@@ -10,6 +10,16 @@
 # the copy-me template. The rest are listed as the real shape of a mature overlay so you can see
 # the whole map; fill each in as a module when you actually hit its problem. Rehearse before you
 # deploy any of them — anchors are version-specific.
+#
+# NOTE — what is deliberately NOT here (pushed higher up the ladder):
+#   * Reply rules (no streaming, mute tool chatter, plain messages)  -> config/config.example.yaml
+#   * Message-quality transforms (strip internal notes, suppress interrupted-final, mask model
+#     failures) and tool-result-history elision                       -> plugins/immersion (CONFIG/PLUGIN,
+#     the durable home — these do NOT belong as fragile patches)
+#   * Media / adapter hardening, media-in-replies, PDF ingest         -> plugins/telegram_platform
+#   * Memory                                                          -> plugins/memory
+#   * Canonical knowledge                                             -> gbrain/ (external product)
+# Only behaviors with NO config knob and NO plugin seam stay as patches below. See docs/wiring.md.
 
 patches:
   # ── security · never cut ────────────────────────────────────────────────────

@@ -158,14 +158,14 @@
 <div class="wrap">
   <div class="hero">
     <span class="kick">Diagnose · Deploy · Keep alive</span>
-    <h1>The overlay build map.</h1>
-    <p class="lede">A minimal, maintainable set of changes on top of a stock agent runtime.
-      This is the map, not the manifesto: the pipeline, the registry, the plugins, the config,
-      and the order you build them in.</p>
+    <h1>The client-ready runtime map.</h1>
+    <p class="lede">A stock agent, made client-ready: drag it in, fill the placeholders, and it
+      behaves correctly on a client lane with no operator tuning. The reply rules, the plugins,
+      the minimal overlay, and the order you wire them in.</p>
     <div class="diag">
-      <span>Floor: <b>~13 patches</b>, trending down</span>
-      <span>Upstream bumps: <b>boring by design</b></span>
-      <span>Every change has a <b>retirement condition</b></span>
+      <span>Reply rules: <b>no streaming, no tool chatter</b></span>
+      <span>Message quality: <b>config + plugin, not patches</b></span>
+      <span>Overlay floor: <b>irreducible patches only</b></span>
     </div>
   </div>
 </div>
@@ -185,6 +185,20 @@
     </div>
     <p class="pipe-note">A patch that fails to re-apply is caught in <b>Rehearse</b>, in a sandbox,
       before any runtime sees it. That is the whole reason a bump stays boring.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <span class="eyebrow">The reply rules</span>
+    <h2>Why a client can run it unattended.</h2>
+    <p class="sub">The message-quality layer is the point of the bundle. It lives in config and the
+      immersion plugin, not in patches, so it is durable and drag-and-drop.</p>
+    <div class="grid">
+      <div class="card"><div class="seam">config</div><h3>No streaming, no chatter</h3><p><code>streaming: false</code>, <code>rich_messages: false</code>, and <code>notifications.tool_step_intermediate: false</code> so a client gets one clean composed reply, never token-by-token or a stream of tool-step pings.</p></div>
+      <div class="card"><div class="seam">immersion plugin · transform_llm_output</div><h3>Clean outbound</h3><p>Strips internal continuity notes, suppresses interrupted-waiting placeholders, and masks provider/model failures behind one generic line. A client never sees the machinery.</p></div>
+      <div class="card"><div class="seam">immersion plugin · llm_request</div><h3>Tool mute (context side)</h3><p>Elides stale oversized tool results from history and drops orphan tool calls, so huge file reads do not dominate the window every turn.</p></div>
+    </div>
   </div>
 </section>
 

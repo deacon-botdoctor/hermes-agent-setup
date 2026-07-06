@@ -1,0 +1,63 @@
+"""Output-transform hooks — the outbound reply rules.
+
+`transform_llm_output` runs on the message the client is about to receive. These transforms
+strip operator-internal noise and mask failure internals so a client only ever sees clean,
+finished output. Each is a pure string transform: text in, cleaned text out.
+
+Registered via the plugin's transform_llm_output hook. Keep them cheap (they run on every
+outbound message) and side-effect free.
+"""
+from __future__ import annotations
+
+import re
+
+# Internal continuity / reset / system-note blocks that sometimes leak into model output.
+# Adjust the markers to match whatever your runtime injects internally.
+_INTERNAL_NOTE_RE = re.compile(
+    r"(?ms)^\s*(\[(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\].*?\[/(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\])\s*",
+)
+_INTERRUPTED_RE = re.compile(
+    r"(?i)^\s*(one moment|still working|please hold|interrupted[.,: ].*)$",
+)
+
+
+def strip_leaked_internal_system_notes(text: str | None) -> str | None:
+    """Remove internal continuity/reset system-note blocks from client output."""
+    if not text:
+        return text
+    return _INTERNAL_NOTE_RE.sub("", text).strip() or None
+
+
+def suppress_interrupted_final_response(text: str | None, *, is_client: bool = True) -> str | None:
+    """Blank an interrupted-waiting notice on client lanes.
+
+    When a turn is interrupted, the runtime can emit a placeholder ("one moment...") as the
+    final response. A client should get nothing rather than a dangling placeholder — the real
+    answer arrives on the next turn. Operator lanes keep it.
+    """
+    if not text or not is_client:
+        return text
+    if _INTERRUPTED_RE.match(text.strip()):
+        return None
+    return text
+
+
+def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
+    """Replace provider/model failure internals with a clean generic message on client lanes.
+
+    A client should never see a raw provider stack trace or a "model returned 429" string.
+    """
+    if not text or not is_client:
+        return text
+    if re.search(r"(?i)\b(traceback|provider error|status 4\d\d|status 5\d\d|rate.?limit)\b", text):
+        return "Sorry, I hit a snag on that one. Give me another try in a moment."
+    return text
+
+
+# The hook the runtime calls. Chain the transforms; order matters (strip, then interrupt, then
+# failure-mask). Return the final text (or None to suppress the message entirely).
+def transform_llm_output(output: str | None = None, *, is_client: bool = True, **_) -> str | None:
+    text = strip_leaked_internal_system_notes(output)
+    text = suppress_interrupted_final_response(text, is_client=is_client)
+    text = generic_model_failure_final_response(text, is_client=is_client)
+    return text

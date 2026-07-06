@@ -1,98 +1,102 @@
-# Example fresh-install config — the edits that matter, and why.
+# config.example.yaml — the client-ready runtime skeleton.
 #
-# This is NOT a full config. It's the set of keys I change from the defaults on a fresh
-# install, with a comment on each explaining the reasoning. Diff it against your install's
-# generated default config and apply only what maps to a problem you have.
+# This is the drag-and-drop core: copy it in, fill the <placeholders>, and the agent behaves
+# correctly for a client out of the box — the right reply rules, muted tool chatter, no
+# streaming, clean output — without hand-tuning. Every value is a <placeholder>; never commit
+# real tokens or ids.
 #
-# Every value here is a <PLACEHOLDER>. Never commit real tokens, keys, or IDs.
+# The reply-rules block is the point of this file. It's why a client can run the agent without
+# an operator babysitting message quality.
+
+client_identity: <client-slug>
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Durable runtime — survive restarts without losing in-flight work.
+# REPLY RULES — how the agent talks to a client. The heart of the bundle.
 # ─────────────────────────────────────────────────────────────────────────────
-durable_runtime: true        # or a staged value if your install supports phased rollout.
-                             # Why: a restart mid-task otherwise drops the work. See docs/features.md.
+
+# No streaming. Clients get a complete, composed message, not token-by-token output.
+streaming: false
+
+# Plain messages, not the upstream rich-message decoration. (A custom delivery/readability
+# transform lives in the immersion plugin instead — see plugins/immersion.)
+rich_messages: false
+
+# Muting: keep operational chatter off client lanes. Every event below is an operator concern,
+# not something a client should see. All false.
+notifications:
+  tool_step_intermediate: false     # <-- "mute tool calls": no intermediate tool-step pings
+  compression_events: false         # context compaction is invisible to the client
+  session_reset_events: false
+  provider_fallback_events: false   # a model fallover is silent to the client
+  provider_warning_events: false
+  background_process_notifications: false
+  gateway_restart_notifications: false
+  gateway_status_messages: false
+
+# Busy handling: acknowledge nothing extra, and queue incoming messages rather than interrupting
+# in-flight work. (The /mode command in the immersion plugin can flip queue<->interrupt live.)
+busy_ack: false
+busy_ack_detail: false
+busy_input_mode: queue
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Compression / context management.
+# EXECUTION — what the agent can do, and the CLI-vs-gateway split.
+# ─────────────────────────────────────────────────────────────────────────────
+code_execution:
+  timeout: 300          # seconds per code-execution tool call
+  max_tool_calls: 90    # cap tool calls per turn
+
+# The CLI surface gets the full toolset for operator work; the chat (gateway) surface is
+# narrower on purpose — a client lane shouldn't expose terminal/code_execution.
+web:
+  cli:      [clarify, code_execution, file, memory, session_search, skills, terminal, todo, tts, web]
+  telegram: [clarify, file, memory, session_search, skills, todo, tts]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MEMORY — the agent's own recall (distinct from the canonical GBrain layer).
+# ─────────────────────────────────────────────────────────────────────────────
+memory:
+  memory_enabled: true
+  memory_char_limit: 2200   # cap injected-memory size so recall doesn't crowd the prompt
+# The provider is a plugin — see plugins/memory (local SQLite-FTS, or GBrain-backed).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMPRESSION — keep autoraise on (off drops compaction drastically); notice is suppressed
+# by the overlay, see overlay/modules/suppress_codex_autoraise_notice.py.
 # ─────────────────────────────────────────────────────────────────────────────
 compression:
-  # Keep autoraise ON. On a large-context model that caps usable context well below its
-  # nominal window, autoraise lets the agent use most of the window before compacting.
-  # Turning it OFF can drop the compaction threshold drastically (e.g. to ~25%), which makes
-  # the agent compact constantly. Keep the behavior; suppress the *notice* at the overlay
-  # level if it's noisy (see docs/features.md — the notice is cosmetic, the behavior is not).
   codex_gpt55_autoraise: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Secret redaction — non-negotiable. See docs/features.md (security section).
+# SECURITY — redaction on. Non-negotiable; secrets in tool output otherwise persist.
 # ─────────────────────────────────────────────────────────────────────────────
-# Redaction of tool output / logs / chat before persistence should be ENABLED. If your install
-# exposes this as config, turn it on here; if it's an overlay feature, that's the single most
-# important overlay you run. Secrets in tool output otherwise land in the transcript and get
-# re-sent to the model every turn.
 redaction:
   enabled: true
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Message style — plain, not decorated.
-# ─────────────────────────────────────────────────────────────────────────────
-rich_messages: false         # Why: I want plain, predictable message output on chat lanes,
-                             # not auto-decorated rich formatting. Personal preference — flip if
-                             # you like the rich style.
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Interrupt vs queue — what happens when a message arrives mid-turn.
-# ─────────────────────────────────────────────────────────────────────────────
-# "queue" = a new message waits for the current turn to finish (in-flight work is preserved).
-# "interrupt" = a new message drops the current turn. I default to queue so a follow-up message
-# doesn't kill work already running.
-input_mode: queue
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Notifications — quiet by default, exception-driven.
-# ─────────────────────────────────────────────────────────────────────────────
-# Prefer a policy that stays quiet and only speaks on exceptions / scheduled digests, rather
-# than narrating every event. An always-on agent that messages you constantly trains you to
-# ignore it. Tune to your tolerance.
-notifications:
-  policy: quiet-exception-only
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Skills — a curated index, not an alphabetical dump.
+# SKILLS — a curated allowlist, not an alphabetical dump.
 # ─────────────────────────────────────────────────────────────────────────────
 skills:
-  # Surface a small, relevant core set and grow it deliberately. A tight list beats making the
-  # agent choose from every bundled skill. Start from your genuine core and add as needed.
   index_allowlist:
     - <core-skill-1>
     - <core-skill-2>
-    # ...
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Model — a primary with a cheap-first fallback chain.
+# CANONICAL KNOWLEDGE — wire the agent to a GBrain library (see gbrain/README.md).
 # ─────────────────────────────────────────────────────────────────────────────
-# Run a primary model with an explicit fallback chain so a provider hiccup (rate limit, cooldown)
-# degrades gracefully instead of failing the turn. Order the chain cheap-first, then capable, so
-# a transient blip doesn't immediately reach for your most expensive lane.
-model:
-  primary: <your-primary-model>
-  fallback:
-    - <cheaper-fallback-model>
-    - <capable-fallback-model>
-
-# Reasoning effort — set a sane floor so cheap models don't under-think, without forcing max
-# effort on every trivial turn.
-reasoning:
-  effort_floor: <low|medium>
+gbrain:
+  enabled: true
+  chat_model: <provider:model>   # e.g. a small, cheap chat model for the router
+  engine: postgres               # compiled-binary launcher, not a source checkout
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Platforms.
+# PLATFORMS + MODEL
 # ─────────────────────────────────────────────────────────────────────────────
 platforms:
-  - telegram-platform        # or your chat platform of choice.
-
+  - telegram-platform
 telegram:
-  bot_token: <YOUR_BOT_TOKEN>   # from BotFather. NEVER commit the real token.
-  # Enable/disable is via the plugins list, not just this block — a platform plugin can
-  # auto-enable when its CLI is installed. If you need it OFF, disable the plugin explicitly
-  # rather than relying on a config flag.
+  bot_token: <YOUR_BOT_TOKEN>    # from BotFather. NEVER commit the real token.
+
+model:
+  primary: <your-primary-model>
+  fallback: [<cheaper-fallback>, <capable-fallback>]
