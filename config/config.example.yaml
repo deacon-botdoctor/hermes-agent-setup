@@ -162,10 +162,15 @@ mcp_servers:
     command: <anamnesis-mcp-command>
   browser:
     tier: on_demand
-    command: <browser-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/browser/src python -m browser_mcp.server
+    env:
+      BROWSER_CDP_URL: http://127.0.0.1:9230
   browser-lane:
     tier: on_demand
-    command: <browser-lane-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/browser-lane/src python -m browser_lane_mcp.server
+    env:
+      BROWSER_LANE_SOCKET: <runtime>/.hermes/browser-lane/daemon.sock
+      BROWSER_CDP_URL: http://127.0.0.1:9230
   gbrain:
     tier: on_demand
     command: <gbrain serve>
