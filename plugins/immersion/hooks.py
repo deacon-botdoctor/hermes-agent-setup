@@ -68,10 +68,10 @@ def suppress_interrupted_final_response(text: str | None, *, is_client: bool = T
 # failure line. NOT prose
 # that happens to mention "rate limit" or "traceback": the agent answering a question about errors
 # is a legitimate reply and must pass through untouched.
-_ANCHORED_RAW_ERROR_RES = (
-    re.compile(r"Traceback \(most recent call last\):"),                       # a real python traceback
-    re.compile(r'(?is)^\s*[\[{]?\s*"?error"?\s*[:=]'),                          # message IS a raw error object
+_RAW_TRACEBACK_RE = re.compile(
+    r'(?s)^\s*Traceback \(most recent call last\):\s*\n(?:\s+File "[^"\n]+", line \d+, in [^\n]+|[A-Za-z_][\w.]*\s*(?::|$))'
 )
+_RAW_ERROR_OBJECT_RE = re.compile(r'(?is)^\s*[\[{]?\s*"?error"?\s*[:=]')
 _FUZZY_PROVIDER_ERROR_RE = re.compile(
     r"(?im)^\s*(error|exception|openrouter|openai|anthropic)[: ].{0,80}\b(4\d\d|5\d\d|rate.?limit|quota|unauthorized|timeout)\b"
 )
@@ -86,7 +86,7 @@ def generic_model_failure_final_response(text: str | None, *, is_client: bool = 
     """
     if not text or not is_client:
         return text
-    is_raw_error = any(r.search(text) for r in _ANCHORED_RAW_ERROR_RES)
+    is_raw_error = bool(_RAW_TRACEBACK_RE.match(text) or _RAW_ERROR_OBJECT_RE.match(text))
     is_provider_error_line = len(text) < 240 and _FUZZY_PROVIDER_ERROR_RE.search(text)
     if is_raw_error or is_provider_error_line:
         return "Sorry, I hit a snag on that one. Give me another try in a moment."
