@@ -78,6 +78,7 @@ export CAPABILITY_REGISTRY="$PWD/mcp-servers/capability-router/registry.json"
 export PYTHONPATH="$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/local-document-tools/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
 export BROWSER_CDP_URL="http://127.0.0.1:9230"
 export BROWSER_LANE_SOCKET="<runtime>/.hermes/browser-lane/daemon.sock"
+export LOCAL_DOCUMENT_TOOLS_ROOTS="$PWD"
 
 # 5. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout

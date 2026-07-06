@@ -16,9 +16,11 @@ SERVER = REPO / "mcp-servers/local-document-tools/src/local_document_tools_mcp/s
 class _FastMCPStub:
     def __init__(self, name: str):
         self.name = name
+        self.tools = []
 
     def tool(self):
         def decorator(fn):
+            self.tools.append(fn.__name__)
             return fn
 
         return decorator
@@ -49,17 +51,26 @@ def _load():
 class LocalDocumentToolsTests(unittest.TestCase):
     def setUp(self):
         self.old_limit = os.environ.get("LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES")
-        os.environ["LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES"] = "1000"
-        self.mod = _load()
+        self.old_roots = os.environ.get("LOCAL_DOCUMENT_TOOLS_ROOTS")
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
+        os.environ["LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES"] = "1000"
+        os.environ["LOCAL_DOCUMENT_TOOLS_ROOTS"] = str(self.root)
+        self.mod = _load()
 
     def tearDown(self):
         if self.old_limit is None:
             os.environ.pop("LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES", None)
         else:
             os.environ["LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES"] = self.old_limit
+        if self.old_roots is None:
+            os.environ.pop("LOCAL_DOCUMENT_TOOLS_ROOTS", None)
+        else:
+            os.environ["LOCAL_DOCUMENT_TOOLS_ROOTS"] = self.old_roots
         self.tmp.cleanup()
+
+    def test_registers_document_convert_tool(self):
+        self.assertIn("document_convert", self.mod.mcp.tools)
 
     def test_document_info_and_extract_text(self):
         path = self.root / "note.txt"
@@ -80,6 +91,43 @@ class LocalDocumentToolsTests(unittest.TestCase):
         result = self.mod.html_to_text(str(path))
         self.assertTrue(result["ok"])
         self.assertEqual(result["text"], "Title\nHello & goodbye")
+
+    def test_document_convert_supports_html_to_text(self):
+        path = self.root / "page.html"
+        path.write_text("<h1>Title</h1><p>Hello &amp; goodbye</p>")
+
+        result = self.mod.document_convert(str(path), target_format="text", source_format="text/html")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["text"], "Title\nHello & goodbye")
+
+    def test_document_convert_reports_unsupported_conversion(self):
+        path = self.root / "document.pdf"
+        path.write_text("%PDF-1.7")
+
+        result = self.mod.document_convert(str(path), target_format="text", source_format="pdf")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error_code"], "unsupported_conversion")
+        self.assertIn("unsupported_conversion", result["error"])
+
+    def test_rejects_files_outside_configured_roots(self):
+        with tempfile.TemporaryDirectory() as outside:
+            path = Path(outside) / "secret.txt"
+            path.write_text("secret")
+
+            result = self.mod.extract_text(str(path))
+
+        self.assertFalse(result["ok"])
+        self.assertIn("LOCAL_DOCUMENT_TOOLS_ROOTS", result["error"])
+
+    def test_read_text_limits_bytes_from_open_file(self):
+        path = self.root / "large.txt"
+        path.write_text("abcdef")
+        self.mod.MAX_READ_BYTES = 4
+
+        result = self.mod.extract_text(str(path))
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["text"], "abcd")
 
     def test_merge_text_documents_reports_partial_errors(self):
         one = self.root / "one.txt"

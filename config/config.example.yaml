@@ -179,6 +179,10 @@ mcp_servers:
   local-document-tools:
     tier: on_demand
     command: PYTHONPATH=<bundle>/mcp-servers/local-document-tools/src python -m local_document_tools_mcp.server
+    env:
+      # os.pathsep-separated allowlist; defaults to the server cwd when unset.
+      LOCAL_DOCUMENT_TOOLS_ROOTS: <workspace-or-documents-dir>
+      LOCAL_DOCUMENT_TOOLS_MAX_READ_BYTES: "2000000"
   search:
     tier: on_demand
     command: PYTHONPATH=<bundle>/mcp-servers/search/src python -m search_mcp.server
