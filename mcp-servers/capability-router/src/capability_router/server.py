@@ -185,6 +185,8 @@ def record_capability_outcome(
     failure_detail: str | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any]:
+    if outcome is None and ok is None:
+        return {"ok": False, "recorded": False, "reason": "missing_outcome"}
     normalized = outcome or ("success" if ok else "failure")
     if normalized not in {"success", "failure"}:
         return {"ok": False, "recorded": False, "reason": "invalid_outcome", "outcome": normalized}

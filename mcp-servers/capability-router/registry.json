@@ -46,6 +46,15 @@
       "preferred_for": ["web search", "find current pages", "scrape URL"]
     },
     {
+      "id": "web.web-search",
+      "category": "web",
+      "label": "Web search MCP",
+      "summary": "Search the web through the distinct shared-floor web-search MCP.",
+      "mcp_server": "web-search",
+      "tool_name": "web_search",
+      "preferred_for": ["web-search", "web search", "current web results", "internet lookup"]
+    },
+    {
       "id": "web.browser",
       "category": "web",
       "label": "Browser lane",

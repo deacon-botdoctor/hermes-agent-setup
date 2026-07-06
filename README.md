@@ -65,7 +65,7 @@ cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-d
 # 2b. install or prune the canonical-floor plugins named in plugins.enabled
 #     (composio-onboarding, hermes-lcm, Task Ledger, Telegram Transcript, autoDream)
 
-# 3. put mcp-servers/capability-router on PYTHONPATH and set CAPABILITY_REGISTRY
+# 3. put mcp-servers/capability-router/src on PYTHONPATH and set CAPABILITY_REGISTRY
 #    to mcp-servers/capability-router/registry.json
 
 # 4. the overlay: rehearse against a pristine checkout, then apply

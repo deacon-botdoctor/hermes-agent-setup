@@ -131,6 +131,13 @@ class CapabilityRouterTests(unittest.TestCase):
         self.assertEqual(status["usage_records_success"], 2)
         self.assertEqual(status["usage_by_capability"][0]["usage_score"], 0)
 
+    def test_missing_outcome_does_not_record_usage(self):
+        result = self.router.record_capability_outcome("test.alpha")
+        self.assertFalse(result["ok"])
+        self.assertFalse(result["recorded"])
+        self.assertEqual(result["reason"], "missing_outcome")
+        self.assertEqual(self.router.registry_status()["usage_records_total"], 0)
+
     def test_storage_error_is_fail_soft(self):
         self.router.USAGE_DB_PATH = self.tmp / "not-dir" / "usage.db"
         self.router.USAGE_DB_PATH.parent.write_text("blocking file")
