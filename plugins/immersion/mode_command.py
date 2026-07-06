@@ -27,11 +27,12 @@ def handle_mode(raw_args: str, *, get_config, set_config) -> str:
     return "Mode set to **interrupt** — a new message will drop whatever I'm doing."
 
 
-def register(ctx) -> None:
-    """Register /mode if the runtime exposes a command API. No-op (returns) otherwise."""
+def register(ctx) -> bool:
+    """Register /mode if the runtime exposes a command API."""
     if not (hasattr(ctx, "register_command") and hasattr(ctx, "get_config") and hasattr(ctx, "set_config")):
-        return  # command/config API not present; caller falls back to config default
+        return False
     ctx.register_command(
         "mode",
         lambda raw: handle_mode(raw, get_config=ctx.get_config, set_config=ctx.set_config),
     )
+    return True

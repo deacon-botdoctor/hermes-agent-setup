@@ -53,6 +53,10 @@ code_execution:
 web:
   backend: firecrawl
   firecrawl_url: http://127.0.0.1:3002        # local self-hosted; swap to the hosted API if you prefer
+  # SECURITY WARNING: these client/Telegram defaults expose web browsing, shell access, and
+  # code execution with no approval gate. Use them only for trusted clients/operators.
+  # For UNTRUSTED clients, narrow `telegram` by dropping terminal/code_execution/web or set
+  # approvals.mode to 'on'.
   # Per-surface toolsets. Both get the full set by default — an agent that can't run
   # code_execution/terminal on the chat lane fails the moment it needs them. Narrow `telegram`
   # yourself ONLY if you want a locked-down customer-facing lane; do not narrow it by default.
@@ -66,6 +70,8 @@ web:
 # mode: 'on'   = the agent asks before sensitive actions (operator/supervised use).
 # 'off' is the right default for a client-facing bot that must run without you approving each step;
 # only turn it on for a lane where a human is watching and wants a gate.
+# SECURITY WARNING: with the full Telegram toolset above, mode 'off' lets Telegram users invoke
+# terminal, code_execution, and web without an operator approval prompt.
 approvals:
   mode: 'off'
   timeout: 60

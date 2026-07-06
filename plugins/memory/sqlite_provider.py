@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import re
 import sqlite3
+import threading
 from pathlib import Path
 
 
@@ -22,32 +23,35 @@ class SqliteMemoryProvider:
         self.db_path = Path(db_path).expanduser()
         self.char_limit = char_limit
         self._db: sqlite3.Connection | None = None
+        self._lock = threading.Lock()
 
     # ── lifecycle ────────────────────────────────────────────────────────────
     def post_setup(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: a gateway calls prefetch/sync_turn from different threads.
         self._db = sqlite3.connect(str(self.db_path), check_same_thread=False)
-        self._db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS memories(
-              id INTEGER PRIMARY KEY, session_id TEXT, kind TEXT,
-              text TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now'))
-            );
-            CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
-              USING fts5(text, content='memories', content_rowid='id');
-            CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
-              INSERT INTO memories_fts(rowid, text) VALUES (new.id, new.text);
-            END;
-            """
-        )
-        self._db.commit()
+        with self._lock:
+            self._db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS memories(
+                  id INTEGER PRIMARY KEY, session_id TEXT, kind TEXT,
+                  text TEXT NOT NULL, created_at TEXT DEFAULT (datetime('now'))
+                );
+                CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
+                  USING fts5(text, content='memories', content_rowid='id');
+                CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
+                  INSERT INTO memories_fts(rowid, text) VALUES (new.id, new.text);
+                END;
+                """
+            )
+            self._db.commit()
 
     def shutdown(self) -> None:
-        if self._db:
-            self._db.commit()
-            self._db.close()
-            self._db = None
+        with self._lock:
+            if self._db:
+                self._db.commit()
+                self._db.close()
+                self._db = None
 
     # ── the two turn-cycle hooks ─────────────────────────────────────────────
     def sync_turn(self, session_id: str, messages: list) -> int:
@@ -56,32 +60,34 @@ class SqliteMemoryProvider:
         The extraction here is deliberately simple (user statements of fact / preference). Swap in
         an LLM extraction pass if you want richer memories.
         """
-        assert self._db, "call post_setup first"
         written = 0
-        for m in messages or []:
-            if not (isinstance(m, dict) and m.get("role") == "user"):
-                continue
-            content = m.get("content")
-            if isinstance(content, str) and _looks_durable(content):
-                self._db.execute(
-                    "INSERT INTO memories(session_id, kind, text) VALUES(?,?,?)",
-                    (session_id, "fact", content.strip()[: self.char_limit]),
-                )
-                written += 1
-        self._db.commit()
+        with self._lock:
+            assert self._db, "call post_setup first"
+            for m in messages or []:
+                if not (isinstance(m, dict) and m.get("role") == "user"):
+                    continue
+                content = m.get("content")
+                if isinstance(content, str) and _looks_durable(content):
+                    self._db.execute(
+                        "INSERT INTO memories(session_id, kind, text) VALUES(?,?,?)",
+                        (session_id, "fact", content.strip()[: self.char_limit]),
+                    )
+                    written += 1
+            self._db.commit()
         return written
 
     def prefetch(self, session_id: str, query: str, k: int = 5) -> list[str]:
         """Before a turn: return up to k relevant memories, total under char_limit."""
-        assert self._db, "call post_setup first"
         terms = _fts_query(query)
         if not terms:
             return []
-        rows = self._db.execute(
-            "SELECT m.text FROM memories_fts f JOIN memories m ON m.id=f.rowid "
-            "WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
-            (terms, k),
-        ).fetchall()
+        with self._lock:
+            assert self._db, "call post_setup first"
+            rows = self._db.execute(
+                "SELECT m.text FROM memories_fts f JOIN memories m ON m.id=f.rowid "
+                "WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?",
+                (terms, k),
+            ).fetchall()
         out, budget = [], self.char_limit
         for (text,) in rows:
             if len(text) <= budget:

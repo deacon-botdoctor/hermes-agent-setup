@@ -29,8 +29,8 @@ def register(ctx) -> None:
         ctx.register_middleware("llm_request", middleware.llm_request_middleware)
         wired = True
     try:
-        mode_command.register(ctx)
-        wired = True
+        if mode_command.register(ctx):
+            wired = True
     except Exception:  # /mode is optional; never let it break loading
         pass
     if not wired:

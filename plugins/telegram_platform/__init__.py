@@ -35,12 +35,10 @@ class HardenedTelegramAdapter:  # subclass the bundled adapter: class HardenedTe
 
 
 def register(ctx) -> None:
-    """Register the hardened adapter under the bundled telegram key. Never raises."""
+    """Defer registration until this adapter wraps the bundled Telegram adapter."""
     import logging
 
-    if hasattr(ctx, "register_platform"):
-        ctx.register_platform("telegram", HardenedTelegramAdapter)
-    else:
-        logging.getLogger("telegram_platform").warning(
-            "telegram_platform: no register_platform on ctx; wire HardenedTelegramAdapter manually."
-        )
+    logging.getLogger("telegram_platform").warning(
+        "telegram_platform: HardenedTelegramAdapter is a placeholder; leaving bundled telegram "
+        "adapter registered."
+    )

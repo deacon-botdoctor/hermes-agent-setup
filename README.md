@@ -68,6 +68,13 @@ python overlay/apply.py --hermes-dir /path/to/runtime
 The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.
 Requires Python 3 and PyYAML (`pip install pyyaml`).
 
+## Security warning
+
+The example config intentionally gives Telegram the full toolset and sets approvals to `off`.
+That exposes shell, code execution, and web access to client/Telegram users with no approval gate.
+For untrusted clients, narrow the Telegram toolset by dropping `terminal`, `code_execution`, and
+`web`, or set approvals to `on`.
+
 ## The rule the whole thing follows
 
 Before any change, take the highest rung that fits: **DELETE, CONFIG, PLUGIN, UPSTREAM, SIDECAR,
