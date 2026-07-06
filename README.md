@@ -10,6 +10,8 @@ plugin), so they survive upstream bumps instead of breaking.
 
 Open [`index.html`](index.html) for the visual build map, and [`docs/wiring.md`](docs/wiring.md)
 for how a turn flows through every piece.
+The scrubbed real-client rebuild checklist lives in
+[`docs/canonical-client-spec.md`](docs/canonical-client-spec.md).
 
 ## What makes it client-ready
 

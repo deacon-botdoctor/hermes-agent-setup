@@ -8,6 +8,7 @@
 # The reply-rules block is the point of this file. It's why a client can run the agent without
 # an operator babysitting message quality.
 
+_config_version: 1
 client_identity: <client-slug>
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,6 +46,15 @@ busy_input_mode: queue
 code_execution:
   timeout: 300          # seconds per code-execution tool call
   max_tool_calls: 90    # cap tool calls per turn
+
+agent:
+  max_turns: 60
+  reasoning_effort: medium
+  gateway_notify_interval: 600
+  gateway_timeout: 300
+
+terminal:
+  enabled: true
 
 # Web scraping/crawl backend. firecrawl is the default. Run it LOCALLY (self-hosted, no API key)
 # by pointing firecrawl_url at a local instance, or use the hosted API with a key.
@@ -84,6 +94,9 @@ memory:
   memory_char_limit: 2200   # cap injected-memory size so recall doesn't crowd the prompt
 # The provider is a plugin — see plugins/memory (local SQLite-FTS, or GBrain-backed).
 
+context:
+  engine: lcm
+
 # ─────────────────────────────────────────────────────────────────────────────
 # COMPRESSION — keep autoraise on (off drops compaction drastically); notice is suppressed
 # by the overlay, see overlay/modules/suppress_codex_autoraise_notice.py.
@@ -114,13 +127,106 @@ gbrain:
   engine: postgres               # compiled-binary launcher, not a source checkout
 
 # ─────────────────────────────────────────────────────────────────────────────
+# TOOLS / MCP — canonical real-client floor.
+#
+# Re-enumerated from live client-standard runtimes: the shared floor is the hot capability
+# router plus on-demand knowledge, search, browser, document, memory, visual identity, and
+# Telegram-admin surfaces. Other MCPs are client-specific and belong in an overlay, not this
+# public default.
+# ─────────────────────────────────────────────────────────────────────────────
+mcp_policy:
+  hot_path_enabled:
+    - capability-router
+  on_demand:
+    - anamnesis
+    - browser
+    - browser-lane
+    - gbrain
+    - local-document-tools
+    - search
+    - telegram-admin
+    - visual-identity
+    - web-search
+
+mcp_servers:
+  capability-router:
+    tier: hot
+    command: <python -m capability_router.server>
+  anamnesis:
+    tier: on_demand
+    command: <anamnesis-mcp-command>
+  browser:
+    tier: on_demand
+    command: <browser-mcp-command>
+  browser-lane:
+    tier: on_demand
+    command: <browser-lane-mcp-command>
+  gbrain:
+    tier: on_demand
+    command: <gbrain serve>
+    metadata:
+      resources: true
+  local-document-tools:
+    tier: on_demand
+    command: <local-document-tools-mcp-command>
+  search:
+    tier: on_demand
+    command: <search-mcp-command>
+  telegram-admin:
+    tier: on_demand
+    command: <telegram-admin-mcp-command>
+  visual-identity:
+    tier: on_demand
+    command: <visual-identity-mcp-command>
+  web-search:
+    tier: on_demand
+    command: <web-search-mcp-command>
+
+mcp_proxy:
+  enabled: true
+
+delegation:
+  model: gpt-5.5
+  max_iterations: 90
+  default_toolsets: [terminal, file, web]
+
+plugins:
+  enabled:
+    - composio-onboarding
+    - hermes-lcm
+    - Task Ledger
+    - Telegram Transcript
+    - autoDream
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PLATFORMS + MODEL
 # ─────────────────────────────────────────────────────────────────────────────
 platforms:
-  - telegram-platform
+  api_server:
+    enabled: true
+  telegram:
+    enabled: true
 telegram:
   bot_token: <YOUR_BOT_TOKEN>    # from BotFather. NEVER commit the real token.
 
 model:
-  primary: <your-primary-model>
-  fallback: [<cheaper-fallback>, <capable-fallback>]
+  default: gpt-5.5
+  provider: openai-codex
+  temperature: 0.2
+  max_tokens: 32768
+  context_length: 1048576
+
+providers:
+  fallback:
+    max_attempts: 3
+    cooldown_seconds: 300
+    circuit_breaker:
+      enabled: true
+
+fallback_providers:
+  - provider: openrouter
+    model: z-ai/glm-5.2
+    api_key_env: OPENROUTER_API_KEY
+  - provider: openrouter
+    model: anthropic/claude-sonnet-5
+    api_key_env: OPENROUTER_API_KEY
