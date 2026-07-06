@@ -38,9 +38,14 @@ GBrain-backed one) and the **canonical-knowledge** wiring ([`gbrain/`](gbrain)).
 ```
 config/            reply rules + runtime skeleton (the drag-and-drop core), AGENTS.md
 plugins/
+  autodream/       autoDream floor placeholder for nightly consolidation hooks
+  composio_onboarding/  Composio onboarding floor placeholder
+  hermes_lcm/      LCM context-engine floor placeholder
   immersion/       reply-rules plugin: output transforms + request middleware + /mode  (runs)
   memory/          memory providers: sqlite_provider (local, runs+tested) + gbrain_provider
+  task_ledger/     Task Ledger floor placeholder
   telegram_platform/  disabled placeholder; Telegram hardening is not active yet
+  telegram_transcript/ Telegram Transcript floor placeholder
 mcp-servers/
   anamnesis/        local SQLite-FTS memory MCP (runs+tested)
   capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
@@ -68,11 +73,8 @@ index.html         the build map
 # 1. the reply rules: copy the config skeleton into your runtime, fill <placeholders>
 cp config/config.example.yaml <your-runtime>/config.yaml
 
-# 2. install the bundled local plugins where your runtime discovers user plugins
-cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-dir>/
-
-# 2b. install or prune the canonical-floor plugins named in plugins.enabled
-#     (composio-onboarding, hermes-lcm, Task Ledger, Telegram Transcript, autoDream)
+# 2. install bundled local plugins where your runtime discovers user plugins
+cp -r plugins/* <your-plugins-dir>/
 
 # 3. wire the hot capability router — see mcp-servers/capability-router/README.md
 export PYTHONPATH="$PWD/mcp-servers/capability-router/src:$PYTHONPATH"
