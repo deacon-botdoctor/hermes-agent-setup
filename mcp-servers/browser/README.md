@@ -10,6 +10,7 @@ Clean-room MCP surface for a running Chromium DevTools Protocol endpoint.
 ## Tools
 
 - `browser_status()` reads `/json/version`.
+- `browser_open(url="about:blank")` opens a new target through `/json/new`.
 - `list_targets()` reads `/json/list`.
 - `cdp_json(path)` reads a JSON CDP HTTP endpoint.
 

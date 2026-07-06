@@ -1,3 +1,3 @@
-from .server import browser_status, cdp_json, list_targets
+from .server import browser_open, browser_status, cdp_json, list_targets
 
-__all__ = ["browser_status", "cdp_json", "list_targets"]
+__all__ = ["browser_open", "browser_status", "cdp_json", "list_targets"]

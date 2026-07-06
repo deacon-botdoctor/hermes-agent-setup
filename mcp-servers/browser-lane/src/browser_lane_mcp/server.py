@@ -65,6 +65,11 @@ def browser_lane_command(command: str, **params: Any) -> dict[str, Any]:
     return result
 
 
+@_tool
+def browser_lane_open(url: str) -> dict[str, Any]:
+    return browser_lane_command("open", url=url)
+
+
 def main() -> None:
     if mcp is None:
         raise SystemExit("The mcp package is required to run the browser-lane MCP server.")

@@ -21,9 +21,11 @@ BROWSER_LANE_SERVER = REPO / "mcp-servers/browser-lane/src/browser_lane_mcp/serv
 class _FastMCPStub:
     def __init__(self, name: str):
         self.name = name
+        self.tools = []
 
     def tool(self):
         def decorator(fn):
+            self.tools.append(fn.__name__)
             return fn
 
         return decorator
@@ -87,6 +89,18 @@ class BrowserMcpTests(unittest.TestCase):
         self.assertEqual(result["version"]["Browser"], "HeadlessChrome/test")
         self.assertEqual(urlopen.call_args.args[0].full_url, "http://cdp.local:9230/json/version")
 
+    def test_browser_open_is_registered_and_opens_new_target(self):
+        browser = _load(BROWSER_SERVER, f"browser_mcp_open_{id(self)}")
+        payload = {"id": "target-1", "url": "https://example.com/a b"}
+        with patch("urllib.request.urlopen", return_value=_Response(payload)) as urlopen:
+            result = browser.browser_open("https://example.com/a b")
+
+        self.assertIn("browser_open", browser.mcp.tools)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["path"], "/json/new?https%3A%2F%2Fexample.com%2Fa%20b")
+        self.assertEqual(result["data"]["id"], "target-1")
+        self.assertEqual(urlopen.call_args.args[0].full_url, "http://cdp.local:9230/json/new?https%3A%2F%2Fexample.com%2Fa%20b")
+
     def test_list_targets_fail_soft(self):
         browser = _load(BROWSER_SERVER, f"browser_mcp_fail_{id(self)}")
         with patch("urllib.request.urlopen", side_effect=OSError("offline")):
@@ -121,6 +135,34 @@ class BrowserMcpTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["page_id"], "p1")
+
+    def test_browser_lane_open_is_registered_and_delegates_to_open_command(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            socket_path = Path(tmp) / "daemon.sock"
+            os.environ["BROWSER_LANE_SOCKET"] = str(socket_path)
+            lane = _load(BROWSER_LANE_SERVER, f"browser_lane_open_{id(self)}")
+
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            server.bind(str(socket_path))
+            server.listen(1)
+
+            def serve_once():
+                conn, _ = server.accept()
+                with conn:
+                    request = json.loads(conn.recv(65536).decode("utf-8"))
+                    self.assertEqual(request["command"], "open")
+                    self.assertEqual(request["params"]["url"], "https://example.com")
+                    conn.sendall(json.dumps({"ok": True, "page_id": "p2"}).encode("utf-8") + b"\n")
+                server.close()
+
+            thread = threading.Thread(target=serve_once)
+            thread.start()
+            result = lane.browser_lane_open("https://example.com")
+            thread.join(timeout=2)
+
+        self.assertIn("browser_lane_open", lane.mcp.tools)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["page_id"], "p2")
 
     def test_browser_lane_status_missing_socket(self):
         os.environ["BROWSER_LANE_SOCKET"] = "/tmp/missing-browser-lane.sock"

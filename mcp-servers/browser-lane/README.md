@@ -12,6 +12,7 @@ keeps the public bundle to the narrow wire protocol surface.
 ## Tools
 
 - `browser_lane_status()` reports socket and CDP endpoint readiness.
+- `browser_lane_open(url)` asks the daemon to open a URL.
 - `browser_lane_command(command, **params)` sends one JSON-line command to the daemon and returns
   its JSON-line response.
 

@@ -60,9 +60,14 @@ def cdp_json(path: str) -> dict[str, Any]:
     return {"ok": True, "cdp_url": BROWSER_CDP_URL, "path": safe_path, "data": data}
 
 
-def new_page(url: str = "about:blank") -> dict[str, Any]:
+@_tool
+def browser_open(url: str = "about:blank") -> dict[str, Any]:
     encoded = urllib.parse.quote(url, safe="")
     return cdp_json(f"/json/new?{encoded}")
+
+
+def new_page(url: str = "about:blank") -> dict[str, Any]:
+    return browser_open(url)
 
 
 def main() -> None:
