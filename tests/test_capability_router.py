@@ -13,6 +13,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "mcp-servers/capability-router/src/capability_router/server.py"
+DEFAULT_REGISTRY = REPO / "mcp-servers/capability-router/registry.json"
 
 
 class _FastMCPStub:
@@ -145,6 +146,12 @@ class CapabilityRouterTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertFalse(result["recorded"])
         self.assertIn("reason", result)
+
+    def test_default_registry_keeps_browser_mcps_distinct(self):
+        registry = json.loads(DEFAULT_REGISTRY.read_text())
+        by_id = {capability["id"]: capability for capability in registry["capabilities"]}
+        self.assertEqual(by_id["web.browser"]["mcp_server"], "browser")
+        self.assertEqual(by_id["web.browser-lane"]["mcp_server"], "browser-lane")
 
 
 if __name__ == "__main__":

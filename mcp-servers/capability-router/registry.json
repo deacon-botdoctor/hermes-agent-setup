@@ -57,11 +57,20 @@
     {
       "id": "web.browser",
       "category": "web",
+      "label": "Browser MCP",
+      "summary": "Use the plain browser MCP for browser, CDP, page navigation, and screenshot actions.",
+      "mcp_server": "browser",
+      "tool_name": "browser_open",
+      "preferred_for": ["browser", "CDP", "page navigation", "screenshot", "interactive page"]
+    },
+    {
+      "id": "web.browser-lane",
+      "category": "web",
       "label": "Browser lane",
-      "summary": "Use browser or browser-lane MCPs for pages that require a real browser session.",
+      "summary": "Use browser-lane for richer lane and browser daemon workflows.",
       "mcp_server": "browser-lane",
       "tool_name": "browser_lane_open",
-      "preferred_for": ["browser automation", "logged-in web app", "screenshot", "interactive page"]
+      "preferred_for": ["browser lane", "browser daemon", "logged-in web app", "lane workflow"]
     },
     {
       "id": "documents.local-document-tools",
