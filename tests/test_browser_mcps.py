@@ -87,7 +87,9 @@ class BrowserMcpTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["version"]["Browser"], "HeadlessChrome/test")
-        self.assertEqual(urlopen.call_args.args[0].full_url, "http://cdp.local:9230/json/version")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://cdp.local:9230/json/version")
+        self.assertEqual(request.get_method(), "GET")
 
     def test_browser_open_is_registered_and_opens_new_target(self):
         browser = _load(BROWSER_SERVER, f"browser_mcp_open_{id(self)}")
@@ -99,7 +101,9 @@ class BrowserMcpTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["path"], "/json/new?https%3A%2F%2Fexample.com%2Fa%20b")
         self.assertEqual(result["data"]["id"], "target-1")
-        self.assertEqual(urlopen.call_args.args[0].full_url, "http://cdp.local:9230/json/new?https%3A%2F%2Fexample.com%2Fa%20b")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://cdp.local:9230/json/new?https%3A%2F%2Fexample.com%2Fa%20b")
+        self.assertEqual(request.get_method(), "PUT")
 
     def test_list_targets_fail_soft(self):
         browser = _load(BROWSER_SERVER, f"browser_mcp_fail_{id(self)}")

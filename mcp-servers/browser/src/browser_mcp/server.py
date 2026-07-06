@@ -24,12 +24,16 @@ def _tool(fn):
     return mcp.tool()(fn)
 
 
-def _json_get(path: str, timeout: float = DEFAULT_TIMEOUT) -> Any:
+def _json_request(path: str, method: str = "GET", timeout: float = DEFAULT_TIMEOUT) -> Any:
     url = f"{BROWSER_CDP_URL}{path}"
-    request = urllib.request.Request(url, headers={"Accept": "application/json"})
+    request = urllib.request.Request(url, headers={"Accept": "application/json"}, method=method)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         body = response.read().decode("utf-8", errors="replace")
     return json.loads(body) if body else {}
+
+
+def _json_get(path: str, timeout: float = DEFAULT_TIMEOUT) -> Any:
+    return _json_request(path, timeout=timeout)
 
 
 @_tool
@@ -63,7 +67,12 @@ def cdp_json(path: str) -> dict[str, Any]:
 @_tool
 def browser_open(url: str = "about:blank") -> dict[str, Any]:
     encoded = urllib.parse.quote(url, safe="")
-    return cdp_json(f"/json/new?{encoded}")
+    path = f"/json/new?{encoded}"
+    try:
+        data = _json_request(path, method="PUT")
+    except Exception as exc:
+        return {"ok": False, "cdp_url": BROWSER_CDP_URL, "path": path, "error": str(exc)}
+    return {"ok": True, "cdp_url": BROWSER_CDP_URL, "path": path, "data": data}
 
 
 def new_page(url: str = "about:blank") -> dict[str, Any]:
