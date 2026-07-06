@@ -42,6 +42,8 @@ plugins/
   telegram_platform/  disabled placeholder; Telegram hardening is not active yet
 mcp-servers/
   capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
+  search/             SearXNG search + Firecrawl scrape MCP (runs+tested)
+  web-search/         distinct web-search MCP floor surface (runs+tested)
 overlay/
   apply.py         apply engine — overlays the registry onto a runtime tree (runs)
   rehearse.py      verify-before-deploy harness (runs)
@@ -69,11 +71,14 @@ cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-d
 export PYTHONPATH="$PWD/mcp-servers/capability-router/src:$PYTHONPATH"
 export CAPABILITY_REGISTRY="$PWD/mcp-servers/capability-router/registry.json"
 
-# 4. the overlay: rehearse against a pristine checkout, then apply
+# 4. wire on-demand search surfaces — see mcp-servers/search and mcp-servers/web-search
+export PYTHONPATH="$PWD/mcp-servers/search/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
+
+# 5. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout
 python overlay/apply.py --hermes-dir /path/to/runtime
 
-# 5. wire GBrain (install it separately) — see gbrain/README.md — and restart.
+# 6. wire GBrain (install it separately) — see gbrain/README.md — and restart.
 ```
 
 The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.

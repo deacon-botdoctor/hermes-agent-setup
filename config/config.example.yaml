@@ -176,7 +176,7 @@ mcp_servers:
     command: <local-document-tools-mcp-command>
   search:
     tier: on_demand
-    command: <search-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/search/src python -m search_mcp.server
   telegram-admin:
     tier: on_demand
     command: <telegram-admin-mcp-command>
@@ -185,7 +185,7 @@ mcp_servers:
     command: <visual-identity-mcp-command>
   web-search:
     tier: on_demand
-    command: <web-search-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/web-search/src python -m web_search_mcp.server
 
 mcp_proxy:
   enabled: true
