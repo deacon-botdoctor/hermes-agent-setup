@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 SERVER = REPO / "mcp-servers/local-document-tools/src/local_document_tools_mcp/server.py"
+SRC = REPO / "mcp-servers/local-document-tools/src"
 
 
 class _FastMCPStub:
@@ -71,6 +72,19 @@ class LocalDocumentToolsTests(unittest.TestCase):
 
     def test_registers_document_convert_tool(self):
         self.assertIn("document_convert", self.mod.mcp.tools)
+
+    def test_package_exports_document_convert(self):
+        _install_mcp_stub()
+        sys.path.insert(0, str(SRC))
+        try:
+            sys.modules.pop("local_document_tools_mcp", None)
+            sys.modules.pop("local_document_tools_mcp.server", None)
+            package = importlib.import_module("local_document_tools_mcp")
+        finally:
+            sys.path.remove(str(SRC))
+
+        self.assertIs(package.document_convert, package.server.document_convert)
+        self.assertIn("document_convert", package.__all__)
 
     def test_document_info_and_extract_text(self):
         path = self.root / "note.txt"
