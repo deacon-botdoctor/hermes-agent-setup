@@ -152,6 +152,11 @@ mcp_servers:
   capability-router:
     tier: hot
     command: <python -m capability_router.server>
+    env:
+      PYTHONPATH: <repo>/mcp-servers/capability-router/src
+      CAPABILITY_REGISTRY: <repo>/mcp-servers/capability-router/registry.json
+      # Optional; defaults to ~/.hermes/state/capability-router-usage.db.
+      CAPABILITY_USAGE_DB: <state-dir>/capability-router-usage.db
   anamnesis:
     tier: on_demand
     command: <anamnesis-mcp-command>

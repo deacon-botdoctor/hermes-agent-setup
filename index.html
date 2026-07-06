@@ -165,6 +165,7 @@
     <div class="diag">
       <span>Reply rules: <b>no streaming, no tool chatter</b></span>
       <span>Message quality: <b>config + plugin, not patches</b></span>
+      <span>Tool routing: <b>hot capability catalog, lazy tools</b></span>
       <span>Overlay floor: <b>irreducible patches only</b></span>
     </div>
   </div>
@@ -196,6 +197,7 @@
       immersion plugin, not in patches, so it is durable and drag-and-drop.</p>
     <div class="grid">
       <div class="card"><div class="seam">config</div><h3>No streaming, no chatter</h3><p><code>streaming: false</code>, <code>rich_messages: false</code>, and <code>notifications.tool_step_intermediate: false</code> so a client gets one clean composed reply, never token-by-token or a stream of tool-step pings.</p></div>
+      <div class="card"><div class="seam">mcp sidecar</div><h3>Hot capability router</h3><p><code>capability-router</code> stays hot, searches <code>registry.json</code>, and lets heavier shared-floor MCPs load only when the catalog points to them.</p></div>
       <div class="card"><div class="seam">immersion plugin · transform_llm_output</div><h3>Clean outbound</h3><p>Strips internal continuity notes, suppresses interrupted-waiting placeholders, and masks provider/model failures behind one generic line. A client never sees the machinery.</p></div>
       <div class="card"><div class="seam">immersion plugin · llm_request</div><h3>Tool mute (context side)</h3><p>Elides stale oversized tool results from history and drops orphan tool calls, so huge file reads do not dominate the window every turn.</p></div>
       <div class="card"><div class="seam">bin/progress-compose · 10-min beat</div><h3>Human-voiced progress</h3><p>On long work, every ~10 minutes the client gets a short, natural update on what is actually being worked on, in an operator-to-boss voice, with all tools/logs/job-ids stripped. Never a robotic status line.</p></div>
@@ -281,6 +283,7 @@
 <span class="k">compression</span>: {<span class="k">codex_gpt55_autoraise</span>: <span class="v">true</span>}  <span class="c"># off drops compaction to ~25%</span>
 <span class="k">notifications</span>: {<span class="k">tool_step_intermediate</span>: <span class="v">false</span>}
 <span class="k">skills</span>: {<span class="k">index_allowlist</span>: [<span class="v">&lt;core-1&gt;</span>, <span class="v">&lt;core-2&gt;</span>]}
+<span class="k">mcp_policy</span>: {<span class="k">hot_path_enabled</span>: [<span class="v">capability-router</span>], <span class="k">on_demand</span>: [<span class="v">&lt;floor-mcp&gt;</span>]}
 <span class="k">model</span>: {<span class="k">primary</span>: <span class="v">&lt;primary&gt;</span>, <span class="k">fallback</span>: [<span class="v">&lt;cheap&gt;</span>, <span class="v">&lt;capable&gt;</span>]}</pre>
     </div>
     <p class="pipe-note">Every value is a placeholder. Nothing here is a secret. The redaction key
@@ -296,6 +299,7 @@
     <div class="order">
       <div class="ostep"><span class="on"></span><div><h3>Get stock working, unmodified</h3><p>A plain agent on your platform, zero customization. This is how you tell scar tissue from a real need.</p></div></div>
       <div class="ostep"><span class="on"></span><div><h3>Config pass</h3><p>Go key by key against the default. <code>redaction</code> first, then durable runtime and queue mode.</p></div></div>
+      <div class="ostep"><span class="on"></span><div><h3>Wire the hot capability router</h3><p>Put <code>mcp-servers/capability-router/src</code> on <code>PYTHONPATH</code>, set <code>CAPABILITY_REGISTRY</code>, and keep the rest of the shared MCP floor lazy.</p></div></div>
       <div class="ostep"><span class="on"></span><div><h3>Stand up the registry</h3><p>Create <code>registry.yaml</code> and one module per patch. Add only the rows whose problem you actually have.</p></div></div>
       <div class="ostep"><span class="on"></span><div><h3>Plugins for anything with a seam</h3><p>Memory, platform override, output hooks. Prefer a plugin over a patch every time a seam exists.</p></div></div>
       <div class="ostep"><span class="on"></span><div><h3>Apply, then rehearse</h3><p><code>apply-all-patches</code> onto pristine, then rehearse against the target version. Zero anchor-miss before you ship.</p></div></div>

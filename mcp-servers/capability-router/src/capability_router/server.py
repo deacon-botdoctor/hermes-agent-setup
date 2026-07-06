@@ -1,3 +1,5 @@
+"""Hot-path MCP capability catalog with usage-ranked search."""
+
 from __future__ import annotations
 
 import json
@@ -98,6 +100,7 @@ def _init_usage_db() -> None:
 
 @_tool
 def search_capabilities(query: str, max_hits: int = 8) -> dict[str, Any]:
+    """Search the registry and rank matching capabilities with usage feedback."""
     registry = _load_registry()
     query_tokens = _tokens(query)
     usage = _usage_scores()
@@ -131,6 +134,7 @@ def search_capabilities(query: str, max_hits: int = 8) -> dict[str, Any]:
 
 @_tool
 def describe_capability(capability_id: str) -> dict[str, Any]:
+    """Return one registry capability by id."""
     registry = _load_registry()
     for capability in registry["capabilities"]:
         if capability.get("id") == capability_id:
@@ -143,12 +147,14 @@ def describe_capability(capability_id: str) -> dict[str, Any]:
 
 @_tool
 def list_categories() -> dict[str, Any]:
+    """Return the registry category list."""
     registry = _load_registry()
     return {"ok": True, "categories": registry["categories"]}
 
 
 @_tool
 def registry_status() -> dict[str, Any]:
+    """Report registry size and recorded usage totals."""
     registry = _load_registry()
     usage_rows: list[tuple[str, str]] = []
     if USAGE_DB_PATH.exists():
@@ -185,6 +191,7 @@ def record_capability_outcome(
     failure_detail: str | None = None,
     duration_ms: int | None = None,
 ) -> dict[str, Any]:
+    """Persist success/failure feedback for future capability ranking."""
     if outcome is None and ok is None:
         return {"ok": False, "recorded": False, "reason": "missing_outcome"}
     normalized = outcome or ("success" if ok else "failure")
