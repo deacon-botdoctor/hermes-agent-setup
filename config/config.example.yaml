@@ -1,0 +1,98 @@
+# Example fresh-install config — the edits that matter, and why.
+#
+# This is NOT a full config. It's the set of keys I change from the defaults on a fresh
+# install, with a comment on each explaining the reasoning. Diff it against your install's
+# generated default config and apply only what maps to a problem you have.
+#
+# Every value here is a <PLACEHOLDER>. Never commit real tokens, keys, or IDs.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Durable runtime — survive restarts without losing in-flight work.
+# ─────────────────────────────────────────────────────────────────────────────
+durable_runtime: true        # or a staged value if your install supports phased rollout.
+                             # Why: a restart mid-task otherwise drops the work. See docs/features.md.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Compression / context management.
+# ─────────────────────────────────────────────────────────────────────────────
+compression:
+  # Keep autoraise ON. On a large-context model that caps usable context well below its
+  # nominal window, autoraise lets the agent use most of the window before compacting.
+  # Turning it OFF can drop the compaction threshold drastically (e.g. to ~25%), which makes
+  # the agent compact constantly. Keep the behavior; suppress the *notice* at the overlay
+  # level if it's noisy (see docs/features.md — the notice is cosmetic, the behavior is not).
+  codex_gpt55_autoraise: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Secret redaction — non-negotiable. See docs/features.md (security section).
+# ─────────────────────────────────────────────────────────────────────────────
+# Redaction of tool output / logs / chat before persistence should be ENABLED. If your install
+# exposes this as config, turn it on here; if it's an overlay feature, that's the single most
+# important overlay you run. Secrets in tool output otherwise land in the transcript and get
+# re-sent to the model every turn.
+redaction:
+  enabled: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Message style — plain, not decorated.
+# ─────────────────────────────────────────────────────────────────────────────
+rich_messages: false         # Why: I want plain, predictable message output on chat lanes,
+                             # not auto-decorated rich formatting. Personal preference — flip if
+                             # you like the rich style.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Interrupt vs queue — what happens when a message arrives mid-turn.
+# ─────────────────────────────────────────────────────────────────────────────
+# "queue" = a new message waits for the current turn to finish (in-flight work is preserved).
+# "interrupt" = a new message drops the current turn. I default to queue so a follow-up message
+# doesn't kill work already running.
+input_mode: queue
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Notifications — quiet by default, exception-driven.
+# ─────────────────────────────────────────────────────────────────────────────
+# Prefer a policy that stays quiet and only speaks on exceptions / scheduled digests, rather
+# than narrating every event. An always-on agent that messages you constantly trains you to
+# ignore it. Tune to your tolerance.
+notifications:
+  policy: quiet-exception-only
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Skills — a curated index, not an alphabetical dump.
+# ─────────────────────────────────────────────────────────────────────────────
+skills:
+  # Surface a small, relevant core set and grow it deliberately. A tight list beats making the
+  # agent choose from every bundled skill. Start from your genuine core and add as needed.
+  index_allowlist:
+    - <core-skill-1>
+    - <core-skill-2>
+    # ...
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Model — a primary with a cheap-first fallback chain.
+# ─────────────────────────────────────────────────────────────────────────────
+# Run a primary model with an explicit fallback chain so a provider hiccup (rate limit, cooldown)
+# degrades gracefully instead of failing the turn. Order the chain cheap-first, then capable, so
+# a transient blip doesn't immediately reach for your most expensive lane.
+model:
+  primary: <your-primary-model>
+  fallback:
+    - <cheaper-fallback-model>
+    - <capable-fallback-model>
+
+# Reasoning effort — set a sane floor so cheap models don't under-think, without forcing max
+# effort on every trivial turn.
+reasoning:
+  effort_floor: <low|medium>
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Platforms.
+# ─────────────────────────────────────────────────────────────────────────────
+platforms:
+  - telegram-platform        # or your chat platform of choice.
+
+telegram:
+  bot_token: <YOUR_BOT_TOKEN>   # from BotFather. NEVER commit the real token.
+  # Enable/disable is via the plugins list, not just this block — a platform plugin can
+  # auto-enable when its CLI is installed. If you need it OFF, disable the plugin explicitly
+  # rather than relying on a config flag.
