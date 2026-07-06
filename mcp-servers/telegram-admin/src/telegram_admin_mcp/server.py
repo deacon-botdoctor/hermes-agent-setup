@@ -44,9 +44,10 @@ def telegram_admin_lookup(query: str, limit: int = 8) -> dict[str, Any]:
     for entry in directory.get("channels", []):
         if not isinstance(entry, dict):
             continue
-        text = " ".join(str(value) for value in entry.values()).lower()
+        scrubbed = _scrub(entry)
+        text = " ".join(str(value) for value in scrubbed.values()).lower()
         if not terms or any(term in text for term in terms):
-            hits.append(_scrub(entry))
+            hits.append(scrubbed)
     return {"ok": True, "query": query, "matches": hits[: max(1, int(limit))]}
 
 

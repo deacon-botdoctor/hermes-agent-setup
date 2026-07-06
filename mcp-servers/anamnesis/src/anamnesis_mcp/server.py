@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -59,6 +60,11 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
+def _fts_query(query: str) -> str:
+    terms = re.findall(r"[a-z0-9]{3,}", query.lower())
+    return " OR ".join(terms[:8])
+
+
 @_tool
 def memory_record(content: str, kind: str = "memory", source: str | None = None) -> dict[str, Any]:
     if not content.strip():
@@ -76,6 +82,9 @@ def memory_record(content: str, kind: str = "memory", source: str | None = None)
 def memory_search(query: str, limit: int = 8) -> dict[str, Any]:
     if not query.strip():
         return {"ok": False, "error": "empty_query", "memories": []}
+    fts_query = _fts_query(query)
+    if not fts_query:
+        return {"ok": True, "query": query, "memories": []}
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -86,7 +95,7 @@ def memory_search(query: str, limit: int = 8) -> dict[str, Any]:
             ORDER BY rank
             LIMIT ?
             """,
-            (query, max(1, int(limit))),
+            (fts_query, max(1, int(limit))),
         ).fetchall()
     return {
         "ok": True,

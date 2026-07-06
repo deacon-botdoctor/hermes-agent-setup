@@ -79,6 +79,16 @@ class KnowledgeAdminMcpTests(unittest.TestCase):
         self.assertIn("extra care", result["memories"][0]["content"])
         self.assertEqual(mod.memory_status()["memories_total"], 1)
 
+    def test_anamnesis_search_sanitizes_fts_syntax(self):
+        os.environ["ANAMNESIS_DB"] = str(self.root / "memory.db")
+        mod = _load(ANAMNESIS, f"anamnesis_syntax_{id(self)}")
+
+        mod.memory_record("Friday deploys need extra care", kind="lesson", source="test")
+        result = mod.memory_search("Friday: OR")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["memories"][0]["content"], "Friday deploys need extra care")
+
     def test_visual_identity_search_scrubs_outside_root_path(self):
         manifest = self.root / "visual-assets.json"
         manifest.write_text(
@@ -126,6 +136,31 @@ class KnowledgeAdminMcpTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["matches"][0]["message_thread_id"], 123)
         self.assertNotIn("bot_token", result["matches"][0])
+
+    def test_telegram_admin_lookup_does_not_search_hidden_fields(self):
+        directory = self.root / "telegram-directory.json"
+        directory.write_text(
+            json.dumps(
+                {
+                    "channels": [
+                        {
+                            "id": "client-main",
+                            "name": "Client Main",
+                            "purpose": "Delivery",
+                            "message_thread_id": 123,
+                            "bot_token": "must-not-query",
+                        }
+                    ]
+                }
+            )
+        )
+        os.environ["TELEGRAM_DIRECTORY"] = str(directory)
+        mod = _load(TELEGRAM, f"telegram_hidden_{id(self)}")
+
+        result = mod.telegram_admin_lookup("must-not-query")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["matches"], [])
 
 
 if __name__ == "__main__":
