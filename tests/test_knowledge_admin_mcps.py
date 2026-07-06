@@ -112,6 +112,29 @@ class KnowledgeAdminMcpTests(unittest.TestCase):
         bad = mod.visual_identity_get("bad")
         self.assertIsNone(bad["asset"]["path"])
 
+    def test_visual_identity_loads_top_level_list_manifest(self):
+        manifest = self.root / "visual-assets.json"
+        manifest.write_text(
+            json.dumps(
+                [
+                    {"id": "logo", "label": "Primary Logo", "kind": "logo", "tags": ["brand"], "path": "logo.png"},
+                    "ignored",
+                ]
+            )
+        )
+        os.environ["VISUAL_IDENTITY_MANIFEST"] = str(manifest)
+        os.environ["VISUAL_IDENTITY_ROOT"] = str(self.root)
+        mod = _load(VISUAL, f"visual_list_{id(self)}")
+
+        result = mod.visual_identity_search("logo")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["assets"],
+            [{"id": "logo", "label": "Primary Logo", "kind": "logo", "tags": ["brand"], "path": "logo.png"}],
+        )
+        self.assertEqual(mod.visual_identity_status()["assets_total"], 1)
+
     def test_telegram_admin_lookup_returns_scrubbed_fields(self):
         directory = self.root / "telegram-directory.json"
         directory.write_text(

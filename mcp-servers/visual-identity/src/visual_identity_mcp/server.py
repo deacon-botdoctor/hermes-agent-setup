@@ -27,7 +27,12 @@ def _load_assets() -> list[dict[str, Any]]:
     if not ASSET_MANIFEST.exists():
         return []
     data = json.loads(ASSET_MANIFEST.read_text())
-    assets = data.get("assets", data if isinstance(data, list) else [])
+    if isinstance(data, dict):
+        assets = data.get("assets", [])
+    elif isinstance(data, list):
+        assets = data
+    else:
+        assets = []
     return [asset for asset in assets if isinstance(asset, dict)]
 
 
