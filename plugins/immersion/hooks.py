@@ -64,28 +64,31 @@ def suppress_interrupted_final_response(text: str | None, *, is_client: bool = T
     return text
 
 
-# A RAW unhandled-error surface — a real traceback, or a short raw error object/line. NOT prose
+# A RAW unhandled-error surface — a real traceback, a raw error object/line, or a short provider
+# failure line. NOT prose
 # that happens to mention "rate limit" or "traceback": the agent answering a question about errors
 # is a legitimate reply and must pass through untouched.
-_RAW_ERROR_RES = (
+_ANCHORED_RAW_ERROR_RES = (
     re.compile(r"Traceback \(most recent call last\):"),                       # a real python traceback
     re.compile(r'(?is)^\s*[\[{]?\s*"?error"?\s*[:=]'),                          # message IS a raw error object
-    re.compile(r"(?im)^\s*(error|exception|openrouter|openai|anthropic)[: ].{0,80}\b(4\d\d|5\d\d|rate.?limit|quota|unauthorized|timeout)\b"),
+)
+_FUZZY_PROVIDER_ERROR_RE = re.compile(
+    r"(?im)^\s*(error|exception|openrouter|openai|anthropic)[: ].{0,80}\b(4\d\d|5\d\d|rate.?limit|quota|unauthorized|timeout)\b"
 )
 
 
 def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
     """Replace a raw provider/model failure surface with a clean generic message on client lanes.
 
-    Only fires on an actual error surface (a real traceback, or a short raw error object/line) — a
-    client should never see raw failure internals, but a normal reply that mentions errors is fine.
+    Only fires on an actual error surface (a traceback, raw error object, or short provider line)
+    — a client should never see raw failure internals, but a normal reply that mentions errors is
+    fine.
     """
     if not text or not is_client:
         return text
-    is_raw_error = _RAW_ERROR_RES[0].search(text) or (
-        len(text) < 240 and any(r.search(text) for r in _RAW_ERROR_RES[1:])
-    )
-    if is_raw_error:
+    is_raw_error = any(r.search(text) for r in _ANCHORED_RAW_ERROR_RES)
+    is_provider_error_line = len(text) < 240 and _FUZZY_PROVIDER_ERROR_RE.search(text)
+    if is_raw_error or is_provider_error_line:
         return "Sorry, I hit a snag on that one. Give me another try in a moment."
     return text
 

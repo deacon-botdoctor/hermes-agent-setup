@@ -22,7 +22,7 @@ The seams it does **not** offer: the transcript-*write* path, and some deep inte
 flow. Those are where you're forced down to a patch. Knowing where the seams are is what lets
 you keep the patch count low.
 
-## The plugins I run
+## The plugin surfaces in this bundle
 
 ### Memory provider
 **Seam:** the memory-provider interface (`sync_turn` / `prefetch` / session-lifecycle hooks).
@@ -31,10 +31,11 @@ not just the current conversation.
 **Why a plugin:** memory is a first-class extension point. There's no reason to patch for it.
 The provider hooks the turn cycle to write memories and prefetches relevant ones into context.
 
-### Platform adapter override
+### Platform adapter override placeholder
 **Seam:** `register_platform` (same-key override of the bundled adapter).
-**What:** A thin subclass of the bundled chat adapter that overrides a few methods — reliable
-media send timeouts, connection-liveness writes, and similar delivery hardening.
+**What:** `plugins/telegram_platform` is currently a disabled placeholder. It does not register
+or activate media send timeouts, connection-liveness writes, PDF/document ingest, reply-media,
+or similar delivery hardening until it subclasses or wraps the real bundled Telegram adapter.
 **Why a plugin:** because same-key registration cleanly replaces the bundled adapter, a thin
 subclass gets all the upstream behavior for free and overrides only what needs changing. A full
 adapter copy would be pure maintenance debt — the subclass is the right shape.

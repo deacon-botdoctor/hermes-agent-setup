@@ -37,7 +37,7 @@ config/            reply rules + runtime skeleton (the drag-and-drop core), AGEN
 plugins/
   immersion/       reply-rules plugin: output transforms + request middleware + /mode  (runs)
   memory/          memory providers: sqlite_provider (local, runs+tested) + gbrain_provider
-  telegram_platform/  chat-adapter override: media, liveness, PDF, reply-media
+  telegram_platform/  disabled placeholder; Telegram hardening is not active yet
 overlay/
   apply.py         apply engine — overlays the registry onto a runtime tree (runs)
   rehearse.py      verify-before-deploy harness (runs)
@@ -67,6 +67,10 @@ python overlay/apply.py --hermes-dir /path/to/runtime
 
 The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.
 Requires Python 3 and PyYAML (`pip install pyyaml`).
+
+`plugins/telegram_platform` is currently a disabled placeholder. It leaves the bundled Telegram
+adapter in place, so media timeout, liveness, PDF/document ingest, and reply-media hardening are
+not active until the adapter subclasses or wraps the real bundled adapter.
 
 ## Security warning
 

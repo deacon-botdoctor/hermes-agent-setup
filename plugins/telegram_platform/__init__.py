@@ -1,11 +1,8 @@
-"""telegram_platform — a thin chat-adapter override.
+"""telegram_platform — disabled placeholder for a future chat-adapter override.
 
-Registers under the same key as the bundled telegram adapter, so it replaces it while inheriting
-everything you don't override. Carries the delivery hardening a client lane needs: media send
-timeouts, connection-liveness heartbeats, PDF/document extraction, and media-in-replies.
-
-A plugin, not a patch: same-key `register_platform` is a supported seam, so this survives upstream
-bumps that a source edit would not. Override methods, do not fork files.
+This package intentionally does not register anything yet. The bundled Telegram adapter remains
+active until this adapter subclasses or wraps it; media timeout, liveness, PDF/document ingest,
+and reply-media hardening are not active from this package.
 """
 from __future__ import annotations
 
