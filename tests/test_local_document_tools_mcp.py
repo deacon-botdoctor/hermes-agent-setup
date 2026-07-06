@@ -131,7 +131,8 @@ class LocalDocumentToolsTests(unittest.TestCase):
             result = self.mod.extract_text(str(path))
 
         self.assertFalse(result["ok"])
-        self.assertIn("LOCAL_DOCUMENT_TOOLS_ROOTS", result["error"])
+        self.assertEqual(result["error"], "path is outside configured document roots")
+        self.assertNotIn(str(self.root), result["error"])
 
     def test_read_text_limits_bytes_from_open_file(self):
         path = self.root / "large.txt"

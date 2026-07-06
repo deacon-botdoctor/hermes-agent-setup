@@ -33,8 +33,7 @@ def _safe_path(path: str) -> Path:
     resolved = candidate.resolve(strict=True)
     roots = _document_roots()
     if not any(_is_relative_to(resolved, root) for root in roots):
-        allowed = os.pathsep.join(str(root) for root in roots)
-        raise PermissionError(f"{path} is outside {DOCUMENT_ROOTS_ENV}: {allowed}")
+        raise PermissionError("path is outside configured document roots")
     return resolved
 
 
