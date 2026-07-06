@@ -70,12 +70,13 @@ why it's on the ladder rung it's on.
 | Concern | Lives in | Rung | Why |
 |---|---|---|---|
 | Reply rules (streaming, mute, rich) | `config/` | CONFIG | Upstream knobs exist; a config edit is the most durable form. |
-| Message-quality transforms (strip notes, suppress interrupted, mask failures) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
+| Message-quality transforms (strip notes, suppress interrupted, mask failures, redact secrets from output) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
 | Tool-result history hygiene | `plugins/immersion` | PLUGIN | `llm_request` middleware — same reason. |
+| 10-min human-voiced progress updates | `bin/progress-compose.py` + `tasks/` | TOOL | A scheduled tool, not a gateway patch. |
 | Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | `register_platform` same-key override. |
 | Memory | `plugins/memory` | PLUGIN | Memory-provider is a first-class seam. |
 | Canonical knowledge | `gbrain/` | EXTERNAL | A product you install and wire, not code you own. |
-| Redaction, durable runtime, resume, active-task | `overlay/` | PATCH | No seam exists at these layers; these are the irreducible patches. |
+| Write-boundary redaction, durable runtime, resume, active-task, autoraise-notice | `overlay/` | PATCH | No seam exists at these layers; the ~5 irreducible patches. |
 
 The pattern: **push everything as high up the ladder as it will go.** The reply rules that make
 the agent client-ready live in config and the immersion plugin — durable, drag-and-drop — not in

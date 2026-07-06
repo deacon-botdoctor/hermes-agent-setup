@@ -14,8 +14,9 @@
 # NOTE — what is deliberately NOT here (pushed higher up the ladder):
 #   * Reply rules (no streaming, mute tool chatter, plain messages)  -> config/config.example.yaml
 #   * Message-quality transforms (strip internal notes, suppress interrupted-final, mask model
-#     failures) and tool-result-history elision                       -> plugins/immersion (CONFIG/PLUGIN,
-#     the durable home — these do NOT belong as fragile patches)
+#     failures, redact secrets from output) and tool-result-history elision -> plugins/immersion
+#     (the durable home — these do NOT belong as fragile patches)
+#   * Human-voiced 10-min progress updates                             -> bin/progress-compose.py + tasks/
 #   * Media / adapter hardening, media-in-replies, PDF ingest         -> plugins/telegram_platform
 #   * Memory                                                          -> plugins/memory
 #   * Canonical knowledge                                             -> gbrain/ (external product)
@@ -29,11 +30,9 @@ patches:
     target: gateway/session.py
     retire_when: upstream adds a redaction hook at the transcript write boundary
 
-  - name: display_redact
-    module: display_redact              # TODO: implement — scrub spinner/status text
-    rung: patch
-    target: agent/display.py
-    retire_when: upstream redacts display output natively
+  # RETIRED display_redact: moved to plugins/immersion (transform_llm_output →
+  # redact_secrets_from_output). Scrubbing the client-bound message is the surface that matters;
+  # no source patch needed.
 
   # ── durable execution & clean restarts ──────────────────────────────────────
   - name: durable_runtime
@@ -54,12 +53,8 @@ patches:
     target: gateway/run.py
     retire_when: upstream grows a per-turn task hook
 
-  # ── delivery & UX ───────────────────────────────────────────────────────────
-  - name: long_running_checkpoints
-    module: long_running_checkpoints    # TODO: implement — progress pings on long tasks
-    rung: patch
-    target: gateway/run.py
-    retire_when: routed to a notification plugin
+  # RETIRED long_running_checkpoints: carried by bin/progress-compose.py + the tasks/ trigger
+  # (the human-voiced 10-min updates). The behavior is a scheduled tool, not a gateway patch.
 
   # ── tooling · housekeeping ──────────────────────────────────────────────────
   - name: session_search_current_topic

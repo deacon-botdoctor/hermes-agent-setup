@@ -20,6 +20,26 @@ _INTERRUPTED_RE = re.compile(
     r"(?i)^\s*(one moment|still working|please hold|interrupted[.,: ].*)$",
 )
 
+# Secret shapes to scrub from any client-bound message. Belt-and-suspenders on top of the
+# write-boundary redaction: a secret should never reach the client's screen either. Strict
+# shapes only, so this never touches normal prose.
+_SECRET_RES = [
+    re.compile(r"[0-9]{8,12}:AA[A-Za-z0-9_-]{30,}"),          # bot token
+    re.compile(r"sk-or-v1-[a-f0-9]{40,}"),                    # OpenRouter
+    re.compile(r"sk-ant-[a-z]+[0-9]+-[A-Za-z0-9_-]{40,}"),    # Anthropic
+    re.compile(r"sk-proj-[A-Za-z0-9_-]{40,}"),                # OpenAI project
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{30,}"),                # GitHub tokens
+]
+
+
+def redact_secrets_from_output(text: str | None) -> str | None:
+    """Scrub credential shapes from a client-bound message (was the display_redact patch)."""
+    if not text:
+        return text
+    for pat in _SECRET_RES:
+        text = pat.sub("[redacted]", text)
+    return text
+
 
 def strip_leaked_internal_system_notes(text: str | None) -> str | None:
     """Remove internal continuity/reset system-note blocks from client output."""
@@ -60,4 +80,5 @@ def transform_llm_output(output: str | None = None, *, is_client: bool = True, *
     text = strip_leaked_internal_system_notes(output)
     text = suppress_interrupted_final_response(text, is_client=is_client)
     text = generic_model_failure_final_response(text, is_client=is_client)
+    text = redact_secrets_from_output(text)  # last: nothing secret reaches the client
     return text
