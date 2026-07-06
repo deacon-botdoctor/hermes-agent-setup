@@ -24,6 +24,10 @@ you keep the patch count low.
 
 ## The plugin surfaces in this bundle
 
+The example config also names canonical-floor runtime plugins (`composio-onboarding`,
+`hermes-lcm`, `Task Ledger`, `Telegram Transcript`, `autoDream`). Those are install-or-prune
+entries for a real client runtime, not source directories bundled in this repo.
+
 ### Memory provider
 **Seam:** the memory-provider interface (`sync_turn` / `prefetch` / session-lifecycle hooks).
 **What:** Long-term recall across sessions — the agent remembers durable facts and prior work,

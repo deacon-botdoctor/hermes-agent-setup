@@ -1,6 +1,6 @@
 # How it all wires together
 
-The pieces (config, overlay, plugins, memory, GBrain) aren't independent — they're stages a
+The pieces (config, overlay, plugins, MCP, memory, GBrain) aren't independent — they're stages a
 message passes through. This traces one turn end to end so you can see where each piece sits and
 why it's on the ladder rung it's on.
 
@@ -18,6 +18,7 @@ why it's on the ladder rung it's on.
                                             ▼
           prefetch  ◀── MEMORY (plugins/memory)  ── recall relevant facts into context
           lookup    ◀── GBRAIN (gbrain/)         ── canonical facts, on demand ("don't guess")
+          route     ◀── MCP POLICY               ── capability-router hot, shared tools lazy
                                             ▼
                         ┌─────────────────────────────────────────┐
                         │ LLM REQUEST  (immersion llm_request mw)  │  elide stale tool results,
@@ -56,8 +57,9 @@ why it's on the ladder rung it's on.
 4. **LLM request middleware** (`immersion/middleware.py`) cleans the request history: stale
    oversized tool results get elided (the tool-mute on the context side), orphan tool outputs get
    dropped so the provider doesn't reject them.
-5. **Model call**, with a cheap-first fallback chain (config `model.fallback`) so a provider blip
-   degrades instead of failing.
+5. **Model call**, using config `model.default` / `model.provider` and the
+   `fallback_providers` chain guarded by `providers.fallback`, so a provider blip degrades
+   instead of failing.
 6. **Output transform** (`immersion/hooks.py`) cleans the outbound message: internal notes
    stripped, interrupted-placeholders suppressed, provider failures masked to a clean generic.
 7. **Reply rules** (config) decide *how* it's delivered: no streaming, no intermediate tool-step
@@ -74,6 +76,7 @@ why it's on the ladder rung it's on.
 | Message-quality transforms (strip notes, suppress interrupted, mask failures, redact secrets from output) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
 | Tool-result history hygiene | `plugins/immersion` | PLUGIN | `llm_request` middleware — same reason. |
 | 10-min human-voiced progress updates | `bin/progress-compose.py` + `tasks/` | TOOL | A scheduled tool, not a gateway patch. |
+| Shared tool routing | `mcp_policy` + `mcp_servers` | CONFIG | Capability-router stays hot; heavier floor MCPs load on demand. |
 | Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | Disabled placeholder; hardening is not active until it wraps the bundled adapter. |
 | Memory | `plugins/memory` | PLUGIN | Memory-provider is a first-class seam. |
 | Canonical knowledge | `gbrain/` | EXTERNAL | A product you install and wire, not code you own. |

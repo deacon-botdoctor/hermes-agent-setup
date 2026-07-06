@@ -39,6 +39,17 @@ gbrain:
   enabled: true
   chat_model: <provider:model>   # small/cheap router model
   engine: postgres
+
+mcp_policy:
+  on_demand:
+    - gbrain
+
+mcp_servers:
+  gbrain:
+    tier: on_demand
+    command: <gbrain serve>
+    metadata:
+      resources: true
 ```
 
 ## The rule that makes it worth wiring

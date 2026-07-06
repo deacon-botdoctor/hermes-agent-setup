@@ -10,6 +10,8 @@ plugin), so they survive upstream bumps instead of breaking.
 
 Open [`index.html`](index.html) for the visual build map, and [`docs/wiring.md`](docs/wiring.md)
 for how a turn flows through every piece.
+The scrubbed real-client rebuild checklist lives in
+[`docs/canonical-client-spec.md`](docs/canonical-client-spec.md).
 
 ## What makes it client-ready
 
@@ -55,8 +57,11 @@ index.html         the build map
 # 1. the reply rules: copy the config skeleton into your runtime, fill <placeholders>
 cp config/config.example.yaml <your-runtime>/config.yaml
 
-# 2. install the plugins where your runtime discovers user plugins
+# 2. install the bundled local plugins where your runtime discovers user plugins
 cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-dir>/
+
+# 2b. install or prune the canonical-floor plugins named in plugins.enabled
+#     (composio-onboarding, hermes-lcm, Task Ledger, Telegram Transcript, autoDream)
 
 # 3. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout

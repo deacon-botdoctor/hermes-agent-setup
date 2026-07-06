@@ -16,8 +16,10 @@ Two parts:
    internal names) stripped. Falls back to a templated line if the model is down, so the client
    always gets *something* human.
 
-2. **The trigger** — a periodic beat that, while a task is in flight, calls the composer and
-   delivers its output to the client lane. Wire it however your platform schedules recurring work:
+2. **The trigger** — a workload watchdog or periodic beat that first proves a task is in flight,
+   then calls the composer and delivers its output back into the active client thread. This is not
+   a blind cron announcement; it is tied to the live workload record for the turn being worked.
+   Wire it however your platform schedules recurring work:
 
    - **Linux** (`linux/`): a systemd `--user` timer on a 10-minute `OnUnitActiveSec`, or a
      `*/10 * * * *` crontab line, gated so it only fires while a task is actually running.
@@ -42,9 +44,11 @@ Two parts:
 <key>StartInterval</key><integer>600</integer>
 ```
 
-Wrap it in a small sender that pulls the live goal/elapsed from your runtime's task state and
-pipes the composed text to your chat platform. Keep the send idempotent so a client never gets two
-identical updates back to back.
+Wrap it in a small sender that pulls the live goal/elapsed plus chat/thread identity from your
+runtime's task state and pipes the composed text to your chat platform. For Telegram, pass the
+thread id through as `message_thread_id` (and `reply_to_message_id` when you have the originating
+message), so the update lands inline in the same work thread instead of the group root. Keep the
+send idempotent so a client never gets two identical updates back to back.
 
 ## Everything else that lives here
 
