@@ -6,7 +6,7 @@ config.local.yaml
 secrets/
 *.token
 *.key
-memory/
+/memory/
 __pycache__/
 *.pyc
 .DS_Store
