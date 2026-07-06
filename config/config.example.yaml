@@ -280,7 +280,7 @@ voice:
   silence_duration: 3.0
 
 human_delay:
-  mode: off
+  mode: 'off'
   min_ms: 800
   max_ms: 2500
 
