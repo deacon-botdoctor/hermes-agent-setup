@@ -198,6 +198,7 @@
       <div class="card"><div class="seam">config</div><h3>No streaming, no chatter</h3><p><code>streaming: false</code>, <code>rich_messages: false</code>, and <code>notifications.tool_step_intermediate: false</code> so a client gets one clean composed reply, never token-by-token or a stream of tool-step pings.</p></div>
       <div class="card"><div class="seam">immersion plugin · transform_llm_output</div><h3>Clean outbound</h3><p>Strips internal continuity notes, suppresses interrupted-waiting placeholders, and masks provider/model failures behind one generic line. A client never sees the machinery.</p></div>
       <div class="card"><div class="seam">immersion plugin · llm_request</div><h3>Tool mute (context side)</h3><p>Elides stale oversized tool results from history and drops orphan tool calls, so huge file reads do not dominate the window every turn.</p></div>
+      <div class="card"><div class="seam">bin/progress-compose · 10-min beat</div><h3>Human-voiced progress</h3><p>On long work, every ~10 minutes the client gets a short, natural update on what is actually being worked on, in an operator-to-boss voice, with all tools/logs/job-ids stripped. Never a robotic status line.</p></div>
     </div>
   </div>
 </section>
