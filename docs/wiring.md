@@ -55,9 +55,10 @@ why it's on the ladder rung it's on.
    turn needs an authoritative fact, the agent looks it up in **GBrain** (`gbrain/`) rather than
    guessing — that's the canonical layer.
 4. **Capability routing.** The hot `capability-router` MCP searches the bundled catalog before
-   heavier shared-floor MCPs load on demand, including the `browser` and `browser-lane`
-   surfaces, the `local-document-tools` text/HTML document surface, and the distinct `search`
-   and `web-search` surfaces backed by SearXNG and Firecrawl. Its registry lives in
+   heavier shared-floor MCPs load on demand, including `anamnesis` local memory, the `browser`
+   and `browser-lane` surfaces, the `local-document-tools` text/HTML document surface, the
+   distinct `search` and `web-search` surfaces backed by SearXNG and Firecrawl,
+   `telegram-admin` directory lookup, and `visual-identity` asset lookup. Its registry lives in
    `mcp-servers/capability-router/registry.json`; `record_capability_outcome` stores
    success/failure feedback in the usage DB so working tools rank up and failing tools rank down.
 5. **LLM request middleware** (`immersion/middleware.py`) cleans the request history: stale
@@ -82,7 +83,7 @@ why it's on the ladder rung it's on.
 | Message-quality transforms (strip notes, suppress interrupted, mask failures, redact secrets from output) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
 | Tool-result history hygiene | `plugins/immersion` | PLUGIN | `llm_request` middleware — same reason. |
 | 10-min human-voiced progress updates | `bin/progress-compose.py` + `tasks/` | TOOL | A scheduled tool, not a gateway patch. |
-| Shared tool routing | `mcp_policy` + `mcp_servers` + `mcp-servers/capability-router/` + `mcp-servers/browser/` + `mcp-servers/browser-lane/` + `mcp-servers/local-document-tools/` + `mcp-servers/search/` + `mcp-servers/web-search/` | CONFIG + SIDECAR | Capability-router stays hot; heavier floor MCPs load on demand; usage outcomes adjust catalog ranking. |
+| Shared tool routing | `mcp_policy` + `mcp_servers` + `mcp-servers/capability-router/` + `mcp-servers/anamnesis/` + `mcp-servers/browser/` + `mcp-servers/browser-lane/` + `mcp-servers/local-document-tools/` + `mcp-servers/search/` + `mcp-servers/telegram-admin/` + `mcp-servers/visual-identity/` + `mcp-servers/web-search/` | CONFIG + SIDECAR | Capability-router stays hot; heavier floor MCPs load on demand; usage outcomes adjust catalog ranking. |
 | Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | Disabled placeholder; hardening is not active until it wraps the bundled adapter. |
 | Memory | `plugins/memory` | PLUGIN | Memory-provider is a first-class seam. |
 | Canonical knowledge | `gbrain/` | EXTERNAL | A product you install and wire, not code you own. |
