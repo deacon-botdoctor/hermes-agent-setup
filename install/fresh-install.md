@@ -17,7 +17,8 @@ Copy [`../config/config.example.yaml`](../config/config.example.yaml), and go ke
 your generated default config. For each edit, confirm you have the problem it solves before
 applying it. The high-value ones for almost anyone:
 
-- **Redaction enabled** — do this first. Security.
+- **Redaction, security, privacy** — do this first: keep transcript redaction on, leave Tirith
+  fail-closed unless you know your runtime lacks it, and keep client/tool output redaction on.
 - **Durable runtime** — if your agent does multi-minute work and restarts matter.
 - **Input mode = queue** — if you don't want follow-up messages killing in-flight turns.
 - **Web backend = Firecrawl** — local self-hosted is the example default; see
@@ -38,6 +39,11 @@ applying it. The high-value ones for almost anyone:
 - **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.
   Keep that only for trusted lanes; for untrusted clients, narrow Telegram tools or turn
   approvals on.
+- **Loop guardrails** — keep the hard-stop defaults unless your runtime already enforces repeated
+  tool-call and repeated-error limits elsewhere.
+- **Platforms, voice, cron, alerts** — Telegram is enabled; Discord, WhatsApp, and webhook are
+  disabled placeholders. Wire TTS/STT/voice providers, cron cadences, and operator-alert
+  destinations only when those runtime services exist.
 - **Compression / autoraise** — leave autoraise on for large-context models (see the config
   comments).
 

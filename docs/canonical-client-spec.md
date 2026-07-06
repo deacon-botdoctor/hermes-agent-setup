@@ -16,12 +16,13 @@ never tokens, chat ids, hostnames, client names, private paths, or live values.
 ### Config sections
 
 `_config_version`, `agent`, `approvals`, `auxiliary`, `client_identity`, `compression`,
-`context`, `delegation`, `display`, `durable_runtime`, `durable_runtime_stage_b`,
+`context`, `cron`, `delegation`, `display`, `discord`, `durable_runtime`, `durable_runtime_stage_b`,
 `durable_runtime_stage_c`, `fallback_providers`, `gateway`, `hooks`, `hooks_auto_accept`,
-`mcp_policy`, `mcp_proxy`, `mcp_servers`, `memory`, `model`, `notifications`,
-`operator_alerts`, `platform_toolsets`, `platforms`, `plugins`, `providers`,
-`session_reset`, `skills`, `smart_model_routing`, `telegram`, `terminal`, `tools`,
-`toolsets`, `web`.
+`human_delay`, `mcp_policy`, `mcp_proxy`, `mcp_servers`, `memory`, `model`, `notifications`,
+`operator_alerts`, `personalities`, `platform_toolsets`, `platforms`, `plugins`, `privacy`,
+`providers`, `security`, `session_reset`, `skills`, `smart_model_routing`, `stt`, `telegram`,
+`terminal`, `tool_loop_guardrails`, `tools`, `toolsets`, `tts`, `voice`, `web`, `webhook`,
+`whatsapp`.
 
 ### MCP servers
 
@@ -76,10 +77,9 @@ The shared floor is `index_allowlist` and `index_description_max`. Optional obse
 ## Optional observed sections
 
 The larger real-client union includes platform or client-specific sections such as `bedrock`,
-`browser`, `checkpoints`, `cron`, `dashboard`, `discord`, `honcho`, `human_delay`, `matrix`,
-`mattermost`, `mcp_profiles`, `personalities`, `privacy`, `slack`, `stt`, `tts`, `voice`,
-`whatsapp`, and workflow-specialist sections. These are rebuild targets, but not all belong in
-the public default skeleton.
+`browser`, `checkpoints`, `dashboard`, `honcho`, `matrix`, `mattermost`, `mcp_profiles`, `slack`,
+and workflow-specialist sections. These are rebuild targets, but not all belong in the public
+default skeleton.
 
 ## Rebuild wave order
 

@@ -20,7 +20,8 @@ layers, each at the highest ladder rung that fits:
 
 - **Reply rules → config** ([`config/config.example.yaml`](config/config.example.yaml)): no
   streaming, `tool_step_intermediate: false` (no tool-call chatter), plain messages, queue mode,
-  redaction on. The durable core.
+  redaction/security/privacy on, tool-loop guardrails, and the shared platform/voice/cron
+  skeleton. The durable core.
 - **Message quality → the immersion plugin** ([`plugins/immersion/`](plugins/immersion)):
   `transform_llm_output` strips internal notes, suppresses interrupted placeholders, and masks
   model-failure internals; `llm_request` middleware elides stale tool-result bloat; `/mode` flips

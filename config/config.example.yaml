@@ -110,6 +110,15 @@ compression:
 redaction:
   enabled: true
 
+security:
+  tirith_enabled: true
+  fail_open: false
+  website_blocklist: []
+
+privacy:
+  redact_client_output: true
+  redact_tool_output: true
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SKILLS — a curated allowlist, not an alphabetical dump.
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +220,11 @@ delegation:
   max_iterations: 90
   default_toolsets: [terminal, file, web]
 
+tool_loop_guardrails:
+  hard_stop_enabled: true
+  max_repeated_tool_calls: 6
+  max_same_error_retries: 2
+
 plugins:
   enabled:
     - composio-onboarding
@@ -229,6 +243,70 @@ platforms:
     enabled: true
 telegram:
   bot_token: <YOUR_BOT_TOKEN>    # from BotFather. NEVER commit the real token.
+
+discord:
+  enabled: false
+  bot_token_env: DISCORD_BOT_TOKEN
+
+whatsapp:
+  enabled: false
+  provider: <provider>
+
+webhook:
+  enabled: false
+  bind: 127.0.0.1
+  port: 0
+
+tts:
+  provider: edge
+  edge:
+    voice: en-US-AriaNeural
+  elevenlabs:
+    api_key_env: ELEVENLABS_API_KEY
+  openai:
+    model: gpt-4o-mini-tts
+
+stt:
+  provider: groq
+  groq:
+    api_key_env: GROQ_API_KEY
+  openai:
+    model: whisper-1
+
+voice:
+  max_recording_seconds: 120
+  auto_tts: false
+  silence_threshold: 200
+  silence_duration: 3.0
+
+human_delay:
+  mode: 'off'
+  min_ms: 800
+  max_ms: 2500
+
+personalities:
+  helpful:
+    description: General helpful default.
+  concise:
+    description: Short, direct answers.
+  technical:
+    description: Implementation-focused answers.
+  creative:
+    description: Ideation and drafting.
+  teacher:
+    description: Explanatory walkthroughs.
+
+cron:
+  local_selfcheck:
+    cadence: "*/15 * * * *"
+  tool_readiness_probe:
+    cadence: "*/30 * * * *"
+  canary_reconciler:
+    cadence: "*/30 * * * *"
+
+operator_alerts:
+  enabled: true
+  destination: <operator-alert-destination>
 
 model:
   default: gpt-5.5

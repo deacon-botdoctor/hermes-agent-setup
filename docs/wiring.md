@@ -69,9 +69,10 @@ why it's on the ladder rung it's on.
    instead of failing.
 7. **Output transform** (`immersion/hooks.py`) cleans the outbound message: internal notes
    stripped, interrupted-placeholders suppressed, provider failures masked to a clean generic.
-8. **Reply rules** (config) decide *how* it's delivered: no streaming, no intermediate tool-step
-   chatter, plain (not rich) messages. This is why a client sees clean output with no operator
-   tuning.
+8. **Reply rules + delivery guardrails** (config) decide *how* it's delivered: no streaming, no
+   intermediate tool-step chatter, plain (not rich) messages, privacy redaction, loop-stop
+   limits, platform/voice defaults, cron probes, and operator-alert placeholders. This is why a
+   client sees clean output with no operator tuning.
 9. **Session write** persists the transcript — with redaction scrubbing any secrets first — and
    **memory `sync_turn`** stores durable facts the agent learned.
 
