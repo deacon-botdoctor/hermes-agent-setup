@@ -26,7 +26,8 @@ applying it. The high-value ones for almost anyone:
   `model.default` / `model.provider`, and either wire or remove each `fallback_providers`
   entry you cannot authenticate.
 - **MCP floor** — keep `capability-router` hot and the shared floor in `mcp_policy.on_demand`
-  only when those MCP commands are installed; move client-specific MCPs into local config.
+  only when those MCP commands are installed; set `PYTHONPATH`, `CAPABILITY_REGISTRY`, and
+  optionally `CAPABILITY_USAGE_DB` for the router; move client-specific MCPs into local config.
 - **Plugins** — install or prune the canonical-floor names in `plugins.enabled`; the bundled
   local plugin directories cover immersion, memory, and the disabled Telegram placeholder only.
 - **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.

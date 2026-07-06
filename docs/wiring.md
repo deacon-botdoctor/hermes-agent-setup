@@ -18,7 +18,7 @@ why it's on the ladder rung it's on.
                                             ▼
           prefetch  ◀── MEMORY (plugins/memory)  ── recall relevant facts into context
           lookup    ◀── GBRAIN (gbrain/)         ── canonical facts, on demand ("don't guess")
-          route     ◀── MCP POLICY               ── capability-router hot, shared tools lazy
+          route     ◀── CAPABILITY ROUTER        ── hot catalog search, shared tools lazy
                                             ▼
                         ┌─────────────────────────────────────────┐
                         │ LLM REQUEST  (immersion llm_request mw)  │  elide stale tool results,
@@ -54,18 +54,22 @@ why it's on the ladder rung it's on.
 3. **Context assembly.** Memory (`plugins/memory`) prefetches relevant recalled facts. When the
    turn needs an authoritative fact, the agent looks it up in **GBrain** (`gbrain/`) rather than
    guessing — that's the canonical layer.
-4. **LLM request middleware** (`immersion/middleware.py`) cleans the request history: stale
+4. **Capability routing.** The hot `capability-router` MCP searches the bundled catalog before
+   heavier shared-floor MCPs load on demand. Its registry lives in
+   `mcp-servers/capability-router/registry.json`; `record_capability_outcome` stores
+   success/failure feedback in the usage DB so working tools rank up and failing tools rank down.
+5. **LLM request middleware** (`immersion/middleware.py`) cleans the request history: stale
    oversized tool results get elided (the tool-mute on the context side), orphan tool outputs get
    dropped so the provider doesn't reject them.
-5. **Model call**, using config `model.default` / `model.provider` and the
+6. **Model call**, using config `model.default` / `model.provider` and the
    `fallback_providers` chain guarded by `providers.fallback`, so a provider blip degrades
    instead of failing.
-6. **Output transform** (`immersion/hooks.py`) cleans the outbound message: internal notes
+7. **Output transform** (`immersion/hooks.py`) cleans the outbound message: internal notes
    stripped, interrupted-placeholders suppressed, provider failures masked to a clean generic.
-7. **Reply rules** (config) decide *how* it's delivered: no streaming, no intermediate tool-step
+8. **Reply rules** (config) decide *how* it's delivered: no streaming, no intermediate tool-step
    chatter, plain (not rich) messages. This is why a client sees clean output with no operator
    tuning.
-8. **Session write** persists the transcript — with redaction scrubbing any secrets first — and
+9. **Session write** persists the transcript — with redaction scrubbing any secrets first — and
    **memory `sync_turn`** stores durable facts the agent learned.
 
 ## Why each piece is where it is (the ladder in practice)
@@ -76,7 +80,7 @@ why it's on the ladder rung it's on.
 | Message-quality transforms (strip notes, suppress interrupted, mask failures, redact secrets from output) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
 | Tool-result history hygiene | `plugins/immersion` | PLUGIN | `llm_request` middleware — same reason. |
 | 10-min human-voiced progress updates | `bin/progress-compose.py` + `tasks/` | TOOL | A scheduled tool, not a gateway patch. |
-| Shared tool routing | `mcp_policy` + `mcp_servers` | CONFIG | Capability-router stays hot; heavier floor MCPs load on demand. |
+| Shared tool routing | `mcp_policy` + `mcp_servers` + `mcp-servers/capability-router/` | CONFIG + SIDECAR | Capability-router stays hot; heavier floor MCPs load on demand; usage outcomes adjust catalog ranking. |
 | Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | Disabled placeholder; hardening is not active until it wraps the bundled adapter. |
 | Memory | `plugins/memory` | PLUGIN | Memory-provider is a first-class seam. |
 | Canonical knowledge | `gbrain/` | EXTERNAL | A product you install and wire, not code you own. |
