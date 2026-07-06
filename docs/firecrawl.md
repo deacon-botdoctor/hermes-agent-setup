@@ -29,8 +29,10 @@ web:
   firecrawl_url: http://127.0.0.1:3002
 ```
 
-That's it — the agent's `web` tool now scrapes through your local instance. No key, no quota, and
-the pages you crawl never leave your host.
+The bundled `search` and `web-search` MCP servers use the same local default through
+`FIRECRAWL_URL`; leave it unset for `http://127.0.0.1:3002`, or set it explicitly in the MCP
+server environment. That's it — the agent's `web` tool and search scrape tools now use your local
+instance. No key, no quota, and the pages you crawl never leave your host.
 
 ## Hosted API (alternative)
 
@@ -43,7 +45,8 @@ web:
 ```
 
 and set `FIRECRAWL_API_KEY` in your environment (never commit it). Same tool surface, someone
-else runs the crawler.
+else runs the crawler. The hosted key is also honored by the bundled `search` and `web-search`
+MCP servers when they call Firecrawl.
 
 ## Which to pick
 

@@ -8,6 +8,7 @@ from `search` because real client runtimes configure both MCP servers.
 - `SEARXNG_URL` defaults to `http://127.0.0.1:8080`
 - `FIRECRAWL_URL` defaults to `http://127.0.0.1:3002`
 - `FIRECRAWL_API_KEY` is optional for hosted Firecrawl
+- `WEB_SEARCH_MCP_TIMEOUT` defaults to `20` seconds
 
 ## Tools
 

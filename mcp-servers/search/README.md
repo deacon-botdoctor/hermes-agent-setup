@@ -7,6 +7,7 @@ Clean-room MCP surface for search plus page scraping.
 - `SEARXNG_URL` defaults to `http://127.0.0.1:8080`
 - `FIRECRAWL_URL` defaults to `http://127.0.0.1:3002`
 - `FIRECRAWL_API_KEY` is optional for hosted Firecrawl
+- `SEARCH_MCP_TIMEOUT` defaults to `20` seconds
 
 ## Tools
 
