@@ -233,8 +233,8 @@
         <tr><td class="p">durable_runtime</td><td><span class="pill patch">patch</span></td><td class="tg">runtime</td><td>Long work resumes after a restart instead of vanishing.</td></tr>
         <tr><td class="p">clean_restart_resume_scheduler</td><td><span class="pill patch">patch · 1 anchor</span></td><td class="tg">gateway/run.py</td><td>One scheduler owns the startup resume decision. Replaced 7 scattered patches and killed a churn loop.</td></tr>
         <tr><td class="p">active_task_anchor</td><td><span class="pill patch">patch</span></td><td class="tg">gateway</td><td>Pins the current task so compression cannot summarize it away.</td></tr>
-        <tr><td class="p">media_path_normalize</td><td><span class="pill patch">patch + plugin</span></td><td class="tg">platform base</td><td>Reliable image/file/PDF delivery. Test the default first.</td></tr>
-        <tr><td class="p">telegram_reply_media</td><td><span class="pill plugin">plugin leg</span></td><td class="tg">adapter + gw</td><td>Media in replies. Adapter leg lives in the platform plugin.</td></tr>
+        <tr><td class="p">media_path_normalize</td><td><span class="pill patch">planned plugin</span></td><td class="tg">platform base</td><td>Future image/file/PDF hardening. The Telegram plugin is currently disabled; test the bundled adapter first.</td></tr>
+        <tr><td class="p">telegram_reply_media</td><td><span class="pill plugin">placeholder</span></td><td class="tg">adapter + gw</td><td>Future media in replies. No adapter leg is active until the placeholder wraps the bundled adapter.</td></tr>
         <tr><td class="p">client_friendly_long_running_checkpoints</td><td><span class="pill patch">patch</span></td><td class="tg">gateway/run.py</td><td>Progress pings during long tasks so they do not read as hung.</td></tr>
         <tr><td class="p">cli_web_small_hardening</td><td><span class="pill patch">patch</span></td><td class="tg">web server</td><td>Sane limits on the built-in web tool.</td></tr>
         <tr><td class="p">session_search_current_topic</td><td><span class="pill plugin">→ plugin</span></td><td class="tg">tools</td><td>Search prior transcripts by topic. Belongs in a register_tool plugin.</td></tr>
@@ -260,8 +260,8 @@
     <h2>Anything with a seam does not get a patch.</h2>
     <div class="grid">
       <div class="card"><div class="seam">memory provider</div><h3>Long-term recall</h3><p>Remembers durable facts and prior work across sessions. Hooks the turn cycle to write and prefetch. A first-class extension point.</p></div>
-      <div class="card"><div class="seam">register_platform</div><h3>Adapter override</h3><p>A thin subclass of the bundled chat adapter. Same-key registration replaces it, so you override a few methods and inherit the rest. Override methods, do not fork files.</p></div>
-      <div class="card"><div class="seam">output hooks</div><h3>Immersion</h3><p>Acknowledge input while working, emit status. Output and lifecycle transforms are exactly what the hook seams are for. Check config first.</p></div>
+      <div class="card"><div class="seam">register_platform</div><h3>Adapter placeholder</h3><p><code>plugins/telegram_platform</code> is disabled today. It leaves the bundled Telegram adapter active until a future subclass or wrapper can inherit upstream behavior and override only the needed methods.</p></div>
+      <div class="card"><div class="seam">output hooks</div><h3>Immersion</h3><p>Cleans outbound replies, trims stale tool-result history before provider calls, and registers <code>/mode</code> when the runtime exposes a command API. Check config first.</p></div>
     </div>
   </div>
 </section>
@@ -275,9 +275,11 @@
 <pre><span class="k">durable_runtime</span>: <span class="v">true</span>              <span class="c"># survive restarts without losing work</span>
 <span class="k">redaction</span>: {<span class="k">enabled</span>: <span class="v">true</span>}       <span class="c"># non-negotiable</span>
 <span class="k">rich_messages</span>: <span class="v">false</span>             <span class="c"># plain output on chat lanes</span>
-<span class="k">input_mode</span>: <span class="v">queue</span>               <span class="c"># a new message waits, does not kill the turn</span>
+<span class="k">busy_input_mode</span>: <span class="v">queue</span>          <span class="c"># a new message waits, does not kill the turn</span>
+<span class="k">web</span>: {<span class="k">backend</span>: <span class="v">firecrawl</span>, <span class="k">firecrawl_url</span>: <span class="v">http://127.0.0.1:3002</span>}
+<span class="k">approvals</span>: {<span class="k">mode</span>: <span class="v">off</span>}        <span class="c"># unattended; narrow Telegram tools for untrusted users</span>
 <span class="k">compression</span>: {<span class="k">codex_gpt55_autoraise</span>: <span class="v">true</span>}  <span class="c"># off drops compaction to ~25%</span>
-<span class="k">notifications</span>: {<span class="k">policy</span>: <span class="v">quiet-exception-only</span>}
+<span class="k">notifications</span>: {<span class="k">tool_step_intermediate</span>: <span class="v">false</span>}
 <span class="k">skills</span>: {<span class="k">index_allowlist</span>: [<span class="v">&lt;core-1&gt;</span>, <span class="v">&lt;core-2&gt;</span>]}
 <span class="k">model</span>: {<span class="k">primary</span>: <span class="v">&lt;primary&gt;</span>, <span class="k">fallback</span>: [<span class="v">&lt;cheap&gt;</span>, <span class="v">&lt;capable&gt;</span>]}</pre>
     </div>

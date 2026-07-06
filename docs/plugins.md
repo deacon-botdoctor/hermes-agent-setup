@@ -30,6 +30,9 @@ you keep the patch count low.
 not just the current conversation.
 **Why a plugin:** memory is a first-class extension point. There's no reason to patch for it.
 The provider hooks the turn cycle to write memories and prefetches relevant ones into context.
+`plugins/memory.register(ctx)` now defaults to the local SQLite provider when
+`register_memory_provider` exists, and logs a warning instead of crashing if the runtime has no
+matching registration API.
 
 ### Platform adapter override placeholder
 **Seam:** `register_platform` (same-key override of the bundled adapter).
@@ -42,13 +45,17 @@ adapter copy would be pure maintenance debt — the subclass is the right shape.
 **Rule:** override methods, don't fork files. When a change is a clean method override it's a
 plugin; only the parts with no method seam stay as (thin) patches.
 
-### Immersion / responsiveness
-**Seam:** `transform_llm_output` / status hooks.
-**What:** Makes the agent feel present — acknowledging input while it's working, status emission,
-busy-input handling.
-**Why a plugin:** these are output/lifecycle transforms, exactly what the hook seams are for.
+### Immersion / message quality
+**Seam:** `transform_llm_output` / `llm_request` middleware / `register_command`.
+**What:** Cleans client-bound output, trims stale tool-result history before provider calls, and
+registers `/mode queue|interrupt` when the runtime exposes a command API.
+**Why a plugin:** these are output and request-history transforms, exactly what the hook seams are
+for.
 **Note:** some "immersion" behaviors are actually **config** now (a busy-input mode knob), and a
 few have no hook and stay patches. Check config first.
+`plugins/immersion.register(ctx)` wires output transforms, request middleware, and `/mode` on a
+best-effort basis when those runtime APIs exist; missing APIs log or skip instead of failing
+plugin discovery.
 
 ## How plugins load
 

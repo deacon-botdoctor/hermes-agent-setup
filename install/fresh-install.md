@@ -20,6 +20,11 @@ applying it. The high-value ones for almost anyone:
 - **Redaction enabled** — do this first. Security.
 - **Durable runtime** — if your agent does multi-minute work and restarts matter.
 - **Input mode = queue** — if you don't want follow-up messages killing in-flight turns.
+- **Web backend = Firecrawl** — local self-hosted is the example default; see
+  [`../docs/firecrawl.md`](../docs/firecrawl.md) if you need web scraping/crawl.
+- **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.
+  Keep that only for trusted lanes; for untrusted clients, narrow Telegram tools or turn
+  approvals on.
 - **Compression / autoraise** — leave autoraise on for large-context models (see the config
   comments).
 
@@ -37,9 +42,11 @@ agent; you'll want it the moment "get this fact right" matters.
 
 ## 4. Plugins
 
-Add plugins for behavior that has a supported seam — memory, platform overrides, output
-transforms. See [`../docs/plugins.md`](../docs/plugins.md). Prefer a plugin over a patch every
-time a seam exists. Install each as a self-contained, idempotent package.
+Add plugins for behavior that has a supported seam — memory and output transforms today, with
+platform overrides as a future seam. `plugins/telegram_platform` is currently a disabled
+placeholder and leaves the bundled Telegram adapter active. See [`../docs/plugins.md`](../docs/plugins.md).
+Prefer a plugin over a patch every time a seam exists. Install each as a self-contained,
+idempotent package.
 
 ## 5. Overlay features (last resort)
 
