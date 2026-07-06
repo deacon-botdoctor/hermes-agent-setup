@@ -46,13 +46,29 @@ code_execution:
   timeout: 300          # seconds per code-execution tool call
   max_tool_calls: 90    # cap tool calls per turn
 
-# Both surfaces get the full toolset by default — an agent that can't run code_execution/terminal
-# on the chat lane will fail the moment it needs them. If you specifically want a locked-down
-# client lane (e.g. a customer-facing bot that must never run code), narrow `telegram` yourself
-# and accept that the agent can't do that class of work there. Do NOT narrow it by default.
+# Web scraping/crawl backend. firecrawl is the default. Run it LOCALLY (self-hosted, no API key)
+# by pointing firecrawl_url at a local instance, or use the hosted API with a key.
+#   local self-hosted:  firecrawl_url: http://127.0.0.1:3002   (see docs/firecrawl.md to run it)
+#   hosted API:         firecrawl_url: https://api.firecrawl.dev  (set FIRECRAWL_API_KEY)
 web:
+  backend: firecrawl
+  firecrawl_url: http://127.0.0.1:3002        # local self-hosted; swap to the hosted API if you prefer
+  # Per-surface toolsets. Both get the full set by default — an agent that can't run
+  # code_execution/terminal on the chat lane fails the moment it needs them. Narrow `telegram`
+  # yourself ONLY if you want a locked-down customer-facing lane; do not narrow it by default.
   cli:      [clarify, code_execution, file, memory, session_search, skills, terminal, todo, tts, web]
   telegram: [clarify, code_execution, file, memory, session_search, skills, terminal, todo, tts, web]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPROVALS / permissions — how much the agent asks before acting.
+# ─────────────────────────────────────────────────────────────────────────────
+# mode: 'off'  = no permission prompts; the agent just acts (unattended / client-facing default).
+# mode: 'on'   = the agent asks before sensitive actions (operator/supervised use).
+# 'off' is the right default for a client-facing bot that must run without you approving each step;
+# only turn it on for a lane where a human is watching and wants a gate.
+approvals:
+  mode: 'off'
+  timeout: 60
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MEMORY — the agent's own recall (distinct from the canonical GBrain layer).
