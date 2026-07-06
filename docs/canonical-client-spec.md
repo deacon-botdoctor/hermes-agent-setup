@@ -39,6 +39,9 @@ The shared floor is:
 - `web-search`
 
 `capability-router` is hot-path. The other floor MCPs should be on-demand via `mcp_policy`.
+The bundled `search` and `web-search` implementations are distinct shared-floor MCP surfaces:
+both search SearXNG and scrape pages through Firecrawl, but expose the real client tool names
+separately.
 
 ### Plugins
 
