@@ -44,6 +44,7 @@ mcp-servers/
   capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
   browser/            CDP JSON/status MCP surface (runs+tested)
   browser-lane/       browser-lane daemon socket MCP surface (runs+tested)
+  local-document-tools/  local text/HTML extraction + merge MCP (runs+tested)
   search/             SearXNG search + Firecrawl scrape MCP (runs+tested)
   web-search/         distinct web-search MCP floor surface (runs+tested)
 overlay/
@@ -74,7 +75,7 @@ export PYTHONPATH="$PWD/mcp-servers/capability-router/src:$PYTHONPATH"
 export CAPABILITY_REGISTRY="$PWD/mcp-servers/capability-router/registry.json"
 
 # 4. wire on-demand browser/search surfaces — see the mcp-servers/* READMEs
-export PYTHONPATH="$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
+export PYTHONPATH="$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/local-document-tools/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
 export BROWSER_CDP_URL="http://127.0.0.1:9230"
 export BROWSER_LANE_SOCKET="<runtime>/.hermes/browser-lane/daemon.sock"
 
