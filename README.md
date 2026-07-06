@@ -40,6 +40,8 @@ plugins/
   immersion/       reply-rules plugin: output transforms + request middleware + /mode  (runs)
   memory/          memory providers: sqlite_provider (local, runs+tested) + gbrain_provider
   telegram_platform/  disabled placeholder; Telegram hardening is not active yet
+mcp-servers/
+  capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
 overlay/
   apply.py         apply engine — overlays the registry onto a runtime tree (runs)
   rehearse.py      verify-before-deploy harness (runs)
@@ -63,11 +65,14 @@ cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-d
 # 2b. install or prune the canonical-floor plugins named in plugins.enabled
 #     (composio-onboarding, hermes-lcm, Task Ledger, Telegram Transcript, autoDream)
 
-# 3. the overlay: rehearse against a pristine checkout, then apply
+# 3. put mcp-servers/capability-router on PYTHONPATH and set CAPABILITY_REGISTRY
+#    to mcp-servers/capability-router/registry.json
+
+# 4. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout
 python overlay/apply.py --hermes-dir /path/to/runtime
 
-# 4. wire GBrain (install it separately) — see gbrain/README.md — and restart.
+# 5. wire GBrain (install it separately) — see gbrain/README.md — and restart.
 ```
 
 The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.
