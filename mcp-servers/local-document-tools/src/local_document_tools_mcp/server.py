@@ -25,13 +25,15 @@ def _tool(fn):
 
 
 def _safe_path(path: str) -> Path:
+    roots = _document_roots()
     candidate = Path(path).expanduser().resolve(strict=False)
+    if not any(_is_relative_to(candidate, root) for root in roots):
+        raise PermissionError("path is outside configured document roots")
     if not candidate.exists():
         raise FileNotFoundError(path)
     if not candidate.is_file():
         raise IsADirectoryError(path)
     resolved = candidate.resolve(strict=True)
-    roots = _document_roots()
     if not any(_is_relative_to(resolved, root) for root in roots):
         raise PermissionError("path is outside configured document roots")
     return resolved

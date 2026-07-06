@@ -125,14 +125,20 @@ class LocalDocumentToolsTests(unittest.TestCase):
 
     def test_rejects_files_outside_configured_roots(self):
         with tempfile.TemporaryDirectory() as outside:
-            path = Path(outside) / "secret.txt"
-            path.write_text("secret")
+            existing_path = Path(outside) / "secret.txt"
+            missing_path = Path(outside) / "missing.txt"
+            existing_path.write_text("secret")
 
-            result = self.mod.extract_text(str(path))
+            existing_result = self.mod.extract_text(str(existing_path))
+            missing_result = self.mod.extract_text(str(missing_path))
 
-        self.assertFalse(result["ok"])
-        self.assertEqual(result["error"], "path is outside configured document roots")
-        self.assertNotIn(str(self.root), result["error"])
+        self.assertFalse(existing_result["ok"])
+        self.assertFalse(missing_result["ok"])
+        self.assertEqual(existing_result["error"], "path is outside configured document roots")
+        self.assertEqual(missing_result["error"], "path is outside configured document roots")
+        self.assertEqual(existing_result["error"], missing_result["error"])
+        self.assertNotIn(str(self.root), existing_result["error"])
+        self.assertNotIn(str(self.root), missing_result["error"])
 
     def test_read_text_limits_bytes_from_open_file(self):
         path = self.root / "large.txt"
