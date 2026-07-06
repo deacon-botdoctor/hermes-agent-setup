@@ -35,7 +35,8 @@ applying it. The high-value ones for almost anyone:
   `VISUAL_IDENTITY_MANIFEST`, and `VISUAL_IDENTITY_ROOT` when enabling the memory,
   Telegram-admin, and visual-identity MCPs; move client-specific MCPs into local config.
 - **Plugins** — install or prune the canonical-floor names in `plugins.enabled`; the bundled
-  local plugin directories cover immersion, memory, and the disabled Telegram placeholder only.
+  local plugin tree covers immersion, memory, the disabled Telegram placeholder, and no-op floor
+  placeholders for the canonical-floor names.
 - **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.
   Keep that only for trusted lanes; for untrusted clients, narrow Telegram tools or turn
   approvals on.
@@ -67,9 +68,10 @@ and which belong only in an overlay or local runtime config.
 
 Add plugins for behavior that has a supported seam — memory and output transforms today, with
 platform overrides as a future seam. `plugins/telegram_platform` is currently a disabled
-placeholder and leaves the bundled Telegram adapter active. See [`../docs/plugins.md`](../docs/plugins.md).
-Prefer a plugin over a patch every time a seam exists. Install each as a self-contained,
-idempotent package.
+placeholder and leaves the bundled Telegram adapter active. The canonical-floor plugin names in
+`plugins.enabled` have bundled no-op placeholders, so copying `../plugins/*` into your runtime's
+plugin directory keeps discovery satisfied while leaving unfinished hooks inactive. See
+[`../docs/plugins.md`](../docs/plugins.md). Prefer a plugin over a patch every time a seam exists.
 
 ## 5. Overlay features (last resort)
 

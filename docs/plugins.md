@@ -25,8 +25,11 @@ you keep the patch count low.
 ## The plugin surfaces in this bundle
 
 The example config also names canonical-floor runtime plugins (`composio-onboarding`,
-`hermes-lcm`, `Task Ledger`, `Telegram Transcript`, `autoDream`). Those are install-or-prune
-entries for a real client runtime, not source directories bundled in this repo.
+`hermes-lcm`, `Task Ledger`, `Telegram Transcript`, `autoDream`). This repo bundles importable
+floor placeholders for them under `plugins/composio_onboarding`, `plugins/hermes_lcm`,
+`plugins/task_ledger`, `plugins/telegram_transcript`, and `plugins/autodream`. They register as
+no-op placeholders and log what real runtime hook belongs there, so copying the whole `plugins/`
+tree satisfies discovery without activating unfinished behavior.
 
 ### Memory provider
 **Seam:** the memory-provider interface (`sync_turn` / `prefetch` / session-lifecycle hooks).
@@ -66,4 +69,6 @@ plugin discovery.
 User plugins live in a plugins directory and/or are discovered as installed packages. A user
 plugin registered under the same key as a bundled plugin wins discovery and replaces it — that's
 what makes the subclass-override pattern work. Keep each plugin a self-contained package with its
-own install step so it's idempotent to (re)install.
+own install step so it's idempotent to (re)install. When using the bundled tree directly, copy
+`plugins/*` together; the floor placeholders share `plugins/_floor.py` for their no-op
+registration helper.
