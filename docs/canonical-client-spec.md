@@ -39,6 +39,9 @@ The shared floor is:
 - `web-search`
 
 `capability-router` is hot-path. The other floor MCPs should be on-demand via `mcp_policy`.
+The bundled `browser` MCP talks to a Chromium DevTools Protocol endpoint (`BROWSER_CDP_URL`),
+while `browser-lane` talks to the browser-lane daemon socket (`BROWSER_LANE_SOCKET`) and reports
+the same CDP endpoint for lane readiness checks.
 The bundled `search` and `web-search` implementations are distinct shared-floor MCP surfaces:
 both search SearXNG and scrape pages through Firecrawl, but expose the real client tool names
 separately.

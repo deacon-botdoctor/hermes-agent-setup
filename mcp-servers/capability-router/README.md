@@ -41,10 +41,10 @@ list. Each capability should include at least:
   "id": "web.browser",
   "category": "web",
   "label": "Browser MCP",
-  "summary": "Use the plain browser MCP for browser, CDP, page navigation, and screenshot actions.",
+  "summary": "Use the plain browser MCP for browser CDP status, target listing, and page opening.",
   "mcp_server": "browser",
   "tool_name": "browser_open",
-  "preferred_for": ["browser", "CDP", "page navigation", "screenshot", "interactive page"]
+  "preferred_for": ["browser", "CDP", "page navigation", "interactive page"]
 }
 ```
 
