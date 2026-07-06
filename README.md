@@ -41,11 +41,14 @@ plugins/
   memory/          memory providers: sqlite_provider (local, runs+tested) + gbrain_provider
   telegram_platform/  disabled placeholder; Telegram hardening is not active yet
 mcp-servers/
+  anamnesis/        local SQLite-FTS memory MCP (runs+tested)
   capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
   browser/            CDP JSON/status MCP surface (runs+tested)
   browser-lane/       browser-lane daemon socket MCP surface (runs+tested)
   local-document-tools/  local text/HTML extraction + merge MCP (runs+tested)
   search/             SearXNG search + Firecrawl scrape MCP (runs+tested)
+  telegram-admin/     scrubbed Telegram directory lookup MCP (runs+tested)
+  visual-identity/    manifest-backed visual asset lookup MCP (runs+tested)
   web-search/         distinct web-search MCP floor surface (runs+tested)
 overlay/
   apply.py         apply engine — overlays the registry onto a runtime tree (runs)
@@ -74,11 +77,15 @@ cp -r plugins/immersion plugins/memory plugins/telegram_platform <your-plugins-d
 export PYTHONPATH="$PWD/mcp-servers/capability-router/src:$PYTHONPATH"
 export CAPABILITY_REGISTRY="$PWD/mcp-servers/capability-router/registry.json"
 
-# 4. wire on-demand browser/document/search surfaces — see the mcp-servers/* READMEs
-export PYTHONPATH="$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/local-document-tools/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
+# 4. wire on-demand knowledge/browser/document/search/admin/visual surfaces — see the mcp-servers/* READMEs
+export PYTHONPATH="$PWD/mcp-servers/anamnesis/src:$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/local-document-tools/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/telegram-admin/src:$PWD/mcp-servers/visual-identity/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
 export BROWSER_CDP_URL="http://127.0.0.1:9230"
 export BROWSER_LANE_SOCKET="<runtime>/.hermes/browser-lane/daemon.sock"
 export LOCAL_DOCUMENT_TOOLS_ROOTS="$PWD"
+export ANAMNESIS_DB="<runtime>/.hermes/state/anamnesis.db"
+export TELEGRAM_DIRECTORY="<runtime>/.hermes/telegram-directory.json"
+export VISUAL_IDENTITY_MANIFEST="<runtime>/.hermes/visual-assets.json"
+export VISUAL_IDENTITY_ROOT="<runtime>/Documents/VisualIdentity"
 
 # 5. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout

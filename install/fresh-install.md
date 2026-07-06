@@ -30,7 +30,9 @@ applying it. The high-value ones for almost anyone:
   optionally `CAPABILITY_USAGE_DB` for the router; set `BROWSER_CDP_URL` and
   `BROWSER_LANE_SOCKET` when enabling the bundled browser MCPs; set
   `LOCAL_DOCUMENT_TOOLS_ROOTS` to the readable document/workspace roots when enabling
-  `local-document-tools`; move client-specific MCPs into local config.
+  `local-document-tools`; set `ANAMNESIS_DB`, `TELEGRAM_DIRECTORY`,
+  `VISUAL_IDENTITY_MANIFEST`, and `VISUAL_IDENTITY_ROOT` when enabling the memory,
+  Telegram-admin, and visual-identity MCPs; move client-specific MCPs into local config.
 - **Plugins** — install or prune the canonical-floor names in `plugins.enabled`; the bundled
   local plugin directories cover immersion, memory, and the disabled Telegram placeholder only.
 - **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.

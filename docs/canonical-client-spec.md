@@ -48,6 +48,10 @@ conversion to optional adapters.
 The bundled `search` and `web-search` implementations are distinct shared-floor MCP surfaces:
 both search SearXNG and scrape pages through Firecrawl, but expose the real client tool names
 separately.
+The bundled `anamnesis` MCP stores local SQLite-FTS memories at `ANAMNESIS_DB`; `telegram-admin`
+reads only scrubbed Telegram directory fields from `TELEGRAM_DIRECTORY`; `visual-identity` reads
+approved asset metadata from `VISUAL_IDENTITY_MANIFEST` and returns only paths under
+`VISUAL_IDENTITY_ROOT`.
 
 ### Plugins
 
