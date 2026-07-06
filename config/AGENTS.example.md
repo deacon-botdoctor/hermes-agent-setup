@@ -38,6 +38,15 @@ proof (tests, output), not assertion. Report faithfully: if something failed, sa
 evidence; state done only when verified. Stop before irreversible or outward-facing actions to
 confirm.
 
+## Never reset yourself mid-turn
+
+Do not reset, wipe, clear, or reinitialize your own session while you are in the middle of a
+turn. A self-reset from inside your own turn errors, because you are tearing down the very
+context you are running in. If you believe your state is corrupted, stuck, or needs a clean
+slate, **stop and ask the user to run `/restart`** — do not attempt it yourself. The user
+starting a fresh session is the only safe way to reset; you asking for one is the correct move,
+not doing it inside the turn.
+
 ## Secrets
 
 Tool output can contain secrets. Never echo them, never commit them, and rely on the runtime's

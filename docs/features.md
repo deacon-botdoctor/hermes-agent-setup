@@ -80,8 +80,10 @@ just asked for doesn't get summarized away when the context window fills.
 ## Delivery & UX
 
 ### Media path normalization + reply media
-**Rung:** patch (gateway leg) + plugin (adapter leg)
-**What:** Normalizes media paths and supports media in replies on the chat platform.
+**Rung:** patch (gateway leg) + planned plugin (adapter leg)
+**What:** A planned adapter hardening surface. `plugins/telegram_platform` is currently a disabled
+placeholder, so reply-media, media timeout, liveness, and PDF/document ingest hardening are not
+active until it wraps the real bundled Telegram adapter.
 **Why:** Reliable image/file/PDF delivery. **Caution from experience:** most media-delivery
 problems are *not* a missing feature — the platform delivers media fine by default. Before
 adding media machinery, check that some *other* overlay isn't corrupting the media path (e.g. a

@@ -17,7 +17,8 @@
 #     failures, redact secrets from output) and tool-result-history elision -> plugins/immersion
 #     (the durable home — these do NOT belong as fragile patches)
 #   * Human-voiced 10-min progress updates                             -> bin/progress-compose.py + tasks/
-#   * Media / adapter hardening, media-in-replies, PDF ingest         -> plugins/telegram_platform
+#   * Future media / adapter hardening, media-in-replies, PDF ingest  -> plugins/telegram_platform
+#     (disabled placeholder until it wraps the bundled adapter)
 #   * Memory                                                          -> plugins/memory
 #   * Canonical knowledge                                             -> gbrain/ (external product)
 # Only behaviors with NO config knob and NO plugin seam stay as patches below. See docs/wiring.md.

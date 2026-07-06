@@ -16,8 +16,10 @@ import re
 _INTERNAL_NOTE_RE = re.compile(
     r"(?ms)^\s*(\[(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\].*?\[/(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\])\s*",
 )
+# Only a message that is ENTIRELY a placeholder gets blanked — not one that merely starts with
+# one of these words ("Interrupted the deploy to..." is a real answer, keep it).
 _INTERRUPTED_RE = re.compile(
-    r"(?i)^\s*(one moment|still working|please hold|interrupted[.,: ].*)$",
+    r"(?i)^\s*(one moment|still working|please hold|interrupted)[.!,:… ]*$",
 )
 
 # Secret shapes to scrub from any client-bound message. Belt-and-suspenders on top of the
@@ -62,14 +64,31 @@ def suppress_interrupted_final_response(text: str | None, *, is_client: bool = T
     return text
 
 
-def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
-    """Replace provider/model failure internals with a clean generic message on client lanes.
+# A RAW unhandled-error surface — a real traceback, a raw error object/line, or a short provider
+# failure line. NOT prose
+# that happens to mention "rate limit" or "traceback": the agent answering a question about errors
+# is a legitimate reply and must pass through untouched.
+_RAW_TRACEBACK_RE = re.compile(
+    r'(?s)^\s*Traceback \(most recent call last\):\s*\n(?:\s+File "[^"\n]+", line \d+, in [^\n]+|[A-Za-z_][\w.]*\s*(?::|$))'
+)
+_RAW_ERROR_OBJECT_RE = re.compile(r'(?is)^\s*[\[{]?\s*"?error"?\s*[:=]')
+_FUZZY_PROVIDER_ERROR_RE = re.compile(
+    r"(?im)^\s*(error|exception|openrouter|openai|anthropic)[: ].{0,80}\b(4\d\d|5\d\d|rate.?limit|quota|unauthorized|timeout)\b"
+)
 
-    A client should never see a raw provider stack trace or a "model returned 429" string.
+
+def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
+    """Replace a raw provider/model failure surface with a clean generic message on client lanes.
+
+    Only fires on an actual error surface (a traceback, raw error object, or short provider line)
+    — a client should never see raw failure internals, but a normal reply that mentions errors is
+    fine.
     """
     if not text or not is_client:
         return text
-    if re.search(r"(?i)\b(traceback|provider error|status 4\d\d|status 5\d\d|rate.?limit)\b", text):
+    is_raw_error = bool(_RAW_TRACEBACK_RE.match(text) or _RAW_ERROR_OBJECT_RE.match(text))
+    is_provider_error_line = len(text) < 240 and _FUZZY_PROVIDER_ERROR_RE.search(text)
+    if is_raw_error or is_provider_error_line:
         return "Sorry, I hit a snag on that one. Give me another try in a moment."
     return text
 

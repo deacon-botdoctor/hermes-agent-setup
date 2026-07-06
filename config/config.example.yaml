@@ -46,11 +46,35 @@ code_execution:
   timeout: 300          # seconds per code-execution tool call
   max_tool_calls: 90    # cap tool calls per turn
 
-# The CLI surface gets the full toolset for operator work; the chat (gateway) surface is
-# narrower on purpose — a client lane shouldn't expose terminal/code_execution.
+# Web scraping/crawl backend. firecrawl is the default. Run it LOCALLY (self-hosted, no API key)
+# by pointing firecrawl_url at a local instance, or use the hosted API with a key.
+#   local self-hosted:  firecrawl_url: http://127.0.0.1:3002   (see docs/firecrawl.md to run it)
+#   hosted API:         firecrawl_url: https://api.firecrawl.dev  (set FIRECRAWL_API_KEY)
 web:
+  backend: firecrawl
+  firecrawl_url: http://127.0.0.1:3002        # local self-hosted; swap to the hosted API if you prefer
+  # SECURITY WARNING: these client/Telegram defaults expose web browsing, shell access, and
+  # code execution with no approval gate. Use them only for trusted clients/operators.
+  # For UNTRUSTED clients, narrow `telegram` by dropping terminal/code_execution/web or set
+  # approvals.mode to 'on'.
+  # Per-surface toolsets. Both get the full set by default — an agent that can't run
+  # code_execution/terminal on the chat lane fails the moment it needs them. Narrow `telegram`
+  # yourself ONLY if you want a locked-down customer-facing lane; do not narrow it by default.
   cli:      [clarify, code_execution, file, memory, session_search, skills, terminal, todo, tts, web]
-  telegram: [clarify, file, memory, session_search, skills, todo, tts]
+  telegram: [clarify, code_execution, file, memory, session_search, skills, terminal, todo, tts, web]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPROVALS / permissions — how much the agent asks before acting.
+# ─────────────────────────────────────────────────────────────────────────────
+# mode: 'off'  = no permission prompts; the agent just acts (unattended / client-facing default).
+# mode: 'on'   = the agent asks before sensitive actions (operator/supervised use).
+# 'off' is the right default for a client-facing bot that must run without you approving each step;
+# only turn it on for a lane where a human is watching and wants a gate.
+# SECURITY WARNING: with the full Telegram toolset above, mode 'off' lets Telegram users invoke
+# terminal, code_execution, and web without an operator approval prompt.
+approvals:
+  mode: 'off'
+  timeout: 60
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MEMORY — the agent's own recall (distinct from the canonical GBrain layer).

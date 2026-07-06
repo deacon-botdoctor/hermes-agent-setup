@@ -27,8 +27,12 @@ def handle_mode(raw_args: str, *, get_config, set_config) -> str:
     return "Mode set to **interrupt** — a new message will drop whatever I'm doing."
 
 
-def register(ctx) -> None:
-    """Register the /mode command with the runtime's command registry."""
-    # ctx.register_command("mode", lambda raw: handle_mode(raw, get_config=ctx.get_config,
-    #                                                       set_config=ctx.set_config))
-    raise NotImplementedError("wire handle_mode to your runtime's register_command")
+def register(ctx) -> bool:
+    """Register /mode if the runtime exposes a command API."""
+    if not (hasattr(ctx, "register_command") and hasattr(ctx, "get_config") and hasattr(ctx, "set_config")):
+        return False
+    ctx.register_command(
+        "mode",
+        lambda raw: handle_mode(raw, get_config=ctx.get_config, set_config=ctx.set_config),
+    )
+    return True

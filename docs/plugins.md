@@ -22,7 +22,7 @@ The seams it does **not** offer: the transcript-*write* path, and some deep inte
 flow. Those are where you're forced down to a patch. Knowing where the seams are is what lets
 you keep the patch count low.
 
-## The plugins I run
+## The plugin surfaces in this bundle
 
 ### Memory provider
 **Seam:** the memory-provider interface (`sync_turn` / `prefetch` / session-lifecycle hooks).
@@ -30,24 +30,32 @@ you keep the patch count low.
 not just the current conversation.
 **Why a plugin:** memory is a first-class extension point. There's no reason to patch for it.
 The provider hooks the turn cycle to write memories and prefetches relevant ones into context.
+`plugins/memory.register(ctx)` now defaults to the local SQLite provider when
+`register_memory_provider` exists, and logs a warning instead of crashing if the runtime has no
+matching registration API.
 
-### Platform adapter override
+### Platform adapter override placeholder
 **Seam:** `register_platform` (same-key override of the bundled adapter).
-**What:** A thin subclass of the bundled chat adapter that overrides a few methods — reliable
-media send timeouts, connection-liveness writes, and similar delivery hardening.
+**What:** `plugins/telegram_platform` is currently a disabled placeholder. It does not register
+or activate media send timeouts, connection-liveness writes, PDF/document ingest, reply-media,
+or similar delivery hardening until it subclasses or wraps the real bundled Telegram adapter.
 **Why a plugin:** because same-key registration cleanly replaces the bundled adapter, a thin
 subclass gets all the upstream behavior for free and overrides only what needs changing. A full
 adapter copy would be pure maintenance debt — the subclass is the right shape.
 **Rule:** override methods, don't fork files. When a change is a clean method override it's a
 plugin; only the parts with no method seam stay as (thin) patches.
 
-### Immersion / responsiveness
-**Seam:** `transform_llm_output` / status hooks.
-**What:** Makes the agent feel present — acknowledging input while it's working, status emission,
-busy-input handling.
-**Why a plugin:** these are output/lifecycle transforms, exactly what the hook seams are for.
+### Immersion / message quality
+**Seam:** `transform_llm_output` / `llm_request` middleware / `register_command`.
+**What:** Cleans client-bound output, trims stale tool-result history before provider calls, and
+registers `/mode queue|interrupt` when the runtime exposes a command API.
+**Why a plugin:** these are output and request-history transforms, exactly what the hook seams are
+for.
 **Note:** some "immersion" behaviors are actually **config** now (a busy-input mode knob), and a
 few have no hook and stay patches. Check config first.
+`plugins/immersion.register(ctx)` wires output transforms, request middleware, and `/mode` on a
+best-effort basis when those runtime APIs exist; missing APIs log or skip instead of failing
+plugin discovery.
 
 ## How plugins load
 

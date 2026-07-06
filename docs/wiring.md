@@ -8,7 +8,7 @@ why it's on the ladder rung it's on.
 
 ```
                         ┌─────────────────────────────────────────┐
-   client message  ──▶  │ PLATFORM ADAPTER (plugins/telegram_*)    │  media, liveness, reply-media
+   client message  ──▶  │ PLATFORM ADAPTER (bundled Telegram)       │  plugin hardening inactive
                         └───────────────────┬─────────────────────┘
                                             ▼
                         ┌─────────────────────────────────────────┐
@@ -44,8 +44,9 @@ why it's on the ladder rung it's on.
 
 ## A turn, step by step
 
-1. **Message arrives** at the platform adapter (`plugins/telegram_platform`). Media, PDFs, and
-   connection-liveness are handled here — a plugin, because `register_platform` is a real seam.
+1. **Message arrives** at the bundled platform adapter. `plugins/telegram_platform` is a disabled
+   placeholder, so media timeout, liveness, PDF/document ingest, and reply-media hardening are not
+   active until it subclasses or wraps the real bundled Telegram adapter.
 2. **Gateway + overlay.** The stock runtime runs, with the overlay's irreducible patches active:
    redaction guards the write boundary, durable runtime and the resume scheduler keep the turn
    alive across restarts, the active-task anchor pins what you asked for.
@@ -73,7 +74,7 @@ why it's on the ladder rung it's on.
 | Message-quality transforms (strip notes, suppress interrupted, mask failures, redact secrets from output) | `plugins/immersion` | PLUGIN | `transform_llm_output` is a supported seam. This is where the old message-quality *patches* belong. |
 | Tool-result history hygiene | `plugins/immersion` | PLUGIN | `llm_request` middleware — same reason. |
 | 10-min human-voiced progress updates | `bin/progress-compose.py` + `tasks/` | TOOL | A scheduled tool, not a gateway patch. |
-| Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | `register_platform` same-key override. |
+| Media / adapter hardening | `plugins/telegram_platform` | PLUGIN | Disabled placeholder; hardening is not active until it wraps the bundled adapter. |
 | Memory | `plugins/memory` | PLUGIN | Memory-provider is a first-class seam. |
 | Canonical knowledge | `gbrain/` | EXTERNAL | A product you install and wire, not code you own. |
 | Write-boundary redaction, durable runtime, resume, active-task, autoraise-notice | `overlay/` | PATCH | No seam exists at these layers; the ~5 irreducible patches. |
