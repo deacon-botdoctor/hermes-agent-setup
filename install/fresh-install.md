@@ -22,6 +22,13 @@ applying it. The high-value ones for almost anyone:
 - **Input mode = queue** — if you don't want follow-up messages killing in-flight turns.
 - **Web backend = Firecrawl** — local self-hosted is the example default; see
   [`../docs/firecrawl.md`](../docs/firecrawl.md) if you need web scraping/crawl.
+- **Context / model / fallback** — keep `context.engine: lcm`, set the primary
+  `model.default` / `model.provider`, and either wire or remove each `fallback_providers`
+  entry you cannot authenticate.
+- **MCP floor** — keep `capability-router` hot and the shared floor in `mcp_policy.on_demand`
+  only when those MCP commands are installed; move client-specific MCPs into local config.
+- **Plugins** — install or prune the canonical-floor names in `plugins.enabled`; the bundled
+  local plugin directories cover immersion, memory, and the disabled Telegram placeholder only.
 - **Approvals / toolsets** — the example leaves Telegram unattended with the full toolset.
   Keep that only for trusted lanes; for untrusted clients, narrow Telegram tools or turn
   approvals on.
@@ -39,6 +46,10 @@ If you're running the agent for real work with durable facts it must get right, 
 canonical store and wire the lookup rule. See
 [`../docs/canonical-knowledge.md`](../docs/canonical-knowledge.md). You can skip this for a toy
 agent; you'll want it the moment "get this fact right" matters.
+
+Use [`../docs/canonical-client-spec.md`](../docs/canonical-client-spec.md) as the scrubbed
+checklist for deciding which real-client floor sections belong in your public/default skeleton
+and which belong only in an overlay or local runtime config.
 
 ## 4. Plugins
 
