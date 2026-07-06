@@ -42,6 +42,9 @@ The shared floor is:
 The bundled `browser` MCP talks to a Chromium DevTools Protocol endpoint (`BROWSER_CDP_URL`),
 while `browser-lane` talks to the browser-lane daemon socket (`BROWSER_LANE_SOCKET`) and reports
 the same CDP endpoint for lane readiness checks.
+The bundled `local-document-tools` MCP is a safe local document starter: allowlist readable roots
+with `LOCAL_DOCUMENT_TOOLS_ROOTS`, then extract or merge text/HTML while leaving PDF/OCR/rich
+conversion to optional adapters.
 The bundled `search` and `web-search` implementations are distinct shared-floor MCP surfaces:
 both search SearXNG and scrape pages through Firecrawl, but expose the real client tool names
 separately.
