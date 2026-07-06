@@ -16,8 +16,10 @@ import re
 _INTERNAL_NOTE_RE = re.compile(
     r"(?ms)^\s*(\[(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\].*?\[/(?:CONTINUITY|SESSION-RESET|INTERNAL|SYSTEM-NOTE)\])\s*",
 )
+# Only a message that is ENTIRELY a placeholder gets blanked — not one that merely starts with
+# one of these words ("Interrupted the deploy to..." is a real answer, keep it).
 _INTERRUPTED_RE = re.compile(
-    r"(?i)^\s*(one moment|still working|please hold|interrupted[.,: ].*)$",
+    r"(?i)^\s*(one moment|still working|please hold|interrupted)[.!,:… ]*$",
 )
 
 # Secret shapes to scrub from any client-bound message. Belt-and-suspenders on top of the
@@ -62,14 +64,28 @@ def suppress_interrupted_final_response(text: str | None, *, is_client: bool = T
     return text
 
 
-def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
-    """Replace provider/model failure internals with a clean generic message on client lanes.
+# A RAW unhandled-error surface — a real traceback, or a short raw error object/line. NOT prose
+# that happens to mention "rate limit" or "traceback": the agent answering a question about errors
+# is a legitimate reply and must pass through untouched.
+_RAW_ERROR_RES = (
+    re.compile(r"Traceback \(most recent call last\):"),                       # a real python traceback
+    re.compile(r'(?is)^\s*[\[{]?\s*"?error"?\s*[:=]'),                          # message IS a raw error object
+    re.compile(r"(?im)^\s*(error|exception|openrouter|openai|anthropic)[: ].{0,80}\b(4\d\d|5\d\d|rate.?limit|quota|unauthorized|timeout)\b"),
+)
 
-    A client should never see a raw provider stack trace or a "model returned 429" string.
+
+def generic_model_failure_final_response(text: str | None, *, is_client: bool = True) -> str | None:
+    """Replace a raw provider/model failure surface with a clean generic message on client lanes.
+
+    Only fires on an actual error surface (a real traceback, or a short raw error object/line) — a
+    client should never see raw failure internals, but a normal reply that mentions errors is fine.
     """
     if not text or not is_client:
         return text
-    if re.search(r"(?i)\b(traceback|provider error|status 4\d\d|status 5\d\d|rate.?limit)\b", text):
+    is_raw_error = _RAW_ERROR_RES[0].search(text) or (
+        len(text) < 240 and any(r.search(text) for r in _RAW_ERROR_RES[1:])
+    )
+    if is_raw_error:
         return "Sorry, I hit a snag on that one. Give me another try in a moment."
     return text
 

@@ -28,7 +28,10 @@ def handle_mode(raw_args: str, *, get_config, set_config) -> str:
 
 
 def register(ctx) -> None:
-    """Register the /mode command with the runtime's command registry."""
-    # ctx.register_command("mode", lambda raw: handle_mode(raw, get_config=ctx.get_config,
-    #                                                       set_config=ctx.set_config))
-    raise NotImplementedError("wire handle_mode to your runtime's register_command")
+    """Register /mode if the runtime exposes a command API. No-op (returns) otherwise."""
+    if not (hasattr(ctx, "register_command") and hasattr(ctx, "get_config") and hasattr(ctx, "set_config")):
+        return  # command/config API not present; caller falls back to config default
+    ctx.register_command(
+        "mode",
+        lambda raw: handle_mode(raw, get_config=ctx.get_config, set_config=ctx.set_config),
+    )

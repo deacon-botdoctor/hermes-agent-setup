@@ -17,7 +17,17 @@ __all__ = ["SqliteMemoryProvider", "GBrainMemoryProvider"]
 
 
 def register(ctx) -> None:
-    # provider = SqliteMemoryProvider(char_limit=2200)          # local default
-    # provider = GBrainMemoryProvider(char_limit=2200)          # GBrain-backed
-    # ctx.register_memory_provider(provider)
-    raise NotImplementedError("choose a provider and wire it to register_memory_provider")
+    """Register the local memory provider by default. Never raises.
+
+    Swap to GBrainMemoryProvider if you want recall backed by your brain. If the runtime has no
+    known memory-registration API, this logs a warning and skips rather than crashing loading.
+    """
+    import logging
+
+    provider = SqliteMemoryProvider(char_limit=2200)
+    if hasattr(ctx, "register_memory_provider"):
+        ctx.register_memory_provider(provider)
+    else:
+        logging.getLogger("memory").warning(
+            "memory: no register_memory_provider on ctx; wire SqliteMemoryProvider manually."
+        )

@@ -26,7 +26,8 @@ class SqliteMemoryProvider:
     # ── lifecycle ────────────────────────────────────────────────────────────
     def post_setup(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(self.db_path))
+        # check_same_thread=False: a gateway calls prefetch/sync_turn from different threads.
+        self._db = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self._db.executescript(
             """
             CREATE TABLE IF NOT EXISTS memories(
