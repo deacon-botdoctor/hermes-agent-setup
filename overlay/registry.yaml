@@ -1,0 +1,72 @@
+# registry.yaml — the overlay manifest.
+#
+# One entry per change you make to the stock runtime. The apply engine reads this top to bottom.
+# `module` names a file in modules/ (without .py). `rung` records where on the change ladder the
+# change sits, so a reviewer can see at a glance what should eventually move to config/plugin or
+# be deleted. `retire_when` is the condition under which this entry should go away — a patch with
+# no retirement condition is debt with no exit.
+#
+# Only ONE module below ships as working code in this kit (suppress_codex_autoraise_notice) plus
+# the copy-me template. The rest are listed as the real shape of a mature overlay so you can see
+# the whole map; fill each in as a module when you actually hit its problem. Rehearse before you
+# deploy any of them — anchors are version-specific.
+
+patches:
+  # ── security · never cut ────────────────────────────────────────────────────
+  - name: redact_session_write
+    module: redact_session_write        # TODO: implement — scrub secrets before persist
+    rung: patch
+    target: gateway/session.py
+    retire_when: upstream adds a redaction hook at the transcript write boundary
+
+  - name: display_redact
+    module: display_redact              # TODO: implement — scrub spinner/status text
+    rung: patch
+    target: agent/display.py
+    retire_when: upstream redacts display output natively
+
+  # ── durable execution & clean restarts ──────────────────────────────────────
+  - name: durable_runtime
+    module: durable_runtime             # TODO: implement — resume work across restarts
+    rung: patch
+    target: gateway/run.py
+    retire_when: upstream ships durable execution
+
+  - name: clean_restart_resume_scheduler
+    module: clean_restart_resume_scheduler   # TODO: implement — one startup resume decision
+    rung: patch
+    target: gateway/run.py
+    retire_when: upstream centralizes restart resume
+
+  - name: active_task_anchor
+    module: active_task_anchor          # TODO: implement — pin task through compression
+    rung: patch
+    target: gateway/run.py
+    retire_when: upstream grows a per-turn task hook
+
+  # ── delivery & UX ───────────────────────────────────────────────────────────
+  - name: long_running_checkpoints
+    module: long_running_checkpoints    # TODO: implement — progress pings on long tasks
+    rung: patch
+    target: gateway/run.py
+    retire_when: routed to a notification plugin
+
+  # ── tooling · housekeeping ──────────────────────────────────────────────────
+  - name: session_search_current_topic
+    module: session_search_current_topic  # TODO: move to a register_tool plugin
+    rung: plugin
+    target: tools/session_search_tool.py
+    retire_when: shipped as a register_tool plugin
+
+  - name: skill_index_allowlist
+    module: skill_index_allowlist       # TODO: prefer config skills.index_allowlist
+    rung: config
+    target: agent/prompt_builder.py
+    retire_when: upstream prompt_builder reads skills.index_allowlist
+
+  # ── working reference module (ships in this kit) ─────────────────────────────
+  - name: suppress_codex_autoraise_notice
+    module: suppress_codex_autoraise_notice
+    rung: patch
+    target: agent/agent_init.py
+    retire_when: upstream stops emitting the startup notice, or exposes a notice-off config
