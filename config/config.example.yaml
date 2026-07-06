@@ -159,7 +159,9 @@ mcp_servers:
       CAPABILITY_USAGE_DB: <state-dir>/capability-router-usage.db
   anamnesis:
     tier: on_demand
-    command: <anamnesis-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/anamnesis/src python -m anamnesis_mcp.server
+    env:
+      ANAMNESIS_DB: <runtime>/.hermes/state/anamnesis.db
   browser:
     tier: on_demand
     command: PYTHONPATH=<bundle>/mcp-servers/browser/src python -m browser_mcp.server
@@ -188,10 +190,15 @@ mcp_servers:
     command: PYTHONPATH=<bundle>/mcp-servers/search/src python -m search_mcp.server
   telegram-admin:
     tier: on_demand
-    command: <telegram-admin-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/telegram-admin/src python -m telegram_admin_mcp.server
+    env:
+      TELEGRAM_DIRECTORY: <runtime>/.hermes/telegram-directory.json
   visual-identity:
     tier: on_demand
-    command: <visual-identity-mcp-command>
+    command: PYTHONPATH=<bundle>/mcp-servers/visual-identity/src python -m visual_identity_mcp.server
+    env:
+      VISUAL_IDENTITY_MANIFEST: <runtime>/.hermes/visual-assets.json
+      VISUAL_IDENTITY_ROOT: <runtime>/Documents/VisualIdentity
   web-search:
     tier: on_demand
     command: PYTHONPATH=<bundle>/mcp-servers/web-search/src python -m web_search_mcp.server
