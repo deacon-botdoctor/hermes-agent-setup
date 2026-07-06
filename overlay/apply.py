@@ -66,13 +66,20 @@ def run(hermes_dir: Path, only: str | None, dry_run: bool) -> int:
             print(f"no registry entry named {only!r}")
             return 2
 
-    results = {"applied": 0, "already": 0, "anchor-miss": 0, "error": 0}
+    results = {"applied": 0, "already": 0, "pending": 0, "anchor-miss": 0, "error": 0}
     width = max((len(e["name"]) for e in entries), default=10)
 
     for entry in entries:
         name = entry["name"]
+        module_name = entry.get("module", name)
+        # A registry entry can be listed before its module is written — that's the map showing
+        # the whole overlay. Report it as pending, not as a failure.
+        if not (MODULES_DIR / f"{module_name}.py").exists():
+            results["pending"] += 1
+            print(f"  {name:<{width}}  .. pending ({entry.get('rung', 'patch')} — no module yet)")
+            continue
         try:
-            mod = _load_module(entry.get("module", name))
+            mod = _load_module(module_name)
             target = hermes_dir / mod.TARGET
             if not target.exists():
                 print(f"  {name:<{width}}  SKIP (target absent: {mod.TARGET})")
