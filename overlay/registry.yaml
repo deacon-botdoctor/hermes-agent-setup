@@ -54,6 +54,12 @@ patches:
     target: gateway/run.py
     retire_when: upstream grows a per-turn task hook
 
+  - name: telegram_dm_topic_recovery_root_guard
+    module: telegram_dm_topic_recovery_root_guard
+    rung: patch
+    target: gateway/platforms/base.py
+    retire_when: upstream only recovers Telegram DM topics for stripped replies, not explicit root/lobby prompts
+
   # RETIRED long_running_checkpoints: carried by bin/progress-compose.py + the tasks/ trigger
   # (the human-voiced 10-min updates). The behavior is a scheduled tool, not a gateway patch.
 
