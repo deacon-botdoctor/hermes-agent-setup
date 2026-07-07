@@ -50,3 +50,7 @@ list. Each capability should include at least:
 
 Extra fields are preserved and returned by `search_capabilities` and `describe_capability`, so
 registry entries can carry routing metadata such as `routing_policy`.
+
+The default registry keeps the shared-floor web/browser surfaces distinct: `web.search` routes
+to the `search` MCP, `web.web-search` routes to `web-search`, `web.browser` routes to `browser`,
+and `web.browser-lane` routes to `browser-lane`.

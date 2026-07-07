@@ -102,23 +102,31 @@ class CapabilityRouterTests(unittest.TestCase):
 
     def test_search_and_describe_catalog_entry(self):
         result = self.router.search_capabilities("queue durable long running job")
-        hit = next(item for item in result["hits"] if item["id"] == "pattern.durable-work")
+        hit = next(
+            item for item in result["hits"] if item["id"] == "pattern.durable-work"
+        )
         self.assertEqual(hit["availability"], "catalog")
         self.assertTrue(hit["can_invoke_now"])
 
         detail = self.router.describe_capability("pattern.durable-work")
         self.assertTrue(detail["ok"])
-        self.assertEqual(detail["capability"]["routing_policy"]["default_lane"], "durable-workload")
+        self.assertEqual(
+            detail["capability"]["routing_policy"]["default_lane"], "durable-workload"
+        )
 
     def test_recorded_failures_demote_search_result(self):
         before = self.router.search_capabilities("calendar", max_hits=2)
-        self.assertEqual([item["id"] for item in before["hits"]], ["test.alpha", "test.beta"])
+        self.assertEqual(
+            [item["id"] for item in before["hits"]], ["test.alpha", "test.beta"]
+        )
 
         for _ in range(3):
             self.router.record_capability_outcome("test.alpha", outcome="failure")
 
         after = self.router.search_capabilities("calendar", max_hits=2)
-        self.assertEqual([item["id"] for item in after["hits"]], ["test.beta", "test.alpha"])
+        self.assertEqual(
+            [item["id"] for item in after["hits"]], ["test.beta", "test.alpha"]
+        )
         alpha = next(item for item in after["hits"] if item["id"] == "test.alpha")
         self.assertEqual(alpha["score_breakdown"]["usage"], -6)
 
@@ -147,9 +155,13 @@ class CapabilityRouterTests(unittest.TestCase):
         self.assertFalse(result["recorded"])
         self.assertIn("reason", result)
 
-    def test_default_registry_keeps_browser_mcps_distinct(self):
+    def test_default_registry_keeps_shared_floor_mcps_distinct(self):
         registry = json.loads(DEFAULT_REGISTRY.read_text())
-        by_id = {capability["id"]: capability for capability in registry["capabilities"]}
+        by_id = {
+            capability["id"]: capability for capability in registry["capabilities"]
+        }
+        self.assertEqual(by_id["web.search"]["mcp_server"], "search")
+        self.assertEqual(by_id["web.web-search"]["mcp_server"], "web-search")
         self.assertEqual(by_id["web.browser"]["mcp_server"], "browser")
         self.assertEqual(by_id["web.browser-lane"]["mcp_server"], "browser-lane")
 
