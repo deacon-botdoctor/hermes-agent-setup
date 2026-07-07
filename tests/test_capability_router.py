@@ -165,6 +165,22 @@ class CapabilityRouterTests(unittest.TestCase):
         self.assertEqual(by_id["web.browser"]["mcp_server"], "browser")
         self.assertEqual(by_id["web.browser-lane"]["mcp_server"], "browser-lane")
 
+    def test_public_floor_metadata_is_shipped(self):
+        router_root = REPO / "mcp-servers/capability-router"
+        public_floor = router_root / "public-floor-registry.json"
+        operating_patterns = router_root / "operating-patterns.capability-entry.json"
+        pyproject = router_root / "pyproject.toml"
+
+        for path in (public_floor, operating_patterns, pyproject):
+            self.assertTrue(path.exists(), path)
+
+        floor = json.loads(public_floor.read_text())
+        floor_ids = {capability["id"] for capability in floor["capabilities"]}
+        self.assertIn("memory.anamnesis", floor_ids)
+        self.assertIn("web.web-search", floor_ids)
+        self.assertIn("telegram.admin", floor_ids)
+        self.assertIn("visual.identity", floor_ids)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,0 +1,325 @@
+{
+  "capabilities": [
+    {
+      "id": "ops-pattern.durable-work",
+      "kind": "operating_pattern",
+      "category": "operator-tools",
+      "label": "Durable Work Queue",
+      "summary": "Route long-running, retryable, restart-sensitive, or auditable work through the durable workload lane instead of the live chat loop.",
+      "inputs": {
+        "goal": "Natural-language task goal",
+        "origin": "Telegram/chat/cron/board source metadata",
+        "lane": "research|coding|audit|gbrain-admin|local-inference|client-ops",
+        "artifact_required": "Boolean; true for substantial research/reference work"
+      },
+      "outputs": "Queued work item with durable id, status, liveness, owner, and closeout result.",
+      "cost_per_call": "runtime/provider dependent",
+      "rate_limit": "operator controlled",
+      "requires_creds": [],
+      "preferred_for": [
+        "long running work",
+        "durable job",
+        "background task",
+        "survive restart",
+        "retryable",
+        "queue this",
+        "watch this",
+        "status later",
+        "artifact required"
+      ],
+      "deprioritize_for": [
+        "quick reply",
+        "one sentence",
+        "simple clarification"
+      ],
+      "routing_policy": {
+        "default_lane": "durable-workload",
+        "use_when": [
+          "Task is likely to take more than 3-5 minutes.",
+          "Task should survive a gateway/session restart.",
+          "Task has dependencies, needs retries, or needs audit history.",
+          "Operator may need pause, resume, cancel, replay, or status.",
+          "Substantial research/reference work must leave a markdown artifact."
+        ],
+        "avoid_when": [
+          "The answer is a direct conversational response.",
+          "The task is a tiny one-shot lookup with no durable value."
+        ],
+        "closeout": [
+          "Return durable id, state, owner, last meaningful event, result, and artifact path when present.",
+          "Do not close artifact-required work without artifact_path or explicit no_artifact_reason."
+        ]
+      }
+    },
+    {
+      "id": "ops-pattern.gbrain-local-admin",
+      "kind": "operating_pattern",
+      "category": "knowledge-rag",
+      "label": "GBrain Local Admin Via Minions",
+      "summary": "Run local-only GBrain admin operations through Minions shell jobs with inherited secrets, not through thin-client MCP or raw secret env.",
+      "inputs": {
+        "operation": "sync|embed|extract|dream|doctor|autopilot-support|storage|repair-jsonb|integrity",
+        "cwd": "Brain repo or gbrain workspace path",
+        "inherit": "Config secret names such as database_url; never raw values"
+      },
+      "outputs": "Minions job id plus GBrain health/status result.",
+      "cost_per_call": "local runtime plus provider costs for embed/dream/remediate",
+      "rate_limit": "Minions queue/supervisor controlled",
+      "requires_creds": [
+        "gbrain worker config for inherited secrets when DB/provider access is needed"
+      ],
+      "preferred_for": [
+        "gbrain sync",
+        "gbrain embed",
+        "gbrain doctor",
+        "brain health",
+        "dream cycle",
+        "localOnly",
+        "remediate brain",
+        "maintenance",
+        "minions shell"
+      ],
+      "deprioritize_for": [
+        "gbrain search",
+        "gbrain query",
+        "gbrain get",
+        "read only brain lookup"
+      ],
+      "routing_policy": {
+        "first_step": "Run or queue a read-only doctor/status check when appropriate.",
+        "submission_rule": "Use gbrain jobs submit shell with inherit for secrets; never persist raw DATABASE_URL or API keys in env.",
+        "worker_rule": "Verify gbrain jobs supervisor status before assuming queued shell jobs will run.",
+        "direct_ok": [
+          "Read-only MCP-equivalent operations such as search/query/get/list can run directly or through MCP."
+        ],
+        "minions_required_for": [
+          "Long-running sync/embed/extract/dream/doctor remediation.",
+          "Any local-only op from a thin-client/control surface.",
+          "Any admin op that needs retry/audit history."
+        ]
+      }
+    },
+    {
+      "id": "ops-pattern.coding-worktree",
+      "kind": "operating_pattern",
+      "category": "operator-tools",
+      "label": "Coding Worktree Lane",
+      "summary": "Route repo-writing coding tasks into an isolated worktree/branch with recorded gates, tests, diff base, and closeout artifacts.",
+      "inputs": {
+        "goal": "Coding task goal",
+        "repo_root": "Canonical repository root",
+        "base_ref": "Base branch/ref",
+        "acceptance_checks": "Tests or manual checks required before closeout"
+      },
+      "outputs": "Coding run state with worktree path, branch, test results, gate verdicts, diff, and merge status.",
+      "cost_per_call": "model/runtime dependent",
+      "rate_limit": "operator controlled; one worktree per writing task",
+      "requires_creds": [
+        "git access for target repo",
+        "Claude/Codex auth if delegated to coding CLI"
+      ],
+      "preferred_for": [
+        "write code",
+        "edit repo",
+        "implement feature",
+        "fix bug",
+        "review branch",
+        "qa branch",
+        "merge conflict",
+        "worktree",
+        "coding run",
+        "gstack review",
+        "claude code"
+      ],
+      "deprioritize_for": [
+        "read only code question",
+        "explain code without edits"
+      ],
+      "routing_policy": {
+        "isolation": "Writing tasks require an isolated worktree/branch by default.",
+        "dirty_repo_rule": "Do not edit a dirty shared repo unless Deacon explicitly authorizes that exact working tree.",
+        "review_gates": [
+          "plan-review for high-risk plans",
+          "qa for behavior/user-facing changes",
+          "security for auth/data/secret/network changes",
+          "gstack /review before landing meaningful code"
+        ],
+        "closeout": [
+          "Record tests run and result.",
+          "Record diff base and branch.",
+          "Escalate merge conflicts explicitly."
+        ]
+      }
+    },
+    {
+      "id": "ops-pattern.gstack-claude",
+      "kind": "operating_pattern",
+      "category": "operator-tools",
+      "label": "Claude Code + gstack Specialist Lane",
+      "summary": "Use Claude Code with explicit gstack skill prompts for planning, review, QA, security, design, documentation, shipping, and investigation.",
+      "inputs": {
+        "skill": "/office-hours|/autoplan|/plan-eng-review|/review|/qa|/cso|/ship|/investigate|/document-release|/design-review",
+        "repo_or_url": "Repository path, PR/branch context, or URL to QA",
+        "mode": "plan|review|qa|build|ship|investigate"
+      },
+      "outputs": "Specialist output such as plan, findings, screenshots, test results, PR, or release notes.",
+      "cost_per_call": "Claude subscription/runtime dependent",
+      "rate_limit": "Claude Code/session limits and operator policy",
+      "requires_creds": [
+        "Claude Code authenticated session",
+        "gstack installed or curated gstack skill bundle available"
+      ],
+      "preferred_for": [
+        "office hours",
+        "autoplan",
+        "plan eng review",
+        "code review",
+        "security audit",
+        "qa url",
+        "browser qa",
+        "ship pr",
+        "investigate bug",
+        "design review",
+        "documentation release",
+        "use claude subscription",
+        "gstack"
+      ],
+      "routing_policy": {
+        "launch_rule": "Launch with an explicit skill prompt; do not vaguely ask Claude to help.",
+        "durability_rule": "Long-running CLI sessions must register with the durable/background lane, not raw detached processes.",
+        "examples": [
+          "Load gstack. Run /review on this repo. Return findings first with file/line references.",
+          "Load gstack. Run /qa https://... and capture screenshots for verified bugs.",
+          "Load gstack. Run /autoplan for this feature and save the plan; wait for approval before implementation."
+        ]
+      }
+    },
+    {
+      "id": "ops-pattern.local-inference-gate",
+      "kind": "operating_pattern",
+      "category": "monitoring-obs",
+      "label": "Local Inference Admission Gate",
+      "summary": "Bound Spark/local-model worker concurrency by measured capacity and meaningful liveness instead of launching unlimited agents.",
+      "inputs": {
+        "model": "Local model/backend",
+        "estimated_tokens": "Optional workload estimate",
+        "priority": "normal|high|low",
+        "lane": "local-inference"
+      },
+      "outputs": "Queued or admitted local inference job with capacity state and liveness events.",
+      "cost_per_call": "local GPU/CPU runtime",
+      "rate_limit": "decode/concurrency gate",
+      "requires_creds": [],
+      "preferred_for": [
+        "local model",
+        "spark",
+        "vllm",
+        "ollama",
+        "decode gate",
+        "concurrency",
+        "worker capacity",
+        "local inference",
+        "step model"
+      ],
+      "routing_policy": {
+        "admission_rule": "Queue when capacity is saturated; do not equate more workers with more throughput.",
+        "liveness_rule": "Distinguish waiting for capacity from stalled worker.",
+        "events": [
+          "capacity_checked",
+          "admitted",
+          "queued_for_capacity",
+          "tokens_generated",
+          "worker_stalled"
+        ]
+      }
+    },
+    {
+      "id": "ops-pattern.artifact-first-research",
+      "kind": "operating_pattern",
+      "category": "knowledge-rag",
+      "label": "Artifact-First Research",
+      "summary": "Substantial research/reference work should create a markdown artifact and return only a concise executive readout in chat.",
+      "inputs": {
+        "goal": "Research question or brief",
+        "sources": "Known source constraints or topic context",
+        "artifact_path": "Expected output markdown path"
+      },
+      "outputs": "Markdown artifact plus executive summary and reusable evidence trail.",
+      "cost_per_call": "model/runtime dependent",
+      "rate_limit": "operator controlled",
+      "requires_creds": [],
+      "preferred_for": [
+        "research",
+        "deep dive",
+        "read up",
+        "reference",
+        "make artifact",
+        "write markdown",
+        "save findings",
+        "knowledge reusable",
+        "executive readout"
+      ],
+      "deprioritize_for": [
+        "quick answer",
+        "yes or no"
+      ],
+      "routing_policy": {
+        "artifact_required": true,
+        "closeout": "Return a short summary and artifact path. Do not bury the only useful output in chat.",
+        "default_store": "Use the active workspace/artifacts path or the board task's declared artifact path."
+      }
+    },
+    {
+      "id": "coding-agent.codex-cli",
+      "kind": "coding_agent",
+      "category": "operator-tools",
+      "label": "Codex CLI Specialist",
+      "summary": "Use Codex CLI as the fleet-friendly coding specialist when Claude/gstack is unavailable or Codex is the approved host lane.",
+      "inputs": {
+        "goal": "Coding, review, QA, or investigation task",
+        "cwd": "Isolated worktree or approved workspace",
+        "prompt": "Explicit Codex instruction template",
+        "job_type": "ralph_codex for durable workload runner"
+      },
+      "outputs": "Codex run log, status marker, optional proof marker, and closeout summary.",
+      "cost_per_call": "Codex subscription/runtime dependent",
+      "rate_limit": "Codex subscription limits plus Ralph/durable workload gates",
+      "requires_creds": [
+        "codex CLI in PATH",
+        "~/.codex/auth.json or runtime-equivalent Codex auth",
+        "~/.hermes/bin/ralph-codex-launch.sh for background jobs"
+      ],
+      "preferred_for": [
+        "codex",
+        "codex cli",
+        "coding specialist",
+        "fleet coding",
+        "review branch",
+        "qa branch",
+        "implement feature",
+        "fix tests",
+        "ralph codex",
+        "codex subscription"
+      ],
+      "provider_for": [
+        "ops-pattern.coding-worktree",
+        "ops-pattern.gstack-claude"
+      ],
+      "availability_probe": {
+        "command": "codex",
+        "auth_file": "~/.codex/auth.json",
+        "launcher": "~/.hermes/bin/ralph-codex-launch.sh"
+      },
+      "routing_policy": {
+        "foreground_rule": "Small synchronous tasks may use native Hermes terminal execution with notify_on_complete when available.",
+        "background_rule": "Long-running or detached Codex CLI jobs must use ralph-codex-launch.sh or durable workload job_type=ralph_codex; never raw 'codex ... &' without watchdog registration.",
+        "prompt_templates": {
+          "review": "Run Codex in review stance for the diff against base. Return findings first with file/line references, residual risk, and tests not run. Do not edit files unless explicitly asked.",
+          "implementation": "Run Codex in an isolated worktree. Implement the requested change, run acceptance checks, and write closeout proof with tests and changed files.",
+          "qa": "Run Codex to inspect the app/repo behavior, execute the stated QA checks, record commands/results, and create regression notes for verified bugs."
+        },
+        "fallback_rule": "If Codex auth or CLI is unavailable, route to another installed coding_agent or escalate with missing capability evidence."
+      }
+    }
+  ]
+}
