@@ -62,6 +62,7 @@ overlay/
   registry.yaml    the manifest: irreducible patches only; everything else routed to config/plugin
   modules/         one working reference module + a copy-me template
 gbrain/            canonical-knowledge wiring (references garrytan/gbrain — not vendored)
+skills/            bundled curated skills, including visual-reference-library
 docs/              philosophy, features, plugins, canonical-knowledge, and the wiring walkthrough
 install.sh         runs the pipeline: rehearse, then apply
 index.html         the build map
@@ -90,11 +91,17 @@ export TELEGRAM_DIRECTORY="<runtime>/.hermes/telegram-directory.json"
 export VISUAL_IDENTITY_MANIFEST="<runtime>/.hermes/visual-assets.json"
 export VISUAL_IDENTITY_ROOT="<runtime>/Documents/VisualIdentity"
 
-# 5. the overlay: rehearse against a pristine checkout, then apply
+# 5. install curated helper CLIs and skills
+cp bin/visual-reference-* <runtime>/.hermes/bin/
+mkdir -p <runtime>/.hermes/skills/curated/visual-reference-library
+cp skills/curated/visual-reference-library/* <runtime>/.hermes/skills/curated/visual-reference-library/
+<runtime>/.hermes/bin/visual-reference-qa
+
+# 6. the overlay: rehearse against a pristine checkout, then apply
 python overlay/rehearse.py --upstream /path/to/pristine-checkout
 python overlay/apply.py --hermes-dir /path/to/runtime
 
-# 6. wire GBrain (install it separately) — see gbrain/README.md — and restart.
+# 7. wire GBrain (install it separately) — see gbrain/README.md — and restart.
 ```
 
 The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.

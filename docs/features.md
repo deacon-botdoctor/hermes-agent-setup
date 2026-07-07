@@ -136,6 +136,14 @@ crowding the skill list.
 and grow it deliberately.
 **Skip it and:** the agent sees every skill, useful or not.
 
+### Visual reference library
+**Rung:** sidecar + skill
+**What:** Bundles `bin/visual-reference-lookup`, `bin/visual-reference-qa`, and the
+`skills/curated/visual-reference-library` registry.
+**Why:** Visual artifacts, UI, reports, diagrams, and social creatives should start from
+client-safe design patterns, required inputs, and QA gates instead of generic prompt slop.
+**Skip it and:** agents can still create visuals, but they lose the reusable taste/QA lookup lane.
+
 ---
 
 ## The floor

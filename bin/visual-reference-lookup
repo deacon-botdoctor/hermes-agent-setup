@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""Lookup golden-safe visual reference records for artifact generation."""
+from __future__ import annotations
+import argparse, json, os, sys
+from pathlib import Path
+from typing import Any
+
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except Exception:
+    pass
+
+DEFAULT_REGISTRY = Path(os.environ.get('HERMES_VISUAL_REFERENCE_REGISTRY', '~/.hermes/skills/curated/visual-reference-library/registry.jsonl')).expanduser()
+
+ARTIFACT_SYNONYMS = {
+    'pdf': {'pdf','report','one-pager','doc'},
+    'report': {'report','pdf','doc'},
+    'onepager': {'one-pager','pdf','html'},
+    'one-pager': {'one-pager','pdf','html'},
+    'landing': {'website','html','png','svg'},
+    'landing-section': {'website','html','png','svg'},
+    'website': {'website','html','png','svg'},
+    'social': {'social','png','svg','html'},
+    'diagram': {'diagram','png','svg','pdf'},
+    'logo': {'svg','png'},
+    'icon': {'svg','png','website','social','report'},
+    'dashboard': {'dashboard','html','png'},
+    'ui': {'website','html','dashboard','ui'},
+    'interface': {'website','html','dashboard','ui'},
+}
+CHANNEL_HINTS = {
+    'linkedin': {'social','png','html'},
+    'telegram': {'png','pdf','report'},
+    'email': {'html','png','pdf'},
+    'web': {'website','html','png','svg'},
+    'client-pdf': {'pdf','report','one-pager'},
+    'internal': {'diagram','report','pdf'},
+}
+
+def norm(s: str) -> str:
+    return (s or '').strip().lower().replace('_','-')
+
+def load_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        raise SystemExit(f'Registry not found: {path}')
+    return [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines() if line.strip()]
+
+def load_overlay(path: str | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    p = Path(path).expanduser()
+    if not p.exists():
+        raise SystemExit(f'Overlay not found: {p}')
+    if p.suffix.lower() != '.json':
+        raise SystemExit('Golden lookup accepts JSON overlays only. Convert client-local overlays before use.')
+    return json.loads(p.read_text(encoding='utf-8'))
+
+def wanted_artifacts(artifact_type: str, channel: str | None) -> set[str]:
+    out = set()
+    a = norm(artifact_type)
+    out |= ARTIFACT_SYNONYMS.get(a, {a})
+    if channel:
+        out |= CHANNEL_HINTS.get(norm(channel), {norm(channel)})
+    return {x for x in out if x}
+
+def text_blob(rec: dict[str, Any]) -> str:
+    parts = []
+    for k in ['id','name','category','why_it_works','reuse_guidance','status','production_lane','notes']:
+        parts.append(str(rec.get(k,'')))
+    for k in ['artifact_types','best_for','not_for','qa_gates','required_inputs']:
+        parts.extend(str(x) for x in rec.get(k,[]) or [])
+    return ' '.join(parts).lower()
+
+def score_record(rec: dict[str, Any], wanted: set[str], style_goal: str) -> int:
+    if rec.get('boundary') != 'golden-safe':
+        return -999
+    score = 0
+    artifacts = set(rec.get('artifact_types') or [])
+    score += 12 * len(artifacts & wanted)
+    if rec.get('category') in wanted:
+        score += 8
+    blob = text_blob(rec)
+    for token in norm(style_goal).split():
+        if len(token) > 2 and token in blob:
+            score += 2
+    if rec.get('status') == 'approved':
+        score += 4
+    elif rec.get('status') == 'candidate':
+        score += 1
+    sc = rec.get('score') or {}
+    score += int(sc.get('clarity',0)) + int(sc.get('brand_safety',0)) + int(sc.get('production_reliability',0))
+    return score
+
+def compact_record(rec: dict[str, Any]) -> dict[str, Any]:
+    keep = ['id','name','category','boundary','status','production_lane','best_for','not_for','why_it_works','qa_gates','required_inputs','reuse_guidance','score']
+    return {k: rec.get(k, [] if k in {'best_for','not_for','qa_gates','required_inputs'} else None) for k in keep}
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description='Look up golden-safe visual reference patterns for artifact generation.')
+    ap.add_argument('--artifact-type', required=True)
+    ap.add_argument('--client-id')
+    ap.add_argument('--channel')
+    ap.add_argument('--style-goal', default='')
+    ap.add_argument('--registry', default=str(DEFAULT_REGISTRY))
+    ap.add_argument('--overlay', help='Explicit client-local JSON overlay path; never auto-discovers other clients.')
+    ap.add_argument('--limit', type=int, default=3)
+    ap.add_argument('--json', action='store_true')
+    args = ap.parse_args()
+
+    records = load_jsonl(Path(args.registry).expanduser())
+    overlay = load_overlay(args.overlay)
+    wanted = wanted_artifacts(args.artifact_type, args.channel)
+    scored = [(score_record(r, wanted, args.style_goal), r) for r in records]
+    scored = [(s,r) for s,r in scored if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    guard_categories = {'rule','anti-pattern'}
+    rules_are_primary = norm(args.artifact_type) in {'logo','icon','svg','vector'}
+    if rules_are_primary:
+        scored.sort(key=lambda x: (x[1].get('category') in guard_categories, x[0]), reverse=True)
+        patterns = [r for s,r in scored][:args.limit]
+    else:
+        patterns = [r for s,r in scored if r.get('category') not in guard_categories][:args.limit]
+        if len(patterns) < args.limit:
+            for s,r in scored:
+                if r not in patterns and r.get('category') in guard_categories:
+                    patterns.append(r)
+                    if len(patterns) >= args.limit:
+                        break
+    guards = [r for s,r in scored if r.get('category') in guard_categories and r not in patterns][:2]
+
+    lanes, qa, inputs = [], [], []
+    for r in patterns + guards:
+        if r.get('production_lane') and r['production_lane'] not in lanes:
+            lanes.append(r['production_lane'])
+        for q in r.get('qa_gates') or []:
+            if q not in qa: qa.append(q)
+        for inp in r.get('required_inputs') or []:
+            if inp not in inputs: inputs.append(inp)
+    result = {
+        'query': {'artifact_type': args.artifact_type, 'client_id': args.client_id, 'channel': args.channel, 'style_goal': args.style_goal, 'wanted_artifacts': sorted(wanted)},
+        'boundary_note': 'Golden-safe records only. Client overlays are never auto-discovered across clients.',
+        'overlay': overlay,
+        'patterns': [compact_record(r) for r in patterns],
+        'guards_or_antipatterns': [compact_record(r) for r in guards],
+        'recommended_production_lanes': lanes,
+        'combined_required_inputs': inputs,
+        'combined_qa_gates': qa,
+    }
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(f"Visual reference lookup: {args.artifact_type} / {args.channel or 'no-channel'}")
+        print(result['boundary_note'])
+        print('\nPatterns:')
+        for r in result['patterns']:
+            print(f"- {r['id']} — {r['name']} [{r['production_lane']}]")
+        print('\nGuards / anti-patterns:')
+        for r in result['guards_or_antipatterns']:
+            print(f"- {r['id']} — {r['name']}")
+        print('\nProduction lanes: ' + (', '.join(lanes) if lanes else 'none'))
+        print('Required inputs: ' + (', '.join(inputs) if inputs else 'none'))
+        print('QA gates: ' + (', '.join(qa) if qa else 'none'))
+    return 0
+if __name__ == '__main__':
+    raise SystemExit(main())

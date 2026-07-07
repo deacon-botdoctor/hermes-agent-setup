@@ -126,6 +126,13 @@ skills:
   index_allowlist:
     - <core-skill-1>
     - <core-skill-2>
+    - visual-reference-library
+
+visual_reference_library:
+  lookup: <runtime>/.hermes/bin/visual-reference-lookup
+  qa: <runtime>/.hermes/bin/visual-reference-qa
+  registry: <runtime>/.hermes/skills/curated/visual-reference-library/registry.jsonl
+  overlay: <optional-client-local-visual-overlay.json>
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CANONICAL KNOWLEDGE — wire the agent to a GBrain library (see gbrain/README.md).
