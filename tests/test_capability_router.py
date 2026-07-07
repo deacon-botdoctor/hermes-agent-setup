@@ -147,9 +147,11 @@ class CapabilityRouterTests(unittest.TestCase):
         self.assertFalse(result["recorded"])
         self.assertIn("reason", result)
 
-    def test_default_registry_keeps_browser_mcps_distinct(self):
+    def test_default_registry_keeps_shared_floor_mcps_distinct(self):
         registry = json.loads(DEFAULT_REGISTRY.read_text())
         by_id = {capability["id"]: capability for capability in registry["capabilities"]}
+        self.assertEqual(by_id["web.search"]["mcp_server"], "search")
+        self.assertEqual(by_id["web.web-search"]["mcp_server"], "web-search")
         self.assertEqual(by_id["web.browser"]["mcp_server"], "browser")
         self.assertEqual(by_id["web.browser-lane"]["mcp_server"], "browser-lane")
 
