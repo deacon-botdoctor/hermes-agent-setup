@@ -22,9 +22,11 @@ deleted.
 
 The official Hermes installer creates a new checkout and managed dependencies
 under a separate staging `HERMES_HOME`; it does not touch the live data home.
-The agent restores the old launcher or Windows User PATH/environment route,
-records the exact upstream SHA, and runs `hermes doctor` against staging. The
-new checkout is addressed only by absolute path until cutover.
+On POSIX, it also runs with a staging-only `HOME`, leaving the old launcher
+untouched. The agent verifies that launcher or restores and verifies the
+Windows User and process environment route, records the exact upstream SHA,
+and runs `hermes doctor` against staging. The new checkout is addressed only
+by absolute path until cutover.
 
 ## 4. Controlled switch and proof
 

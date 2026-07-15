@@ -61,7 +61,8 @@ Record:
 - the process and service definition that launch the live gateway;
 - current gateway health, messaging identity, active turns, and restart count;
 - hashes of `config.yaml`, service definition, launcher, and environment file;
-- on Windows, the relevant User `PATH` and `HERMES_HOME` values;
+- on Windows, the relevant User and process `PATH`, `HERMES_HOME`, and
+  `HERMES_GIT_BASH_PATH` values;
 - paths for `state.db`, `MEMORY.md`, `USER.md`, skills, workspace/projects,
   media, and client-local data;
 - legacy plugins, MCPs, databases, cron jobs, daemons, and hooks;
@@ -261,7 +262,7 @@ retention window expires.
 Return:
 
 - old and new exact SHAs;
-- platform, runtime home, service scope, and active route;
+- platform, live and staging runtime homes, service scope, and active route;
 - backup path and manifest hash;
 - pre-switch and native `state.db` snapshot hashes, schema versions, and
   integrity results;
