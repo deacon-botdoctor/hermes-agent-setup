@@ -102,24 +102,36 @@ is accepted because it owns the new code and managed dependencies.
 The installers can also change which runtime the user-facing `hermes` command
 resolves to even when an explicit installation directory is supplied.
 Before invoking one, record the current resolved command. On POSIX, preserve
-the launcher's path, contents or link target, mode, and hash. On Windows,
-preserve the relevant User `PATH` and `HERMES_HOME` values. Immediately after
-the installer exits, restore those route inputs and prove `command -v hermes` /
-`Get-Command hermes` still reaches the old runtime. Use only the new runtime's
-absolute executable path until the controlled switch. Stop if the old route
-cannot be restored exactly.
+the launcher's path, contents or link target, mode, and hash, and give the
+installer a staging-only `HOME` so its launcher, Node shims, and shell-profile
+writes cannot reach the live user's route. On Windows, preserve the User and
+process `PATH`, `HERMES_HOME`, and `HERMES_GIT_BASH_PATH` values. Immediately
+after the installer exits, restore those route inputs and prove `command -v
+hermes` / `Get-Command hermes` still reaches the old runtime. Use only the new
+runtime's absolute executable path until the controlled switch. Stop if the
+old route cannot be restored exactly.
 
 POSIX headless example:
 
 ```bash
 live_home="${HERMES_HOME:-$HOME/.hermes}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-staging_home="$live_home/staging/hermes-native-$stamp"
+staging_home="${live_home%/}.native-staging-$stamp"
+staging_user_home="$staging_home/user-home"
 new_runtime="$staging_home/hermes-agent"
+old_hermes="$(command -v hermes)"
+old_hermes_target="$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")"
+old_hermes_mode="$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")"
+old_hermes_hash="$(git hash-object "$old_hermes")"
+mkdir -p "$staging_user_home"
 curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-  | HERMES_HOME="$staging_home" bash -s -- \
+  | HOME="$staging_user_home" HERMES_HOME="$staging_home" bash -s -- \
       --skip-setup --skip-browser \
       --hermes-home "$staging_home" --dir "$new_runtime"
+test "$(command -v hermes)" = "$old_hermes"
+test "$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")" = "$old_hermes_target"
+test "$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")" = "$old_hermes_mode"
+test "$(git hash-object "$old_hermes")" = "$old_hermes_hash"
 git -C "$new_runtime" rev-parse HEAD
 HERMES_HOME="$staging_home" "$new_runtime/venv/bin/hermes" doctor
 ```
@@ -129,14 +141,41 @@ Windows PowerShell example:
 ```powershell
 $LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
 $Stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$StagingHome = Join-Path $LiveHome "staging\hermes-native-$Stamp"
+$StagingHome = "${LiveHome}.native-staging-$Stamp"
 $NewRuntime = Join-Path $StagingHome "hermes-agent"
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
+$OldHermes = (Get-Command hermes -ErrorAction Stop).Source
+$OldHermesHash = (Get-FileHash $OldHermes -Algorithm SHA256).Hash
+$OldUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$OldUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
+$OldUserGitBash = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
+$OldProcessPath = $env:Path
+$OldProcessHermesHome = $env:HERMES_HOME
+$OldProcessGitBash = $env:HERMES_GIT_BASH_PATH
 Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
-& $Installer -SkipSetup -HermesHome $StagingHome -InstallDir $NewRuntime
+try {
+    & $Installer -SkipSetup -HermesHome $StagingHome -InstallDir $NewRuntime
+} finally {
+    [Environment]::SetEnvironmentVariable("Path", $OldUserPath, "User")
+    [Environment]::SetEnvironmentVariable("HERMES_HOME", $OldUserHermesHome, "User")
+    [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $OldUserGitBash, "User")
+    $env:Path = $OldProcessPath
+    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
+    if ($null -eq $OldProcessGitBash) { Remove-Item Env:HERMES_GIT_BASH_PATH -ErrorAction SilentlyContinue } else { $env:HERMES_GIT_BASH_PATH = $OldProcessGitBash }
+}
+$RestoredHermes = (Get-Command hermes -ErrorAction Stop).Source
+if ($RestoredHermes -ne $OldHermes) { throw "Hermes command route changed: $RestoredHermes" }
+if ((Get-FileHash $RestoredHermes -Algorithm SHA256).Hash -ne $OldHermesHash) { throw "Hermes launcher changed" }
+if ([Environment]::GetEnvironmentVariable("Path", "User") -ne $OldUserPath) { throw "User PATH was not restored" }
+if ([Environment]::GetEnvironmentVariable("HERMES_HOME", "User") -ne $OldUserHermesHome) { throw "User HERMES_HOME was not restored" }
+if ([Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User") -ne $OldUserGitBash) { throw "User HERMES_GIT_BASH_PATH was not restored" }
 git -C $NewRuntime rev-parse HEAD
-$env:HERMES_HOME = $StagingHome
-& "$NewRuntime\venv\Scripts\hermes.exe" doctor
+try {
+    $env:HERMES_HOME = $StagingHome
+    & "$NewRuntime\venv\Scripts\hermes.exe" doctor
+} finally {
+    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
+}
 ```
 
 Record the exact installed SHA. Do not claim “latest” without that proof.
