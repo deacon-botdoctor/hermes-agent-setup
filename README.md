@@ -18,6 +18,12 @@ Linux, macOS, WSL2, or Termux:
 ```bash
 curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
   | bash -s -- --skip-browser
+```
+
+Start a new login shell (or reload its profile) so the installed command is on
+`PATH`, then run:
+
+```bash
 hermes setup
 hermes doctor
 hermes gateway install
@@ -28,6 +34,11 @@ Native Windows PowerShell:
 
 ```powershell
 iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+```
+
+Open a new PowerShell window, then run:
+
+```powershell
 hermes doctor
 hermes gateway install
 hermes gateway status

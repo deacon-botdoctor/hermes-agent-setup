@@ -89,12 +89,18 @@ contain hashes and paths, never secret contents. Prove the rollback command can
 find every required artifact before proceeding. A raw copy of a live
 `state.db` without its WAL state is not a valid backup.
 
-### 3. Install native Hermes side by side
+### 3. Install native Hermes in an isolated staging home
 
 Use the official installer, not code from this repository.
 
-The official installers can change which runtime the user-facing `hermes`
-command resolves to even when an explicit installation directory is supplied.
+Do not run an installer against the live `HERMES_HOME`. The official installers
+write config scaffolding, synchronize skills, change permissions, and may set
+persistent environment/PATH values in addition to installing code. Create a
+separate staging home on the same trusted machine; keep it until the migration
+is accepted because it owns the new code and managed dependencies.
+
+The installers can also change which runtime the user-facing `hermes` command
+resolves to even when an explicit installation directory is supplied.
 Before invoking one, record the current resolved command. On POSIX, preserve
 the launcher's path, contents or link target, mode, and hash. On Windows,
 preserve the relevant User `PATH` and `HERMES_HOME` values. Immediately after
@@ -106,25 +112,30 @@ cannot be restored exactly.
 POSIX headless example:
 
 ```bash
-export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+live_home="${HERMES_HOME:-$HOME/.hermes}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-new_runtime="$HERMES_HOME/runtimes/hermes-native-$stamp"
+staging_home="$live_home/staging/hermes-native-$stamp"
+new_runtime="$staging_home/hermes-agent"
 curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-  | bash -s -- --skip-setup --skip-browser --dir "$new_runtime"
+  | HERMES_HOME="$staging_home" bash -s -- \
+      --skip-setup --skip-browser \
+      --hermes-home "$staging_home" --dir "$new_runtime"
 git -C "$new_runtime" rev-parse HEAD
-"$new_runtime/venv/bin/hermes" doctor
+HERMES_HOME="$staging_home" "$new_runtime/venv/bin/hermes" doctor
 ```
 
 Windows PowerShell example:
 
 ```powershell
-$HermesHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
+$LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
 $Stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$NewRuntime = Join-Path $HermesHome "runtimes\hermes-native-$Stamp"
+$StagingHome = Join-Path $LiveHome "staging\hermes-native-$Stamp"
+$NewRuntime = Join-Path $StagingHome "hermes-agent"
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
 Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
-& $Installer -SkipSetup -HermesHome $HermesHome -InstallDir $NewRuntime
+& $Installer -SkipSetup -HermesHome $StagingHome -InstallDir $NewRuntime
 git -C $NewRuntime rev-parse HEAD
+$env:HERMES_HOME = $StagingHome
 & "$NewRuntime\venv\Scripts\hermes.exe" doctor
 ```
 
@@ -151,6 +162,12 @@ Before the live switch:
 - prove the new `hermes` command imports from the new checkout;
 - prove the exact old service definition and rollback command are available;
 - preserve the old code and data untouched.
+
+Restore the live runtime's original command/PATH and `HERMES_HOME` immediately
+after staging. Invoke the new executable by absolute path with `HERMES_HOME`
+explicitly set to the staging home until the final live-data snapshot is
+sealed. Only during the controlled switch may the new service be bound to the
+live data home.
 
 After draining and stopping the old gateway, create and validate a final
 SQLite-consistent `state.db` snapshot. Record the exact commands that stop both
