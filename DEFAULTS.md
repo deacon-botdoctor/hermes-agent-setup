@@ -6,7 +6,8 @@ The default assumes a headless machine and one user-owned Hermes runtime.
 
 - Official Hermes installer and update path.
 - Native `state.db`, session identity, compaction, session search, memory,
-  `MEMORY.md`, `USER.md`, Task Ledger, cron, gateway, and service tooling.
+  `MEMORY.md`, `USER.md`, per-session task tracking, persistent goals, cron,
+  gateway, and service tooling.
 - One local config/data boundary per agent.
 - Built-in skills and official extension points.
 - Exact topic/session isolation on messaging platforms.
@@ -14,8 +15,8 @@ The default assumes a headless machine and one user-owned Hermes runtime.
 ## Configure
 
 - Start with the smallest toolset the user needs.
-- Keep one capability router/discovery surface hot when the installation uses
-  MCPs; start optional MCPs on demand.
+- Manage MCPs through native `hermes mcp` configuration; enable only the
+  servers and tools the user needs.
 - Keep browser automation off until a real workflow needs it.
 - Keep Composio onboarding off until the user selects an account/integration.
 - Store secrets only in the platform-supported local secret/config path.

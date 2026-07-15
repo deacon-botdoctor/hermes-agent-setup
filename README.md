@@ -6,8 +6,8 @@ A native-first setup and migration guide for
 This repository does **not** fork Hermes, patch its source, copy MCP servers, or
 ship another memory system. It tells a fresh agent how to install Hermes and
 tells an agent on the old Bot Doctor-style runtime how to move safely to native
-Hermes without losing its identity, conversations, configuration, projects, or
-credentials.
+Hermes without losing its identity, conversations, memory, configuration,
+projects, skills, or credentials.
 
 ## Choose your path
 
@@ -72,7 +72,7 @@ The replacement has four rules:
 | Layer | Owner |
 |---|---|
 | Hermes code, installer, memory, sessions, gateway, service tooling | Upstream Hermes |
-| `config.yaml`, `.env`, `MEMORY.md`, `USER.md`, sessions, projects, skills | The local agent/user |
+| `config.yaml`, `.env`, `state.db`, `MEMORY.md`, `USER.md`, sessions, projects, skills | The local agent/user |
 | Optional tools and MCPs | Local configuration, cold by default |
 | Fleet orchestration, credentials, shared databases | Outside this public repository |
 

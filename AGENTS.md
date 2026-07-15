@@ -22,7 +22,8 @@ editing or reviewing this repository.
   messaging identity, and credentials survive unchanged unless the user
   explicitly requests a change.
 - Native Hermes owns sessions, `state.db`, compaction, memory/search,
-  `MEMORY.md`, `USER.md`, Task Ledger, gateway, cron, and service installation.
+  `MEMORY.md`, `USER.md`, per-session task tracking, persistent goals, gateway,
+  cron, and service installation.
 - Optional browser, Composio, and MCP capabilities are cold until needed. The
   current official Windows installer provisions browser dependencies and
   Chromium, but the capability must remain inactive until it has a consumer.
@@ -60,6 +61,7 @@ Record:
 - the process and service definition that launch the live gateway;
 - current gateway health, messaging identity, active turns, and restart count;
 - hashes of `config.yaml`, service definition, launcher, and environment file;
+- on Windows, the relevant User `PATH` and `HERMES_HOME` values;
 - paths for `state.db`, `MEMORY.md`, `USER.md`, skills, workspace/projects,
   media, and client-local data;
 - legacy plugins, MCPs, databases, cron jobs, daemons, and hooks;
@@ -75,7 +77,7 @@ permissions:
 
 - the old code SHA and dirty diff/bundle;
 - allowlisted config and environment files;
-- service definition and launcher;
+- service definition and launcher or Windows command-route values;
 - a SQLite-consistent `state.db` snapshot created with the SQLite backup API,
   plus its integrity result, schema version, and restore procedure;
 - state/data manifest and hashes;
@@ -91,13 +93,15 @@ find every required artifact before proceeding. A raw copy of a live
 
 Use the official installer, not code from this repository.
 
-The official installers update the user-facing `hermes` launcher even when an
-explicit installation directory is supplied. Before invoking one, preserve the
-existing launcher's path, contents or link target, mode, and hash in the
-rollback. Immediately after the installer exits, restore that launcher and
-prove `command -v hermes` / `Get-Command hermes` still reaches the old runtime.
-Use only the new runtime's absolute executable path until the controlled
-switch. Stop if the old launcher cannot be restored exactly.
+The official installers can change which runtime the user-facing `hermes`
+command resolves to even when an explicit installation directory is supplied.
+Before invoking one, record the current resolved command. On POSIX, preserve
+the launcher's path, contents or link target, mode, and hash. On Windows,
+preserve the relevant User `PATH` and `HERMES_HOME` values. Immediately after
+the installer exits, restore those route inputs and prove `command -v hermes` /
+`Get-Command hermes` still reaches the old runtime. Use only the new runtime's
+absolute executable path until the controlled switch. Stop if the old route
+cannot be restored exactly.
 
 POSIX headless example:
 
@@ -156,8 +160,8 @@ may migrate the shared database, so a code-only switch is not a rollback.
 
 Drain the old gateway, reinstall the gateway service using the **new** Hermes
 command while preserving the prior user/system scope and profile, deliberately
-replace the user-facing launcher with the new absolute command, then start it.
-Do not edit a dirty old checkout in place.
+replace the user-facing command route with the new absolute command, then start
+it. Do not edit a dirty old checkout in place.
 
 ### 6. Immediate verification
 
@@ -171,7 +175,8 @@ Fail and roll back on any failed check:
 - two simultaneous topics/sessions do not leak context;
 - a low-signal continuation clarifies rather than borrowing another task;
 - `MEMORY.md`, `USER.md`, native session search, and `state.db` are readable;
-- Task Ledger and scheduled work survive restart;
+- the built-in task tool works, persistent goals resume, and scheduled work
+  survives restart;
 - one declared optional tool cold-starts successfully, then stops;
 - no retired legacy daemon or second memory/transcript database is active;
 - credential/config hashes are unchanged unless explicitly planned;
@@ -200,7 +205,7 @@ Return:
 - backup path and manifest hash;
 - pre-switch and native `state.db` snapshot hashes, schema versions, and
   integrity results;
-- launcher restoration and controlled-cutover results;
+- command-route restoration and controlled-cutover results;
 - preserved/retired/kept-exception counts;
 - every verification result;
 - credential/data-change booleans;

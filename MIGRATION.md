@@ -22,18 +22,20 @@ deleted.
 
 The official Hermes installer creates a new checkout. The agent records its
 exact upstream SHA and runs `hermes doctor` before it can own the service. Since
-the installer rewrites the user-facing launcher, the agent restores the old
-launcher immediately and addresses the new checkout only by absolute path
-until cutover.
+the installer can change user-facing command resolution, the agent restores the
+old launcher or Windows User PATH/environment route immediately and addresses
+the new checkout only by absolute path until cutover.
 
 ## 4. Controlled switch and proof
 
 With zero active turns, the agent drains the old gateway, binds the existing
 service/profile to the new native command, and runs identity, messaging,
-restart, continuity, memory, task, optional-tool, and rollback checks.
+restart, continuity, memory, built-in task-tool, persistent-goal, optional-tool,
+and rollback checks.
 Immediately before cutover it takes a final consistent database snapshot.
-Rollback stops both runtimes, restores that snapshot with its WAL sidecars
-moved aside, verifies database integrity, and only then starts the old runtime.
+Rollback stops both runtimes, moves the live database and its WAL sidecars
+aside, restores that snapshot, verifies database integrity, and only then
+starts the old runtime.
 
 Any failure restores the old service. A credential, database-schema, identity,
 or network change is not part of this migration unless the operator separately
@@ -55,7 +57,7 @@ bindings be removed. User data and the sealed rollback remain.
 | Telegram transcript recall DB | Delete; use native `state.db` |
 | AutoDream/nightly dream | Off; add no replacement by default |
 | Always-on browser lane | Off; cold-start for a verified consumer |
-| All MCPs hot | Replace with router/discovery plus cold optional MCPs |
+| All MCPs hot | Keep only required servers/tools enabled in native MCP configuration |
 | No-op compatibility plugins | Delete |
 | Composio onboarding | Off until the user chooses an integration |
 | Identity, `MEMORY.md`, `USER.md`, projects, skills | Preserve as local data |
@@ -66,4 +68,4 @@ bindings be removed. User data and the sealed rollback remain.
 Stop before switching if the live route, active turns, backup, service owner,
 credential boundary, or rollback is ambiguous. Stop and roll back after the
 switch on a traceback, model/provider error, missing table, restart loop,
-identity mismatch, context leakage, missing task, or rollback drift.
+identity mismatch, context leakage, missing scheduled task, or rollback drift.
