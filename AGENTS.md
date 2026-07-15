@@ -61,7 +61,8 @@ Record:
 - the process and service definition that launch the live gateway;
 - current gateway health, messaging identity, active turns, and restart count;
 - hashes of `config.yaml`, service definition, launcher, and environment file;
-- on Windows, the relevant User `PATH` and `HERMES_HOME` values;
+- on Windows, the relevant User and process `PATH`, `HERMES_HOME`, and
+  `HERMES_GIT_BASH_PATH` values;
 - paths for `state.db`, `MEMORY.md`, `USER.md`, skills, workspace/projects,
   media, and client-local data;
 - legacy plugins, MCPs, databases, cron jobs, daemons, and hooks;
@@ -89,43 +90,97 @@ contain hashes and paths, never secret contents. Prove the rollback command can
 find every required artifact before proceeding. A raw copy of a live
 `state.db` without its WAL state is not a valid backup.
 
-### 3. Install native Hermes side by side
+### 3. Install native Hermes in an isolated staging home
 
 Use the official installer, not code from this repository.
 
-The official installers can change which runtime the user-facing `hermes`
-command resolves to even when an explicit installation directory is supplied.
+Do not run an installer against the live `HERMES_HOME`. The official installers
+write config scaffolding, synchronize skills, change permissions, and may set
+persistent environment/PATH values in addition to installing code. Create a
+separate staging home on the same trusted machine; keep it until the migration
+is accepted because it owns the new code and managed dependencies.
+
+The installers can also change which runtime the user-facing `hermes` command
+resolves to even when an explicit installation directory is supplied.
 Before invoking one, record the current resolved command. On POSIX, preserve
-the launcher's path, contents or link target, mode, and hash. On Windows,
-preserve the relevant User `PATH` and `HERMES_HOME` values. Immediately after
-the installer exits, restore those route inputs and prove `command -v hermes` /
-`Get-Command hermes` still reaches the old runtime. Use only the new runtime's
-absolute executable path until the controlled switch. Stop if the old route
-cannot be restored exactly.
+the launcher's path, contents or link target, mode, and hash, and give the
+installer a staging-only `HOME` so its launcher, Node shims, and shell-profile
+writes cannot reach the live user's route. On Windows, preserve the User and
+process `PATH`, `HERMES_HOME`, and `HERMES_GIT_BASH_PATH` values. Immediately
+after the installer exits, restore those route inputs and prove `command -v
+hermes` / `Get-Command hermes` still reaches the old runtime. Use only the new
+runtime's absolute executable path until the controlled switch. Stop if the
+old route cannot be restored exactly.
 
 POSIX headless example:
 
 ```bash
-export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+live_home="${HERMES_HOME:-$HOME/.hermes}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-new_runtime="$HERMES_HOME/runtimes/hermes-native-$stamp"
+staging_home="${live_home%/}.native-staging-$stamp"
+staging_user_home="$staging_home/user-home"
+new_runtime="$staging_home/hermes-agent"
+old_hermes="$(command -v hermes)"
+old_hermes_target="$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")"
+old_hermes_mode="$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")"
+old_hermes_hash="$(git hash-object "$old_hermes")"
+mkdir -p "$staging_user_home"
 curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-  | bash -s -- --skip-setup --skip-browser --dir "$new_runtime"
+  | HOME="$staging_user_home" HERMES_HOME="$staging_home" bash -s -- \
+      --skip-setup --skip-browser \
+      --hermes-home "$staging_home" --dir "$new_runtime"
+test "$(command -v hermes)" = "$old_hermes"
+test "$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")" = "$old_hermes_target"
+test "$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")" = "$old_hermes_mode"
+test "$(git hash-object "$old_hermes")" = "$old_hermes_hash"
 git -C "$new_runtime" rev-parse HEAD
-"$new_runtime/venv/bin/hermes" doctor
+HERMES_HOME="$staging_home" "$new_runtime/venv/bin/hermes" doctor
 ```
 
 Windows PowerShell example:
 
 ```powershell
-$HermesHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
+$LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
 $Stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$NewRuntime = Join-Path $HermesHome "runtimes\hermes-native-$Stamp"
+$StagingHome = "${LiveHome}.native-staging-$Stamp"
+$NewRuntime = Join-Path $StagingHome "hermes-agent"
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
+$OldHermes = (Get-Command hermes -ErrorAction Stop).Source
+$OldHermesHash = (Get-FileHash $OldHermes -Algorithm SHA256).Hash
+$OldUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+$OldUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
+$OldUserGitBash = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
+$OldProcessPath = $env:Path
+$OldProcessHermesHome = $env:HERMES_HOME
+$OldProcessGitBash = $env:HERMES_GIT_BASH_PATH
 Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
-& $Installer -SkipSetup -HermesHome $HermesHome -InstallDir $NewRuntime
+try {
+    & $Installer -SkipSetup -HermesHome $StagingHome -InstallDir $NewRuntime
+} finally {
+    [Environment]::SetEnvironmentVariable("Path", $OldUserPath, "User")
+    [Environment]::SetEnvironmentVariable("HERMES_HOME", $OldUserHermesHome, "User")
+    [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $OldUserGitBash, "User")
+    $env:Path = $OldProcessPath
+    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
+    if ($null -eq $OldProcessGitBash) { Remove-Item Env:HERMES_GIT_BASH_PATH -ErrorAction SilentlyContinue } else { $env:HERMES_GIT_BASH_PATH = $OldProcessGitBash }
+}
+$RestoredHermes = (Get-Command hermes -ErrorAction Stop).Source
+if ($RestoredHermes -ne $OldHermes) { throw "Hermes command route changed: $RestoredHermes" }
+if ((Get-FileHash $RestoredHermes -Algorithm SHA256).Hash -ne $OldHermesHash) { throw "Hermes launcher changed" }
+if ([Environment]::GetEnvironmentVariable("Path", "User") -ne $OldUserPath) { throw "User PATH was not restored" }
+if ([Environment]::GetEnvironmentVariable("HERMES_HOME", "User") -ne $OldUserHermesHome) { throw "User HERMES_HOME was not restored" }
+if ([Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User") -ne $OldUserGitBash) { throw "User HERMES_GIT_BASH_PATH was not restored" }
+if ($env:Path -ne $OldProcessPath) { throw "Process PATH was not restored" }
+if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored" }
+if ($env:HERMES_GIT_BASH_PATH -ne $OldProcessGitBash) { throw "Process HERMES_GIT_BASH_PATH was not restored" }
 git -C $NewRuntime rev-parse HEAD
-& "$NewRuntime\venv\Scripts\hermes.exe" doctor
+try {
+    $env:HERMES_HOME = $StagingHome
+    & "$NewRuntime\venv\Scripts\hermes.exe" doctor
+} finally {
+    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
+}
+if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored after doctor" }
 ```
 
 Record the exact installed SHA. Do not claim “latest” without that proof.
@@ -151,6 +206,12 @@ Before the live switch:
 - prove the new `hermes` command imports from the new checkout;
 - prove the exact old service definition and rollback command are available;
 - preserve the old code and data untouched.
+
+Restore the live runtime's original command/PATH and `HERMES_HOME` immediately
+after staging. Invoke the new executable by absolute path with `HERMES_HOME`
+explicitly set to the staging home until the final live-data snapshot is
+sealed. Only during the controlled switch may the new service be bound to the
+live data home.
 
 After draining and stopping the old gateway, create and validate a final
 SQLite-consistent `state.db` snapshot. Record the exact commands that stop both
@@ -201,7 +262,7 @@ retention window expires.
 Return:
 
 - old and new exact SHAs;
-- platform, runtime home, service scope, and active route;
+- platform, live and staging runtime homes, service scope, and active route;
 - backup path and manifest hash;
 - pre-switch and native `state.db` snapshot hashes, schema versions, and
   integrity results;

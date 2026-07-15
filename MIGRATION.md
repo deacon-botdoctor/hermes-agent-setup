@@ -18,13 +18,15 @@ service wiring, identity, and data. The receipt contains hashes—not secrets.
 copy of a live database is insufficient. The old runtime is not modified or
 deleted.
 
-## 3. Side-by-side native install
+## 3. Isolated native install
 
-The official Hermes installer creates a new checkout. The agent records its
-exact upstream SHA and runs `hermes doctor` before it can own the service. Since
-the installer can change user-facing command resolution, the agent restores the
-old launcher or Windows User PATH/environment route immediately and addresses
-the new checkout only by absolute path until cutover.
+The official Hermes installer creates a new checkout and managed dependencies
+under a separate staging `HERMES_HOME`; it does not touch the live data home.
+On POSIX, it also runs with a staging-only `HOME`, leaving the old launcher
+untouched. The agent verifies that launcher or restores and verifies the
+Windows User and process environment route, records the exact upstream SHA,
+and runs `hermes doctor` against staging. The new checkout is addressed only
+by absolute path until cutover.
 
 ## 4. Controlled switch and proof
 
