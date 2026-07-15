@@ -33,6 +33,11 @@ hermes gateway install
 hermes gateway status
 ```
 
+The current official Windows installer always installs browser npm
+dependencies and Playwright Chromium; it does not yet expose the POSIX
+`--skip-browser` option. Keep browser automation inactive until it has a real
+consumer.
+
 Browser automation, Composio, and additional MCP servers should be enabled only
 when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
 

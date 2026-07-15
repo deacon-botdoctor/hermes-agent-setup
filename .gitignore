@@ -1,0 +1,12 @@
+# Never commit real secrets or local config
+*.env
+.env
+config.yaml
+config.local.yaml
+secrets/
+*.token
+*.key
+/memory/
+__pycache__/
+*.pyc
+.DS_Store

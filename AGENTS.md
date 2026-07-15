@@ -23,7 +23,9 @@ editing or reviewing this repository.
   explicitly requests a change.
 - Native Hermes owns sessions, `state.db`, compaction, memory/search,
   `MEMORY.md`, `USER.md`, Task Ledger, gateway, cron, and service installation.
-- Optional browser, Composio, and MCP capabilities are cold until needed.
+- Optional browser, Composio, and MCP capabilities are cold until needed. The
+  current official Windows installer provisions browser dependencies and
+  Chromium, but the capability must remain inactive until it has a consumer.
 - The old runtime remains intact and runnable until native verification and a
   rollback rehearsal both pass.
 
@@ -74,17 +76,28 @@ permissions:
 - the old code SHA and dirty diff/bundle;
 - allowlisted config and environment files;
 - service definition and launcher;
+- a SQLite-consistent `state.db` snapshot created with the SQLite backup API,
+  plus its integrity result, schema version, and restore procedure;
 - state/data manifest and hashes;
 - identity/context files, skills, and projects;
 - the exact stop/switch/start commands.
 
 Backups may contain credentials only on the same trusted machine. Receipts must
 contain hashes and paths, never secret contents. Prove the rollback command can
-find every required artifact before proceeding.
+find every required artifact before proceeding. A raw copy of a live
+`state.db` without its WAL state is not a valid backup.
 
 ### 3. Install native Hermes side by side
 
 Use the official installer, not code from this repository.
+
+The official installers update the user-facing `hermes` launcher even when an
+explicit installation directory is supplied. Before invoking one, preserve the
+existing launcher's path, contents or link target, mode, and hash in the
+rollback. Immediately after the installer exits, restore that launcher and
+prove `command -v hermes` / `Get-Command hermes` still reaches the old runtime.
+Use only the new runtime's absolute executable path until the controlled
+switch. Stop if the old launcher cannot be restored exactly.
 
 POSIX headless example:
 
@@ -112,6 +125,10 @@ git -C $NewRuntime rev-parse HEAD
 ```
 
 Record the exact installed SHA. Do not claim “latest” without that proof.
+On Windows, the current official installer has no browser-skip option and
+installs browser npm dependencies and Playwright Chromium. Treat this as a
+packaging exception: do not start or configure browser automation until a real
+consumer requires it.
 
 ### 4. Subtract before adding
 
@@ -131,8 +148,15 @@ Before the live switch:
 - prove the exact old service definition and rollback command are available;
 - preserve the old code and data untouched.
 
+After draining and stopping the old gateway, create and validate a final
+SQLite-consistent `state.db` snapshot. Record the exact commands that stop both
+runtimes, move aside the database and its `-wal`/`-shm` sidecars, restore the
+snapshot, run an integrity check, and restart the old runtime. Native startup
+may migrate the shared database, so a code-only switch is not a rollback.
+
 Drain the old gateway, reinstall the gateway service using the **new** Hermes
-command while preserving the prior user/system scope and profile, then start it.
+command while preserving the prior user/system scope and profile, deliberately
+replace the user-facing launcher with the new absolute command, then start it.
 Do not edit a dirty old checkout in place.
 
 ### 6. Immediate verification
@@ -154,6 +178,12 @@ Fail and roll back on any failed check:
 - rollback rehearsal returns to the old healthy runtime and restore returns to
   native health.
 
+For the rollback rehearsal, first stop native Hermes and take a validated
+SQLite-consistent snapshot of its database. Move the native database and
+sidecars aside, restore the final pre-switch snapshot, and prove the old runtime
+healthy. Stop the old runtime before restoring the native snapshot and service.
+Never open the same database from both runtimes or restore over a live gateway.
+
 ### 7. Delete only after proof
 
 After the user accepts native health, delete only obsolete **code and service
@@ -168,6 +198,9 @@ Return:
 - old and new exact SHAs;
 - platform, runtime home, service scope, and active route;
 - backup path and manifest hash;
+- pre-switch and native `state.db` snapshot hashes, schema versions, and
+  integrity results;
+- launcher restoration and controlled-cutover results;
 - preserved/retired/kept-exception counts;
 - every verification result;
 - credential/data-change booleans;

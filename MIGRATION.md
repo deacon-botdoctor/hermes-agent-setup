@@ -14,18 +14,26 @@ agree.
 
 The agent creates a local, permission-restricted backup of code state, config,
 service wiring, identity, and data. The receipt contains hashes—not secrets.
-The old runtime is not modified or deleted.
+`state.db` is captured through SQLite's backup API and integrity-checked; a raw
+copy of a live database is insufficient. The old runtime is not modified or
+deleted.
 
 ## 3. Side-by-side native install
 
 The official Hermes installer creates a new checkout. The agent records its
-exact upstream SHA and runs `hermes doctor` before it can own the service.
+exact upstream SHA and runs `hermes doctor` before it can own the service. Since
+the installer rewrites the user-facing launcher, the agent restores the old
+launcher immediately and addresses the new checkout only by absolute path
+until cutover.
 
 ## 4. Controlled switch and proof
 
 With zero active turns, the agent drains the old gateway, binds the existing
 service/profile to the new native command, and runs identity, messaging,
 restart, continuity, memory, task, optional-tool, and rollback checks.
+Immediately before cutover it takes a final consistent database snapshot.
+Rollback stops both runtimes, restores that snapshot with its WAL sidecars
+moved aside, verifies database integrity, and only then starts the old runtime.
 
 Any failure restores the old service. A credential, database-schema, identity,
 or network change is not part of this migration unless the operator separately
