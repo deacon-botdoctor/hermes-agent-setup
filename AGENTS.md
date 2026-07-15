@@ -169,6 +169,9 @@ if ((Get-FileHash $RestoredHermes -Algorithm SHA256).Hash -ne $OldHermesHash) { 
 if ([Environment]::GetEnvironmentVariable("Path", "User") -ne $OldUserPath) { throw "User PATH was not restored" }
 if ([Environment]::GetEnvironmentVariable("HERMES_HOME", "User") -ne $OldUserHermesHome) { throw "User HERMES_HOME was not restored" }
 if ([Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User") -ne $OldUserGitBash) { throw "User HERMES_GIT_BASH_PATH was not restored" }
+if ($env:Path -ne $OldProcessPath) { throw "Process PATH was not restored" }
+if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored" }
+if ($env:HERMES_GIT_BASH_PATH -ne $OldProcessGitBash) { throw "Process HERMES_GIT_BASH_PATH was not restored" }
 git -C $NewRuntime rev-parse HEAD
 try {
     $env:HERMES_HOME = $StagingHome
@@ -176,6 +179,7 @@ try {
 } finally {
     if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
 }
+if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored after doctor" }
 ```
 
 Record the exact installed SHA. Do not claim “latest” without that proof.
