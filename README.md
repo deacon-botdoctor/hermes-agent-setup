@@ -1,132 +1,81 @@
-# hermes-agent-setup
+# Hermes Agent Setup
 
-A **client-ready runtime bundle** for a stock agent: drag it in, fill the placeholders, and the
-agent behaves correctly for a client out of the box — right reply rules, muted tool chatter, no
-streaming, clean output — without an operator tuning message quality by hand.
+A native-first setup and migration guide for
+[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
 
-It's a working kit, not just docs. The apply engine, rehearsal harness, reference patch module,
-and memory provider all run. The reply rules live where they belong (config + the immersion
-plugin), so they survive upstream bumps instead of breaking.
+This repository does **not** fork Hermes, patch its source, copy MCP servers, or
+ship another memory system. It tells a fresh agent how to install Hermes and
+tells an agent on the old Bot Doctor-style runtime how to move safely to native
+Hermes without losing its identity, conversations, memory, configuration,
+projects, skills, or credentials.
 
-Open [`index.html`](index.html) for the visual build map, and [`docs/wiring.md`](docs/wiring.md)
-for how a turn flows through every piece.
-The scrubbed real-client rebuild checklist lives in
-[`docs/canonical-client-spec.md`](docs/canonical-client-spec.md).
+## Choose your path
 
-## What makes it client-ready
+### Fresh headless agent
 
-The point of the bundle is that a client can run the agent unattended. That comes from three
-layers, each at the highest ladder rung that fits:
-
-- **Reply rules → config** ([`config/config.example.yaml`](config/config.example.yaml)): no
-  streaming, `tool_step_intermediate: false` (no tool-call chatter), plain messages, queue mode,
-  redaction/security/privacy on, tool-loop guardrails, and the shared platform/voice/cron
-  skeleton. The durable core.
-- **Message quality → the immersion plugin** ([`plugins/immersion/`](plugins/immersion)):
-  `transform_llm_output` strips internal notes, suppresses interrupted placeholders, and masks
-  model-failure internals; `llm_request` middleware elides stale tool-result bloat; `/mode` flips
-  queue/interrupt live. This is where message-quality lives as a plugin, not fragile patches.
-- **The irreducible patches → the overlay** ([`overlay/`](overlay)): only what has no config knob
-  or plugin seam — redaction at the write boundary, durable runtime, the resume scheduler, the
-  active-task anchor.
-
-Plus **memory** ([`plugins/memory/`](plugins/memory), a runnable local SQLite-FTS provider and a
-GBrain-backed one) and the **canonical-knowledge** wiring ([`gbrain/`](gbrain)).
-
-## Layout
-
-```
-config/            reply rules + runtime skeleton (the drag-and-drop core), AGENTS.md
-plugins/
-  autodream/       autoDream floor placeholder for nightly consolidation hooks
-  composio_onboarding/  Composio onboarding floor placeholder
-  hermes_lcm/      LCM context-engine floor placeholder
-  immersion/       reply-rules plugin: output transforms + request middleware + /mode  (runs)
-  memory/          memory providers: sqlite_provider (local, runs+tested) + gbrain_provider
-  task_ledger/     Task Ledger floor placeholder
-  telegram_platform/  disabled placeholder; Telegram hardening is not active yet
-  telegram_transcript/ Telegram Transcript floor placeholder
-mcp-servers/
-  anamnesis/        local SQLite-FTS memory MCP (runs+tested)
-  capability-router/  clean-room capability catalog + usage-ranked search (runs+tested)
-  browser/            CDP JSON/status MCP surface (runs+tested)
-  browser-lane/       browser-lane daemon socket MCP surface (runs+tested)
-  local-document-tools/  local text/HTML extraction + merge MCP (runs+tested)
-  search/             SearXNG search + Firecrawl scrape MCP (runs+tested)
-  telegram-admin/     scrubbed Telegram directory lookup MCP (runs+tested)
-  visual-identity/    manifest-backed visual asset lookup MCP (runs+tested)
-  web-search/         distinct web-search MCP floor surface (runs+tested)
-overlay/
-  apply.py         apply engine — overlays the registry onto a runtime tree (runs)
-  rehearse.py      verify-before-deploy harness (runs)
-  registry.yaml    the manifest: irreducible patches only; everything else routed to config/plugin
-  modules/         one working reference module + a copy-me template
-gbrain/            canonical-knowledge wiring (references garrytan/gbrain — not vendored)
-skills/            bundled curated skills, including visual-reference-library
-docs/              philosophy, features, plugins, canonical-knowledge, and the wiring walkthrough
-install.sh         runs the pipeline: rehearse, then apply
-index.html         the build map
-```
-
-## Quick start
+Linux, macOS, WSL2, or Termux:
 
 ```bash
-# 1. the reply rules: copy the config skeleton into your runtime, fill <placeholders>
-cp config/config.example.yaml <your-runtime>/config.yaml
-
-# 2. install bundled local plugins where your runtime discovers user plugins
-cp -r plugins/* <your-plugins-dir>/
-
-# 3. wire the hot capability router — see mcp-servers/capability-router/README.md
-export PYTHONPATH="$PWD/mcp-servers/capability-router/src:$PYTHONPATH"
-export CAPABILITY_REGISTRY="$PWD/mcp-servers/capability-router/registry.json"
-
-# 4. wire on-demand knowledge/browser/document/search/admin/visual surfaces — see the mcp-servers/* READMEs
-export PYTHONPATH="$PWD/mcp-servers/anamnesis/src:$PWD/mcp-servers/browser/src:$PWD/mcp-servers/browser-lane/src:$PWD/mcp-servers/local-document-tools/src:$PWD/mcp-servers/search/src:$PWD/mcp-servers/telegram-admin/src:$PWD/mcp-servers/visual-identity/src:$PWD/mcp-servers/web-search/src:$PYTHONPATH"
-export BROWSER_CDP_URL="http://127.0.0.1:9230"
-export BROWSER_LANE_SOCKET="<runtime>/.hermes/browser-lane/daemon.sock"
-export LOCAL_DOCUMENT_TOOLS_ROOTS="$PWD"
-export ANAMNESIS_DB="<runtime>/.hermes/state/anamnesis.db"
-export TELEGRAM_DIRECTORY="<runtime>/.hermes/telegram-directory.json"
-export VISUAL_IDENTITY_MANIFEST="<runtime>/.hermes/visual-assets.json"
-export VISUAL_IDENTITY_ROOT="<runtime>/Documents/VisualIdentity"
-
-# 5. install curated helper CLIs and skills
-cp bin/visual-reference-* <runtime>/.hermes/bin/
-mkdir -p <runtime>/.hermes/skills/curated/visual-reference-library
-cp skills/curated/visual-reference-library/* <runtime>/.hermes/skills/curated/visual-reference-library/
-<runtime>/.hermes/bin/visual-reference-qa
-
-# 6. the overlay: rehearse against a pristine checkout, then apply
-python overlay/rehearse.py --upstream /path/to/pristine-checkout
-python overlay/apply.py --hermes-dir /path/to/runtime
-
-# 7. wire GBrain (install it separately) — see gbrain/README.md — and restart.
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
+  | bash -s -- --skip-browser
+hermes setup
+hermes doctor
+hermes gateway install
+hermes gateway status
 ```
 
-The memory provider runs standalone if you want to see it work: `python plugins/memory/sqlite_provider.py --demo`.
-Requires Python 3 and PyYAML (`pip install pyyaml`).
+Native Windows PowerShell:
 
-`plugins/telegram_platform` is currently a disabled placeholder. It leaves the bundled Telegram
-adapter in place, so media timeout, liveness, PDF/document ingest, and reply-media hardening are
-not active until the adapter subclasses or wraps the real bundled adapter.
+```powershell
+iex (irm https://hermes-agent.nousresearch.com/install.ps1)
+hermes doctor
+hermes gateway install
+hermes gateway status
+```
 
-## Security warning
+The current official Windows installer always installs browser npm
+dependencies and Playwright Chromium; it does not yet expose the POSIX
+`--skip-browser` option. Keep browser automation inactive until it has a real
+consumer.
 
-The example config intentionally gives Telegram the full toolset and sets approvals to `off`.
-That exposes shell, code execution, and web access to client/Telegram users with no approval gate.
-For untrusted clients, narrow the Telegram toolset by dropping `terminal`, `code_execution`, and
-`web`, or set approvals to `on`.
+Browser automation, Composio, and additional MCP servers should be enabled only
+when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
 
-## The rule the whole thing follows
+### Agent already running the old customized runtime
 
-Before any change, take the highest rung that fits: **DELETE, CONFIG, PLUGIN, UPSTREAM, SIDECAR,
-PATCH.** Patches are last because they anchor to upstream source and break on version bumps. Every
-overlay entry records its `rung` and a `retire_when` condition. See [`docs/philosophy.md`](docs/philosophy.md)
-and [`docs/wiring.md`](docs/wiring.md).
+Open [AGENTS.md](AGENTS.md) in the agent's coding environment and say:
 
-## Safety
+> Follow the migration contract in AGENTS.md. Start with the read-only
+> inventory and stop before switching the live gateway unless I explicitly
+> authorize the switch.
 
-Nothing here is a secret. Tokens, keys, ids, and hostnames are all `<placeholders>`. Never commit
-the real ones. Redaction is the first thing you turn on, precisely because secrets in tool output
-otherwise persist into transcripts and get re-sent every turn.
+The detailed human-readable procedure is in [MIGRATION.md](MIGRATION.md).
+
+## What changed from the old public setup
+
+The previous repository contained a second runtime layer: source patches,
+placeholder plugins, copied MCP servers, custom SQLite memory, Anamnesis, LCM,
+AutoDream, transcript storage, and permanent browser wiring. Current Hermes
+already owns the core session, memory, search, compaction, task, gateway, and
+service behavior. Those duplicate implementations have been deleted from the
+active repository.
+
+The replacement has four rules:
+
+1. Use official Hermes code.
+2. Preserve user data and identity separately from code.
+3. Add optional capabilities only for a proven consumer.
+4. Never remove the old runtime until native health and rollback both pass.
+
+## Ownership model
+
+| Layer | Owner |
+|---|---|
+| Hermes code, installer, memory, sessions, gateway, service tooling | Upstream Hermes |
+| `config.yaml`, `.env`, `state.db`, `MEMORY.md`, `USER.md`, sessions, projects, skills | The local agent/user |
+| Optional tools and MCPs | Local configuration, cold by default |
+| Fleet orchestration, credentials, shared databases | Outside this public repository |
+
+This repository intentionally contains instructions, not a new installer or
+control plane. The official installer and `hermes doctor` remain the executable
+source of truth.
