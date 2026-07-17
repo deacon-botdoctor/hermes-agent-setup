@@ -198,6 +198,12 @@ client-local addition. Never begin by copying the old overlay.
 Use [DEFAULTS.md](DEFAULTS.md) as the target posture. Classify every old item as
 `native`, `keep-client-local`, `cold-optional`, `operator-only`, or `retire`.
 
+Preserve client-local overlays only when they still have a live consumer and
+cannot be expressed through native configuration or an official extension
+point. Preserve their configuration, secrets, data, ownership boundary, health
+check, and rollback separately from runtime code. Do not copy them into the
+public setup or eager-load them into every session.
+
 ### 5. Switch only after route proof
 
 Before the live switch:
@@ -239,6 +245,10 @@ Fail and roll back on any failed check:
 - the built-in task tool works, persistent goals resume, and scheduled work
   survives restart;
 - one declared optional tool cold-starts successfully, then stops;
+- after a clean session and gateway restart, an ordinary request that needs an
+  optional capability causes the agent to inspect its inventory, choose the
+  correct approved route, load only that capability, invoke it, and verify the
+  result without claiming the cold capability is missing;
 - no retired legacy daemon or second memory/transcript database is active;
 - credential/config hashes are unchanged unless explicitly planned;
 - rollback rehearsal returns to the old healthy runtime and restore returns to
@@ -249,6 +259,26 @@ SQLite-consistent snapshot of its database. Move the native database and
 sidecars aside, restore the final pre-switch snapshot, and prove the old runtime
 healthy. Stop the old runtime before restoring the native snapshot and service.
 Never open the same database from both runtimes or restore over a live gateway.
+
+Use an acceptance request that is ordinary for the client and requires one
+cold capability—for example, “Find the next approved customer
+appointment and summarize it without changing anything.” Start from a fresh
+session after a gateway restart. Record proof that the agent:
+
+1. discovers the relevant configured capability rather than answering “I
+   can't” from the initial tool list;
+2. routes a connected SaaS request through the approved connector/Composio
+   surface, using browser automation only for a verified connector/API gap;
+3. distinguishes cold, unavailable, unauthenticated, unauthorized, and
+   transport failure correctly if the first route does not run;
+4. performs only the requested read, verifies the returned result, and does not
+   infer broader permission from tool or account availability; and
+5. leaves unrelated optional capabilities unloaded.
+
+If the real client has no approved connected capability suitable for this
+test, use an equivalent non-mutating request against a declared optional tool.
+Do not add credentials, authorize an account, or broaden access merely to make
+the acceptance test pass.
 
 ### 7. Delete only after proof
 

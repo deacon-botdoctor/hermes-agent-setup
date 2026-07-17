@@ -34,6 +34,11 @@ With zero active turns, the agent drains the old gateway, binds the existing
 service/profile to the new native command, and runs identity, messaging,
 restart, continuity, memory, built-in task-tool, persistent-goal, optional-tool,
 and rollback checks.
+From a clean session after restart, it also proves that an ordinary request can
+discover a cold capability, select the approved native/connector route, invoke
+it, and verify the result. A cold capability must not be reported as missing;
+browser automation is a fallback for a verified connector/API gap, not the
+default SaaS route.
 Immediately before cutover it takes a final consistent database snapshot.
 Rollback stops both runtimes, moves the live database and its WAL sidecars
 aside, restores that snapshot, verifies database integrity, and only then
