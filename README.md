@@ -52,6 +52,20 @@ consumer.
 Browser automation, Composio, and additional MCP servers should be enabled only
 when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
 
+### Lean does not mean less capable
+
+The old setup eagerly loaded optional tools, MCP servers, browser wiring, and
+duplicate memory/context layers into every session. That increased prompt and
+tool-list size, obscured routing, and created more always-on failure surfaces.
+The native-first setup keeps the base runtime small and discovers optional
+capabilities when a request needs them.
+
+A cold capability is not a missing capability. Skills, configured MCP servers,
+approved connectors, and browser automation remain discoverable and can be
+loaded on demand. Before saying a task cannot be done, the agent must inspect
+its capability inventory and run a safe health or connection check. The full
+routing and failure-state doctrine is in [DEFAULTS.md](DEFAULTS.md).
+
 ### Agent already running the old customized runtime
 
 Open [AGENTS.md](AGENTS.md) in the agent's coding environment and say:

@@ -23,6 +23,65 @@ The default assumes a headless machine and one user-owned Hermes runtime.
 - Use an external knowledge system only as an explicitly declared boundary;
   never silently substitute a local database for a shared canonical one.
 
+## Capability model
+
+Lean means **deferred**, not removed. Keep the default prompt and tool surface
+small, then discover and activate a capability for the request that consumes
+it. This lowers prompt/tool bloat, makes routing easier to inspect, and reduces
+idle dependencies while preserving the same approved capability boundary.
+
+Use this loop:
+
+1. **Inventory/discover:** inspect the native tool and skill inventory plus any
+   configured MCP or approved connector catalog relevant to the request.
+2. **Activate/load:** enable or load only the selected capability and its
+   narrow credential/data scope.
+3. **Invoke:** perform the smallest safe operation that satisfies the request.
+4. **Verify/retry:** check the result; retry only when the failure is transient
+   or the corrected input is understood.
+5. **Approved fallback:** move to the next route below only when it is allowed
+   and materially better suited.
+6. **Incident:** stop and report the evidence when authorization, credentials,
+   health, or transport cannot be safely recovered.
+
+Classify the state before choosing a remedy:
+
+| State | Meaning | Next action |
+| --- | --- | --- |
+| Cold/unloaded | Discoverable but not active in this session | Load or enable it for the request |
+| Unavailable | Not installed, configured, or supported here | Use an approved alternative or report the gap |
+| Unauthenticated | The route exists but lacks a valid login/token | Run its safe auth/connection check; request authentication if needed |
+| Unauthorized | Identity is known but lacks permission for this action | Stop; never widen scope or infer consent |
+| Transport failure | The approved route is configured but unreachable or timing out | Verify health, make a bounded retry, then use an approved fallback or report an incident |
+
+### Route doctrine
+
+Route in this order:
+
+1. native Hermes or a local user-owned capability;
+2. connected SaaS through the user's approved connector or Composio surface;
+3. browser automation only when the task requires UI interaction or the
+   approved API/connector has a verified gap.
+
+Availability never grants permission. A visible tool, account, page, token, or
+connector does not authorize a read or mutation beyond the user's request and
+the configured trust boundary.
+
+Before saying **“I can't”**, inspect the capability router/inventory available
+in the current agent surface and run a non-mutating doctor or connection check.
+For native Hermes, the supported inspection commands include:
+
+```bash
+hermes tools list
+hermes skills list
+hermes mcp list
+hermes doctor
+```
+
+Use only the commands relevant to the suspected route. These checks prove
+presence and health; they do not grant authorization or justify installing a
+new integration.
+
 ## Do not install by default
 
 - LCM;
