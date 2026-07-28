@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import sys
+import types
 from pathlib import Path
 
 
@@ -47,6 +48,14 @@ def _load_runtime_module():
     runtime_root = source.parent.parent
     if str(runtime_root) not in sys.path:
         sys.path.insert(0, str(runtime_root))
+    if (
+        source == candidates[2]
+        and "hermes_constants" not in sys.modules
+        and importlib.util.find_spec("hermes_constants") is None
+    ):
+        fallback_constants = types.ModuleType("hermes_constants")
+        fallback_constants.get_hermes_home = lambda: home
+        sys.modules["hermes_constants"] = fallback_constants
     spec = importlib.util.spec_from_file_location("llm_attempt_receipts_runtime", source)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader
