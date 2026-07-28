@@ -6,7 +6,7 @@
   "components": {
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "be90015aed966c844747a407341694fe4f4965a08485ce512ebd4a75b351e612",
+      "digest": "378f45e32992a9e9ac10fde91596446c17145521409c4a8ed2d123a18224dfd9",
       "excluded_paths": [],
       "file_count": 79,
       "files": [
@@ -41,7 +41,7 @@
           "type": "blob"
         },
         {
-          "blob": "b88291979182053b76fbdb6fa6ae50cc5a57247c",
+          "blob": "73b23b1352c7c7dcf35d35aeb381ee0d73b8cf48",
           "mode": "100755",
           "path": "bin/llm-attempt-reconcile.py",
           "type": "blob"
@@ -547,7 +547,7 @@
       ]
     }
   },
-  "deployment_digest": "d4422c7b2ef824ebd637a6573cbf982f5831c10826c5177fd889e6f82fa0c6be",
+  "deployment_digest": "129a057672e568e5622f4a1600d1990826999c6aa3937001b61f8169d6d61861",
   "assembled_runtime_fingerprint": {
     "digest": "0ec238524c924c2c149e8d2b630a1481a58849c9d025e3178fd073aa1fe1b05d",
     "file_count": 39,
