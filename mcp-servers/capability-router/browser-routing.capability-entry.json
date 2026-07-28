@@ -1,0 +1,37 @@
+{
+  "capabilities": [
+    {
+      "id": "ops-pattern.web-routing",
+      "kind": "operating_pattern",
+      "category": "search-web",
+      "label": "Firecrawl-First Web Routing",
+      "summary": "Route public reading and extraction to local Firecrawl; reserve the isolated per-client browser harness for interactive UI work.",
+      "inputs": {
+        "intent": "read|extract|research|interact|authenticated-action",
+        "target": "URL, domain, or research query"
+      },
+      "outputs": "Selected web lane, readiness requirement, and bounded fallback rule.",
+      "cost_per_call": "local Firecrawl or existing browser runtime",
+      "rate_limit": "Two failed attempts per selected lane before diagnostic stop",
+      "requires_creds": [],
+      "preferred_for": [
+        "read webpage",
+        "extract webpage",
+        "web research",
+        "use firecrawl",
+        "browser automation",
+        "click website",
+        "authenticated browser",
+        "choose web tool"
+      ],
+      "routing_policy": {
+        "public_read": "Use web_extract backed by FIRECRAWL_API_URL; local Firecrawl is the default.",
+        "interactive": "Use the existing per-client browser harness for clicks, typing, authentication, uploads, downloads, and UI screenshots.",
+        "specialized": "Prefer an existing tested domain harness for a known brittle workflow; do not create a generic Playwright wrapper.",
+        "isolation": "Browser profiles, cookies, tabs, and CDP endpoints are per-client and must never be shared.",
+        "failure_budget": "After two failed attempts on the selected lane, stop and return a diagnostic; do not spawn another browser, profile, or daemon.",
+        "closeout": "Reuse tabs where possible and close task-created tabs when the task ends."
+      }
+    }
+  ]
+}

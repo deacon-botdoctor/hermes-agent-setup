@@ -1,0 +1,3 @@
+platforms:
+  telegram:
+    reply_to_mode: "off"

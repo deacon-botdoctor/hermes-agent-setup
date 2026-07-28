@@ -1,0 +1,1964 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import sqlite3
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+try:
+    import yaml
+except Exception:  # pragma: no cover
+    yaml = None
+
+UTC = timezone.utc
+ACTION_PAT = re.compile(
+    r"\b(can you|could you|please|send|pull|generate|create|fix|check|look|need|i need|help|"
+    r"review|schedule|find|fill out|draft)\b|\?",
+    re.I,
+)
+DONE_PAT = re.compile(
+    r"\b(done|sent|attached|here(?:'s| is)|fixed|pulled|generated|created|saved|emailed|delivered)\b|MEDIA:", re.I
+)
+GENERIC_TASK_CONTRACT = {
+    "named_workflow": "client-chat-help",
+    "intended_outcome": "actionable client request receives a useful response or explicit blocker",
+    "required_tools": ["telegram", "conversation_memory"],
+    "deliverable": "client_response_or_explicit_blocker",
+    "independent_certifier": "client_acceptance_or_doc_verdict",
+}
+GENERIC_SUCCESS_CONTRACT_REFERENCE = "generic-client-chat@1:client-chat-help"
+NEG_PAT = re.compile(
+    r"\b(wrong|dumbass|what are you doing|not what i asked|doesn'?t work|didn'?t work|broken|"
+    r"still not|again\?|incorrect|bad|useless|wtf|why would|you said)\b",
+    re.I,
+)
+HARD_LEAK_PAT = re.compile(
+    r"Traceback|Exception|NoneType|tool call|mcp_|execute_code|send_path_degraded|api call failed|"
+    r"no first byte|provider.*failed|Missing Authentication",
+    re.I,
+)
+PATH_LEAK_PAT = re.compile(r"(?:/Users/[^\s`]+|/home/[^\s`]+|[A-Z]:\\\\Users\\\\[^\s`]+|\.hermes)", re.I)
+CODEX_PAT = re.compile(r"openai-codex|codex|gpt-5\.5", re.I)
+API_FAIL_PAT = re.compile(
+    r"api call failed|authenticationerror|missing authentication|http\s*(?:none|4\d\d|5\d\d)|"
+    r"no first byte|provider.*failed|non-retryable error",
+    re.I,
+)
+TOOL_FAIL_PAT = re.compile(
+    r"tool .*?(?:failed|returned error)|unknown tool|mcp_.*?(?:failed|error)|browser .*?stderr", re.I
+)
+FALLBACK_PAT = re.compile(r"fallback|switching to fallback|primary model failed", re.I)
+# RESTART_METRIC_FIX_V1: count only true restart ACTIONS, not the ~4 safe-restart
+# bookkeeping lines each restart emits (WAL checkpoint, verified healthy, trigger touched).
+RESTART_PAT = re.compile(
+    r"received sigterm|gateway restarted|restarting (?:hermes-)?gateway|restarting [\w.-]+\.service|"
+    r"crash[- ]?restart|watchdog restart",
+    re.I,
+)
+BENIGN_FALLBACK_PAT = re.compile(
+    r"Auto-discovered Telegram fallback IPs|Telegram fallback IPs active|"
+    r"providers\.fallback: unknown config keys ignored",
+    re.I,
+)
+RESTART_BOOKKEEPING_PAT = re.compile(
+    r"launched tool readiness post-restart probe|updated post-restart trigger|post-restart probe|"
+    r"post-restart trigger touched|verified healthy after restart|wal checkpoint|compile check passed|"
+    r"\.restart-trigger|readiness post-restart",
+    re.I,
+)
+# A sanitized, client-safe failure notice — the agent telling the user it
+# withheld raw provider/internal details — is the redaction WORKING, not a
+# leak. Matches the gateway's own "kept raw details out of chat" wording.
+BENIGN_CLIENT_NOTICE_PAT = re.compile(
+    r"kept raw provider details out of chat|check gateway logs for diagnostics|raw (?:provider |error )?"
+    r"details (?:were |have been )?(?:omitted|withheld|kept out)",
+    re.I,
+)
+SECRET_PAT = re.compile(
+    r"(?i)(sk-[a-z0-9_-]{12,}|api[_-]?key\s*[:=]\s*\S+|token\s*[:=]\s*\S+|password\s*[:=]\s*\S+|bearer\s+\S+)"
+)
+
+
+def now_utc() -> datetime:
+    return datetime.now(UTC)
+
+
+def iso(dt: datetime) -> str:
+    return dt.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+def parse_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    match = re.search(r"(20\d{2}-\d{2}-\d{2}[T ][0-9:.]+(?:Z|[+-]\d{2}:?\d{2})?)", text)
+    if match:
+        text = match.group(1)
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        if " " in text and "T" not in text:
+            text = text.replace(" ", "T", 1)
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC)
+    except Exception:
+        return None
+
+
+def snippet(text: str | None, limit: int = 220) -> str:
+    compact = " ".join((text or "").split())
+    compact = SECRET_PAT.sub("[REDACTED]", compact)
+    return compact[:limit] + ("..." if len(compact) > limit else "")
+
+
+def read_json(path: Path) -> Any:
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return None
+
+
+def evidence(
+    source: str,
+    summary: str,
+    timestamp: str | None = None,
+    path: str | None = None,
+    message_id: str | int | None = None,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"source": source, "summary": snippet(summary, 280)}
+    if timestamp:
+        item["timestamp"] = timestamp
+    if path:
+        item["path"] = path
+    if message_id is not None:
+        item["message_id"] = message_id
+    return item
+
+
+def table_columns(db: Path, table: str) -> list[str]:
+    if not db.exists():
+        return []
+    con = sqlite3.connect(str(db))
+    try:
+        return [row[1] for row in con.execute(f"PRAGMA table_info({table})").fetchall()]
+    finally:
+        con.close()
+
+
+def query(db: Path, sql: str, params: list[Any]) -> list[dict[str, Any]]:
+    if not db.exists():
+        return []
+    con = sqlite3.connect(str(db))
+    con.row_factory = sqlite3.Row
+    try:
+        return [dict(row) for row in con.execute(sql, params).fetchall()]
+    finally:
+        con.close()
+
+
+def transcript_db(home: Path) -> Path:
+    for rel in ("data/telegram-transcript.db", "telegram-transcript.db"):
+        path = home / rel
+        if path.exists():
+            return path
+    return home / "data/telegram-transcript.db"
+
+
+def conversation_memory_surface(home: Path) -> Path:
+    for rel in ("data/telegram-transcript.db", "telegram-transcript.db", "state.db", "lcm.db"):
+        path = home / rel
+        if path.exists():
+            return path
+    return home / "data/telegram-transcript.db"
+
+
+def effective_runtime_home(home: Path, contract: dict[str, Any]) -> Path:
+    if (home / "gateway_state.json").exists() or (home / "logs/gateway.log").exists():
+        return home
+    agent_id = str((contract.get("client") or {}).get("agent_id") or "").strip()
+    candidates = []
+    if agent_id:
+        candidates.append(home / "profiles" / agent_id)
+    candidates.append(home / "profiles" / "gateway")
+    for candidate in candidates:
+        if (candidate / "gateway_state.json").exists() or (candidate / "logs/gateway.log").exists():
+            return candidate
+    return home
+
+
+def load_messages(home: Path, since: datetime, limit: int) -> tuple[list[dict[str, Any]], str]:
+    db = transcript_db(home)
+    cols = table_columns(db, "telegram_messages")
+    if not cols:
+        return [], str(db)
+    id_col = "id" if "id" in cols else ("rowid" if "rowid" in cols else "ROWID")
+    rows = query(
+        db,
+        f"""
+        SELECT {id_col} AS id, chat_id, thread_id, message_id, timestamp, sender_name, role, text
+        FROM telegram_messages
+        WHERE timestamp >= ?
+        ORDER BY timestamp DESC, {id_col} DESC
+        LIMIT ?
+        """,
+        [since.isoformat().replace("+00:00", "+00:00"), limit],
+    )
+    return list(reversed(rows)), str(db)
+
+
+def scan_logs(home: Path, since: datetime) -> dict[str, list[dict[str, Any]]]:
+    result = {"codex": [], "api": [], "tool": [], "fallback": [], "restart": [], "error": [], "leak": []}
+    seen: dict[str, set[str]] = {key: set() for key in result}
+    paths = [
+        home / "logs/gateway.log",
+        home / "logs/gateway.error.log",
+        home / "logs/agent.log",
+        home / "logs/errors.log",
+        home / "logs/safe-restart.log",
+    ]
+
+    def add(category: str, line: str, stamp: str, path: Path) -> None:
+        key = re.sub(r"^20\d{2}[-T:0-9., Z]+\s*", "", line).strip()
+        key = re.sub(r"pid=\d+", "pid=*", key)
+        key = re.sub(r"ThreadPoolExecutor-\d+_\d+:\d+", "ThreadPoolExecutor-*", key)
+        if key in seen[category]:
+            return
+        seen[category].add(key)
+        result[category].append(evidence("log", line, stamp, str(path)))
+
+    for path in paths:
+        if not path.exists():
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()[-20000:]
+        except Exception:
+            continue
+        for line in lines:
+            ts = parse_ts(line)
+            if ts is None or ts < since:
+                continue
+            stamp = iso(ts)
+            if CODEX_PAT.search(line) and API_FAIL_PAT.search(line):
+                add("codex", line, stamp, path)
+            if API_FAIL_PAT.search(line):
+                add("api", line, stamp, path)
+            if TOOL_FAIL_PAT.search(line):
+                add("tool", line, stamp, path)
+            if FALLBACK_PAT.search(line) and not BENIGN_FALLBACK_PAT.search(line):
+                add("fallback", line, stamp, path)
+            if RESTART_PAT.search(line) and not RESTART_BOOKKEEPING_PAT.search(line):
+                add("restart", line, stamp, path)
+            if API_FAIL_PAT.search(line) or "Traceback" in line or "ERROR" in line or "Exception" in line:
+                add("error", line, stamp, path)
+            if SECRET_PAT.search(line):
+                add("leak", line, stamp, path)
+    return {key: vals[-20:] for key, vals in result.items()}
+
+
+def load_jsonl_since(paths: list[Path], since: datetime) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for path in paths:
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines()[-2000:]:
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            ts = parse_ts(row.get("ts") or row.get("timestamp") or row.get("created_at"))
+            if ts is None or ts >= since:
+                row["_source_path"] = str(path)
+                out.append(row)
+    return out[-100:]
+
+
+def latest_assistant_after(rows: list[dict[str, Any]], user_row: dict[str, Any]) -> dict[str, Any] | None:
+    user_ts = parse_ts(user_row.get("timestamp"))
+    if not user_ts:
+        return None
+    same_thread = (user_row.get("chat_id"), user_row.get("thread_id") or "")
+    for row in rows:
+        row_ts = parse_ts(row.get("timestamp"))
+        if row.get("role") == "assistant" and row_ts and row_ts >= user_ts:
+            if (row.get("chat_id"), row.get("thread_id") or "") == same_thread:
+                return row
+    return None
+
+
+def outcome_task_contract(contract: dict[str, Any] | None) -> dict[str, Any]:
+    """Return bounded task metadata only for one explicitly declared workflow.
+
+    This is a task signature for independent review, not a success verdict.
+    It deliberately contains contract constants rather than client transcript
+    content, and fails closed for hand-tuned or ambiguous contracts.
+    """
+    if not isinstance(contract, dict):
+        return {}
+    workflows = contract.get("expected_workflows")
+    if not isinstance(workflows, list) or len(workflows) != 1 or not isinstance(workflows[0], dict):
+        return {}
+    workflow = workflows[0]
+    declared = workflow.get("task_contract")
+    if not isinstance(declared, dict):
+        return {}
+    contract_id = str(contract.get("contract_id") or "").strip()
+    contract_version = str(contract.get("contract_version") or "").strip()
+    signature = {
+        "named_workflow": workflow.get("id"),
+        "intended_outcome": declared.get("intended_outcome"),
+        "required_tools": declared.get("required_tools"),
+        "deliverable": declared.get("deliverable"),
+        "independent_certifier": declared.get("independent_certifier"),
+    }
+    if (
+        not contract_id
+        or contract_version != "1"
+        or set(declared) != {key for key in GENERIC_TASK_CONTRACT if key != "named_workflow"}
+        or signature != GENERIC_TASK_CONTRACT
+    ):
+        return {}
+    return {
+        **GENERIC_TASK_CONTRACT,
+        "success_contract_reference": GENERIC_SUCCESS_CONTRACT_REFERENCE,
+    }
+
+
+def build_outcomes(
+    messages: list[dict[str, Any]], contract: dict[str, Any] | None = None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    user_msgs = [m for m in messages if m.get("role") == "user"]
+    if not user_msgs:
+        return (
+            [
+                {
+                    "summary": "No client activity found in review window.",
+                    "status": "no_client_activity",
+                    "client_visible": False,
+                    "evidence": [],
+                    "smoothness_impact": "none",
+                }
+            ],
+            [],
+            [],
+        )
+    outcomes = []
+    unanswered = []
+    negative = []
+    for msg in user_msgs:
+        text = msg.get("text") or ""
+        if NEG_PAT.search(text):
+            negative.append(msg)
+        if not ACTION_PAT.search(text):
+            continue
+        reply = latest_assistant_after(messages, msg)
+        ev = [evidence("telegram", text, msg.get("timestamp"), message_id=msg.get("message_id"))]
+        if reply:
+            ev.append(
+                evidence(
+                    "telegram", reply.get("text") or "", reply.get("timestamp"), message_id=reply.get("message_id")
+                )
+            )
+            status = "accomplished" if DONE_PAT.search(reply.get("text") or "") else "in_progress"
+            impact = "none" if status == "accomplished" else "low"
+        else:
+            status = "dropped"
+            impact = "high"
+            unanswered.append(msg)
+        outcome = {
+            "request_id": str(msg.get("id") or msg.get("message_id") or len(outcomes) + 1),
+            "summary": snippet(text, 160),
+            "status": status,
+            "client_visible": True,
+            "evidence": ev,
+            "smoothness_impact": impact,
+        }
+        outcome.update(outcome_task_contract(contract))
+        outcomes.append(outcome)
+    if not outcomes:
+        outcomes.append(
+            {
+                "summary": "Client messages were present, but no actionable asks matched the review pattern.",
+                "status": "accomplished",
+                "client_visible": True,
+                "evidence": [
+                    evidence(
+                        "telegram",
+                        user_msgs[-1].get("text") or "",
+                        user_msgs[-1].get("timestamp"),
+                        message_id=user_msgs[-1].get("message_id"),
+                    )
+                ],
+                "smoothness_impact": "none",
+            }
+        )
+    return outcomes[-20:], unanswered, negative
+
+
+def source_status(home: Path, contract: dict[str, Any]) -> tuple[list[str], list[str], list[str]]:
+    checked, missing, blind = [], [], []
+    signals = contract.get("signals", {})
+    for rel in signals.get("required_sources", []):
+        path = home / rel
+        if path.exists():
+            checked.append(rel)
+        elif rel == "data/telegram-transcript.db" and conversation_memory_surface(home).exists():
+            checked.append(f"{rel} (covered_by {conversation_memory_surface(home).name})")
+        else:
+            missing.append(rel)
+    for rel in signals.get("optional_sources", []):
+        if (home / rel).exists():
+            checked.append(rel)
+    for rel in missing:
+        if rel in {"state/telegram-delivery-proof/proofs.jsonl", "state/send-audit.jsonl"}:
+            blind.append(f"No delivery proof source at {rel}; delivery claims may be under-observed.")
+        elif rel.endswith(".db"):
+            blind.append(f"Missing database source {rel}; memory/transcript checks may be incomplete.")
+    return checked, missing, blind
+
+
+def capability_results(
+    home: Path, contract: dict[str, Any], messages: list[dict[str, Any]], sends: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    state = read_json(home / "gateway_state.json") or read_json(home / "state/gateway_state.json") or {}
+    platforms = state.get("platforms") or {}
+    expected = []
+    broken = []
+    conditional = []
+    for cap in contract.get("capabilities", {}).get("expected", []):
+        status = "healthy"
+        reason = "Expected capability is available or not required by today’s evidence."
+        ev = []
+        if cap == "telegram":
+            tel = platforms.get("telegram") if isinstance(platforms, dict) else None
+            tel_state = tel.get("state") if isinstance(tel, dict) else None
+            status = "healthy" if tel_state == "connected" else "broken"
+            reason = f"telegram platform state={tel_state!r}"
+            ev = [evidence("gateway_state", reason, path=str(home / "gateway_state.json"))]
+        elif cap == "gateway_health":
+            gstate = state.get("gateway_state") or state.get("state")
+            status = "healthy" if gstate == "running" else "broken"
+            reason = f"gateway state={gstate!r}"
+            ev = [evidence("gateway_state", reason, path=str(home / "gateway_state.json"))]
+        elif cap == "local_conversation_memory":
+            db = conversation_memory_surface(home)
+            status = "healthy" if db.exists() else "broken"
+            if db.exists() and db.name != "telegram-transcript.db":
+                reason = f"conversation memory surface exists via {db.name}"
+            else:
+                reason = f"transcript db {'exists' if db.exists() else 'missing'}"
+            ev = [evidence("filesystem", reason, path=str(db))]
+        elif cap == "delivery_proof_for_client_visible_sends":
+            proof = home / "state/telegram-delivery-proof/proofs.jsonl"
+            send_audit = home / "state/send-audit.jsonl"
+            status = "healthy" if proof.exists() or send_audit.exists() or not sends else "broken"
+            reason = (
+                "delivery proof source present or no sends observed"
+                if status == "healthy"
+                else "client-visible sends observed but no proof source exists"
+            )
+            ev = [evidence("delivery", reason, path=str(proof if proof.exists() else send_audit))]
+        elif cap == "artifact_delivery_when_requested":
+            artifact_requested = any(
+                re.search(r"\b(pdf|file|artifact|attach|image|docx|xlsx|csv)\b", m.get("text") or "", re.I)
+                for m in messages
+            )
+            roots = [home / "artifacts", home / "output"]
+            status = "healthy" if (not artifact_requested or any(p.exists() for p in roots)) else "degraded"
+            reason = (
+                "artifact path exists or no artifact request observed"
+                if status == "healthy"
+                else "artifact request observed but no artifact/output directory found"
+            )
+            ev = [evidence("filesystem", reason, path=str(roots[0]))]
+        elif cap == "codex_or_primary_model_with_fallback":
+            cfg = home / "config.yaml"
+            status = "healthy" if cfg.exists() else "degraded"
+            reason = "config.yaml present for model/fallback inspection" if cfg.exists() else "config.yaml missing"
+            ev = [evidence("config", reason, path=str(cfg))]
+        item = {"capability": cap, "status": status, "reason": reason, "evidence": ev}
+        expected.append(item)
+        if status in {"broken", "degraded"}:
+            broken.append(item)
+    for cap in contract.get("capabilities", {}).get("conditional", []):
+        conditional.append(
+            {
+                "capability": cap,
+                "status": "not_checked",
+                "reason": "conditional capability; only checked when daily evidence invokes it",
+                "evidence": [],
+            }
+        )
+    return expected, broken, conditional
+
+
+def is_client_visible_leak(text: str, contract: dict[str, Any]) -> bool:
+    if SECRET_PAT.search(text):
+        return True
+    # A sanitized, client-safe failure notice (the agent telling the user it
+    # withheld raw provider/internal details) is the redaction WORKING, not a
+    # leak. Exempt it BEFORE generic pattern checks, but only when no harder
+    # leak signal (stack trace, tool/mcp marker, or real filesystem path) is
+    # present, so a genuine leak that happens to include the phrase still flags.
+    if BENIGN_CLIENT_NOTICE_PAT.search(text) and not re.search(
+        r"Traceback|Exception|NoneType|mcp_|execute_code|/Users/|/home/|\.hermes", text, re.I
+    ):
+        return False
+    policy = contract.get("visibility_policy", {})
+    forbidden = [p for p in policy.get("forbidden_client_visible_patterns", []) if p]
+    if any(re.search(pattern, text, re.I) for pattern in forbidden):
+        return True
+    if HARD_LEAK_PAT.search(text):
+        return True
+    if not PATH_LEAK_PAT.search(text):
+        return False
+    allowed_terms = [term.lower() for term in policy.get("allowed_client_visible_internal_terms", [])]
+    allowed_prefixes = policy.get("allowed_path_prefixes", [])
+    lowered = text.lower()
+    if any(term and term in lowered for term in allowed_terms):
+        return False
+    paths = PATH_LEAK_PAT.findall(text)
+    if paths and all(any(path.startswith(prefix) for prefix in allowed_prefixes) for path in paths):
+        return False
+    return True
+
+
+def repeated_request_candidates(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        words = re.findall(r"[a-z0-9']+", (msg.get("text") or "").lower())
+        words = [
+            w
+            for w in words
+            if len(w) > 3 and w not in {"please", "could", "would", "that", "this", "with", "from", "have", "need"}
+        ]
+        if words:
+            normalized.append(" ".join(words[:8]))
+    counts = Counter(normalized)
+    out = []
+    for phrase, count in counts.most_common(5):
+        if count >= 3:
+            out.append(
+                {
+                    "title": f"Repeated request pattern: {phrase}",
+                    "trigger": f"Observed {count} similar client messages in review window.",
+                    "recommendation": (
+                        "Skillify this repeated request pattern into a deterministic workflow or reusable "
+                        "prompt/tool path."
+                    ),
+                    "priority": "medium",
+                    "evidence": [evidence("telegram", phrase)],
+                }
+            )
+    return out
+
+
+def unique_paths(items: list[dict[str, Any]]) -> list[str]:
+    paths = []
+    for item in items:
+        path = item.get("path")
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def build_audit_directions(
+    scores: dict[str, int],
+    friction: dict[str, Any],
+    escalations: list[dict[str, Any]],
+    expected_broken: list[dict[str, Any]],
+    missing_required: list[str],
+    outcomes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    score_drivers: list[dict[str, Any]] = []
+    source_map: list[dict[str, Any]] = []
+    next_steps: list[dict[str, Any]] = []
+    implementation_candidates: list[dict[str, Any]] = []
+    fallback_evidence = friction["fallback_events"]["examples"]
+    restart_evidence = friction["restarts"]["examples"]
+    tool_evidence = friction["tool_failures"]["examples"]
+    model_evidence = friction["codex_failures"]["examples"] + friction["api_failures"]["examples"]
+    delivery_evidence = friction["delivery_failures"]["examples"]
+    unanswered_evidence = friction["unanswered_client_messages"]["examples"]
+
+    if scores["client_smoothness"] < 85:
+        score_drivers.append(
+            {
+                "metric": "client_smoothness",
+                "score": scores["client_smoothness"],
+                "why": (
+                    "Smoothness is low when the client had negative feedback, unanswered asks, or repeated "
+                    "fallback/tool friction that likely made the day feel harder than it should."
+                ),
+                "evidence": (fallback_evidence + tool_evidence + unanswered_evidence)[:8],
+            }
+        )
+        next_steps.append(
+            {
+                "priority": "high",
+                "title": "Audit the client smoothness drop before changing runtime behavior",
+                "why": (
+                    "The report says the client outcome may have completed, but the agent had too much visible "
+                    "or operational friction around the work."
+                ),
+                "how_to_audit": [
+                    "Read outcomes[].evidence for the client asks and replies that drove the day.",
+                    "Compare friction.fallback_events and friction.tool_failures timestamps with those outcomes.",
+                    "Classify whether friction was invisible background noise, slowed the client down, or forced "
+                    "the client to manage the agent.",
+                ],
+                "do_not_auto_implement": True,
+                "evidence": (fallback_evidence + tool_evidence + unanswered_evidence)[:8],
+            }
+        )
+
+    if scores["ops_health"] < 85:
+        score_drivers.append(
+            {
+                "metric": "ops_health",
+                "score": scores["ops_health"],
+                "why": (
+                    "Ops health is low because restart, fallback, API, or tool-failure pressure was high during "
+                    "the review window."
+                ),
+                "evidence": (restart_evidence + fallback_evidence + tool_evidence + model_evidence)[:8],
+            }
+        )
+        next_steps.append(
+            {
+                "priority": "high",
+                "title": "Cluster restart/fallback/tool failures into a root-cause bucket",
+                "why": (
+                    "This distinguishes harmless restart-log noise from a real runtime problem that deserves "
+                    "repair or a Skillify workflow."
+                ),
+                "how_to_audit": [
+                    "Group friction examples by source path and timestamp proximity.",
+                    "Check whether restarts were operator-initiated, watchdog-driven, or crash-driven.",
+                    "Check whether tool failures are one capability, one missing auth surface, or many unrelated "
+                    "failures.",
+                    "Only propose implementation after the cluster is classified.",
+                ],
+                "do_not_auto_implement": True,
+                "evidence": (restart_evidence + fallback_evidence + tool_evidence + model_evidence)[:8],
+            }
+        )
+        implementation_candidates.append(
+            {
+                "title": "Runtime friction classifier",
+                "trigger": "Repeated restart/fallback/tool-failure pressure appears in nightly review.",
+                "guardrail": "Candidate only; first verify whether the failures affected client-visible outcomes.",
+                "evidence": (restart_evidence + fallback_evidence + tool_evidence)[:8],
+            }
+        )
+
+    if scores["outcome_completion"] < 100 or unanswered_evidence:
+        score_drivers.append(
+            {
+                "metric": "outcome_completion",
+                "score": scores["outcome_completion"],
+                "why": "Outcome completion drops when actionable client asks are unanswered, dropped, or blocked.",
+                "evidence": unanswered_evidence[:8],
+            }
+        )
+        next_steps.append(
+            {
+                "priority": "high",
+                "title": "Resolve open client asks and backfill promise tracking",
+                "why": "Unanswered asks are client-harm risk and should be handled before deeper optimization work.",
+                "how_to_audit": [
+                    "Open friction.unanswered_client_messages examples.",
+                    "Find the latest assistant response in the same chat/thread.",
+                    "Send or queue a follow-up only after confirming the current state.",
+                ],
+                "do_not_auto_implement": True,
+                "evidence": unanswered_evidence[:8],
+            }
+        )
+
+    if expected_broken:
+        score_drivers.append(
+            {
+                "metric": "capability_fit",
+                "score": scores["capability_fit"],
+                "why": (
+                    "Capability fit drops only for capabilities in this client contract, not broad fleet MCP "
+                    "availability."
+                ),
+                "evidence": [ev for cap in expected_broken for ev in cap.get("evidence", [])][:8],
+            }
+        )
+        next_steps.append(
+            {
+                "priority": "medium",
+                "title": "Repair or update only contract-required capabilities",
+                "why": "Avoid noisy generic MCP sweeps; this should be tied to the client’s actual workflows.",
+                "how_to_audit": [
+                    "Review capability_contract.expected_broken.",
+                    "Confirm the capability is still required by expected_workflows.",
+                    "If it is not required, update the client contract instead of fixing unused tooling.",
+                ],
+                "do_not_auto_implement": True,
+                "evidence": [ev for cap in expected_broken for ev in cap.get("evidence", [])][:8],
+            }
+        )
+
+    if missing_required:
+        next_steps.append(
+            {
+                "priority": "medium",
+                "title": "Close audit coverage gaps",
+                "why": (
+                    "Missing sources reduce confidence in the review and should be fixed before trusting green reports."
+                ),
+                "how_to_audit": [
+                    "Review coverage.sources_missing and coverage.blind_spots.",
+                    "Confirm whether each missing source should exist for this client runtime.",
+                    "Update the contract when a source is intentionally absent.",
+                ],
+                "do_not_auto_implement": True,
+                "evidence": [{"source": "coverage", "summary": src} for src in missing_required[:8]],
+            }
+        )
+
+    if fallback_evidence or restart_evidence or tool_evidence:
+        source_map.append(
+            {
+                "category": "runtime_friction",
+                "sources": unique_paths(fallback_evidence + restart_evidence + tool_evidence),
+                "why": (
+                    "Primary evidence for fallback storms, restart pressure, and tool failures that lower "
+                    "smoothness/ops health."
+                ),
+            }
+        )
+    if model_evidence:
+        source_map.append(
+            {
+                "category": "model_api_friction",
+                "sources": unique_paths(model_evidence),
+                "why": "Primary evidence for Codex/API failures and fallback behavior.",
+            }
+        )
+    if delivery_evidence:
+        source_map.append(
+            {
+                "category": "delivery_proof",
+                "sources": unique_paths(delivery_evidence),
+                "why": "Evidence for draft-only or failed client-visible sends.",
+            }
+        )
+    source_map.append(
+        {
+            "category": "client_outcomes",
+            "sources": sorted(
+                {ev.get("source", "telegram") for outcome in outcomes for ev in outcome.get("evidence", [])}
+            ),
+            "why": "Transcript-backed view of what the client tried to accomplish and whether the agent handled it.",
+        }
+    )
+
+    if not next_steps:
+        next_steps.append(
+            {
+                "priority": "low",
+                "title": "No dig-in required unless the operator wants a qualitative review",
+                "why": "Scores and contract-required capabilities are healthy.",
+                "how_to_audit": ["Spot-check outcomes and skillify_candidates for compounding opportunities."],
+                "do_not_auto_implement": True,
+                "evidence": [],
+            }
+        )
+
+    return {
+        "score_drivers": score_drivers,
+        "source_map": source_map,
+        "next_best_steps": next_steps,
+        "implementation_candidates": implementation_candidates,
+        "dig_in_questions": [
+            "Was the low score caused by client-visible friction or internal-only noise?",
+            "Which source path has the densest cluster of failures?",
+            "Did any failure block a client outcome, or did fallbacks recover cleanly?",
+            "Is this a one-off repair, a Skillify candidate, or a candidate for a delegated worker/employee lane?",
+        ],
+    }
+
+
+def build_cleanup_plan(
+    scores: dict[str, int],
+    friction: dict[str, Any],
+    expected_broken: list[dict[str, Any]],
+    missing_required: list[str],
+) -> dict[str, Any]:
+    fallback_evidence = friction["fallback_events"]["examples"]
+    restart_evidence = friction["restarts"]["examples"]
+    tool_evidence = friction["tool_failures"]["examples"]
+    model_evidence = friction["codex_failures"]["examples"] + friction["api_failures"]["examples"]
+    unanswered_evidence = friction["unanswered_client_messages"]["examples"]
+    proposals: list[dict[str, Any]] = []
+
+    if scores["client_smoothness"] < 85 or scores["ops_health"] < 85:
+        proposals.append(
+            {
+                "id": "classify-runtime-friction",
+                "title": "Classify runtime friction before repair",
+                "owner": "client_agent",
+                "scope": "local_runtime",
+                "risk": "low",
+                "reason": (
+                    "The client agent has the freshest local evidence and can group failures without changing code, "
+                    "config, logs, or client-visible state."
+                ),
+                "preconditions": [
+                    "Read-only classification only.",
+                    "No restarts, deletes, credential changes, or client-visible sends.",
+                    "Classify each cluster as client-visible, latency-only, internal-only, or stale historical noise.",
+                ],
+                "steps": [
+                    "Group restart, fallback, and tool-failure evidence by source path and timestamp proximity.",
+                    "Mark whether each group overlaps with a client outcome timestamp.",
+                    "Return the proposed root-cause bucket and confidence level for operator review.",
+                ],
+                "approval_required": True,
+                "auto_execute": False,
+                "evidence": (restart_evidence + fallback_evidence + tool_evidence + model_evidence)[:8],
+            }
+        )
+        proposals.append(
+            {
+                "id": "prepare-runtime-repair-candidate",
+                "title": "Prepare, but do not execute, runtime repair candidate",
+                "owner": "control_plane_agent",
+                "scope": "control_plane",
+                "risk": "medium",
+                "reason": (
+                    "Runtime/code/config fixes can affect multiple agents or restart behavior, so they belong to the "
+                    "control plane after classification."
+                ),
+                "preconditions": [
+                    "Client-agent classification identifies a concrete root cause.",
+                    "Operator confirms the issue is not harmless internal-only noise.",
+                    "Patch plan includes rollback and validation commands.",
+                ],
+                "steps": [
+                    "Map the classified cluster to a specific script, config, dependency, or credential surface.",
+                    "Draft a minimal repair plan with validation commands.",
+                    "Wait for explicit approval before changing files or restarting services.",
+                ],
+                "approval_required": True,
+                "auto_execute": False,
+                "evidence": (restart_evidence + fallback_evidence + tool_evidence + model_evidence)[:8],
+            }
+        )
+
+    if expected_broken:
+        proposals.append(
+            {
+                "id": "reconcile-contract-capabilities",
+                "title": "Reconcile broken expected capabilities with the client contract",
+                "owner": "control_plane_agent",
+                "scope": "client_contract",
+                "risk": "medium",
+                "reason": (
+                    "Broken expected capabilities should either be repaired or removed from the contract if the "
+                    "workflow no longer requires them."
+                ),
+                "preconditions": [
+                    "Confirm the capability is still required by an expected workflow.",
+                    "Do not run broad MCP or auth sweeps unrelated to this client contract.",
+                ],
+                "steps": [
+                    "Review capability_contract.expected_broken.",
+                    "Tie each broken capability to a workflow or mark it as stale contract scope.",
+                    "Prepare either a targeted repair plan or a contract update for approval.",
+                ],
+                "approval_required": True,
+                "auto_execute": False,
+                "evidence": [ev for cap in expected_broken for ev in cap.get("evidence", [])][:8],
+            }
+        )
+
+    if missing_required:
+        proposals.append(
+            {
+                "id": "repair-audit-coverage",
+                "title": "Repair or intentionally suppress missing audit sources",
+                "owner": "control_plane_agent",
+                "scope": "client_contract",
+                "risk": "low",
+                "reason": (
+                    "Missing sources reduce confidence in the report, but may be valid if the client runtime "
+                    "intentionally lacks that surface."
+                ),
+                "preconditions": [
+                    "Confirm whether each missing source should exist on this runtime.",
+                    "Do not create fake sources to satisfy the schema.",
+                ],
+                "steps": [
+                    "Inspect coverage.sources_missing and coverage.blind_spots.",
+                    "For each source, choose repair instrumentation or mark optional in the contract.",
+                    "Validate the next report shows either restored coverage or an intentional suppression.",
+                ],
+                "approval_required": True,
+                "auto_execute": False,
+                "evidence": [{"source": "coverage", "summary": src} for src in missing_required[:8]],
+            }
+        )
+
+    if unanswered_evidence:
+        proposals.append(
+            {
+                "id": "prepare-client-followup",
+                "title": "Prepare client follow-up for unresolved asks",
+                "owner": "operator",
+                "scope": "client_visible_followup",
+                "risk": "high",
+                "reason": (
+                    "Client-visible follow-up should be reviewed by the operator before sending or durable-store "
+                    "backfill."
+                ),
+                "preconditions": [
+                    "Confirm the ask is still unresolved.",
+                    "Draft the message and durable backfill plan before sending.",
+                ],
+                "steps": [
+                    "Open the transcript evidence for unanswered asks.",
+                    "Draft a concise follow-up or recovery note.",
+                    "After approval and send, backfill durable conversation stores.",
+                ],
+                "approval_required": True,
+                "auto_execute": False,
+                "evidence": unanswered_evidence[:8],
+            }
+        )
+
+    if not proposals:
+        proposals.append(
+            {
+                "id": "no-cleanup-needed",
+                "title": "No cleanup proposed",
+                "owner": "client_agent",
+                "scope": "local_runtime",
+                "risk": "low",
+                "reason": (
+                    "The report did not find low scores, broken expected capabilities, missing required sources, or "
+                    "unresolved asks."
+                ),
+                "preconditions": ["Continue store-only reporting."],
+                "steps": ["No action."],
+                "approval_required": False,
+                "auto_execute": False,
+                "evidence": [],
+            }
+        )
+
+    return {
+        "mode": "propose_only",
+        "responsibility_model": [
+            {
+                "owner": "client_agent",
+                "responsibility": (
+                    "Collect local evidence, classify local friction, and propose reversible local cleanup without "
+                    "mutating runtime state."
+                ),
+            },
+            {
+                "owner": "control_plane_agent",
+                "responsibility": (
+                    "Own cross-client patterns, shared code/config repairs, contract changes, validation, and any "
+                    "restart-affecting plan."
+                ),
+            },
+            {
+                "owner": "operator",
+                "responsibility": (
+                    "Approve repairs, decide whether client-visible follow-up is needed, and authorize any send, "
+                    "restart, destructive cleanup, or credential change."
+                ),
+            },
+        ],
+        "guardrails": [
+            "Propose-only: generated reports must not modify files, restart services, send messages, rotate logs, "
+            "or change credentials.",
+            "Client agents may classify their own evidence; control-plane agents handle shared code/runtime fixes.",
+            "Every proposed cleanup must carry evidence, owner, risk, preconditions, and explicit "
+            "approval_required status.",
+        ],
+        "proposals": proposals,
+    }
+
+
+def summarize_friction(friction: dict[str, Any]) -> str:
+    return (
+        ", ".join(f"{key}={value.get('count', 0)}" for key, value in friction.items() if value.get("count", 0))
+        or "no friction counters tripped"
+    )
+
+
+def build_doc_review_packet(
+    contract: dict[str, Any],
+    home: Path,
+    report_id: str,
+    report_path: Path,
+    level: str,
+    scores: dict[str, int],
+    friction: dict[str, Any],
+    cleanup_plan: dict[str, Any],
+    audit_directions: dict[str, Any],
+    expected_broken: list[dict[str, Any]],
+) -> dict[str, Any]:
+    client = contract["client"]
+    client_id = client["client_id"]
+    agent_id = client["agent_id"]
+    host = client.get("host", "")
+    report_ref = f"ssh {host} cat {report_path}" if host else str(report_path)
+    top_drivers = audit_directions.get("score_drivers", [])[:3]
+    driver_text = "; ".join(f"{d['metric']}={d['score']}" for d in top_drivers) or "no low score drivers"
+    subject = f"[Client Day Review][{client_id}/{agent_id}][{level.upper()}] proposed fixes need approval"
+    body = (
+        f"{client['client_name']} / {client['agent_name']} report {report_id} is {level}. "
+        f"Scores: overall={scores['overall']}, smoothness={scores['client_smoothness']}, "
+        f"ops={scores['ops_health']}, completion={scores['outcome_completion']}, "
+        f"capability={scores['capability_fit']}. "
+        f"Drivers: {driver_text}. Friction: {summarize_friction(friction)}. Report: {report_ref}"
+    )
+    cards: list[dict[str, Any]] = []
+    questions = [
+        "How wide is this bug or failure mode?",
+        "How widespread is it across other clients?",
+        "Is the root cause in hermes-golden or only this client runtime?",
+        "Does every client have the affected code/config/capability?",
+        "What is initially going on here, before any repair is attempted?",
+    ]
+    required_checks = [
+        "Read the source report package and evidence snippets first.",
+        "Search hermes-golden for the implicated script/config names if evidence points to shared code.",
+        "Sample recent day-review reports or logs for at least two other clients before calling it fleet-wide.",
+        "Classify blast radius as single-client, cohort, fleet-wide, or unknown.",
+        "Prepare validation and rollback steps before asking for approval to implement.",
+    ]
+    initial_answers = [
+        (
+            f"Initial scope: {client_id}/{agent_id} local report only; fleet-wide impact is unproven until Doc "
+            "researches it."
+        ),
+        (
+            "Golden repo involvement: unknown from local report alone; Doc should verify by mapping evidence paths "
+            "to shared repo code/config."
+        ),
+        (
+            "Every-client impact: unknown; do not assume until matching signals appear in other client reports or "
+            "shared code is confirmed."
+        ),
+        f"Initial read: {summarize_friction(friction)} with no auto-execution requested.",
+    ]
+    for proposal in cleanup_plan.get("proposals", []):
+        if proposal.get("id") == "no-cleanup-needed":
+            continue
+        cards.append(
+            {
+                "id": f"cdr-{report_id}-{proposal['id']}",
+                "title": f"Client Day-Review Fix Approval: {proposal['title']}",
+                "client": client_id,
+                "severity": level,
+                "proposed_fix": {
+                    "owner": proposal["owner"],
+                    "action": proposal["title"],
+                    "risk": proposal["risk"],
+                    "approval_required": proposal["approval_required"],
+                    "auto_execute": proposal["auto_execute"],
+                },
+                "initial_assessment": {
+                    "what_is_going_on": proposal["reason"],
+                    "client_impact": (
+                        "No client-visible harm was detected in this report; low scores currently indicate friction "
+                        "requiring classification."
+                    ),
+                    "confidence": "medium" if proposal.get("evidence") else "low",
+                },
+                "blast_radius_research": {
+                    "questions_to_answer": questions,
+                    "initial_answers": initial_answers,
+                    "required_checks": required_checks,
+                },
+                "approval_options": ["approve_research_only", "hold", "deny", "request_more_context"],
+                "source_report": report_ref,
+                "evidence": proposal.get("evidence", [])[:8],
+            }
+        )
+    return {
+        "envelope": {
+            "type": "decision_packet",
+            "from": agent_id,
+            "to": "doc",
+            "priority": "p1" if level in {"yellow", "red"} else "p2",
+            "classification": "client_internal",
+            "scope": f"client:{client_id}",
+            "subject": subject,
+            "body": body,
+            "action": (
+                "Investigate this low report automatically; research blast radius and only return a concise "
+                "proposed-change approval card if repair is warranted."
+            ),
+            "why_you": (
+                "Doc owns investigation, cross-client comparison, and repair proposal packaging for Deacon approval."
+            ),
+            "constraint": (
+                "Propose-only. Do not modify files, restart services, send client-visible messages, or change "
+                "credentials without approval."
+            ),
+            "done_when": "",
+            "refs": [report_ref],
+            "requires_ack": True,
+        },
+        "morning_digest": body
+        + " Doc should investigate automatically; no Deacon approval is needed until there is a concrete "
+        "proposed change.",
+        "approval_cards": cards,
+    }
+
+
+# --- cost-aware reflection: token economics + Script-or-Not + Printing Press --------------
+# Self-contained on purpose: hermes-fleet-day-review.py scp's ONLY this file to each client
+# host and runs it from /tmp, so this cannot import a sibling module. Zero-token — pure
+# measurement over the agent's own state.db. Net-new vs the client-quality review above.
+_COST_CTX_IN_MIN = 4000  # input tokens that count as "expensive context loaded"
+_COST_CTX_OUT_MAX = 50  # output tokens at/below this = effectively no output
+_COST_LOOP_REPEAT_MIN = 3  # identical consecutive tool calls before flagging a loop
+_COST_NGRAM_MIN = 2
+_COST_NGRAM_MAX = 4
+_COST_SEQ_OCC_MIN = 3  # total occurrences before a tool-sequence is a candidate
+_COST_ARG_TRUNC = 120
+_COST_TOP_N = 8
+_COST_SESSION_COLUMNS = (
+    "id",
+    "source",
+    "model",
+    "started_at",
+    "ended_at",
+    "message_count",
+    "tool_call_count",
+    "input_tokens",
+    "output_tokens",
+    "cache_read_tokens",
+    "cache_write_tokens",
+    "reasoning_tokens",
+    "estimated_cost_usd",
+    "actual_cost_usd",
+    "title",
+)
+
+
+def _cost_coerce_epoch(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _cost_extract_tool_calls(raw: str) -> list[tuple[str, str]]:
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+    out = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        fn = item.get("function") if isinstance(item.get("function"), dict) else {}
+        name = fn.get("name") or item.get("name") or item.get("tool_name")
+        if not name:
+            continue
+        args = fn.get("arguments")
+        if args is None:
+            args = item.get("arguments")
+        if not isinstance(args, str):
+            args = json.dumps(args, sort_keys=True) if args is not None else ""
+        out.append((str(name), args))
+    return out
+
+
+def _cost_load_sessions(con: sqlite3.Connection, since: float, until: float) -> list[dict[str, Any]]:
+    cur = con.execute("SELECT %s FROM sessions" % ", ".join(_COST_SESSION_COLUMNS))
+    rows = []
+    for raw in cur.fetchall():
+        rec = dict(zip(_COST_SESSION_COLUMNS, raw))
+        started = _cost_coerce_epoch(rec.get("started_at"))  # epoch or ISO; never trust SQL compare
+        if started is None or started < since or started > until:
+            continue
+        for k in (
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "reasoning_tokens",
+            "message_count",
+            "tool_call_count",
+        ):
+            rec[k] = int(rec.get(k) or 0)
+        for k in ("estimated_cost_usd", "actual_cost_usd"):
+            rec[k] = float(rec.get(k) or 0.0)
+        rec["_started"] = started
+        rows.append(rec)
+    rows.sort(key=lambda r: r["_started"])
+    return rows
+
+
+def _cost_load_messages(con: sqlite3.Connection, session_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+    if not session_ids:
+        return {}
+    by: dict[str, list[dict[str, Any]]] = {sid: [] for sid in session_ids}
+    ph = ",".join("?" for _ in session_ids)
+    cur = con.execute(
+        "SELECT session_id, role, content, tool_calls FROM messages "
+        "WHERE session_id IN (%s) ORDER BY session_id, timestamp ASC" % ph,
+        list(session_ids),
+    )
+    for sid, role, content, tool_calls in cur.fetchall():
+        by.setdefault(sid, []).append(
+            {"role": role or "", "has_content": bool((content or "").strip()), "tool_calls": tool_calls or ""}
+        )
+    return by
+
+
+def _cost_aggregate(sessions: list[dict[str, Any]], msgs: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    tin = sum(s["input_tokens"] for s in sessions)
+    tout = sum(s["output_tokens"] for s in sessions)
+    reasoning = sum(s["reasoning_tokens"] for s in sessions)
+    cost = sum(s["actual_cost_usd"] or s["estimated_cost_usd"] for s in sessions)
+    turns = output_turns = waste_turns = 0
+    for ms in msgs.values():
+        for m in ms:
+            if m["role"] != "assistant":
+                continue
+            turns += 1
+            if m["has_content"] or m["tool_calls"]:
+                output_turns += 1
+            else:
+                waste_turns += 1
+    by_model: dict[str, Any] = {}
+    for s in sessions:
+        a = by_model.setdefault(
+            s.get("model") or "unknown", {"sessions": 0, "tokens_in": 0, "tokens_out": 0, "est_cost_usd": 0.0}
+        )
+        a["sessions"] += 1
+        a["tokens_in"] += s["input_tokens"]
+        a["tokens_out"] += s["output_tokens"]
+        a["est_cost_usd"] = round(a["est_cost_usd"] + (s["actual_cost_usd"] or s["estimated_cost_usd"]), 6)
+    top = sorted(sessions, key=lambda s: s["input_tokens"] + s["output_tokens"], reverse=True)[:_COST_TOP_N]
+    return {
+        "sessions": len(sessions),
+        "tokens_in": tin,
+        "tokens_out": tout,
+        "reasoning_tokens": reasoning,
+        "total_tokens": tin + tout + reasoning,
+        "est_cost_usd": round(cost, 6),
+        "turns": turns,
+        "output_turns": output_turns,
+        "waste_turns": waste_turns,
+        "waste_ratio": round(waste_turns / turns, 4) if turns else 0.0,
+        "by_model": by_model,
+        "top_cost_sessions": [
+            {
+                "id": s["id"],
+                "title": (s.get("title") or "")[:80],
+                "model": s.get("model") or "unknown",
+                "tokens_in": s["input_tokens"],
+                "tokens_out": s["output_tokens"],
+                "tool_calls": s["tool_call_count"],
+                "est_cost_usd": round(s["actual_cost_usd"] or s["estimated_cost_usd"], 6),
+            }
+            for s in top
+        ],
+    }
+
+
+def _cost_detect_waste(sessions: list[dict[str, Any]], msgs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    findings = []
+    for s in sessions:
+        if (
+            s["input_tokens"] >= _COST_CTX_IN_MIN
+            and s["output_tokens"] <= _COST_CTX_OUT_MAX
+            and s["tool_call_count"] == 0
+        ):
+            findings.append(
+                {
+                    "pattern": "context_no_output",
+                    "evidence": "session %s '%s' loaded %d input tokens, produced %d output, 0 tool calls"
+                    % (s["id"], (s.get("title") or "")[:60], s["input_tokens"], s["output_tokens"]),
+                    "session_id": s["id"],
+                    "est_wasted_tokens": s["input_tokens"],
+                    "proposed_fix": "trim system/context injection or gate this trigger",
+                }
+            )
+    for sid, ms in msgs.items():
+        seq: list[tuple[str, str]] = []
+        for m in ms:
+            if m["role"] == "assistant":
+                seq.extend(_cost_extract_tool_calls(m["tool_calls"]))
+        run_key, run_len = None, 0
+        for pair in seq + [(None, None)]:
+            if pair == run_key:
+                run_len += 1
+            else:
+                if run_key and run_key[0] is not None and run_len >= _COST_LOOP_REPEAT_MIN:
+                    findings.append(
+                        {
+                            "pattern": "loop_waste",
+                            "evidence": "session %s repeated tool '%s' identically %d times in a row"
+                            % (sid, run_key[0], run_len),
+                            "session_id": sid,
+                            "tool": run_key[0],
+                            "repeats": run_len,
+                            "sample_args": (run_key[1] or "")[:_COST_ARG_TRUNC],
+                            "est_wasted_tokens": None,
+                            "proposed_fix": (
+                                "add a convergence/exit check or replace the loop with a deterministic script"
+                            ),
+                        }
+                    )
+                run_key, run_len = pair, 1
+    findings.sort(key=lambda f: f.get("est_wasted_tokens") or 0, reverse=True)
+    return findings[:_COST_TOP_N]
+
+
+def _cost_detect_script_candidates(msgs: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    seqs, args_by = {}, {}
+    for sid, ms in msgs.items():
+        names = []
+        for m in ms:
+            if m["role"] != "assistant":
+                continue
+            for name, args in _cost_extract_tool_calls(m["tool_calls"]):
+                names.append(name)
+                args_by.setdefault(name, []).append(args)
+        seqs[sid] = names
+    counts: dict[tuple, dict[str, Any]] = {}
+    for sid, names in seqs.items():
+        for n in range(_COST_NGRAM_MIN, _COST_NGRAM_MAX + 1):
+            for i in range(len(names) - n + 1):
+                gram = tuple(names[i : i + n])
+                rec = counts.setdefault(gram, {"occ": 0, "sessions": set()})
+                rec["occ"] += 1
+                rec["sessions"].add(sid)
+    cands = []
+    for gram, rec in counts.items():
+        if rec["occ"] < _COST_SEQ_OCC_MIN:
+            continue
+        determinism, sample = "unknown", ""
+        if len(gram) == 1:
+            seen = args_by.get(gram[0], [])
+            if seen:
+                sample = (seen[0] or "")[:_COST_ARG_TRUNC]
+                determinism = "deterministic" if len(set(seen)) == 1 else "variable_args"
+        cands.append(
+            {
+                "workflow": " -> ".join(gram),
+                "length": len(gram),
+                "occurrences": rec["occ"],
+                "distinct_sessions": len(rec["sessions"]),
+                "determinism_hint": determinism,
+                "sample_args": sample,
+            }
+        )
+    cands.sort(key=lambda c: (c["distinct_sessions"], c["occurrences"], c["length"]), reverse=True)
+    return cands[:_COST_TOP_N]
+
+
+def _cost_provisional_verdicts(
+    script_candidates: list[dict[str, Any]], waste_findings: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Deterministic Script-or-Not verdicts. The agent's own model (in hermes-self-reflect)
+    can refine these; with no model they stand on their own."""
+    verdicts = []
+    for c in script_candidates:
+        occ, sess, hint, length = (
+            c.get("occurrences", 0),
+            c.get("distinct_sessions", 0),
+            c.get("determinism_hint", "unknown"),
+            c.get("length", 1),
+        )
+        if hint == "deterministic":
+            v, conf, why = (
+                "SCRIPT_IT",
+                "med",
+                "single tool repeated with identical args — deterministic, no judgment between calls",
+            )
+        elif sess >= 2:
+            v, conf, why = (
+                "PRESS_IT",
+                "med",
+                "recurring workflow across %d sessions — reusable across agents, press it" % sess,
+            )
+        elif length >= 2 and occ >= 3:
+            v, conf, why = "SKILLIFY_IT", "low", "repeats within a session but needs judgment — capture as a skill"
+        else:
+            v, conf, why = "LEAVE_IT", "low", "low frequency or single-session — not worth abstracting yet"
+        verdicts.append(
+            {
+                "workflow": c.get("workflow", ""),
+                "occurrences": occ,
+                "distinct_sessions": sess,
+                "verdict": v,
+                "rationale": why,
+                "est_monthly_token_savings": None,
+                "confidence": conf,
+                "source": "rules",
+            }
+        )
+    for f in waste_findings:
+        if f.get("pattern") == "loop_waste":
+            verdicts.append(
+                {
+                    "workflow": "loop:%s" % f.get("tool", "?"),
+                    "occurrences": f.get("repeats", 0),
+                    "distinct_sessions": 1,
+                    "verdict": "SCRIPT_IT",
+                    "rationale": (
+                        "identical tool call looped %s times — replace with a deterministic script + exit check"
+                        % f.get("repeats")
+                    ),
+                    "est_monthly_token_savings": None,
+                    "confidence": "med",
+                    "source": "rules",
+                }
+            )
+    return verdicts
+
+
+def _cost_press_candidates(verdicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for v in verdicts:
+        if v["verdict"] != "PRESS_IT":
+            continue
+        out.append(
+            {
+                "tool_name": v["workflow"].replace(" -> ", "_").replace(" ", "_")[:60],
+                "what_it_wraps": v["workflow"],
+                "recurring_value": "%d occurrences across %d sessions" % (v["occurrences"], v["distinct_sessions"]),
+                "fleet_shareable": v["distinct_sessions"] >= 2,
+                "action": "queued",
+            }
+        )
+    return out
+
+
+def _cost_state_db(home: Path) -> Path:
+    for rel in ("state.db", "data/state.db", "lcm.db"):
+        if (home / rel).exists():
+            return home / rel
+    return home / "state.db"
+
+
+def build_cost_review(home: Path, start: datetime, end: datetime) -> dict[str, Any]:
+    """Zero-token token-economics + Script-or-Not + Printing Press signals over the agent's own
+    state.db. Never raises into the caller; returns a status stub when data is absent. The digest
+    intentionally excludes message content/reasoning bodies — only tool names + truncated args."""
+    out: dict[str, Any] = {
+        "window": {"start_at": iso(start), "end_at": iso(end)},
+        "cost_digest": {},
+        "token_waste_findings": [],
+        "script_or_not": [],
+        "printing_press_candidates": [],
+    }
+    db_path = _cost_state_db(home)
+    if not db_path.exists():
+        out["status"] = "no_state_db"
+        return out
+    try:
+        con = sqlite3.connect(str(db_path))
+        try:
+            cols = {r[1] for r in con.execute("PRAGMA table_info(sessions)").fetchall()}
+            if "input_tokens" not in cols:
+                out["status"] = "no_session_token_columns"
+                return out
+            sessions = _cost_load_sessions(con, start.timestamp(), end.timestamp())
+            msgs = _cost_load_messages(con, [s["id"] for s in sessions])
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        out["status"] = "db_error: %s" % str(exc)[:120]
+        return out
+    out["cost_digest"] = _cost_aggregate(sessions, msgs)
+    out["token_waste_findings"] = _cost_detect_waste(sessions, msgs)
+    candidates = _cost_detect_script_candidates(msgs)
+    verdicts = _cost_provisional_verdicts(candidates, out["token_waste_findings"])
+    out["script_or_not"] = verdicts
+    out["printing_press_candidates"] = _cost_press_candidates(verdicts)
+    out["status"] = "ok"
+    return out
+
+
+def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -> dict[str, Any]:
+    end = now_utc()
+    start = end - timedelta(hours=hours)
+    messages, transcript_path = load_messages(home, start, limit)
+    outcomes, unanswered, negative = build_outcomes(messages, contract)
+    log_hits = scan_logs(home, start)
+    sends = load_jsonl_since(
+        [home / "state/send-audit.jsonl", home / "state/telegram-delivery-proof/proofs.jsonl"], start
+    )
+    draft_only = [row for row in sends if str(row.get("status", "")).lower() == "draft_only"]
+    checked, missing, blind = source_status(home, contract)
+    expected_checked, expected_broken, conditional = capability_results(home, contract, messages, sends)
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant"]
+    client_leaks = [m for m in assistant_msgs if is_client_visible_leak(m.get("text") or "", contract)]
+    missing_required = [
+        s for s in missing if s not in {"state/telegram-delivery-proof/proofs.jsonl", "state/send-audit.jsonl"}
+    ]
+
+    friction = {
+        "codex_failures": {"count": len(log_hits["codex"]), "examples": log_hits["codex"][-8:]},
+        "api_failures": {"count": len(log_hits["api"]), "examples": log_hits["api"][-8:]},
+        "tool_failures": {"count": len(log_hits["tool"]), "examples": log_hits["tool"][-8:]},
+        "fallback_events": {"count": len(log_hits["fallback"]), "examples": log_hits["fallback"][-8:]},
+        "delivery_failures": {
+            "count": len(draft_only),
+            "examples": [
+                evidence("delivery", json.dumps(row, sort_keys=True), path=row.get("_source_path"))
+                for row in draft_only[-8:]
+            ],
+        },
+        "restarts": {"count": len(log_hits["restart"]), "examples": log_hits["restart"][-8:]},
+        "unanswered_client_messages": {
+            "count": len(unanswered),
+            "examples": [
+                evidence("telegram", m.get("text") or "", m.get("timestamp"), message_id=m.get("message_id"))
+                for m in unanswered[-8:]
+            ],
+        },
+    }
+
+    escalations = []
+    for msg in client_leaks[-8:]:
+        escalations.append(
+            {
+                "severity": "red",
+                "category": "client_visible_leak",
+                "summary": "Client-visible assistant message appears to contain internal/tool/error details.",
+                "recommended_action": "Inspect transcript and send correction if client saw internal failure details.",
+                "dedupe_key": f"leak:{msg.get('message_id') or msg.get('id')}",
+                "evidence": [
+                    evidence("telegram", msg.get("text") or "", msg.get("timestamp"), message_id=msg.get("message_id"))
+                ],
+            }
+        )
+    for cap in expected_broken:
+        escalations.append(
+            {
+                "severity": "red" if cap["status"] == "broken" else "yellow",
+                "category": "capability_contract",
+                "summary": f"Expected capability {cap['capability']} is {cap['status']}.",
+                "recommended_action": (
+                    "Fix the expected capability or update the client contract if it is no longer required."
+                ),
+                "dedupe_key": f"capability:{cap['capability']}:{cap['status']}",
+                "evidence": cap.get("evidence", []),
+            }
+        )
+    if unanswered:
+        escalations.append(
+            {
+                "severity": "red",
+                "category": "unanswered_client_ask",
+                "summary": f"{len(unanswered)} actionable client asks had no assistant reply in the review window.",
+                "recommended_action": "Follow up on unanswered asks and backfill promise tracking.",
+                "dedupe_key": "unanswered-client-asks",
+                "evidence": friction["unanswered_client_messages"]["examples"],
+            }
+        )
+    if len(log_hits["codex"]) >= 3 or len(log_hits["api"]) >= 5:
+        escalations.append(
+            {
+                "severity": "yellow",
+                "category": "model_api_friction",
+                "summary": "Repeated Codex/API failures were observed in logs.",
+                "recommended_action": (
+                    "Inspect provider auth/fallback behavior and whether client outcomes were delayed."
+                ),
+                "dedupe_key": "model-api-friction",
+                "evidence": (log_hits["codex"] or log_hits["api"])[-8:],
+            }
+        )
+    if missing_required:
+        escalations.append(
+            {
+                "severity": "yellow",
+                "category": "coverage_gap",
+                "summary": "Required audit sources are missing.",
+                "recommended_action": "Install/repair missing local audit surfaces or adjust the client contract.",
+                "dedupe_key": "missing-required-sources",
+                "evidence": [evidence("coverage", src) for src in missing_required[:8]],
+            }
+        )
+
+    skillify = repeated_request_candidates(messages)
+    employee_candidates = []
+    if len(skillify) >= 2 or len(log_hits["tool"]) >= 10:
+        employee_candidates.append(
+            {
+                "title": "Potential delegated worker lane",
+                "trigger": (
+                    "Repeated workflow/tool friction suggests this may need a dedicated worker or deterministic script."
+                ),
+                "recommendation": (
+                    "Review patterns and decide whether to create a scoped skill, script, or delegated employee lane."
+                ),
+                "priority": "medium",
+                "evidence": (skillify[0].get("evidence", []) if skillify else log_hits["tool"][-3:]),
+            }
+        )
+
+    outcome_penalty = sum(20 for item in outcomes if item["status"] in {"blocked", "dropped"})
+    no_client_activity = all(item.get("status") == "no_client_activity" for item in outcomes)
+    model_penalty = len(log_hits["codex"]) * 3 + len(log_hits["api"]) * 2
+    tool_penalty = len(log_hits["tool"])
+    fallback_penalty = len(log_hits["fallback"])
+    restart_penalty = len(log_hits["restart"]) * 2
+    friction_penalty = min(35, model_penalty + tool_penalty + fallback_penalty + restart_penalty)
+    smoothness_friction_penalty = (
+        0 if no_client_activity else min(20, tool_penalty + fallback_penalty + restart_penalty // 2)
+    )
+    leak_penalty = min(50, len(client_leaks) * 25)
+    cap_penalty = min(30, len(expected_broken) * 12)
+    coverage_penalty = min(15, len(missing_required) * 3)
+    overall = max(0, 100 - outcome_penalty - friction_penalty - leak_penalty - cap_penalty - coverage_penalty)
+    smoothness = max(0, 100 - len(negative) * 12 - len(unanswered) * 18 - smoothness_friction_penalty - leak_penalty)
+    completion = max(0, 100 - outcome_penalty - len(unanswered) * 25)
+    ops_health = max(0, 100 - friction_penalty - min(20, len(log_hits["restart"])))
+    cap_fit = max(0, 100 - cap_penalty - coverage_penalty)
+    if smoothness < 85:
+        escalations.append(
+            {
+                "severity": "yellow",
+                "category": "client_smoothness",
+                "summary": f"Client smoothness score is {smoothness}/100.",
+                "recommended_action": (
+                    "Review negative feedback, repeated friction, and places where the client had to manage the agent."
+                ),
+                "dedupe_key": "client-smoothness-low",
+                "evidence": friction["fallback_events"]["examples"][:3] + friction["tool_failures"]["examples"][:3],
+            }
+        )
+    if ops_health < 85:
+        escalations.append(
+            {
+                "severity": "yellow",
+                "category": "internal_ops_health",
+                "summary": f"Ops health score is {ops_health}/100.",
+                "recommended_action": (
+                    "Inspect fallback/restart/tool-failure pressure and decide whether to repair, Skillify, or "
+                    "delegate the recurring failure mode."
+                ),
+                "dedupe_key": "ops-health-low",
+                "evidence": friction["restarts"]["examples"][:3] + friction["tool_failures"]["examples"][:3],
+            }
+        )
+    level = (
+        "red"
+        if any(e["severity"] == "red" for e in escalations)
+        else ("yellow" if escalations or overall < 85 else "green")
+    )
+    scores = {
+        "overall": overall,
+        "client_smoothness": smoothness,
+        "outcome_completion": completion,
+        "ops_health": ops_health,
+        "capability_fit": cap_fit,
+    }
+    audit_directions = build_audit_directions(
+        scores, friction, escalations, expected_broken, missing_required, outcomes
+    )
+    cleanup_plan = build_cleanup_plan(scores, friction, expected_broken, missing_required)
+
+    contract_bytes = json.dumps(contract, sort_keys=True).encode()
+    client = contract["client"]
+    report_id = f"{client['client_id']}-{end.strftime('%Y%m%dT%H%M%SZ')}"
+    report_path = home / "workspace/ops/reports/client-day-review" / f"{report_id}.json"
+    doc_review_packet = build_doc_review_packet(
+        contract, home, report_id, report_path, level, scores, friction, cleanup_plan, audit_directions, expected_broken
+    )
+    expected_caps = contract.get("capabilities", {}).get("expected", [])
+    ignored_caps = contract.get("capabilities", {}).get("ignored", [])
+    try:
+        cost_review = build_cost_review(home, start, end)
+    except Exception as exc:  # cost review must never break the client-quality report
+        cost_review = {"status": "error: %s" % str(exc)[:120]}
+    return {
+        "schema_version": 1,
+        "report_id": report_id,
+        "generated_at": iso(end),
+        "client": {
+            "client_id": client["client_id"],
+            "client_name": client["client_name"],
+            "agent_id": client["agent_id"],
+            "agent_name": client["agent_name"],
+            "host": client.get("host", ""),
+            "runtime_home": str(home),
+            "telegram_topics": [],
+        },
+        "review_window": {"start_at": iso(start), "end_at": iso(end), "hours": hours},
+        "contract_snapshot": {
+            "contract_id": contract["contract_id"],
+            "contract_version": contract["contract_version"],
+            "contract_hash": hashlib.sha256(contract_bytes).hexdigest()[:16],
+            "expected_workflows": [w["id"] for w in contract.get("expected_workflows", [])],
+            "expected_capabilities": expected_caps,
+            "ignored_capabilities": ignored_caps,
+        },
+        "verdict": {
+            "level": level,
+            "summary": "No client-visible harm detected."
+            if level == "green"
+            else f"{len(escalations)} escalation(s) require review.",
+            "client_visible_harm": bool(client_leaks),
+        },
+        "scores": scores,
+        "outcomes": outcomes,
+        "friction": friction,
+        "capability_contract": {
+            "expected_checked": expected_checked,
+            "expected_broken": expected_broken,
+            "unused_ignored": ignored_caps,
+            "unexpected_usage": conditional,
+        },
+        "skillify_candidates": skillify,
+        "cost_review": cost_review,
+        "employee_candidates": employee_candidates,
+        "memory_updates": [],
+        "escalations": escalations,
+        "cleanup_plan": cleanup_plan,
+        "audit_directions": audit_directions,
+        "doc_review_packet": doc_review_packet,
+        "coverage": {"sources_checked": checked + [transcript_path], "sources_missing": missing, "blind_spots": blind},
+    }
+
+
+def load_contract(path: Path) -> dict[str, Any]:
+    if yaml is None:
+        raise SystemExit("PyYAML is required to read client day review contracts")
+    data = yaml.safe_load(path.read_text(encoding="utf-8", errors="ignore"))
+    if not isinstance(data, dict):
+        raise SystemExit(f"contract did not parse as object: {path}")
+    return data
+
+
+# --- generic contract auto-derivation (host-side; for agents without a hand-tuned contract) ---
+# Mirrors hermes-self-reflect's derivation so the fleet day-review can cover EVERY live agent
+# discovery finds, not only those with a hand-authored contract. Runs where home's files exist.
+def _auto_read_config(home: Path) -> dict:
+    cfg: dict = {}
+    p = home / "config.yaml"
+    if not p.exists():
+        cands = sorted(home.glob("profiles/*/config.yaml"), key=lambda x: x.stat().st_mtime, reverse=True)
+        if cands:
+            p = cands[0]
+    try:
+        for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+            mm = re.match(r"^(agent_name|agent_id|client_id|client_name|host)\s*:\s*(.+)$", line.strip())
+            if mm:
+                cfg[mm.group(1)] = mm.group(2).strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return cfg
+
+
+def _auto_soul_name(home: Path) -> str:
+    try:
+        first = (home / "SOUL.md").read_text(encoding="utf-8", errors="ignore").splitlines()[0]
+    except (OSError, IndexError):
+        return ""
+    mm = re.search(r"SOUL(?:\.md)?\s*[\-—:]+\s*([A-Za-z][A-Za-z0-9'’ ]{1,40})", first)
+    if mm:
+        return mm.group(1).strip()
+    mm2 = re.search(r"#\s*([A-Za-z][A-Za-z0-9'’]+)\s+Client Context", first)
+    return mm2.group(1).strip() if mm2 else ""
+
+
+def derive_generic_contract(home: Path) -> dict:
+    """Synthesize a sane default day-review contract for an agent without a hand-tuned one."""
+    import socket
+
+    cfg = _auto_read_config(home)
+    agent_name = cfg.get("agent_name") or _auto_soul_name(home) or "Agent"
+    agent_id = cfg.get("agent_id") or re.sub(r"[^a-z0-9]+", "", agent_name.lower()) or "agent"
+    client_id = cfg.get("client_id") or agent_id
+    client_name = cfg.get("client_name") or agent_name
+    host = cfg.get("host") or socket.gethostname()
+    candidate = [
+        "data/telegram-transcript.db",
+        "gateway_state.json",
+        "logs/gateway.log",
+        "logs/agent.log",
+        "logs/errors.log",
+        "state/telegram-delivery-proof/proofs.jsonl",
+        "state/send-audit.jsonl",
+        "state.db",
+        "lcm.db",
+    ]
+    optional = [
+        "data/durable-threads.db",
+        "artifacts",
+        "output",
+        "state/model-usage.jsonl",
+        "state/openrouter-usage.jsonl",
+        "cron/jobs.json",
+    ]
+    req = [c for c in candidate if (home / c).exists()]
+    opt = [c for c in optional if (home / c).exists()]
+    return {
+        "schema_version": 1,
+        "contract_id": "%s-%s-day-review" % (client_id, agent_id),
+        "contract_version": 1,
+        "client": {
+            "client_id": client_id,
+            "client_name": client_name,
+            "agent_id": agent_id,
+            "agent_name": agent_name,
+            "host": host,
+            "runtime_home": str(home),
+        },
+        "review_policy": {
+            "window_hours": 24,
+            "green_reports": "store_only",
+            "yellow_report_threshold": (
+                "unresolved client ask, degraded capability, fallback storm, smoothness < 85, or notable token waste"
+            ),
+            "red_report_threshold": (
+                "client-visible leak, delivery failure after completion claim, gateway down, or secret exposure"
+            ),
+        },
+        "expected_workflows": [
+            {
+                "id": "client-chat-help",
+                "name": "Respond to %s requests in Telegram" % client_name,
+                "success_criteria": [
+                    "actionable asks receive a useful response or explicit blocker",
+                    "no stack traces, provider chatter, raw errors, or secrets are client-visible",
+                    "promised work is delivered with proof or tracked as an open promise",
+                ],
+                "required_capabilities": ["telegram", "conversation_memory"],
+                "task_contract": {
+                    "intended_outcome": "actionable client request receives a useful response or explicit blocker",
+                    "required_tools": ["telegram", "conversation_memory"],
+                    "deliverable": "client_response_or_explicit_blocker",
+                    "independent_certifier": "client_acceptance_or_doc_verdict",
+                },
+                "skillify_when": [
+                    "same request pattern appears 3+ times in 7 days",
+                    "same manual tool sequence repeated twice in one day",
+                ],
+                "employee_when": ["recurring work exceeds one hour/day for three days"],
+            }
+        ],
+        "capabilities": {
+            "expected": ["telegram", "local_conversation_memory", "gateway_health"],
+            "conditional": [],
+            "ignored": [],
+        },
+        "visibility_policy": {
+            "allowed_client_visible_internal_terms": [agent_name],
+            "allowed_path_prefixes": [],
+            "forbidden_client_visible_patterns": [
+                "Traceback",
+                "API call failed",
+                "provider failed",
+                "Missing Authentication",
+                r"\b(secret|api[_-]?key|access[_-]?token|auth[_-]?token|bearer)\s*[:=]",
+                r"sk-[a-z0-9_-]{12,}",
+                r"\bCanary Lane\b",
+                r"\blocal self-check\b",
+                r"\bhelper-script\b",
+                r"\bpackaging-sync\b",
+                r"Gateway is running",
+                r"Telegram is connected",
+            ],
+        },
+        "signals": {"required_sources": req, "optional_sources": opt, "ignored_sources": []},
+        "escalation_policy": {
+            "red": [
+                "gateway down or Telegram disconnected during window",
+                "client-visible secret, stack trace, or provider internals",
+                "completion claim without delivery proof",
+            ],
+            "yellow": [
+                "fallback storm that self-recovers",
+                "open promise without tracking",
+                "repeated manual workflow suitable for a script or Printing Press tool",
+                "notable token waste (context loaded with no output, or tool loop)",
+            ],
+            "suppressions": [],
+        },
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run a contract-aware Hermes client day review")
+    parser.add_argument("--contract", default="", help="Path to client day review contract YAML")
+    parser.add_argument(
+        "--auto-contract", action="store_true", help="Derive a generic contract from --home when no --contract is given"
+    )
+    parser.add_argument("--home", default="", help="Hermes runtime home; defaults to contract client.runtime_home")
+    parser.add_argument(
+        "--hours", type=int, default=0, help="Review window; defaults to contract review_policy.window_hours"
+    )
+    parser.add_argument("--limit", type=int, default=500, help="Max transcript messages to inspect")
+    parser.add_argument("--json", action="store_true", help="Print compact JSON instead of pretty JSON")
+    parser.add_argument(
+        "--write-report", action="store_true", help="Write report to <home>/workspace/ops/reports/client-day-review"
+    )
+    args = parser.parse_args()
+
+    if args.contract:
+        contract = load_contract(Path(args.contract).expanduser())
+        home = effective_runtime_home(Path(args.home or contract["client"]["runtime_home"]).expanduser(), contract)
+    else:
+        if not args.home:
+            raise SystemExit("provide --contract, or --home with --auto-contract")
+        home = Path(args.home).expanduser()
+        contract = derive_generic_contract(home)
+    hours = args.hours or int(contract.get("review_policy", {}).get("window_hours", 24))
+    report = build_report(contract, home, hours, args.limit)
+
+    if args.write_report:
+        out_dir = home / "workspace/ops/reports/client-day-review"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{report['report_id']}.json"
+        out_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        report.setdefault("coverage", {}).setdefault("sources_checked", []).append(str(out_path))
+    print(
+        json.dumps(report, separators=(",", ":"), sort_keys=True)
+        if args.json
+        else json.dumps(report, indent=2, sort_keys=True)
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,132 @@
+schema_version: 1
+
+# Temporary exact-value unapply map for the former Golden policy overlays.
+# Remove this file after fleet receipts prove these values are absent.
+retired_defaults:
+  model:
+    max_tokens: 32768
+  compression:
+    enabled: true
+    codex_gpt55_autoraise: true
+    codex_gpt55_autoraise_notice: false
+    threshold: 0.25
+    target_ratio: 0.2
+    protect_last_n: 12
+    protect_first_n: 3
+    hygiene_hard_message_limit: 5000
+    abort_on_summary_failure: false
+    summary_model: gpt-5.6-luna
+    summary_provider: openai-codex
+  auxiliary:
+    promise_extraction:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    vision:
+      provider: openrouter
+      model: google/gemini-2.5-flash
+      timeout: 60
+      download_timeout: 60
+      base_url: https://openrouter.ai/api/v1
+      api_key_env: OPENROUTER_API_KEY
+      context_length: 1048576
+    web_extract:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    compression:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 120
+      base_url: https://chatgpt.com/backend-api/codex
+    session_search:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    skills_hub:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    mcp:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    flush_memories:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    title_generation:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+      base_url: https://chatgpt.com/backend-api/codex
+    research:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 600
+      extra_body:
+        reasoning:
+          enabled: true
+          effort: high
+      base_url: https://chatgpt.com/backend-api/codex
+    approval:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      timeout: 30
+    dream:
+      provider: openai-codex
+      model: gpt-5.6-luna
+      base_url: https://chatgpt.com/backend-api/codex
+      timeout: 60
+  platforms:
+    telegram:
+      require_mention: true
+      suppress_intermediate_flushes: true
+  notifications:
+    compression_events: false
+    session_reset_events: false
+    provider_fallback_events: false
+    provider_warning_events: false
+    tool_step_intermediate: false
+  providers:
+    fallback:
+      notify_user: false
+      max_attempts: 3
+      cooldown_seconds: 300
+      circuit_breaker:
+        max_attempts: 3
+        cooldown_seconds: 300
+  gateway:
+    interrupt_recursion_max_depth: 1
+  agent:
+    gateway_timeout: 300
+  approvals:
+    mode: "off"
+  display:
+    background_process_notifications: false
+    bell_on_complete: false
+    busy_ack: false
+    busy_ack_enabled: false
+    busy_input_mode: interrupt
+    gateway_restart_notifications: false
+    gateway_status_messages: false
+    interim_assistant_messages: false
+    session_reset_events: false
+    show_cost: false
+    show_reasoning: false
+    streaming: false
+    tool_preview_length: 0
+    tool_progress: false
+    tool_progress_command: false
+    tool_progress_overrides: {}
+    compact: false
+    inline_diffs: true
+    personality: helpful
+    resume_display: full
+    skin: default

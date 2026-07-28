@@ -1,16 +1,20 @@
 # Native-first default agent
 
-The default assumes a headless machine and one user-owned Hermes runtime.
+The default assumes a headless machine, one user-owned Hermes profile, and one
+active runtime generation assembled from the exact release in `release.json`.
 
 ## Keep native
 
-- Official Hermes installer and update path.
+- Pinned official Hermes installer/dependencies plus the verified public
+  release payload.
 - Native `state.db`, session identity, compaction, session search, memory,
   `MEMORY.md`, `USER.md`, per-session task tracking, persistent goals, cron,
   gateway, and service tooling.
 - One local config/data boundary per agent.
 - Built-in skills and official extension points.
 - Exact topic/session isolation on messaging platforms.
+- Side-by-side updates that finish or checkpoint active work before switching
+  generations.
 
 ## Configure
 

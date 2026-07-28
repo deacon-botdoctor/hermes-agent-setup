@@ -1,0 +1,3 @@
+# Preserve the exact fleet-tested patch artifact. Its embedded diff includes
+# source whitespace that must not be normalized independently of Golden.
+patches/payloads/durable-drain-inbox-v1/*.patch whitespace=-blank-at-eol,-blank-at-eof

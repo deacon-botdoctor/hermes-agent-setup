@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "name": "durable-drain-inbox-v1",
+  "base_commit": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+  "source_seed_head": "98749113b5fa58e6521113be4a2533143db0e41b",
+  "payload_finalized_in_golden_commit": "76fc709f14b977c05c4aadaeaf6d0af4dfeccf1c",
+  "patch": "hermes-agent-3ef6bbd2-durable-drain-v1.patch",
+  "patch_sha256": "dea9cad9fec07a5f8812b5ce977fe51567dfa7fc5cd6144480357ff468e22e29",
+  "impact": {
+    "commits": 4,
+    "files": 14,
+    "insertions": 5943,
+    "deletions": 289
+  },
+  "postimage_git_blobs": {
+    "gateway/drain_inbox.py": "1574641152b5f88fc9b6fcf36f823bbcbf61c533",
+    "gateway/platforms/base.py": "2dec9d6818b84bbb022b0a9a4bc3a7a8a8a13c11",
+    "gateway/platforms/bluebubbles.py": "ecfb2bf86435fedfb1916f1eab6b05508f48e32e",
+    "gateway/platforms/msgraph_webhook.py": "1de5062a46fc084fc57d4da1b6ebea689b6049e2",
+    "gateway/platforms/qqbot/adapter.py": "0f344e3f81b7ec53623f1c0d3b03a3d701063e69",
+    "gateway/platforms/webhook.py": "f56e8bdcdebe6b45a5f2468c9adb21ca1452adfc",
+    "gateway/platforms/whatsapp_cloud.py": "89ba7c6864befc558052363de167d3b03d3615fa",
+    "gateway/run.py": "82a1f5772d554319a7cc074dc16a3eaf27456045",
+    "gateway/session.py": "457f2871fad676697b5ecc44c5c4eafa3e6a8c55",
+    "gateway/slash_commands.py": "1d20a3b91c3967ce5752d2d3326833ead7c9ca2c",
+    "hermes_state.py": "a809d498c1647f83ae00319b1a30cd98b912c2ea",
+    "tests/gateway/restart_test_helpers.py": "334591dc429dca24bc5184f642bc451169f70da8",
+    "tests/gateway/test_drain_inbox.py": "adedf365195c479da77faed13d7c663b5cf47e07",
+    "tests/gateway/test_restart_resume_pending.py": "3c1aed1f59b12761dcc99d780e12388974f88114"
+  },
+  "downstream_mutable_postimages": {
+    "gateway/drain_inbox.py": [
+      "def _open_trusted_directory(path: Path) -> os.stat_result:",
+      "def _ensure_trusted_directory(path: Path) -> None:",
+      "rows.append((raw, value if isinstance(value, dict) else None))",
+      "def pending_records(path: Path | None = None) -> list[dict[str, Any]]:",
+      "\"\"\"Atomically remove one matching record while retaining malformed rows.\"\"\""
+    ],
+    "gateway/platforms/base.py": [
+      "durable_ingress: bool = False",
+      "def replaced(self, **changes: Any) -> \"MessageEvent\":"
+    ],
+    "gateway/run.py": [
+      "from gateway.drain_inbox import (",
+      "self._startup_restore_barrier = asyncio.Lock()"
+    ],
+    "gateway/session.py": [
+      "def replay_marker_status(",
+      "def persist_replay_marker("
+    ],
+    "tests/gateway/test_drain_inbox.py": [
+      "def test_persisted_event_round_trips_exact_user_instruction(",
+      "def test_queue_file_is_jsonl_for_operator_inspection(",
+      "def test_acknowledge_retains_malformed_rows_for_recovery(",
+      "async def test_runner_replays_and_acknowledges_durable_drain_event("
+    ],
+    "tests/gateway/test_restart_resume_pending.py": [
+      "def test_early_listener_has_startup_gate_before_connect(",
+      "def test_startup_gate_waits_for_final_barrier_then_dispatches_normally("
+    ]
+  },
+  "retirement_condition": "Remove this payload, module, registry entry, and generated carrier marker when upstream.lock pins a canonical Hermes commit whose tree already contains the equivalent durable drain inbox and paired tests."
+}
