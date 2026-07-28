@@ -6,8 +6,8 @@
   "golden_sha": "1e9cf546cdeff7be26109a2c2c407510a8f3726d",
   "canonical_upstream_sha": "f228e145ba35cbbf785eded2021ae6682285b91b",
   "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "955d33b3007626fa5dc539f1d36341dd220c1a09ccf65844150779c950d3b907",
-  "deployment_digest": "9f81ae891c8292f7d2641e48d1a2c22a35d6e4f2c42d2f9067fc700888433485",
+  "runtime_payload_digest": "da8ef5391179fc6fab2326d27be4660c990602d650c22860f03bcd39f8201ae2",
+  "deployment_digest": "cfdaa5d496b8ab62f763de8e7ac17bc7bb3fc8dc1bff30d0c02beec98f96b8d0",
   "assembled_runtime_fingerprint": {
     "digest": "7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d",
     "file_count": 39

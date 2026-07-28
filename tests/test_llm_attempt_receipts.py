@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -202,6 +203,59 @@ def test_reconciler_uses_active_profile_runtime(tmp_path, monkeypatch):
     assert reconcile._load_runtime_module().reconcile_events([{"id": 1}]) == {
         "events": [{"id": 1}]
     }
+
+
+def test_reconciler_cli_falls_back_without_profile_receipt(tmp_path):
+    home = tmp_path / "home"
+    ledger = tmp_path / "llm-attempt-receipts.jsonl"
+    ledger.write_text(
+        "\n".join(
+            (
+                json.dumps(
+                    {
+                        "schema_version": "botdoctor.llm-attempt.v1",
+                        "attempt_id": "attempt-1",
+                        "event": "started",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "schema_version": "botdoctor.llm-attempt.v1",
+                        "attempt_id": "attempt-1",
+                        "event": "terminal",
+                        "surface": "main",
+                        "task": "conversation",
+                        "provider": "test",
+                        "model": "test",
+                        "outcome": "success",
+                        "provider_request_id": "id_unavailable",
+                        "provider_request_id_source": "unavailable",
+                        "cost_status": "unknown",
+                        "key_fingerprint": "id_unavailable",
+                        "key_fingerprint_method": "unavailable",
+                    }
+                ),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    env = os.environ | {
+        "HERMES_HOME": str(home),
+        "HERMES_LLM_ATTEMPT_LEDGER": str(ledger),
+        "PYTHONPATH": "",
+    }
+
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "bin/llm-attempt-reconcile.py")],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    assert json.loads(proc.stdout)["status"] == "pass"
 
 
 def test_public_release_metadata_verifies():
