@@ -269,7 +269,7 @@ For an existing installation, prove only the isolated staged profile here:
 ```powershell
 if ($InstallMode -ne "existing") { throw "Use the fresh-install activation path instead" }
 & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
-  --hermes-home $StagingHome --runtime-dir $Candidate --initialize-staging
+  --hermes-home $StagingHome --runtime-dir $Candidate
 $env:HERMES_HOME = $StagingHome
 $env:HERMES_CODEX_401_CIRCUIT_STATE = Join-Path $StagingHome "state\codex-401-circuit.json"
 try {
@@ -279,6 +279,11 @@ try {
   $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
 }
 ```
+
+The pinned installer has already created the isolated staging profile and its
+credential-free configuration. Preserve that scaffold; `--initialize-staging`
+is only for a genuinely empty staging home that did not pass through the
+pinned installer.
 
 On an existing installation, the installer must run against an isolated staging
 `HermesHome`, and its User/process environment changes must be restored before
@@ -314,9 +319,12 @@ python3 bin/assemble-runtime.py \
   --prepare-home "$staging_home"
 "$candidate/venv/bin/python" bin/install-profile.py \
   --hermes-home "$staging_home" \
-  --runtime-dir "$candidate" \
-  --initialize-staging
+  --runtime-dir "$candidate"
 ```
+
+The pinned installer has already created this isolated staging profile. Do not
+pass `--initialize-staging`, which is reserved for an otherwise empty manual
+staging home.
 
 Prove the candidate's doctor, imports, tool discovery, and profile files in
 staging. Do not patch a dirty live checkout in place.

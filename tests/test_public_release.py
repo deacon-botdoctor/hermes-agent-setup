@@ -1237,7 +1237,6 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     )
     assert "core.autocrlf=false" in instructions
     assert instructions.count("HERMES_CODEX_401_CIRCUIT_STATE") >= 4
-    assert instructions.count("--initialize-staging") >= 2
     assert "bind-service-circuit.py" in instructions
     assert '[Guid]::NewGuid().ToString("N")' in instructions
     assert "--prove-kind windows" in instructions
@@ -1245,6 +1244,19 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     assert "$ProfileHome = $StagingHome" in instructions
     assert "profile-environment-backups" not in instructions
     assert "gateway install --no-start-now" in instructions
+
+
+def test_documented_pinned_installer_scaffold_is_not_reinitialized():
+    instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert instructions.count("--initialize-staging") == 2
+    assert (
+        "`--initialize-staging`\n"
+        "is only for a genuinely empty staging home"
+    ) in instructions
+    assert (
+        "Do not\n"
+        "pass `--initialize-staging`"
+    ) in instructions
 
 
 def test_public_text_has_no_private_runtime_routes():
