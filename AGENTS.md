@@ -231,7 +231,9 @@ For a fresh machine, finish native setup and activate the native gateway:
 Persist the circuit path through the native profile environment before gateway
 installation. Then prove that the generated task principal is exactly
 `$ProvenServiceOwner` and both launchers resolve `$LiveHome` and the exact
-candidate before accepting `gateway status`.
+candidate before accepting `gateway status`. This proof is point-in-time:
+later changes to process, User, or System `PYTHONPATH` make it stale, so rerun
+the proof before the next task start.
 
 ```powershell
 if ($InstallMode -ne "fresh") { throw "Use the staged existing-install path instead" }
