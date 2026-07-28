@@ -461,6 +461,57 @@ def test_runtime_value_uses_unambiguous_sentinel(tmp_path):
         )
 
 
+def test_launchd_state_queries_the_proven_gui_domain():
+    binder = load_script("public_launchd_domain", "bind-service-circuit.py")
+    calls = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        output = "loaded job" if "print" in argv else "/candidate/imports\n"
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    loaded, pythonpath = binder._loaded_launchd_state(
+        "com.example.hermes",
+        run=fake_run,
+        uid=501,
+        launchctl="/bin/launchctl",
+    )
+
+    assert loaded == "loaded job"
+    assert pythonpath == "/candidate/imports"
+    assert calls == [
+        [
+            "/bin/launchctl",
+            "print",
+            "gui/501/com.example.hermes",
+        ],
+        [
+            "/bin/launchctl",
+            "asuser",
+            "501",
+            "/bin/launchctl",
+            "getenv",
+            "PYTHONPATH",
+        ],
+    ]
+
+    def inaccessible_domain(argv, **_kwargs):
+        return subprocess.CompletedProcess(
+            argv,
+            1 if "asuser" in argv else 0,
+            "",
+            "",
+        )
+
+    with pytest.raises(RuntimeError, match="domain environment"):
+        binder._loaded_launchd_state(
+            "com.example.hermes",
+            run=inaccessible_domain,
+            uid=501,
+            launchctl="/bin/launchctl",
+        )
+
+
 def test_windows_uv_launch_spec_uses_base_pythonw(tmp_path):
     binder = load_script("public_windows_uv_spec", "bind-service-circuit.py")
     runtime = tmp_path / "candidate"
@@ -956,9 +1007,32 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
     binder._task_proof(task, vbs_path, r"DOMAIN\Agent")
     with pytest.raises(RuntimeError, match="proven owner"):
         binder._task_proof(task, vbs_path, r"DOMAIN\Other")
-    binder._prove_windows_operator(r"DOMAIN\Agent", r"domain\agent")
+    binder._prove_windows_operator(
+        r"DOMAIN\Agent",
+        process_sid="S-1-5-21-1000",
+        owner_sid="s-1-5-21-1000",
+    )
     with pytest.raises(RuntimeError, match="operator"):
-        binder._prove_windows_operator(r"DOMAIN\Agent", r"DOMAIN\Admin")
+        binder._prove_windows_operator(
+            r"DOMAIN\Agent",
+            process_sid="S-1-5-21-1000",
+            owner_sid="S-1-5-21-2000",
+        )
+    assert (
+        binder._literal_windows_registry_pythonpath(
+            str(windows_runtime),
+            1,
+            1,
+        )
+        == str(windows_runtime)
+    )
+    for value, kind in (
+        (r"%IMPORT_ROOT%\package", 1),
+        (r"!IMPORT_ROOT!\package", 1),
+        (str(windows_runtime), 2),
+    ):
+        with pytest.raises(RuntimeError, match="not literal"):
+            binder._literal_windows_registry_pythonpath(value, kind, 1)
 
 
 def test_prepare_home_rejects_reused_staging(tmp_path):

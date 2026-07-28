@@ -864,10 +864,15 @@ def _loaded_launchd_state(
     label: str,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     uid: int | None = None,
+    launchctl: str | None = None,
 ) -> tuple[str, str]:
-    domain = f"gui/{uid if uid is not None else os.getuid()}"
+    proven_uid = uid if uid is not None else os.getuid()
+    domain = f"gui/{proven_uid}"
+    executable = launchctl or shutil.which("launchctl")
+    if executable is None:
+        raise RuntimeError("launchctl is unavailable")
     result = run(
-        ["launchctl", "print", f"{domain}/{label}"],
+        [executable, "print", f"{domain}/{label}"],
         capture_output=True,
         text=True,
         check=False,
@@ -876,7 +881,14 @@ def _loaded_launchd_state(
     if result.returncode:
         raise RuntimeError("loaded launchd service query failed")
     environment_result = run(
-        ["launchctl", "getenv", "PYTHONPATH"],
+        [
+            executable,
+            "asuser",
+            str(proven_uid),
+            executable,
+            "getenv",
+            "PYTHONPATH",
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -1099,28 +1111,197 @@ def _prove_windows_pythonpath(
         raise RuntimeError("Windows PYTHONPATH omits candidate launch paths")
 
 
-def _windows_operator_identity() -> str:
-    domain = os.environ.get("USERDOMAIN", "")
-    username = os.environ.get("USERNAME", "")
-    if not domain or not username:
-        raise RuntimeError("Windows operator identity cannot be proven")
-    return f"{domain}\\{username}"
+def _windows_sid_string(sid: object) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.ConvertSidToStringSidW.argtypes = [
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.LPWSTR),
+    ]
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    rendered = wintypes.LPWSTR()
+    if not advapi32.ConvertSidToStringSidW(sid, ctypes.byref(rendered)):
+        raise RuntimeError("Windows SID cannot be resolved")
+    try:
+        value = rendered.value
+        if not value:
+            raise RuntimeError("Windows SID cannot be resolved")
+        return value
+    finally:
+        kernel32.LocalFree(rendered)
 
 
-def _prove_windows_operator(owner: str, operator: str) -> None:
-    if owner.casefold() != operator.casefold():
+def _windows_process_sid() -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(
+        kernel32.GetCurrentProcess(), 0x0008, ctypes.byref(token)
+    ):
+        raise RuntimeError("Windows process token cannot be inspected")
+    try:
+        size = wintypes.DWORD()
+        advapi32.GetTokenInformation(
+            token, 1, None, 0, ctypes.byref(size)
+        )
+        if ctypes.get_last_error() != 122 or not size.value:
+            raise RuntimeError("Windows process token identity is unavailable")
+        buffer = ctypes.create_string_buffer(size.value)
+        if not advapi32.GetTokenInformation(
+            token,
+            1,
+            buffer,
+            size.value,
+            ctypes.byref(size),
+        ):
+            raise RuntimeError("Windows process token identity is unavailable")
+
+        class TokenUser(ctypes.Structure):
+            _fields_ = [
+                ("sid", wintypes.LPVOID),
+                ("attributes", wintypes.DWORD),
+            ]
+
+        user = ctypes.cast(buffer, ctypes.POINTER(TokenUser)).contents
+        return _windows_sid_string(user.sid)
+    finally:
+        kernel32.CloseHandle(token)
+
+
+def _windows_account_sid(owner: str) -> str:
+    import ctypes
+    from ctypes import wintypes
+
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32.ConvertStringSidToSidW.argtypes = [
+        wintypes.LPCWSTR,
+        ctypes.POINTER(wintypes.LPVOID),
+    ]
+    advapi32.ConvertStringSidToSidW.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = [wintypes.HLOCAL]
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    if re.fullmatch(r"S-\d+(?:-\d+)+", owner, flags=re.IGNORECASE):
+        sid_pointer = wintypes.LPVOID()
+        if not advapi32.ConvertStringSidToSidW(
+            owner, ctypes.byref(sid_pointer)
+        ):
+            raise RuntimeError("scheduled-task principal cannot be resolved")
+        try:
+            return _windows_sid_string(sid_pointer)
+        finally:
+            kernel32.LocalFree(sid_pointer)
+    advapi32.LookupAccountNameW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi32.LookupAccountNameW.restype = wintypes.BOOL
+    sid_size = wintypes.DWORD()
+    domain_size = wintypes.DWORD()
+    sid_type = wintypes.DWORD()
+    advapi32.LookupAccountNameW(
+        None,
+        owner,
+        None,
+        ctypes.byref(sid_size),
+        None,
+        ctypes.byref(domain_size),
+        ctypes.byref(sid_type),
+    )
+    if ctypes.get_last_error() != 122 or not sid_size.value:
+        raise RuntimeError("scheduled-task principal cannot be resolved")
+    sid = ctypes.create_string_buffer(sid_size.value)
+    domain = ctypes.create_unicode_buffer(max(domain_size.value, 1))
+    if not advapi32.LookupAccountNameW(
+        None,
+        owner,
+        sid,
+        ctypes.byref(sid_size),
+        domain,
+        ctypes.byref(domain_size),
+        ctypes.byref(sid_type),
+    ):
+        raise RuntimeError("scheduled-task principal cannot be resolved")
+    return _windows_sid_string(sid)
+
+
+def _prove_windows_operator(
+    owner: str,
+    *,
+    process_sid: str | None = None,
+    owner_sid: str | None = None,
+) -> None:
+    operator = process_sid or _windows_process_sid()
+    principal = owner_sid or _windows_account_sid(owner)
+    pattern = r"S-\d+(?:-\d+)+"
+    if (
+        re.fullmatch(pattern, operator, flags=re.IGNORECASE) is None
+        or re.fullmatch(pattern, principal, flags=re.IGNORECASE) is None
+        or operator.casefold() != principal.casefold()
+    ):
         raise RuntimeError(
             "Windows operator does not match the scheduled-task principal"
         )
 
 
+def _literal_windows_registry_pythonpath(
+    value: object,
+    kind: object,
+    string_kind: object,
+) -> str:
+    if (
+        not isinstance(value, str)
+        or kind != string_kind
+        or "%" in value
+        or "!" in value
+    ):
+        raise RuntimeError("Windows registry PYTHONPATH is not literal")
+    return value
+
+
 def _windows_pythonpath_sources(
     owner: str,
-    operator: str | None = None,
+    *,
+    process_sid: str | None = None,
+    owner_sid: str | None = None,
 ) -> dict[str, str]:
     if winreg is None:
         raise RuntimeError("Windows registry access is unavailable")
-    _prove_windows_operator(owner, operator or _windows_operator_identity())
+    _prove_windows_operator(
+        owner,
+        process_sid=process_sid,
+        owner_sid=owner_sid,
+    )
     sources = {"process": os.environ.get("PYTHONPATH", "")}
     locations = (
         ("user", winreg.HKEY_CURRENT_USER, r"Environment"),
@@ -1133,14 +1314,17 @@ def _windows_pythonpath_sources(
     for label, root, subkey in locations:
         try:
             with winreg.OpenKey(root, subkey) as key:
-                value, _kind = winreg.QueryValueEx(key, "PYTHONPATH")
+                value, kind = winreg.QueryValueEx(key, "PYTHONPATH")
         except FileNotFoundError:
             value = ""
+            kind = winreg.REG_SZ
         except OSError as exc:
             raise RuntimeError("Windows PYTHONPATH source query failed") from exc
-        if not isinstance(value, str):
-            raise RuntimeError("Windows PYTHONPATH source is invalid")
-        sources[label] = winreg.ExpandEnvironmentStrings(value)
+        sources[label] = _literal_windows_registry_pythonpath(
+            value,
+            kind,
+            winreg.REG_SZ,
+        )
     return sources
 
 
@@ -1151,7 +1335,7 @@ def _prove_windows_inherited_pythonpath(
     if set(sources) != {"process", "user", "system"}:
         raise RuntimeError("Windows PYTHONPATH sources are incomplete")
     for value in sources.values():
-        if not isinstance(value, str) or re.search(r"%[^%]+%", value):
+        if not isinstance(value, str) or "%" in value or "!" in value:
             raise RuntimeError("Windows PYTHONPATH source is unresolved")
         _prove_pythonpath_source(
             value,
