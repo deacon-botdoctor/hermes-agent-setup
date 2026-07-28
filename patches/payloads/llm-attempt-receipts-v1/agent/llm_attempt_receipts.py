@@ -218,10 +218,11 @@ def _usage_payload(
     api_mode: str,
 ) -> dict[str, Any]:
     raw_usage = _obj_get(response, "usage")
+    actual = _actual_cost(response, raw_usage)
     if raw_usage is None or (
-        _is_openrouter(provider, base_url) and _has_only_zero_usage(raw_usage)
+        _is_openrouter(provider, base_url) and _has_unreported_usage(raw_usage)
     ):
-        return _unavailable_usage_payload()
+        return _unavailable_usage_payload(actual)
 
     try:
         from agent.usage_pricing import estimate_usage_cost, normalize_usage
@@ -244,20 +245,6 @@ def _usage_payload(
         result = _unavailable_usage_payload()
         usage = None
 
-    actual = None
-    raw = _json_value(raw_usage)
-    if isinstance(raw, dict):
-        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
-            value = raw.get(key)
-            if isinstance(value, (int, float, Decimal)):
-                actual = float(value)
-                break
-    if actual is None:
-        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
-            value = _obj_get(response, key)
-            if isinstance(value, (int, float, Decimal)):
-                actual = float(value)
-                break
     if actual is not None:
         result.update(
             cost_usd=actual,
@@ -292,7 +279,7 @@ def _is_openrouter(provider: str, base_url: str) -> bool:
     ) == "openrouter.ai"
 
 
-def _has_only_zero_usage(raw_usage: Any) -> bool:
+def _has_unreported_usage(raw_usage: Any) -> bool:
     values = []
     for name in (
         "prompt_tokens",
@@ -307,12 +294,21 @@ def _has_only_zero_usage(raw_usage: Any) -> bool:
         try:
             values.append(int(value))
         except (TypeError, ValueError):
-            return False
-    return bool(values) and not any(values)
+            return True
+    return not values or not any(values)
 
 
-def _unavailable_usage_payload() -> dict[str, Any]:
-    return {
+def _actual_cost(response: Any, raw_usage: Any) -> float | None:
+    for source in (raw_usage, response):
+        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
+            value = _obj_get(source, key)
+            if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+                return float(value)
+    return None
+
+
+def _unavailable_usage_payload(actual_cost: float | None = None) -> dict[str, Any]:
+    payload = {
         "input_tokens": None,
         "output_tokens": None,
         "cache_read_tokens": None,
@@ -320,10 +316,11 @@ def _unavailable_usage_payload() -> dict[str, Any]:
         "reasoning_tokens": None,
         "total_tokens": None,
         "usage_status": "unavailable",
-        "cost_usd": None,
-        "cost_status": "unknown",
-        "cost_source": "none",
+        "cost_usd": actual_cost,
+        "cost_status": "actual" if actual_cost is not None else "unknown",
+        "cost_source": "provider_response" if actual_cost is not None else "none",
     }
+    return payload
 
 
 @dataclass
