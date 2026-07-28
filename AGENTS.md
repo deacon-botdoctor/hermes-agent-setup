@@ -51,6 +51,7 @@ Choose a user-owned profile and an immutable candidate path:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+export HERMES_CODEX_401_CIRCUIT_STATE="$HERMES_HOME/state/codex-401-circuit.json"
 release_id="$(python3 -c 'import json; print(json.load(open("release.json"))["release"])')"
 candidate="$HERMES_HOME/state/runtime-candidates/$release_id"
 
@@ -75,7 +76,10 @@ HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" doctor
 ```
 
 Review the doctor output before installing the gateway service. Then use the
-candidate's native service command, preserving the intended user/system scope:
+candidate's native service command, preserving the intended user/system scope.
+Persist both `HERMES_HOME` and `HERMES_CODEX_401_CIRCUIT_STATE` in the native
+service's profile environment before it starts; the shell export alone is not
+the service binding:
 
 ```bash
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway install
@@ -89,21 +93,53 @@ the user has not supplied.
 
 Use the pinned upstream PowerShell installer to create an isolated clean
 candidate first. Preserve the prior User and process `PATH`, `HERMES_HOME`, and
-`HERMES_GIT_BASH_PATH` when this is an upgrade.
+`HERMES_GIT_BASH_PATH` when this is an upgrade. Use a clean release checkout
+created with `git -c core.autocrlf=false clone <release-repository-url>` so
+payload files retain their canonical LF bytes. Verification accepts a normal
+Git-for-Windows CRLF checkout only when LF normalization reproduces every
+declared identity.
+
+Set `$InstallMode`, `$ProvenHermesHome`, and `$ProvenServiceOwner` from the
+evidence collected in **First classify the machine**. For an existing install,
+the home and service owner must come from the live process and service
+definition. For a fresh install, prove there is no live gateway or Hermes user
+data. Stop on missing, contradictory, or ambiguous evidence.
 
 ```powershell
+$InstallMode = "<fresh-or-existing>"
+$ProvenHermesHome = "<absolute-evidence-backed-HERMES_HOME>"
+$ProvenServiceOwner = "<evidence-backed-user-system-or-task-owner>"
+if ($InstallMode -notin @("fresh", "existing")) {
+  throw "InstallMode must be explicitly fresh or existing"
+}
+if ($ProvenHermesHome.StartsWith("<") -or -not [IO.Path]::IsPathRooted($ProvenHermesHome)) {
+  throw "ProvenHermesHome must be an evidence-backed absolute path"
+}
+if ($ProvenServiceOwner.StartsWith("<") -or [string]::IsNullOrWhiteSpace($ProvenServiceOwner)) {
+  throw "ProvenServiceOwner must identify the inspected service scope"
+}
+$CurrentOperator = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+if ($InstallMode -eq "fresh" -and $ProvenServiceOwner -ne $CurrentOperator) {
+  throw "Run fresh activation as the intended native gateway owner"
+}
 $Release = Get-Content .\release.json -Raw | ConvertFrom-Json
-$LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
+$LiveHome = [IO.Path]::GetFullPath($ProvenHermesHome)
 $Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release)
 $StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release)
-$ExistingInstall = Test-Path (Join-Path $LiveHome "config.yaml")
-$ProfileHome = if ($ExistingInstall) { $StagingHome } else { $LiveHome }
+$ProfileHome = if ($InstallMode -eq "existing") { $StagingHome } else { $LiveHome }
+if ($InstallMode -eq "fresh" -and (Test-Path (Join-Path $LiveHome "config.yaml"))) {
+  throw "Fresh classification conflicts with existing Hermes data"
+}
+if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "config.yaml"))) {
+  throw "Existing classification conflicts with the proven profile"
+}
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
 $InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/3ef6bbd201263d354fd83ec55b3c306ded2eb72a/scripts/install.ps1"
 $ExpectedInstallerSha256 = "b5bdf0e959677de0168f8cfb5f9175c7b57adf5c4319a1c2fc9bec1f46fbdb6e"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
 $PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
+$PriorProcessCodexCircuitState = $env:HERMES_CODEX_401_CIRCUIT_STATE
 $PriorUserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 $PriorUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
 $PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
@@ -124,15 +160,21 @@ try {
   [Environment]::SetEnvironmentVariable("HERMES_HOME", $PriorUserHermesHome, "User")
   [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $PriorUserGitBashPath, "User")
 }
-python .\bin\assemble-runtime.py `
+& "$Candidate\venv\Scripts\python.exe" .\bin\assemble-runtime.py `
   --output $Candidate --use-existing-clean-runtime
 ```
 
 For a fresh machine, finish native setup and activate the native gateway:
 
+Persist `HERMES_HOME` and `HERMES_CODEX_401_CIRCUIT_STATE` in the native
+gateway task's profile environment before installation, and verify the
+generated task and launcher resolve `$ProvenServiceOwner`, `$LiveHome`, and the
+profile-scoped circuit path before accepting `gateway status`.
+
 ```powershell
-if ($ExistingInstall) { throw "Use the staged existing-install path instead" }
+if ($InstallMode -ne "fresh") { throw "Use the staged existing-install path instead" }
 $env:HERMES_HOME = $LiveHome
+$env:HERMES_CODEX_401_CIRCUIT_STATE = Join-Path $LiveHome "state\codex-401-circuit.json"
 try {
   & "$Candidate\venv\Scripts\python.exe" -m hermes_cli.main setup
   & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
@@ -142,20 +184,23 @@ try {
   & "$Candidate\venv\Scripts\hermes.exe" gateway status
 } finally {
   $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
 }
 ```
 
 For an existing installation, prove only the isolated staged profile here:
 
 ```powershell
-if (-not $ExistingInstall) { throw "Use the fresh-install activation path instead" }
+if ($InstallMode -ne "existing") { throw "Use the fresh-install activation path instead" }
 & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
   --hermes-home $StagingHome --runtime-dir $Candidate
 $env:HERMES_HOME = $StagingHome
+$env:HERMES_CODEX_401_CIRCUIT_STATE = Join-Path $StagingHome "state\codex-401-circuit.json"
 try {
   & "$Candidate\venv\Scripts\hermes.exe" doctor
 } finally {
   $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
 }
 ```
 
@@ -231,7 +276,10 @@ At readiness:
    local per-file rollback and does not switch the service.
 3. Stop the old gateway through its actual service owner.
 4. Bind that same service scope/profile to the candidate's absolute Python and
-   source root.
+   source root, with `HERMES_HOME` set to the proven live profile and
+   `HERMES_CODEX_401_CIRCUIT_STATE` set to
+   `$HERMES_HOME/state/codex-401-circuit.json` (or the equivalent Windows
+   path).
 5. Start the candidate and prove the old generation is absent.
 6. Restore durable checkpoints and replay accepted messages exactly once before
    reopening admission.

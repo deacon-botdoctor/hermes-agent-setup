@@ -37,6 +37,35 @@ def _file_mode(path: Path) -> str:
     return "100755" if mode & stat.S_IXUSR else "100644"
 
 
+def _canonical_source_data(
+    data: bytes, declared_blob: str, windows: bool
+) -> bytes | None:
+    if _git_blob_sha1(data) == declared_blob:
+        return data
+    if windows and b"\r\n" in data:
+        normalized = data.replace(b"\r\n", b"\n")
+        if _git_blob_sha1(normalized) == declared_blob:
+            return normalized
+    return None
+
+
+def _tracked_mode(relative: str) -> str:
+    proc = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--stage", "--", relative],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode:
+        raise RuntimeError(
+            (proc.stderr or f"cannot read tracked mode for {relative}").strip()
+        )
+    rows = [line for line in proc.stdout.splitlines() if line]
+    if len(rows) != 1 or "\t" not in rows[0]:
+        raise RuntimeError(f"cannot resolve tracked mode for {relative}")
+    return rows[0].split(maxsplit=1)[0]
+
+
 def _safe_path(raw: object) -> str:
     value = str(raw or "")
     path = Path(value)
@@ -106,14 +135,15 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
                 errors.append(f"{name}: missing {relative}")
                 continue
             data = os.readlink(path).encode() if path.is_symlink() else path.read_bytes()
-            actual_mode = _file_mode(path)
-            actual_blob = _git_blob_sha1(data)
+            windows = os.name == "nt"
+            actual_mode = _tracked_mode(relative) if windows else _file_mode(path)
+            canonical_data = _canonical_source_data(data, declared_blob, windows)
             if actual_mode != declared_mode:
                 errors.append(
                     f"{name}: mode mismatch for {relative}: "
                     f"{actual_mode} != {declared_mode}"
                 )
-            if actual_blob != declared_blob:
+            if canonical_data is None:
                 errors.append(f"{name}: blob mismatch for {relative}")
             canonical.append(
                 (
@@ -144,6 +174,53 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
     for component, field in expected_component_fields.items():
         if component_digests.get(component) != release.get(field):
             errors.append(f"release {field} mismatch")
+
+    assembled = manifest.get("assembled_runtime_fingerprint")
+    expected_assembled = release.get("assembled_runtime_fingerprint")
+    if not isinstance(assembled, dict) or not isinstance(
+        assembled.get("files"), dict
+    ):
+        errors.append("source manifest assembled runtime fingerprint is invalid")
+    elif not isinstance(expected_assembled, dict):
+        errors.append("release assembled runtime fingerprint is invalid")
+    else:
+        files = assembled["files"]
+        canonical = ""
+        for relative in sorted(files):
+            try:
+                safe_relative = _safe_path(relative)
+            except ValueError as exc:
+                errors.append(f"assembled runtime: {exc}")
+                continue
+            entry = files[relative]
+            if (
+                safe_relative != relative
+                or not isinstance(entry, dict)
+                or entry.get("type") != "blob"
+                or entry.get("mode") not in {"100644", "100755", "120000"}
+                or re.fullmatch(
+                    r"[0-9a-f]{64}", str(entry.get("sha256") or "")
+                )
+                is None
+            ):
+                errors.append(
+                    f"assembled runtime: invalid file identity for {relative}"
+                )
+                continue
+            canonical += (
+                f"{relative}\t{entry['mode']}\t{entry['type']}\t"
+                f"{entry['sha256']}\n"
+            )
+        digest = hashlib.sha256(canonical.encode()).hexdigest()
+        if digest != assembled.get("digest"):
+            errors.append("source manifest assembled runtime digest mismatch")
+        if len(files) != assembled.get("file_count"):
+            errors.append("source manifest assembled runtime file count mismatch")
+        for field in ("digest", "file_count"):
+            if assembled.get(field) != expected_assembled.get(field):
+                errors.append(
+                    f"source manifest assembled runtime {field} mismatch"
+                )
 
     return release, errors
 

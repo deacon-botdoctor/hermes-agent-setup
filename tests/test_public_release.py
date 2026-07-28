@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.util
 import json
 import re
@@ -55,6 +56,11 @@ def test_release_identity_matches_source_manifest():
         "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
         "file_count": 32,
     }
+    assert manifest["assembled_runtime_fingerprint"]["digest"] == (
+        release["assembled_runtime_fingerprint"]["digest"]
+    )
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 32
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 32
     assert set(release) == {
         "schema_version",
         "release",
@@ -187,6 +193,110 @@ def test_profile_paths_reject_symlinked_parents(tmp_path):
 
     with pytest.raises(RuntimeError, match="contains a symlink"):
         installer.validate_profile_path(home, home / "plugins" / "plugin.py")
+
+
+def test_profile_paths_reject_reparse_parents(tmp_path, monkeypatch):
+    installer = load_script("public_install_reparse", "install-profile.py")
+    home = tmp_path / "profile"
+    parent = home / "plugins"
+    parent.mkdir(parents=True)
+    monkeypatch.setattr(
+        installer, "_is_reparse_point", lambda path: path == parent
+    )
+
+    with pytest.raises(RuntimeError, match="contains a reparse point"):
+        installer.validate_profile_path(home, parent / "plugin.py")
+
+
+def test_restore_preflights_all_hashes_before_writing(tmp_path, monkeypatch):
+    installer = load_script("public_install_restore", "install-profile.py")
+    home = tmp_path / "profile"
+    backup = home / "state" / "public-setup-backups" / "receipt"
+    saved_dir = backup / "files"
+    saved_dir.mkdir(parents=True)
+    config_path = home / "config.yaml"
+    config_path.write_text("after\n", encoding="utf-8")
+    config_data = b"before-config\n"
+    (backup / "config.yaml.before").write_bytes(config_data)
+    destinations = [home / "plugins" / "first.py", home / "plugins" / "second.py"]
+    rows = []
+    for index, destination in enumerate(destinations):
+        key = f"{index + 1:064x}"
+        saved = saved_dir / key
+        data = f"before-{index}\n".encode()
+        saved.write_bytes(data)
+        rows.append(
+            {
+                "destination": str(destination),
+                "source": f"plugins/example-{index}.py",
+                "mode": "0644",
+                "backup_key": key,
+                "existed": True,
+                "before_mode": "0644",
+                "before_sha256": (
+                    installer.sha256(saved)
+                    if index == 0
+                    else "0" * 64
+                ),
+            }
+        )
+    writes = []
+    monkeypatch.setattr(
+        installer,
+        "atomic_bytes",
+        lambda path, data, mode: writes.append((path, data, mode)),
+    )
+
+    with pytest.raises(RuntimeError, match="hash does not match receipt"):
+        installer.restore(
+            rows,
+            backup,
+            home,
+            config_path,
+            hashlib.sha256(config_data).hexdigest(),
+        )
+
+    assert writes == []
+
+
+def test_windows_source_canonicalization_accepts_only_crlf():
+    verifier = load_script("public_verify_crlf", "verify-release.py")
+    canonical = b"alpha\nbeta\n"
+    blob = verifier._git_blob_sha1(canonical)
+
+    assert (
+        verifier._canonical_source_data(b"alpha\r\nbeta\r\n", blob, True)
+        == canonical
+    )
+    assert verifier._canonical_source_data(b"alpha\r\nchanged\r\n", blob, True) is None
+    assert verifier._canonical_source_data(b"alpha\r\nbeta\r\n", blob, False) is None
+
+
+def test_windows_runtime_identity_accepts_only_declared_crlf(tmp_path):
+    runtime_manifest = load_script(
+        "public_runtime_crlf", "runtime-payload-manifest.py"
+    )
+    path = tmp_path / "runtime.py"
+    canonical = b"alpha\nbeta\n"
+    declared = {
+        "sha256": hashlib.sha256(canonical).hexdigest(),
+        "mode": "100755",
+        "type": "blob",
+    }
+    path.write_bytes(b"alpha\r\nbeta\r\n")
+
+    identity, reason = runtime_manifest._runtime_file_identity(
+        path, declared, True
+    )
+    assert reason is None
+    assert identity == declared
+
+    path.write_bytes(b"alpha\r\nchanged\r\n")
+    identity, reason = runtime_manifest._runtime_file_identity(
+        path, declared, True
+    )
+    assert identity is None
+    assert "content hash" in reason
 
 
 def test_profile_install_interrupt_restores_from_pending_receipt(
@@ -330,7 +440,16 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     assert "-m hermes_cli.main setup" in instructions
     assert "gateway install" in instructions
     assert "gateway status" in instructions
-    assert "$ProfileHome = if ($ExistingInstall)" in instructions
+    assert '$InstallMode = "<fresh-or-existing>"' in instructions
+    assert "$ProvenHermesHome" in instructions
+    assert "$ProvenServiceOwner" in instructions
+    assert "$ExistingInstall" not in instructions
+    assert (
+        '& "$Candidate\\venv\\Scripts\\python.exe" .\\bin\\assemble-runtime.py'
+        in instructions
+    )
+    assert "core.autocrlf=false" in instructions
+    assert instructions.count("HERMES_CODEX_401_CIRCUIT_STATE") >= 4
 
 
 def test_public_text_has_no_private_runtime_routes():

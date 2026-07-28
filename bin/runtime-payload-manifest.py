@@ -243,7 +243,57 @@ def is_runtime_state_or_artifact(path: str) -> bool:
     return bool(re.search(r"\.(?:bak|backup)(?:[-.].*)?$", name)) or name.endswith("~")
 
 
-def runtime_fingerprint(runtime_dir: Path, expected_upstream_sha: str, expected_golden_sha: str) -> dict[str, Any]:
+def _runtime_file_identity(
+    target: Path, declared: dict[str, str] | None, windows: bool
+) -> tuple[dict[str, str] | None, str | None]:
+    mode = target.lstat().st_mode
+    if stat.S_ISLNK(mode):
+        content = os.readlink(target).encode()
+        actual_mode = "120000"
+    else:
+        content = target.read_bytes()
+        actual_mode = "100755" if mode & stat.S_IXUSR else "100644"
+    actual_sha = hashlib.sha256(content).hexdigest()
+    if declared is None:
+        return {
+            "sha256": actual_sha,
+            "mode": actual_mode,
+            "type": "blob",
+        }, None
+    declared_sha = str(declared.get("sha256") or "")
+    declared_mode = str(declared.get("mode") or "")
+    if declared.get("type") != "blob":
+        return None, "declared object type is not a blob"
+    if windows:
+        if actual_sha != declared_sha:
+            if stat.S_ISLNK(mode) or b"\r\n" not in content:
+                return None, "content hash does not match the declared runtime file"
+            normalized = content.replace(b"\r\n", b"\n")
+            if hashlib.sha256(normalized).hexdigest() != declared_sha:
+                return None, "content hash does not match the declared runtime file"
+        return {
+            "sha256": declared_sha,
+            "mode": declared_mode,
+            "type": "blob",
+        }, None
+    if actual_sha != declared_sha:
+        return None, "content hash does not match the declared runtime file"
+    if actual_mode != declared_mode:
+        return None, "mode does not match the declared runtime file"
+    return {
+        "sha256": actual_sha,
+        "mode": actual_mode,
+        "type": "blob",
+    }, None
+
+
+def runtime_fingerprint(
+    runtime_dir: Path,
+    expected_upstream_sha: str,
+    expected_golden_sha: str,
+    expected_files: dict[str, dict[str, str]] | None = None,
+    windows: bool | None = None,
+) -> dict[str, Any]:
     """Fingerprint deviations in a clean-base runtime after Golden is applied.
 
     Callers must build the runtime from a clean upstream checkout. The resulting
@@ -283,7 +333,26 @@ def runtime_fingerprint(runtime_dir: Path, expected_upstream_sha: str, expected_
             "reason": "ignored non-data runtime paths prevent complete provenance",
             "ignored_non_data_paths": unsafe_ignored,
         }
-    paths = sorted({path.strip() for path in unstaged + staged + untracked if path.strip()})
+    windows = os.name == "nt" if windows is None else windows
+    observed_paths = {
+        path.strip() for path in unstaged + staged + untracked if path.strip()
+    }
+    expected_paths = set(expected_files or {})
+    unexpected = sorted(
+        path
+        for path in observed_paths - expected_paths
+        if not is_runtime_state_or_artifact(path)
+    )
+    if expected_files is not None and unexpected:
+        return {
+            "verified": False,
+            "upstream_sha": upstream_sha,
+            "expected_upstream_sha": expected_upstream_sha,
+            "golden_sha": expected_golden_sha,
+            "reason": "runtime contains undeclared non-data changes",
+            "unexpected_paths": unexpected,
+        }
+    paths = sorted(expected_paths if expected_files is not None else observed_paths)
     files: dict[str, dict[str, str]] = {}
     excluded: list[str] = []
     for path in paths:
@@ -292,19 +361,26 @@ def runtime_fingerprint(runtime_dir: Path, expected_upstream_sha: str, expected_
             continue
         target = runtime_dir / path
         if not target.is_file() and not target.is_symlink():
-            raise RuntimeError(f"runtime fingerprint cannot encode deleted path {path}; refusing incomplete provenance")
-        mode = target.lstat().st_mode
-        if stat.S_ISLNK(mode):
-            content = os.readlink(target).encode()
-            git_mode = "120000"
-        else:
-            content = target.read_bytes()
-            git_mode = "100755" if mode & stat.S_IXUSR else "100644"
-        files[path] = {
-            "sha256": hashlib.sha256(content).hexdigest(),
-            "mode": git_mode,
-            "type": "blob",
-        }
+            return {
+                "verified": False,
+                "upstream_sha": upstream_sha,
+                "expected_upstream_sha": expected_upstream_sha,
+                "golden_sha": expected_golden_sha,
+                "reason": f"declared runtime file is missing: {path}",
+            }
+        identity, reason = _runtime_file_identity(
+            target, (expected_files or {}).get(path), windows
+        )
+        if reason:
+            return {
+                "verified": False,
+                "upstream_sha": upstream_sha,
+                "expected_upstream_sha": expected_upstream_sha,
+                "golden_sha": expected_golden_sha,
+                "reason": f"{path}: {reason}",
+            }
+        assert identity is not None
+        files[path] = identity
     canonical = "".join(
         f"{path}\t{files[path]['mode']}\t{files[path]['type']}\t{files[path]['sha256']}\n" for path in sorted(files)
     )
@@ -390,6 +466,11 @@ def main(argv: list[str] | None = None) -> int:
             args.runtime_dir.expanduser().resolve(),
             str(target.get("canonical_upstream_sha") or ""),
             str(target.get("golden_sha") or ""),
+            (
+                target.get("assembled_runtime_fingerprint", {}).get("files")
+                if isinstance(target.get("assembled_runtime_fingerprint"), dict)
+                else None
+            ),
         )
     text = (
         json.dumps(payload, sort_keys=True, separators=(",", ":"))

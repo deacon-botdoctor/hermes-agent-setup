@@ -14,7 +14,9 @@ import datetime as dt
 import hashlib
 import json
 import os
+import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -43,16 +45,32 @@ def atomic_bytes(path: Path, data: bytes, mode: int) -> None:
     os.replace(tmp, path)
 
 
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        attributes = path.lstat().st_file_attributes
+    except (AttributeError, FileNotFoundError, OSError):
+        return False
+    return bool(
+        attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    )
+
+
 def validate_profile_path(home: Path, path: Path) -> None:
     try:
         relative = path.relative_to(home)
     except ValueError:
         raise RuntimeError(f"profile path escapes HERMES_HOME: {path}") from None
+    if ".." in relative.parts:
+        raise RuntimeError(f"profile path escapes HERMES_HOME: {path}")
     current = home
     for part in relative.parts:
         current = current / part
         if current.is_symlink():
             raise RuntimeError(f"profile path contains a symlink: {current}")
+        if _is_reparse_point(current):
+            raise RuntimeError(
+                f"profile path contains a reparse point: {current}"
+            )
         if current != path and current.exists() and not current.is_dir():
             raise RuntimeError(f"profile path parent is not a directory: {current}")
     resolved_parent = path.parent.resolve(strict=False)
@@ -216,23 +234,120 @@ def ensure_public_config(
     return changed
 
 
+def _lexical_path(path: Path) -> Path:
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
+def _receipt_sha256(value: object, field: str) -> str:
+    digest = str(value or "")
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise ValueError(f"rollback receipt has invalid {field}")
+    return digest
+
+
+def _receipt_mode(value: object) -> int:
+    raw = str(value or "")
+    if re.fullmatch(r"0[0-7]{3}", raw) is None:
+        raise ValueError("rollback receipt has invalid before_mode")
+    return int(raw, 8)
+
+
+def _preflight_restore(
+    rows: list[dict[str, Any]],
+    backup: Path,
+    home: Path,
+    config_path: Path,
+    config_sha256_before: object,
+) -> tuple[list[tuple[Path, bool, bytes | None, int]], bytes]:
+    validate_profile_path(home, backup / "files")
+    validate_profile_path(home, config_path)
+    saved_config = backup / "config.yaml.before"
+    validate_profile_path(home, saved_config)
+    expected_config_sha = _receipt_sha256(
+        config_sha256_before, "config_sha256_before"
+    )
+    if (
+        not saved_config.is_file()
+        or saved_config.is_symlink()
+        or _is_reparse_point(saved_config)
+    ):
+        raise RuntimeError(f"rollback config is missing or unsafe: {saved_config}")
+    config_data = saved_config.read_bytes()
+    if hashlib.sha256(config_data).hexdigest() != expected_config_sha:
+        raise RuntimeError("rollback config hash does not match receipt")
+
+    checked: list[tuple[Path, bool, bytes | None, int]] = []
+    seen: set[Path] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("rollback receipt file entry is invalid")
+        raw_destination = row.get("destination")
+        if not isinstance(raw_destination, str) or not Path(
+            raw_destination
+        ).is_absolute():
+            raise ValueError("rollback receipt destination is invalid")
+        destination = _lexical_path(Path(raw_destination))
+        validate_profile_path(home, destination)
+        if destination in seen:
+            raise ValueError("rollback receipt has duplicate destinations")
+        seen.add(destination)
+        existed = row.get("existed")
+        if not isinstance(existed, bool):
+            raise ValueError("rollback receipt existed flag is invalid")
+        mode = _receipt_mode(row.get("before_mode"))
+        _receipt_mode(row.get("mode"))
+        backup_key = _receipt_sha256(row.get("backup_key"), "backup_key")
+        source = row.get("source")
+        if (
+            not isinstance(source, str)
+            or not source
+            or Path(source).is_absolute()
+            or ".." in Path(source).parts
+        ):
+            raise ValueError("rollback receipt source is invalid")
+        expected_sha = row.get("before_sha256")
+        saved_data: bytes | None = None
+        if existed:
+            expected_sha = _receipt_sha256(expected_sha, "before_sha256")
+            saved = backup / "files" / backup_key
+            validate_profile_path(home, saved)
+            if (
+                not saved.is_file()
+                or saved.is_symlink()
+                or _is_reparse_point(saved)
+            ):
+                raise RuntimeError(f"rollback file is missing or unsafe: {saved}")
+            saved_data = saved.read_bytes()
+            if hashlib.sha256(saved_data).hexdigest() != expected_sha:
+                raise RuntimeError(
+                    f"rollback file hash does not match receipt: {saved}"
+                )
+        elif expected_sha is not None:
+            raise ValueError(
+                "rollback receipt has a hash for a nonexistent destination"
+            )
+        checked.append((destination, existed, saved_data, mode))
+    return checked, config_data
+
+
 def restore(
-    rows: list[dict[str, Any]], backup: Path, home: Path, config_path: Path
+    rows: list[dict[str, Any]],
+    backup: Path,
+    home: Path,
+    config_path: Path,
+    config_sha256_before: object,
 ) -> None:
-    for row in reversed(rows):
-        destination = Path(row["destination"]).resolve()
-        if not destination.is_relative_to(home):
-            raise RuntimeError(f"rollback destination escapes HERMES_HOME: {destination}")
-        if row["existed"]:
-            saved = backup / "files" / row["backup_key"]
-            if not saved.is_file():
-                raise RuntimeError(f"rollback file is missing: {saved}")
-            atomic_bytes(destination, saved.read_bytes(), int(row["before_mode"], 8))
+    checked, config_data = _preflight_restore(
+        rows, backup, home, config_path, config_sha256_before
+    )
+    for destination, existed, saved_data, mode in reversed(checked):
+        validate_profile_path(home, destination)
+        if existed:
+            assert saved_data is not None
+            atomic_bytes(destination, saved_data, mode)
         elif destination.is_file() or destination.is_symlink():
             destination.unlink()
-    saved_config = backup / "config.yaml.before"
-    if saved_config.is_file():
-        atomic_bytes(config_path, saved_config.read_bytes(), 0o600)
+    atomic_bytes(config_path, config_data, 0o600)
 
 
 def main() -> int:
@@ -251,20 +366,41 @@ def main() -> int:
     config_path = home / "config.yaml"
     validate_profile_path(home, config_path)
     if args.restore_backup:
-        backup = args.restore_backup.expanduser().resolve()
+        backup = _lexical_path(args.restore_backup)
         backup_root = home / "state" / "public-setup-backups"
+        validate_profile_path(home, backup)
         if not backup.is_relative_to(backup_root):
             raise ValueError("restore backup must be inside this HERMES_HOME")
         receipt_path = backup / "receipt.json"
+        validate_profile_path(home, receipt_path)
+        if (
+            not receipt_path.is_file()
+            or receipt_path.is_symlink()
+            or _is_reparse_point(receipt_path)
+        ):
+            raise ValueError("restore receipt is missing or unsafe")
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if (
-            receipt.get("kind") != "botdoctor_public_profile_install"
-            or Path(str(receipt.get("hermes_home") or "")).resolve() != home
+            receipt.get("schema_version") != 1
+            or receipt.get("status") not in {"pending", "completed"}
+            or receipt.get("kind") != "botdoctor_public_profile_install"
+            or _lexical_path(Path(str(receipt.get("hermes_home") or "")))
+            != home
             or not isinstance(receipt.get("files"), list)
+            or _lexical_path(Path(str(receipt.get("rollback") or "")))
+            != backup
         ):
             raise ValueError("restore receipt is invalid or belongs to another profile")
-        restore(receipt["files"], backup, home, config_path)
-        (home / "state" / "public-setup-current.json").unlink(missing_ok=True)
+        restore(
+            receipt["files"],
+            backup,
+            home,
+            config_path,
+            receipt.get("config_sha256_before"),
+        )
+        current_receipt = home / "state" / "public-setup-current.json"
+        validate_profile_path(home, current_receipt)
+        current_receipt.unlink(missing_ok=True)
         print(
             json.dumps(
                 {
@@ -381,7 +517,13 @@ def main() -> int:
             )
         changed_config = ensure_public_config(config_path, home, python)
     except BaseException:
-        restore(rows, backup, home, config_path)
+        restore(
+            rows,
+            backup,
+            home,
+            config_path,
+            receipt["config_sha256_before"],
+        )
         raise
 
     receipt.update(
