@@ -26,6 +26,47 @@ def load_receipts(monkeypatch, tmp_path):
     return module
 
 
+def test_auxiliary_patch_instruments_fallback_and_refreshed_clients():
+    patch_path = ROOT / "patches/modules/llm_attempt_receipts_v1.py"
+    spec = importlib.util.spec_from_file_location("receipt_patch_module", patch_path)
+    assert spec and spec.loader
+    patch_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(patch_module)
+    source = """
+def resolve_provider_client(*args, **kwargs):
+    return None, None
+
+def call_llm(*args, **kwargs):
+    effective_timeout = _effective_aux_timeout(task, timeout)
+
+async def async_call_llm(*args, **kwargs):
+    effective_timeout = _effective_aux_timeout(task, timeout)
+
+def _call_fallback_candidate_sync(*args, **kwargs):
+    return None
+
+async def _call_fallback_candidate_async(*args, **kwargs):
+    return None
+
+def _refresh_nous_auxiliary_client(*args, **kwargs):
+    return None, None
+
+# ── Public API ──────────────────────────────────────────────────────────────
+
+def extract_content_or_reasoning(response) -> str:
+    return ""
+"""
+
+    patched = patch_module._patch_auxiliary(source)
+
+    assert "_call_fallback_candidate_sync_without_attempt_receipts" in patched
+    assert "_call_fallback_candidate_async_without_attempt_receipts" in patched
+    assert "_refresh_nous_auxiliary_client_without_attempt_receipts" in patched
+    assert "provider=_fallback_receipt_provider(fb_label)" in patched
+    assert 'provider="nous"' in patched
+    assert patch_module._patch_auxiliary(patched) == patched
+
+
 def test_ledger_write_failure_does_not_change_provider_result(tmp_path, monkeypatch, caplog):
     receipts = load_receipts(monkeypatch, tmp_path)
 

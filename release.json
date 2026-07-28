@@ -6,10 +6,10 @@
   "golden_sha": "1e9cf546cdeff7be26109a2c2c407510a8f3726d",
   "canonical_upstream_sha": "f228e145ba35cbbf785eded2021ae6682285b91b",
   "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "955d33b3007626fa5dc539f1d36341dd220c1a09ccf65844150779c950d3b907",
-  "deployment_digest": "9f81ae891c8292f7d2641e48d1a2c22a35d6e4f2c42d2f9067fc700888433485",
+  "runtime_payload_digest": "be90015aed966c844747a407341694fe4f4965a08485ce512ebd4a75b351e612",
+  "deployment_digest": "d4422c7b2ef824ebd637a6573cbf982f5831c10826c5177fd889e6f82fa0c6be",
   "assembled_runtime_fingerprint": {
-    "digest": "7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d",
+    "digest": "0ec238524c924c2c149e8d2b630a1481a58849c9d025e3178fd073aa1fe1b05d",
     "file_count": 39
   },
   "verification": {

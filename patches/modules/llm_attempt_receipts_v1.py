@@ -372,6 +372,93 @@ def resolve_vision_provider_client(
 """
 
 
+def _fallback_execution_wrapper() -> str:
+    return r"""
+
+_call_fallback_candidate_sync_without_attempt_receipts = _call_fallback_candidate_sync
+_call_fallback_candidate_async_without_attempt_receipts = _call_fallback_candidate_async
+
+
+def _fallback_receipt_provider(label: str) -> str:
+    label = str(label or "unknown")
+    if "(" in label and label.endswith(")"):
+        provider = label.rsplit("(", 1)[1][:-1].strip()
+        if provider:
+            return provider
+    return label
+
+
+def _call_fallback_candidate_sync(
+    fb_client: Any,
+    fb_model: Optional[str],
+    fb_label: str,
+    **kwargs,
+) -> Optional[Any]:
+    from agent.llm_attempt_receipts import instrument_auxiliary_client
+
+    fb_client = instrument_auxiliary_client(
+        fb_client,
+        provider=_fallback_receipt_provider(fb_label),
+        model=fb_model,
+        task=kwargs.get("task"),
+    )
+    return _call_fallback_candidate_sync_without_attempt_receipts(
+        fb_client,
+        fb_model,
+        fb_label,
+        **kwargs,
+    )
+
+
+async def _call_fallback_candidate_async(
+    fb_client: Any,
+    fb_model: Optional[str],
+    fb_label: str,
+    **kwargs,
+) -> Optional[Any]:
+    from agent.llm_attempt_receipts import instrument_auxiliary_client
+
+    fb_client = instrument_auxiliary_client(
+        fb_client,
+        provider=_fallback_receipt_provider(fb_label),
+        model=fb_model,
+        task=kwargs.get("task"),
+    )
+    return await _call_fallback_candidate_async_without_attempt_receipts(
+        fb_client,
+        fb_model,
+        fb_label,
+        **kwargs,
+    )
+"""
+
+
+def _nous_refresh_wrapper() -> str:
+    return r"""
+
+_refresh_nous_auxiliary_client_without_attempt_receipts = _refresh_nous_auxiliary_client
+
+
+def _refresh_nous_auxiliary_client(*args, **kwargs):
+    client, resolved_model = _refresh_nous_auxiliary_client_without_attempt_receipts(
+        *args,
+        **kwargs,
+    )
+    from agent.llm_attempt_receipts import instrument_auxiliary_client
+
+    return (
+        instrument_auxiliary_client(
+            client,
+            provider="nous",
+            model=resolved_model or kwargs.get("model"),
+            task="vision" if kwargs.get("is_vision") else None,
+            api_mode=kwargs.get("api_mode"),
+        ),
+        resolved_model,
+    )
+"""
+
+
 def _patch_auxiliary(content: str) -> str:
     if MARKER not in content:
         public_anchor = "\n\n# ── Public API ──────────────────────────────────────────────────────────────\n"
@@ -391,6 +478,10 @@ def _patch_auxiliary(content: str) -> str:
         content = content.rstrip() + _async_wrapper().rstrip() + "\n"
     if "_resolve_vision_provider_client_without_attempt_receipts" not in content:
         content = content.rstrip() + _vision_resolver_wrapper().rstrip() + "\n"
+    if "_call_fallback_candidate_sync_without_attempt_receipts" not in content:
+        content = content.rstrip() + _fallback_execution_wrapper().rstrip() + "\n"
+    if "_refresh_nous_auxiliary_client_without_attempt_receipts" not in content:
+        content = content.rstrip() + _nous_refresh_wrapper().rstrip() + "\n"
     if "HERMES_LLM_ATTEMPT_RESOLVED_CLIENTS_v1" in content:
         return content
     resolved_client_anchor = "    effective_timeout = _effective_aux_timeout(task, timeout)\n"
