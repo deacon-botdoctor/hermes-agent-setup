@@ -49,18 +49,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 77
+    assert manifest["components"]["runtime_payload"]["file_count"] == 79
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
-        "file_count": 32,
+        "digest": "7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d",
+        "file_count": 39,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 32
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 32
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 39
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 39
     assert set(release) == {
         "schema_version",
         "release",
@@ -91,7 +91,7 @@ def test_release_identity_matches_source_manifest():
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "9b3c05096964e4d27c8b126a05760a4ecb35fb56"
+        == "21ed4f1f7fb3e70897edeca36b700b8fe45fd9e2"
     )
 
 
@@ -100,7 +100,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 16
+    assert len(patches) == 17
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -1206,22 +1206,29 @@ def test_gbrain_is_opt_in_and_telegram_continuity_stays_enabled(monkeypatch):
     transcript_source = (
         ROOT / "hooks" / "telegram-transcript" / "handler.py"
     ).read_text(encoding="utf-8")
-    transcript_hook = (
-        ROOT / "hooks" / "telegram-transcript" / "HOOK.yaml"
-    ).read_text(encoding="utf-8")
+    transcript_hook = yaml.safe_load(
+        (ROOT / "hooks" / "telegram-transcript" / "HOOK.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
     assert "HERMES_ENABLE_TELEGRAM_TRANSCRIPT" not in transcript_source
-    assert "Bounded topic-local Telegram continuity" in transcript_hook
+    assert transcript_hook["name"] == "telegram-transcript"
+    assert set(transcript_hook["events"]) == {
+        "agent:start",
+        "agent:end",
+        "processing:complete",
+    }
 
 
 def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert (
         "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "3ef6bbd201263d354fd83ec55b3c306ded2eb72a/scripts/install.ps1"
+        "f228e145ba35cbbf785eded2021ae6682285b91b/scripts/install.ps1"
         in instructions
     )
     assert (
-        "b5bdf0e959677de0168f8cfb5f9175c7b57adf5c4319a1c2fc9bec1f46fbdb6e"
+        "558456de6dc680cecd286018fa1a565a8b31454ed45e6d5b74bdada3142f6c3c"
         in instructions
     )
     assert "-m hermes_cli.main setup" in instructions
@@ -1303,18 +1310,32 @@ def test_public_text_has_no_private_runtime_routes():
     papercuts = (ROOT / "skills" / "fleet" / "papercuts" / "SKILL.md").read_text(
         encoding="utf-8"
     )
-    operating_patterns = (
-        ROOT
-        / "mcp-servers"
-        / "capability-router"
-        / "operating-patterns.capability-entry.json"
-    ).read_text(encoding="utf-8")
+    operating_patterns = json.loads(
+        (
+            ROOT
+            / "mcp-servers"
+            / "capability-router"
+            / "operating-patterns.capability-entry.json"
+        ).read_text(encoding="utf-8")
+    )
     reflection = (
         ROOT / "skills" / "fleet" / "nightly-client-reflection-default" / "SKILL.md"
     ).read_text(encoding="utf-8")
     assert "--route windows-host" in papercuts
     assert "--target example-agent" in papercuts
     assert "C:\\\\Users\\\\Agent\\\\.hermes" in papercuts
-    assert "Durable Jobs" in operating_patterns
-    assert "the operator explicitly authorizes" in operating_patterns
+    durable_work = next(
+        item
+        for item in operating_patterns["capabilities"]
+        if item["id"] == "ops-pattern.durable-work"
+    )
+    coding_worktree = next(
+        item
+        for item in operating_patterns["capabilities"]
+        if item["id"] == "ops-pattern.coding-worktree"
+    )
+    assert durable_work["label"] == "Durable Work Queue"
+    assert "the operator explicitly authorizes" in coding_worktree[
+        "routing_policy"
+    ]["dirty_repo_rule"]
     assert "escalate_to_operator" in reflection

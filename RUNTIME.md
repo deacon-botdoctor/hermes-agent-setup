@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.27`:
+The current public release is `botdoctor-hermes-2026.07.28`:
 
-- upstream Hermes: `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`;
-- public Golden source: `2f5e428248a1bc72ec6275fb25eddfed65c6c71e`;
-- runtime payload: 77 files;
+- upstream Hermes: `f228e145ba35cbbf785eded2021ae6682285b91b`;
+- public Golden source: `1e9cf546cdeff7be26109a2c2c407510a8f3726d`;
+- runtime payload: 79 files;
 - assembled runtime fingerprint:
-  `de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067`.
+  `7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately
@@ -62,9 +62,14 @@ values only when they still exactly match the old defaults.
   Scheduled Task and state namespace.
 - **Codex 401 spend guard:** one bounded client-turn fallback may run while
   recursive/internal paid fallbacks remain blocked.
+- **LLM attempt receipts:** each observed main or auxiliary provider attempt
+  writes a content-free local receipt with route, outcome, and usage evidence.
+  Receipt failures are logged but never block the model path; reconciliation
+  resolves the active installed runtime and treats missing, empty, or zero usage
+  as unavailable while retaining a provider-reported cost.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 16
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 17
 cohesive registry entries in this release.
 
 ## Profile additions
@@ -78,7 +83,8 @@ The bounded profile installer places only manifest-owned files:
   capture hook;
 - shared isolation, content, file-delivery, truth, and operating rules;
 - reflection and papercut skills/scripts;
-- runtime-owned reflection, transaction, and papercut helpers.
+- runtime-owned reflection, transaction, LLM-receipt reconciliation, and
+  papercut helpers.
 
 It backs up every replaced destination, preserves unrelated local files, never
 reads `.env`, and does not switch or restart a service.

@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "release": "botdoctor-hermes-2026.07.27",
+  "release": "botdoctor-hermes-2026.07.28",
   "status": "current",
   "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "2f5e428248a1bc72ec6275fb25eddfed65c6c71e",
-  "canonical_upstream_sha": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+  "golden_sha": "1e9cf546cdeff7be26109a2c2c407510a8f3726d",
+  "canonical_upstream_sha": "f228e145ba35cbbf785eded2021ae6682285b91b",
   "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "c6dcadcea5e97014feeb656692223d047f0686a08fbb024fbce96c1135bcdd46",
-  "deployment_digest": "744fe796c6389590039e158b3e497eeb1329c5cebd0afdfc47f34cc124798539",
+  "runtime_payload_digest": "da8ef5391179fc6fab2326d27be4660c990602d650c22860f03bcd39f8201ae2",
+  "deployment_digest": "cfdaa5d496b8ab62f763de8e7ac17bc7bb3fc8dc1bff30d0c02beec98f96b8d0",
   "assembled_runtime_fingerprint": {
-    "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
-    "file_count": 32
+    "digest": "7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d",
+    "file_count": 39
   },
   "verification": {
-    "golden_suite": "1472 passed, 29 skipped",
-    "clean_upstream_rehearsal": "16 applied, 0 breakage"
+    "golden_suite": "1483 passed, 28 skipped",
+    "clean_upstream_rehearsal": "17 applied, 0 breakage"
   },
   "update_contract": "maintenance-quiescence-v1"
 }

@@ -11,9 +11,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-PAYLOAD_DIR = (
-    Path(__file__).resolve().parents[1] / "payloads" / "durable-drain-inbox-v1"
-)
+PAYLOAD_DIR = Path(__file__).resolve().parents[1] / "payloads" / "durable-drain-inbox-v1"
 MANIFEST_PATH = PAYLOAD_DIR / "manifest.json"
 MARKER_RELATIVE = Path(".golden-runtime-carriers/durable-drain-inbox-v1.json")
 IDEMPOTENCY = "HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1"
@@ -121,13 +119,9 @@ def _marker_payload(manifest: dict[str, Any]) -> dict[str, Any]:
         "idempotency": IDEMPOTENCY,
         "base_commit": manifest["base_commit"],
         "source_seed_head": manifest["source_seed_head"],
-        "payload_finalized_in_golden_commit": manifest[
-            "payload_finalized_in_golden_commit"
-        ],
+        "payload_finalized_in_golden_commit": manifest["payload_finalized_in_golden_commit"],
         "patch_sha256": manifest["patch_sha256"],
-        "downstream_mutable_postimages": manifest.get(
-            "downstream_mutable_postimages", {}
-        ),
+        "downstream_mutable_postimages": manifest.get("downstream_mutable_postimages", {}),
     }
 
 
@@ -154,8 +148,7 @@ def patch_durable_drain_inbox_carrier_v1(root: Path) -> bool:
         marked_mismatches = _marked_install_mismatches(root, manifest)
         if marked_mismatches:
             raise RuntimeError(
-                "durable-drain carrier marker exists but payload drifted: "
-                + ", ".join(marked_mismatches)
+                "durable-drain carrier marker exists but payload drifted: " + ", ".join(marked_mismatches)
             )
         return False
 
@@ -165,19 +158,14 @@ def patch_durable_drain_inbox_carrier_v1(root: Path) -> bool:
 
     head = _repo_head(root)
     if head is not None and head != manifest["base_commit"]:
-        raise RuntimeError(
-            f"durable-drain carrier requires base {manifest['base_commit']}, got {head}"
-        )
+        raise RuntimeError(f"durable-drain carrier requires base {manifest['base_commit']}, got {head}")
 
     payload = PAYLOAD_DIR / manifest["patch"]
     _apply_payload(root, payload, check=True)
     _apply_payload(root, payload, check=False)
     mismatches = _postimage_mismatches(root, manifest)
     if mismatches:
-        raise RuntimeError(
-            "durable-drain carrier postimage verification failed: "
-            + ", ".join(mismatches)
-        )
+        raise RuntimeError("durable-drain carrier postimage verification failed: " + ", ".join(mismatches))
     _write_marker(root, manifest)
     return True
 
@@ -193,10 +181,8 @@ def _load_sibling(name: str):
 
 
 def patch_durable_drain_runtime_v1(root: Path) -> bool:
-    """Apply the carrier and its cross-platform compatibility as one subsystem."""
+    """Apply the carrier and cron dispatch seam as one lifecycle subsystem."""
     changed = patch_durable_drain_inbox_carrier_v1(root)
-    compatibility = _load_sibling("durable_drain_compatibility_v1")
     cron = _load_sibling("cron_scheduler_can_dispatch_compat_v1")
-    changed = compatibility.patch_durable_drain_compatibility_v1(root) or changed
     changed = cron.patch_cron_scheduler_can_dispatch_compat_v1(root) or changed
     return changed
