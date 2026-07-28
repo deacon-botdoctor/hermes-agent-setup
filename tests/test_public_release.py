@@ -391,6 +391,9 @@ def test_systemd_properties_reload_and_use_selected_scope():
                 "ExecStart={ path=/candidate/venv/bin/python ; "
                 "argv[]=/candidate/venv/bin/python -m hermes_cli.main "
                 "gateway run ; }\n"
+                "ExecStartEx={ path=/candidate/venv/bin/python ; "
+                "argv[]=/candidate/venv/bin/python -m hermes_cli.main "
+                "gateway run ; flags= ; }\n"
                 "Environment=HERMES_HOME=/profile\n"
                 "EnvironmentFiles=\n"
                 "PassEnvironment=\n"
@@ -403,6 +406,9 @@ def test_systemd_properties_reload_and_use_selected_scope():
     properties = binder._systemd_properties(
         "hermes-gateway", "user", run=fake_run
     )
+    manager_environment = binder._systemd_manager_environment(
+        "user", run=fake_run
+    )
 
     assert calls[0] == ["systemctl", "--user", "daemon-reload"]
     assert calls[1][:4] == [
@@ -412,6 +418,47 @@ def test_systemd_properties_reload_and_use_selected_scope():
         "hermes-gateway",
     ]
     assert properties["DropInPaths"] == ""
+    assert manager_environment == {"PYTHONPATH": ""}
+    assert calls[2] == ["systemctl", "--user", "show-environment"]
+
+
+def test_runtime_value_uses_unambiguous_sentinel(tmp_path):
+    binder = load_script("public_runtime_sentinel", "bind-service-circuit.py")
+    runtime = tmp_path / "candidate"
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+
+    def resolved_run(argv, **_kwargs):
+        marker = re.search(r"_proof_marker='([^']+)'", argv[-1]).group(1)
+        return subprocess.CompletedProcess(
+            argv, 0, f"generator chatter\n{marker}\"resolved\"\n", ""
+        )
+
+    def ambiguous_run(argv, **_kwargs):
+        marker = re.search(r"_proof_marker='([^']+)'", argv[-1]).group(1)
+        return subprocess.CompletedProcess(
+            argv, 0, f"{marker}\"one\"\n{marker}\"two\"\n", ""
+        )
+
+    assert (
+        binder._runtime_value(
+            runtime,
+            tmp_path,
+            "_proof_emit('resolved')",
+            run=resolved_run,
+            token="fixed",
+        )
+        == "resolved"
+    )
+    with pytest.raises(RuntimeError, match="resolution failed"):
+        binder._runtime_value(
+            runtime,
+            tmp_path,
+            "_proof_emit('one');_proof_emit('two')",
+            run=ambiguous_run,
+            token="fixed",
+        )
 
 
 def test_windows_uv_launch_spec_uses_base_pythonw(tmp_path):
@@ -470,6 +517,20 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
         expected_argv,
         expected_environment,
     )
+    for prefix in ("+", "!", "!!"):
+        with pytest.raises(RuntimeError, match="execution flags"):
+            binder._prove_systemd(
+                unit.replace(
+                    f"ExecStart={runtime}".encode(),
+                    f"ExecStart={prefix}{runtime}".encode(),
+                ),
+                home,
+                runtime,
+                "system",
+                owner,
+                expected_argv,
+                expected_environment,
+            )
     with pytest.raises(RuntimeError, match="pinned launch spec"):
         binder._prove_systemd(
             unit.replace(b"/runtimes/candidate/", b"/runtimes/candidate-old/"),
@@ -523,6 +584,11 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
             "argv[]=/runtimes/candidate/venv/bin/python -m hermes_cli.main "
             "gateway run ; }"
         ),
+        "ExecStartEx": (
+            "{ path=/runtimes/candidate/venv/bin/python ; "
+            "argv[]=/runtimes/candidate/venv/bin/python -m hermes_cli.main "
+            "gateway run ; flags= ; }"
+        ),
         "Environment": (
             f"HERMES_HOME={home} VIRTUAL_ENV={runtime}/venv "
             "PYTHONUNBUFFERED=1"
@@ -543,6 +609,39 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
         expected_argv,
         expected_environment,
     )
+    with pytest.raises(RuntimeError, match="pinned launch spec"):
+        binder._prove_effective_systemd(
+            {
+                **effective,
+                "ExecStartEx": effective["ExecStartEx"].replace(
+                    "flags= ;", "flags=privileged ;"
+                ),
+            },
+            definition,
+            home,
+            runtime,
+            "system",
+            owner,
+            expected_argv,
+            expected_environment,
+        )
+    with pytest.raises(RuntimeError, match="pinned launch spec"):
+        binder._prove_effective_systemd(
+            {
+                **effective,
+                "ExecStartEx": effective["ExecStartEx"].replace(
+                    "path=/runtimes/candidate/",
+                    "path=/runtimes/candidate-old/",
+                ),
+            },
+            definition,
+            home,
+            runtime,
+            "system",
+            owner,
+            expected_argv,
+            expected_environment,
+        )
     with pytest.raises(RuntimeError, match="drop-in"):
         binder._prove_effective_systemd(
             {**effective, "DropInPaths": "/etc/systemd/system/override.conf"},
@@ -597,6 +696,36 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
             expected_argv,
             expected_environment,
         )
+    user_effective = {**effective, "User": ""}
+    binder._prove_effective_systemd(
+        user_effective,
+        definition,
+        home,
+        runtime,
+        "user",
+        owner,
+        expected_argv,
+        expected_environment,
+        current_user=owner,
+        manager_environment={"PYTHONPATH": str(runtime / "imports")},
+    )
+    for inherited in ("/old-runtime", f":{runtime}", f"{runtime}:"):
+        with pytest.raises(
+            RuntimeError,
+            match="manager PYTHONPATH",
+        ):
+            binder._prove_effective_systemd(
+                user_effective,
+                definition,
+                home,
+                runtime,
+                "user",
+                owner,
+                expected_argv,
+                expected_environment,
+                current_user=owner,
+                manager_environment={"PYTHONPATH": inherited},
+            )
 
     launchd_argv = [*expected_argv, "--replace"]
     plist_payload = {
@@ -622,6 +751,61 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
             launchd_argv,
             expected_environment,
             current_user=owner,
+        )
+    label = "com.example.hermes"
+    loaded_launchd = (
+        f"gui/501/{label} = {{\n"
+        f"\tpath = /Users/agent/Library/LaunchAgents/{label}.plist\n"
+        f"\tprogram = {launchd_argv[0]}\n"
+        "\targuments = {\n"
+        + "".join(f"\t\t{argument}\n" for argument in launchd_argv)
+        + "\t}\n"
+        "\tinherited environment = {\n"
+        "\t}\n"
+        "\tdefault environment = {\n"
+        "\t\tPATH => /usr/bin:/bin\n"
+        "\t}\n"
+        "\tenvironment = {\n"
+        f"\t\tHERMES_HOME => {home}\n"
+        f"\t\tVIRTUAL_ENV => {runtime}/venv\n"
+        "\t\tXPC_SERVICE_NAME => com.example.hermes\n"
+        "\t}\n"
+        "}\n"
+    )
+    launchd_definition = Path(
+        f"/Users/agent/Library/LaunchAgents/{label}.plist"
+    )
+    binder._prove_loaded_launchd(
+        loaded_launchd,
+        str(runtime / "domain-imports"),
+        launchd_definition,
+        runtime,
+        launchd_argv,
+        expected_environment,
+        label,
+        uid=501,
+    )
+    with pytest.raises(RuntimeError, match="pinned launch spec"):
+        binder._prove_loaded_launchd(
+            loaded_launchd.replace("gateway\n", "/old-runtime/gateway.py\n"),
+            "",
+            launchd_definition,
+            runtime,
+            launchd_argv,
+            expected_environment,
+            label,
+            uid=501,
+        )
+    with pytest.raises(RuntimeError, match="domain PYTHONPATH"):
+        binder._prove_loaded_launchd(
+            loaded_launchd,
+            "/old-runtime",
+            launchd_definition,
+            runtime,
+            launchd_argv,
+            expected_environment,
+            label,
+            uid=501,
         )
     with pytest.raises(RuntimeError, match="runtime owner"):
         binder._prove_launchd(
@@ -733,6 +917,21 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
                 "system": "",
             },
         )
+    for inherited in (";", f";{windows_runtime}", f"{windows_runtime};"):
+        with pytest.raises(
+            RuntimeError,
+            match="inherited Windows PYTHONPATH",
+        ):
+            binder._prove_windows_launchers(
+                cmd,
+                vbs,
+                windows_home,
+                windows_runtime,
+                python,
+                venv,
+                (str(windows_runtime), site_packages),
+                {"process": inherited, "user": "", "system": ""},
+            )
     with pytest.raises(RuntimeError, match="VBS PYTHONPATH"):
         binder._prove_windows_launchers(
             cmd,
@@ -757,6 +956,9 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
     binder._task_proof(task, vbs_path, r"DOMAIN\Agent")
     with pytest.raises(RuntimeError, match="proven owner"):
         binder._task_proof(task, vbs_path, r"DOMAIN\Other")
+    binder._prove_windows_operator(r"DOMAIN\Agent", r"domain\agent")
+    with pytest.raises(RuntimeError, match="operator"):
+        binder._prove_windows_operator(r"DOMAIN\Agent", r"DOMAIN\Admin")
 
 
 def test_prepare_home_rejects_reused_staging(tmp_path):

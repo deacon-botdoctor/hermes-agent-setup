@@ -416,7 +416,8 @@ def _systemd_definition_spec(data: bytes) -> tuple[list[str], dict[str, str]]:
         raise RuntimeError("systemd unit launch specification is invalid") from exc
     if not argv:
         raise RuntimeError("systemd unit launch specification is invalid")
-    argv[0] = argv[0].lstrip("-@+!:")
+    if argv[0][0] in "-@+!:|":
+        raise RuntimeError("systemd unit has unverified execution flags")
     return argv, _service_environment(environment_tokens)
 
 
@@ -484,6 +485,7 @@ def _systemd_properties(
         raise RuntimeError("systemd daemon-reload failed")
     names = (
         "ExecStart",
+        "ExecStartEx",
         "Environment",
         "EnvironmentFiles",
         "PassEnvironment",
@@ -536,6 +538,72 @@ def _effective_systemd_argv(value: str) -> list[str]:
     return argv
 
 
+def _effective_systemd_flags(value: str) -> str:
+    matches = re.findall(
+        r"(?:^|[ {])flags=(.*?)(?:\s*;|$)",
+        _systemd_unescape(value),
+    )
+    if len(matches) != 1:
+        raise RuntimeError("effective systemd execution flags are ambiguous")
+    return matches[0].strip()
+
+
+def _effective_systemd_path(value: str) -> str:
+    matches = re.findall(
+        r"(?:^|[ {])path=(.*?)(?:\s*;|$)",
+        _systemd_unescape(value),
+    )
+    if len(matches) != 1 or not matches[0].strip():
+        raise RuntimeError("effective systemd executable is ambiguous")
+    return matches[0].strip()
+
+
+def _systemd_manager_environment(
+    scope: str,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, str]:
+    if scope != "user":
+        return {}
+    result = run(
+        ["systemctl", "--user", "show-environment"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("systemd manager environment query failed")
+    values: list[str] = []
+    for line in result.stdout.splitlines():
+        if line.startswith("PYTHONPATH="):
+            values.append(line.split("=", 1)[1])
+    if len(values) > 1:
+        raise RuntimeError("systemd manager PYTHONPATH is ambiguous")
+    return {"PYTHONPATH": values[0] if values else ""}
+
+
+def _prove_pythonpath_source(
+    value: str,
+    runtime: Path,
+    separator: str,
+    *,
+    windows: bool = False,
+    source: str,
+) -> None:
+    if not isinstance(value, str):
+        raise RuntimeError(f"{source} is invalid")
+    if not value:
+        return
+    entries = value.split(separator)
+    if any(not entry for entry in entries):
+        raise RuntimeError(f"{source} contains a current-directory entry")
+    if any(
+        not _inside_runtime(entry, runtime, windows=windows)
+        for entry in entries
+    ):
+        raise RuntimeError(f"{source} escapes the candidate")
+
+
 def _prove_effective_systemd(
     properties: dict[str, str],
     definition: Path,
@@ -546,6 +614,7 @@ def _prove_effective_systemd(
     expected_argv: list[str],
     expected_environment: dict[str, str],
     current_user: str | None = None,
+    manager_environment: dict[str, str] | None = None,
 ) -> None:
     if properties["DropInPaths"].strip():
         raise RuntimeError("systemd service has unverified drop-in overrides")
@@ -558,7 +627,16 @@ def _prove_effective_systemd(
     if fragment != definition:
         raise RuntimeError("effective systemd fragment is not the native definition")
     argv = _effective_systemd_argv(properties["ExecStart"])
-    if argv != expected_argv or not _inside_runtime(argv[0], runtime):
+    extended_argv = _effective_systemd_argv(properties["ExecStartEx"])
+    flags = _effective_systemd_flags(properties["ExecStartEx"])
+    if (
+        argv != expected_argv
+        or extended_argv != expected_argv
+        or _effective_systemd_path(properties["ExecStart"]) != expected_argv[0]
+        or _effective_systemd_path(properties["ExecStartEx"]) != expected_argv[0]
+        or flags
+        or not _inside_runtime(argv[0], runtime)
+    ):
         raise RuntimeError(
             "effective systemd service does not match the pinned launch spec"
         )
@@ -580,6 +658,17 @@ def _prove_effective_systemd(
         current_user or _current_identity()[0]
     ).casefold():
         raise RuntimeError("effective systemd user scope has the wrong owner")
+    if scope == "user":
+        if manager_environment is None or set(manager_environment) != {
+            "PYTHONPATH"
+        }:
+            raise RuntimeError("systemd manager environment proof is incomplete")
+        _prove_pythonpath_source(
+            manager_environment["PYTHONPATH"],
+            runtime,
+            os.pathsep,
+            source="systemd manager PYTHONPATH",
+        )
 
 
 def _current_identity() -> tuple[str, Path]:
@@ -592,13 +681,27 @@ def _current_identity() -> tuple[str, Path]:
         return getpass.getuser(), Path.home()
 
 
-def _runtime_value(runtime: Path, home: Path, code: str) -> str:
+def _runtime_value(
+    runtime: Path,
+    home: Path,
+    code: str,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    token: str | None = None,
+) -> str:
     env = os.environ.copy()
     env["HERMES_HOME"] = str(home)
     env.pop("PYTHONHOME", None)
     env.pop("PYTHONPATH", None)
-    result = subprocess.run(
-        [str(_runtime_python(runtime)), "-c", code],
+    marker = f"__BOTDOCTOR_PROOF_{token or os.urandom(16).hex()}__"
+    wrapped = (
+        "import json;"
+        f"_proof_marker={marker!r};"
+        "_proof_emit=lambda value:print("
+        "_proof_marker+json.dumps(value,separators=(',',':')));"
+        + code
+    )
+    result = run(
+        [str(_runtime_python(runtime)), "-c", wrapped],
         cwd=runtime,
         env=env,
         capture_output=True,
@@ -606,10 +709,22 @@ def _runtime_value(runtime: Path, home: Path, code: str) -> str:
         check=False,
         timeout=30,
     )
-    lines = result.stdout.splitlines()
-    if result.returncode or len(lines) != 1 or not lines[0]:
+    lines = [
+        line.removeprefix(marker)
+        for line in result.stdout.splitlines()
+        if line.startswith(marker)
+    ]
+    if result.returncode or len(lines) != 1:
         raise RuntimeError("candidate native service path resolution failed")
-    return lines[0]
+    try:
+        value = json.loads(lines[0])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "candidate native service path resolution failed"
+        ) from exc
+    if not isinstance(value, str) or not value:
+        raise RuntimeError("candidate native service path resolution failed")
+    return value
 
 
 def _native_systemd_spec(
@@ -626,7 +741,7 @@ def _native_systemd_spec(
         "unit=generate_systemd_unit("
         f"system={scope == 'system'},run_as_user={owner!r}"
         ");"
-        "print(base64.b64encode(unit.encode()).decode())",
+        "_proof_emit(base64.b64encode(unit.encode()).decode())",
     )
     try:
         return _systemd_definition_spec(base64.b64decode(encoded, validate=True))
@@ -650,7 +765,7 @@ def _native_launchd_spec(
         "a.extend(p.split() if p else []);"
         "a.extend(['gateway','run','--replace']);"
         "e={'HERMES_HOME':h,'VIRTUAL_ENV':str(v or g.PROJECT_ROOT/'venv')};"
-        "print(json.dumps({'argv':a,'environment':e},separators=(',',':')))",
+        "_proof_emit(json.dumps({'argv':a,'environment':e},separators=(',',':')))",
     )
     try:
         payload = json.loads(raw)
@@ -703,6 +818,136 @@ def _prove_launchd(
         or owner.casefold() != (current_user or _current_identity()[0]).casefold()
     ):
         raise RuntimeError("launchd definition does not match the proven runtime owner")
+
+
+def _launchd_block(text: str, name: str) -> list[str]:
+    lines = text.splitlines()
+    starts = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip() == f"{name} = {{"
+    ]
+    if len(starts) != 1:
+        raise RuntimeError(f"loaded launchd {name} is ambiguous")
+    values: list[str] = []
+    for line in lines[starts[0] + 1 :]:
+        if line.strip() == "}":
+            return values
+        values.append(line.strip())
+    raise RuntimeError(f"loaded launchd {name} is incomplete")
+
+
+def _launchd_field(text: str, name: str) -> str:
+    values = [
+        line.split("=", 1)[1].strip()
+        for line in text.splitlines()
+        if line.strip().startswith(f"{name} = ")
+    ]
+    if len(values) != 1 or not values[0]:
+        raise RuntimeError(f"loaded launchd {name} is ambiguous")
+    return values[0]
+
+
+def _launchd_environment_block(text: str, name: str) -> dict[str, str]:
+    environment: dict[str, str] = {}
+    for line in _launchd_block(text, name):
+        if "=>" not in line:
+            raise RuntimeError(f"loaded launchd {name} is invalid")
+        key, value = (part.strip() for part in line.split("=>", 1))
+        if not key or key in environment:
+            raise RuntimeError(f"loaded launchd {name} is ambiguous")
+        environment[key] = value
+    return environment
+
+
+def _loaded_launchd_state(
+    label: str,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    uid: int | None = None,
+) -> tuple[str, str]:
+    domain = f"gui/{uid if uid is not None else os.getuid()}"
+    result = run(
+        ["launchctl", "print", f"{domain}/{label}"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("loaded launchd service query failed")
+    environment_result = run(
+        ["launchctl", "getenv", "PYTHONPATH"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if environment_result.returncode:
+        raise RuntimeError("launchd domain environment query failed")
+    return result.stdout, environment_result.stdout.rstrip("\r\n")
+
+
+def _prove_loaded_launchd(
+    text: str,
+    domain_pythonpath: str,
+    definition: Path,
+    runtime: Path,
+    expected_argv: list[str],
+    expected_environment: dict[str, str],
+    label: str,
+    uid: int | None = None,
+) -> None:
+    domain = f"gui/{uid if uid is not None else os.getuid()}"
+    headers = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip().startswith(f"{domain}/{label} = ")
+    ]
+    if headers != [f"{domain}/{label} = {{"]:
+        raise RuntimeError("loaded launchd service identity is ambiguous")
+    if _lexical(Path(_launchd_field(text, "path"))) != definition:
+        raise RuntimeError("loaded launchd service is not the native definition")
+    arguments = _launchd_block(text, "arguments")
+    program = _launchd_field(text, "program")
+    if (
+        arguments != expected_argv
+        or program != expected_argv[0]
+        or not _inside_runtime(program, runtime)
+    ):
+        raise RuntimeError(
+            "loaded launchd service does not match the pinned launch spec"
+        )
+    environment = _launchd_environment_block(text, "environment")
+    relevant_environment = _service_environment(
+        [
+            f"{key}={value}"
+            for key, value in environment.items()
+            if key in RELEVANT_SERVICE_ENV
+        ]
+    )
+    if relevant_environment != expected_environment:
+        raise RuntimeError(
+            "loaded launchd environment does not match the pinned launch spec"
+        )
+    pythonpath_sources = {
+        "loaded launchd environment PYTHONPATH": environment.get(
+            "PYTHONPATH", ""
+        ),
+        "inherited launchd PYTHONPATH": _launchd_environment_block(
+            text, "inherited environment"
+        ).get("PYTHONPATH", ""),
+        "default launchd PYTHONPATH": _launchd_environment_block(
+            text, "default environment"
+        ).get("PYTHONPATH", ""),
+        "launchd domain PYTHONPATH": domain_pythonpath,
+    }
+    for source, value in pythonpath_sources.items():
+        _prove_pythonpath_source(
+            value,
+            runtime,
+            os.pathsep,
+            source=source,
+        )
 
 
 def _first_windows_executable(command: str) -> str:
@@ -841,19 +1086,41 @@ def _prove_windows_pythonpath(
     runtime: Path,
     required: tuple[str, ...],
 ) -> None:
-    entries = [entry for entry in rendered.split(";") if entry]
-    if not entries or any(
-        not _inside_runtime(entry, runtime, windows=True) for entry in entries
-    ):
-        raise RuntimeError("Windows PYTHONPATH escapes the candidate")
+    _prove_pythonpath_source(
+        rendered,
+        runtime,
+        ";",
+        windows=True,
+        source="Windows PYTHONPATH",
+    )
+    entries = rendered.split(";")
     normalized = {_windows_path(entry) for entry in entries}
     if any(_windows_path(path) not in normalized for path in required):
         raise RuntimeError("Windows PYTHONPATH omits candidate launch paths")
 
 
-def _windows_pythonpath_sources() -> dict[str, str]:
+def _windows_operator_identity() -> str:
+    domain = os.environ.get("USERDOMAIN", "")
+    username = os.environ.get("USERNAME", "")
+    if not domain or not username:
+        raise RuntimeError("Windows operator identity cannot be proven")
+    return f"{domain}\\{username}"
+
+
+def _prove_windows_operator(owner: str, operator: str) -> None:
+    if owner.casefold() != operator.casefold():
+        raise RuntimeError(
+            "Windows operator does not match the scheduled-task principal"
+        )
+
+
+def _windows_pythonpath_sources(
+    owner: str,
+    operator: str | None = None,
+) -> dict[str, str]:
     if winreg is None:
         raise RuntimeError("Windows registry access is unavailable")
+    _prove_windows_operator(owner, operator or _windows_operator_identity())
     sources = {"process": os.environ.get("PYTHONPATH", "")}
     locations = (
         ("user", winreg.HKEY_CURRENT_USER, r"Environment"),
@@ -886,11 +1153,13 @@ def _prove_windows_inherited_pythonpath(
     for value in sources.values():
         if not isinstance(value, str) or re.search(r"%[^%]+%", value):
             raise RuntimeError("Windows PYTHONPATH source is unresolved")
-        if any(
-            entry and not _inside_runtime(entry, runtime, windows=True)
-            for entry in value.split(";")
-        ):
-            raise RuntimeError("inherited Windows PYTHONPATH escapes the candidate")
+        _prove_pythonpath_source(
+            value,
+            runtime,
+            ";",
+            windows=True,
+            source="inherited Windows PYTHONPATH",
+        )
 
 
 def _prove_windows_launchers(
@@ -902,6 +1171,7 @@ def _prove_windows_launchers(
     venv_dir: str | None = None,
     required_pythonpath: tuple[str, ...] | None = None,
     inherited_pythonpaths: dict[str, str] | None = None,
+    service_owner: str | None = None,
 ) -> None:
     cmd = cmd_data.decode("utf-8")
     vbs = vbs_data.decode("utf-8")
@@ -927,10 +1197,12 @@ def _prove_windows_launchers(
     if cmd_static != vbs_static:
         raise RuntimeError("Windows launcher PYTHONPATH values differ")
     _prove_windows_pythonpath(cmd_static, runtime, required_pythonpath)
+    if inherited_pythonpaths is None:
+        if service_owner is None:
+            raise RuntimeError("Windows service owner is required")
+        inherited_pythonpaths = _windows_pythonpath_sources(service_owner)
     _prove_windows_inherited_pythonpath(
-        inherited_pythonpaths
-        if inherited_pythonpaths is not None
-        else _windows_pythonpath_sources(),
+        inherited_pythonpaths,
         runtime,
     )
     command_lines = [
@@ -1075,7 +1347,8 @@ def main() -> int:
                         runtime,
                         home,
                         "from hermes_cli.gateway import get_systemd_unit_path;"
-                        f"print(get_systemd_unit_path(system={args.scope == 'system'}))",
+                        "_proof_emit(str(get_systemd_unit_path("
+                        f"system={args.scope == 'system'})))",
                     )
                 )
             )
@@ -1100,10 +1373,12 @@ def main() -> int:
                 runtime,
                 home,
                 "from hermes_cli.gateway import get_service_name;"
-                "print(get_service_name())",
+                "_proof_emit(str(get_service_name()))",
             )
+            properties = _systemd_properties(service, args.scope)
+            manager_environment = _systemd_manager_environment(args.scope)
             _prove_effective_systemd(
-                _systemd_properties(service, args.scope),
+                properties,
                 definition,
                 home,
                 runtime,
@@ -1111,6 +1386,7 @@ def main() -> int:
                 args.service_owner,
                 expected_argv,
                 expected_environment,
+                manager_environment=manager_environment,
             )
         else:
             expected = _lexical(
@@ -1119,7 +1395,7 @@ def main() -> int:
                         runtime,
                         home,
                         "from hermes_cli.gateway import get_launchd_plist_path;"
-                        "print(get_launchd_plist_path())",
+                        "_proof_emit(str(get_launchd_plist_path()))",
                     )
                 )
             )
@@ -1137,6 +1413,22 @@ def main() -> int:
                 expected_argv,
                 expected_environment,
             )
+            label = _runtime_value(
+                runtime,
+                home,
+                "from hermes_cli.gateway import get_launchd_label;"
+                "_proof_emit(str(get_launchd_label()))",
+            )
+            loaded, domain_pythonpath = _loaded_launchd_state(label)
+            _prove_loaded_launchd(
+                loaded,
+                domain_pythonpath,
+                definition,
+                runtime,
+                expected_argv,
+                expected_environment,
+                label,
+            )
     else:
         if not args.cmd_launcher or not args.vbs_launcher or not args.task_name:
             parser.error(
@@ -1152,7 +1444,7 @@ def main() -> int:
                     runtime,
                     home,
                     "from hermes_cli.gateway_windows import get_task_script_path;"
-                    "print(get_task_script_path())",
+                    "_proof_emit(str(get_task_script_path()))",
                 )
             )
         )
@@ -1160,7 +1452,7 @@ def main() -> int:
             runtime,
             home,
             "from hermes_cli.gateway_windows import get_task_name;"
-            "print(get_task_name())",
+            "_proof_emit(str(get_task_name()))",
         )
         if (
             cmd != expected_cmd
@@ -1173,14 +1465,20 @@ def main() -> int:
             or not vbs.is_file()
         ):
             raise RuntimeError("Windows launchers do not match the proven profile")
+        task_xml = _query_windows_task(args.task_name)
+        _task_proof(task_xml, vbs, args.service_owner)
+        inherited_pythonpaths = _windows_pythonpath_sources(
+            args.service_owner
+        )
         _prove_windows_launchers(
             cmd.read_bytes(),
             vbs.read_bytes(),
             home,
             runtime,
             *_windows_launch_spec(runtime),
+            inherited_pythonpaths=inherited_pythonpaths,
+            service_owner=args.service_owner,
         )
-        _task_proof(_query_windows_task(args.task_name), vbs, args.service_owner)
     print(
         json.dumps(
             {"ok": True, "service_proven": args.prove_kind},
