@@ -76,6 +76,16 @@ STREAM_FINAL_BLOCK = (
     '                _telegram_tx.accepted(getattr(self, "_message_id", None))\n\n'
     "    # Strip MEDIA:"
 )
+STREAM_NATIVE_FINALLY = "        finally:\n            # Safety net: if run() exits (normal return, cancellation, or\n"
+STREAM_NATIVE_FINALLY_BLOCK = (
+    "        finally:\n"
+    '            if (getattr(self, "_final_response_sent", False)\n'
+    '                    or getattr(self, "final_response_sent", False)\n'
+    '                    or getattr(self, "_final_content_delivered", False)\n'
+    '                    or getattr(self, "final_content_delivered", False)):\n'
+    '                _telegram_tx.accepted(getattr(self, "_message_id", None))\n'
+    "            # Safety net: if run() exits (normal return, cancellation, or\n"
+)
 BYPASS_RESET_BEGIN = (
     "        logger.debug(\n"
     "            \"[%s] Command '/%s' bypassing active-session guard for %s\",\n"
@@ -715,8 +725,11 @@ def _with_core_method_hooks(text: str) -> str:
 def _stream_hooks_current(text: str) -> bool:
     tree = ast.parse(text)
     run = _method_source(tree, text, "GatewayStreamConsumer", "run")
-    stream_run_block = STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
-    return stream_run_block in run and _has_ledger_alias(tree)
+    stream_run_blocks = (
+        STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0],
+        STREAM_NATIVE_FINALLY_BLOCK,
+    )
+    return any(block in run for block in stream_run_blocks) and _has_ledger_alias(tree)
 
 
 def _with_stream_hooks(text: str) -> str:
@@ -738,12 +751,50 @@ def _with_stream_hooks(text: str) -> str:
 def _with_stream_method_hooks(text: str) -> str:
     old = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
     new = STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
+    if STREAM_NATIVE_FINALLY_BLOCK in text or new in text:
+        return text
+    damaged_native = _without_line(
+        STREAM_NATIVE_FINALLY_BLOCK,
+        "_telegram_tx.accepted",
+    )
+    if damaged_native in text:
+        return _once(
+            text,
+            damaged_native,
+            STREAM_NATIVE_FINALLY_BLOCK,
+            "stream native-finally repair",
+        )
+    if STREAM_NATIVE_FINALLY in text:
+        return _once(
+            text,
+            STREAM_NATIVE_FINALLY,
+            STREAM_NATIVE_FINALLY_BLOCK,
+            "stream native-finally",
+        )
     return _ensure(
         text,
         old,
         new,
         "stream final",
         (_without_line(new, "_telegram_tx.accepted"),),
+    )
+
+
+def _without_stream_method_hooks(text: str) -> str:
+    legacy_new = STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
+    legacy_old = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
+    if STREAM_NATIVE_FINALLY_BLOCK in text:
+        return _once(
+            text,
+            STREAM_NATIVE_FINALLY_BLOCK,
+            STREAM_NATIVE_FINALLY,
+            "historical native stream final rollback",
+        )
+    return _once(
+        text,
+        legacy_new,
+        legacy_old,
+        "historical stream final rollback",
     )
 
 
@@ -876,8 +927,10 @@ def _validate_pre_canary_text(text: str, kind: str, label: str) -> None:
                 raise RuntimeError
         elif kind == "stream":
             run = _method_source(tree, text, "GatewayStreamConsumer", "run")
-            stream_run_tail = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
-            if run.count(stream_run_tail) != 1 or not _has_import(
+            legacy_tail = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
+            has_native_tail = run.count(STREAM_NATIVE_FINALLY) == 1
+            has_legacy_tail = not has_native_tail and run.count(legacy_tail) == 1
+            if not (has_native_tail or has_legacy_tail) or not _has_import(
                 tree, "gateway.platforms.base", "MEDIA_TAG_CLEANUP_RE"
             ):
                 raise RuntimeError
@@ -993,12 +1046,7 @@ def _recover_historical_pre_canary(installed_text: str, kind: str) -> str:
             recovered,
             "GatewayStreamConsumer",
             "run",
-            lambda method: _once(
-                method,
-                STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0],
-                STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0],
-                "historical stream final rollback",
-            ),
+            _without_stream_method_hooks,
         )
     else:
         raise RuntimeError(f"historical recovery unsupported for {kind}")
@@ -1221,9 +1269,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
         if backup.exists():
             _validate_pre_canary(backup, kind, backup=True)
             if backup.read_bytes() != path.read_bytes():
-                if kind != "base" or not _matches_ordered_base_predecessors(
-                    backup.read_text(), path.read_text()
-                ):
+                if kind != "base" or not _matches_ordered_base_predecessors(backup.read_text(), path.read_text()):
                     raise RuntimeError(f"rollback backup does not match source: {path}")
                 rebound_backups[backup] = backup.read_bytes()
         else:

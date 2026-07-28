@@ -9,8 +9,7 @@ only run for stripped replies with reply_to_message_id.
 
 Idempotent via marker: HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1
 Target: gateway/platforms/base.py, tests/gateway/test_base_topic_sessions.py,
-        tests/gateway/test_telegram_text_batching.py,
-        tests/gateway/test_drain_inbox.py
+        tests/gateway/test_telegram_text_batching.py
 
 Usage:
   python3 -m patches.modules.telegram_dm_topic_recovery_root_guard_v1 --hermes-dir /path/to/hermes-agent
@@ -24,7 +23,6 @@ import sys
 from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1"
-DRAIN_REPLAY_TEST = "test_replay_awaits_task_returned_after_topic_recovery"
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
@@ -150,56 +148,11 @@ def _patch_text_batching_test(hermes_dir: Path) -> bool:
     return changed
 
 
-def _drain_inbox_replay_test_parts(hermes_dir: Path) -> tuple[Path, str, list[str], int, int, str]:
-    path = hermes_dir / "tests" / "gateway" / "test_drain_inbox.py"
-    if not path.exists():
-        raise RuntimeError("paired durable-inbox test source is required")
-    content = path.read_text(encoding="utf-8")
-    tree = ast.parse(content)
-    node = next(
-        (item for item in tree.body if isinstance(item, ast.AsyncFunctionDef) and item.name == DRAIN_REPLAY_TEST),
-        None,
-    )
-    if node is None or node.end_lineno is None:
-        raise RuntimeError(f"paired durable-inbox test seam is missing: {DRAIN_REPLAY_TEST}")
-    lines = content.splitlines(keepends=True)
-    start = node.lineno - 1
-    end = node.end_lineno
-    local = "".join(lines[start:end])
-    reply_anchor = '    event.reply_to_message_id = "reply-anchor"\n'
-    needle = "    event = _event()\n"
-    if reply_anchor not in local and needle not in local:
-        raise RuntimeError(f"paired durable-inbox test anchor drifted: {DRAIN_REPLAY_TEST}")
-    return path, content, lines, start, end, local
-
-
-def _patch_drain_inbox_replay_test(hermes_dir: Path) -> bool:
-    """Keep the replay test shaped like the stripped reply it exercises."""
-    path, content, lines, start, end, local = _drain_inbox_replay_test_parts(hermes_dir)
-    reply_anchor = '    event.reply_to_message_id = "reply-anchor"\n'
-    if reply_anchor in local:
-        print("[telegram_dm_topic_recovery_root_guard_v1] drain replay test already patched")
-        return False
-    needle = "    event = _event()\n"
-    local = local.replace(needle, needle + reply_anchor, 1)
-    patched = "".join(lines[:start]) + local + "".join(lines[end:])
-    try:
-        ast.parse(patched)
-    except SyntaxError as exc:
-        raise RuntimeError(f"paired durable-inbox test parse failed: {exc}") from exc
-    changed = _write_if_changed(path, patched)
-    if changed:
-        print(f"[telegram_dm_topic_recovery_root_guard_v1] PATCHED {path}")
-    return changed
-
-
 def patch_telegram_dm_topic_recovery_root_guard_v1(hermes_dir: Path) -> bool:
-    _drain_inbox_replay_test_parts(hermes_dir)
     changed = False
     changed |= _patch_base_adapter(hermes_dir)
     changed |= _patch_base_topic_tests(hermes_dir)
     changed |= _patch_text_batching_test(hermes_dir)
-    changed |= _patch_drain_inbox_replay_test(hermes_dir)
     return changed
 
 

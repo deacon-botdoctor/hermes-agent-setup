@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.27`:
+The current public release is `botdoctor-hermes-2026.07.28`:
 
-- upstream Hermes: `3ef6bbd201263d354fd83ec55b3c306ded2eb72a`;
-- public Golden source: `2f5e428248a1bc72ec6275fb25eddfed65c6c71e`;
-- runtime payload: 77 files;
+- upstream Hermes: `f228e145ba35cbbf785eded2021ae6682285b91b`;
+- public Golden source: `1e9cf546cdeff7be26109a2c2c407510a8f3726d`;
+- runtime payload: 79 files;
 - assembled runtime fingerprint:
-  `de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067`.
+  `055a770630917e5d7534480dc829358f36ecbf083174d211995a6d8713a25b70`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately
@@ -62,9 +62,11 @@ values only when they still exactly match the old defaults.
   Scheduled Task and state namespace.
 - **Codex 401 spend guard:** one bounded client-turn fallback may run while
   recursive/internal paid fallbacks remain blocked.
+- **LLM attempt receipts:** every model attempt records grounded provider,
+  outcome, and usage evidence without changing the model's decision-making.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 16
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 17
 cohesive registry entries in this release.
 
 ## Profile additions

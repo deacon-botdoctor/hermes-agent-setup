@@ -24,6 +24,7 @@ COMPONENT_PATHS = {
         "bin/hermes-reflect-candidates-to-drafts.py",
         "bin/hermes-self-reflect.py",
         "bin/hermes-skillify-autopromote.py",
+        "bin/llm-attempt-reconcile.py",
         "bin/client-local-evidence-query.py",
         "bin/papercut_inbox.py",
         "bin/registry-sync.py",
@@ -42,9 +43,12 @@ COMPONENT_PATHS = {
         "patches/modules/auto_resume_contextual_reset_v1.py",
         "patches/modules/codex_401_paid_fallback_circuit_v1.py",
         "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+        # Retired paths stay listed so a release that deletes them remains
+        # owned by runtime_payload when compared with the prior Golden.
         "patches/modules/durable_drain_compatibility_v1.py",
         "patches/modules/durable_drain_inbox_carrier_v1.py",
         "patches/modules/gateway_runtime_root_guard_v1.py",
+        "patches/modules/llm_attempt_receipts_v1.py",
         "patches/modules/mcp_in_turn_refresh_v1.py",
         "patches/modules/mcp_legacy_alias_dispatch_v1.py",
         "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
@@ -57,6 +61,7 @@ COMPONENT_PATHS = {
         "patches/modules/telegram_transaction_canary_v1.py",
         "patches/modules/windows_gateway_task_identity_v1.py",
         "patches/payloads/durable-drain-inbox-v1",
+        "patches/payloads/llm-attempt-receipts-v1",
         "patches/payloads/session-search-current-topic-v2",
         "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
         "patches/registry.yaml",
@@ -92,6 +97,7 @@ COMPONENT_EXCLUDES = {
 }
 
 ANALYSIS_ONLY_PATHS = {
+    ".gitattributes",
     "agent-standards.md",
     "bin/tool-readiness-probe.py",
     "bin/runtime-payload-manifest.py",

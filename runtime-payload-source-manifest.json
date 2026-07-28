@@ -1,177 +1,14 @@
 {
-  "assembled_runtime_fingerprint": {
-    "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
-    "file_count": 32,
-    "files": {
-      ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
-        "mode": "100644",
-        "sha256": "d93ce9538adba6cb94aa8ad91f1532b68ee0d3dacafc4e1bd213e5e6ed060c0b",
-        "type": "blob"
-      },
-      "agent/chat_completion_helpers.py": {
-        "mode": "100644",
-        "sha256": "191793f60e771fb1f2c6de76aa598ddd8b4d2eac4b3cda41c485cd0a6ab6289a",
-        "type": "blob"
-      },
-      "agent/codex_401_circuit.py": {
-        "mode": "100644",
-        "sha256": "42a4391199577a3c91e627bc3f5fd6bd47f8a2126f49aaf3d30accb599a54847",
-        "type": "blob"
-      },
-      "agent/conversation_loop.py": {
-        "mode": "100644",
-        "sha256": "f46fdf58b3ebc6f460d87e6caae4a2f0c486ade0daf4d51aab6fb053f5006742",
-        "type": "blob"
-      },
-      "agent/prompt_builder.py": {
-        "mode": "100644",
-        "sha256": "fb71f4a851e7599d188148b7c84dc389c860abc6a427f700b5e9660fa1263465",
-        "type": "blob"
-      },
-      "agent/tool_executor.py": {
-        "mode": "100644",
-        "sha256": "30c56376b4ccd47a0279e5ae3810752f9c865c5e94ed8508cb10fdd8604e5dda",
-        "type": "blob"
-      },
-      "gateway/drain_inbox.py": {
-        "mode": "100644",
-        "sha256": "2fb5273e49c8625a665e6537613c8feca1dc29b2b6c90ce97bfd436dd6870c3f",
-        "type": "blob"
-      },
-      "gateway/platforms/base.py": {
-        "mode": "100644",
-        "sha256": "eab9382d365d4b7117ebc55548f972f680603b60bad3ecd052ef28a9477377d8",
-        "type": "blob"
-      },
-      "gateway/platforms/bluebubbles.py": {
-        "mode": "100644",
-        "sha256": "811a21a6925b6bb54777a4b847e7a96681250ba54fb679522ba2dcdb050a332b",
-        "type": "blob"
-      },
-      "gateway/platforms/msgraph_webhook.py": {
-        "mode": "100644",
-        "sha256": "b4f12c7cc075653b5709c5f044621521b89da66bd507fe6543dad77cd76982eb",
-        "type": "blob"
-      },
-      "gateway/platforms/qqbot/adapter.py": {
-        "mode": "100644",
-        "sha256": "0ddf5155f4c09c8870aff60f681f4fdad8f51c05eeb35be7c28513cb363b1e0e",
-        "type": "blob"
-      },
-      "gateway/platforms/webhook.py": {
-        "mode": "100644",
-        "sha256": "724180b7732fd2e663a283f237331cb1592b90bd804a496965a82fb20253f89d",
-        "type": "blob"
-      },
-      "gateway/platforms/whatsapp_cloud.py": {
-        "mode": "100644",
-        "sha256": "ee7af2004960a51e7f9147cb3d7101619fa4f12c6efc365836f4acaa6f4bef61",
-        "type": "blob"
-      },
-      "gateway/run.py": {
-        "mode": "100644",
-        "sha256": "2af993970501b62487b905852b2b696983ecc84b8d70dbe6d3d858eed5405633",
-        "type": "blob"
-      },
-      "gateway/session.py": {
-        "mode": "100644",
-        "sha256": "bc806854a295132a4dc102817617f3c1e1f75e8d9cdb1adb2fbe2bbd4f3e1da1",
-        "type": "blob"
-      },
-      "gateway/slash_commands.py": {
-        "mode": "100644",
-        "sha256": "e75868a891d623170768ace320a93ba3580675a57e325fd9d5d5bbaac275df89",
-        "type": "blob"
-      },
-      "gateway/stream_consumer.py": {
-        "mode": "100644",
-        "sha256": "42eff6327394df1dea22dd1cc4d9a3608d0c8ac8946951f961e1bcfb26d264a9",
-        "type": "blob"
-      },
-      "gateway/telegram_transaction_ledger.py": {
-        "mode": "100644",
-        "sha256": "40bef50b5149177f09f5cd297f8e9b7e91af081429c98de3cba3201b98f9b1bf",
-        "type": "blob"
-      },
-      "hermes_cli/gateway_windows.py": {
-        "mode": "100644",
-        "sha256": "a0f60515ed73bb005a0c16e78383ba767d363b383a4b5f90675c110983edce26",
-        "type": "blob"
-      },
-      "hermes_state.py": {
-        "mode": "100644",
-        "sha256": "ad2afddbe6b5b413f64da15cac1d02bc63bf25931db75dbc7ec43c65e9e5a976",
-        "type": "blob"
-      },
-      "model_tools.py": {
-        "mode": "100644",
-        "sha256": "4b8f2b229c830573bde5f3408f12171a3f6edc13e33e5c1e120983541cf5beae",
-        "type": "blob"
-      },
-      "plugins/platforms/telegram/adapter.py": {
-        "mode": "100644",
-        "sha256": "07ca06995e2f9078856488bf9f3aff3b61d5899510ef32eb76bda4b7cfc9bc84",
-        "type": "blob"
-      },
-      "run_agent.py": {
-        "mode": "100644",
-        "sha256": "9737ff6fba365d006f462f5671f761b29655866c947e82785c290f3331aa6cff",
-        "type": "blob"
-      },
-      "tests/gateway/restart_test_helpers.py": {
-        "mode": "100644",
-        "sha256": "73c9d5af7c1e7f8230ac581f3b213b5f3999fb5d48fcb3af81b352115bc8fdc3",
-        "type": "blob"
-      },
-      "tests/gateway/test_base_topic_sessions.py": {
-        "mode": "100644",
-        "sha256": "e66ff6f7347b147942c3a53a8fd76a71ea2b6953dc9edb4f38a5b06ea6380c54",
-        "type": "blob"
-      },
-      "tests/gateway/test_drain_inbox.py": {
-        "mode": "100644",
-        "sha256": "ceddb2a215173e1755d44a8694c46219e6a116eb8e9c66aca77bf571db44161a",
-        "type": "blob"
-      },
-      "tests/gateway/test_restart_resume_pending.py": {
-        "mode": "100644",
-        "sha256": "c8c338b215be1d47d19da28fddcc1db8342752b9b2e506ca9e5dc7bd79f752c3",
-        "type": "blob"
-      },
-      "tests/gateway/test_telegram_text_batching.py": {
-        "mode": "100644",
-        "sha256": "5a0f4a6699e60231a003ecd37abf9b4d2e580ec3fe2044cfaf9e6d73f7a2eca1",
-        "type": "blob"
-      },
-      "tests/tools/test_tool_search.py": {
-        "mode": "100644",
-        "sha256": "bbd1427940f83525be1e21abcab397c7e144adf397be99438dc271de053b1674",
-        "type": "blob"
-      },
-      "tools/golden_topic_recall.py": {
-        "mode": "100644",
-        "sha256": "d8b3cfdb5442ace59d80542b13c98e0287cda998ee23e53e18c8db3e1112d95c",
-        "type": "blob"
-      },
-      "tools/session_search_tool.py": {
-        "mode": "100644",
-        "sha256": "d01bd8fb4ba0c9026e8d4fc3d7371a853f2ba9933780c7d919e9343836c7e435",
-        "type": "blob"
-      },
-      "tools/tool_search.py": {
-        "mode": "100644",
-        "sha256": "b56793ad065e30014ac3422c8856c60af149bc40ab40805c292d76edcc62c00e",
-        "type": "blob"
-      }
-    }
-  },
-  "canonical_upstream_sha": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+  "schema_version": 1,
+  "kind": "golden_runtime_payload_manifest",
+  "golden_sha": "1e9cf546cdeff7be26109a2c2c407510a8f3726d",
+  "canonical_upstream_sha": "f228e145ba35cbbf785eded2021ae6682285b91b",
   "components": {
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "c6dcadcea5e97014feeb656692223d047f0686a08fbb024fbce96c1135bcdd46",
+      "digest": "9dcfcc7cfb1826337e43086f433f1e34e863047b5b2936ea8f805243c5923e04",
       "excluded_paths": [],
-      "file_count": 77,
+      "file_count": 79,
       "files": [
         {
           "blob": "07f58440e5dae380f25cb6461b9a479827a0f8e9",
@@ -204,6 +41,12 @@
           "type": "blob"
         },
         {
+          "blob": "5ca056258638b8299118c138c6125bd8f5e58b25",
+          "mode": "100755",
+          "path": "bin/llm-attempt-reconcile.py",
+          "type": "blob"
+        },
+        {
           "blob": "daf679e8c53698423f481d79c7d24aeaa5cb1852",
           "mode": "100755",
           "path": "bin/papercut_inbox.py",
@@ -228,7 +71,7 @@
           "type": "blob"
         },
         {
-          "blob": "7618aba1891f991689666f0cb353623b6d6efa72",
+          "blob": "79a1170d78830509006db2304b98cb5f1bbd60f2",
           "mode": "100644",
           "path": "hooks/gbrain-capture/HOOK.yaml",
           "type": "blob"
@@ -354,13 +197,7 @@
           "type": "blob"
         },
         {
-          "blob": "8403fa1b074b7d0d33782ff3bb4cf2802eec122c",
-          "mode": "100644",
-          "path": "patches/modules/durable_drain_compatibility_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "6aebb563a2ad7c2aa4c5c1557311037be7474fae",
+          "blob": "47af3925bdb6db13c2c07fc2fccf4ecf403fd1b4",
           "mode": "100644",
           "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
           "type": "blob"
@@ -369,6 +206,12 @@
           "blob": "db532b972abc2506135c8852fba9fc3259b02d40",
           "mode": "100644",
           "path": "patches/modules/gateway_runtime_root_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ef1479892584d213b85f46da33e2a5060da69cc2",
+          "mode": "100755",
+          "path": "patches/modules/llm_attempt_receipts_v1.py",
           "type": "blob"
         },
         {
@@ -396,13 +239,13 @@
           "type": "blob"
         },
         {
-          "blob": "f75dbfe06388a3b7f59ea1e4f19f546cd2a3d4c1",
+          "blob": "0652b0806652844a5a16761af972677e1c08479d",
           "mode": "100644",
           "path": "patches/modules/restart_interruption_checkin_v1.py",
           "type": "blob"
         },
         {
-          "blob": "9b3c05096964e4d27c8b126a05760a4ecb35fb56",
+          "blob": "21ed4f1f7fb3e70897edeca36b700b8fe45fd9e2",
           "mode": "100755",
           "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
           "type": "blob"
@@ -426,7 +269,7 @@
           "type": "blob"
         },
         {
-          "blob": "7dc88f0d367de873790c74d96f57bfce9880cd95",
+          "blob": "ae5385613796763ede841d04b02986e6f85cc81a",
           "mode": "100644",
           "path": "patches/modules/telegram_transaction_canary_v1.py",
           "type": "blob"
@@ -438,15 +281,21 @@
           "type": "blob"
         },
         {
-          "blob": "094a89b09c5b629c47977fd4338ad0849e712da7",
+          "blob": "a6a9ed68a5646fc3586f2abd75da9ab9cc52a45f",
           "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-3ef6bbd2-durable-drain-v1.patch",
+          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-f228e145-durable-drain-v2.patch",
           "type": "blob"
         },
         {
-          "blob": "41acbeebf95f09d9d1380a669a1d00526213d9fa",
+          "blob": "400349c7daf749ad951ea2a06c24b75887da1c67",
           "mode": "100644",
           "path": "patches/payloads/durable-drain-inbox-v1/manifest.json",
+          "type": "blob"
+        },
+        {
+          "blob": "21e31bf096a6a2c221e2a62f26df60b92c17c8b9",
+          "mode": "100644",
+          "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
           "type": "blob"
         },
         {
@@ -462,7 +311,7 @@
           "type": "blob"
         },
         {
-          "blob": "d7f9b0a1b0115802b5730a0d5bf2614d678838da",
+          "blob": "ca12f6d030539d4e4b8a5fea068bab517681f739",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -630,7 +479,7 @@
           "type": "blob"
         },
         {
-          "blob": "6972af25f620e8d75c6bdca3989f643671d46973",
+          "blob": "240468abd9008b34337d38b93e75e5d73cb260bc",
           "mode": "100644",
           "path": "upstream.lock",
           "type": "blob"
@@ -641,6 +490,7 @@
         "bin/hermes-reflect-candidates-to-drafts.py",
         "bin/hermes-self-reflect.py",
         "bin/hermes-skillify-autopromote.py",
+        "bin/llm-attempt-reconcile.py",
         "bin/client-local-evidence-query.py",
         "bin/papercut_inbox.py",
         "bin/registry-sync.py",
@@ -662,6 +512,7 @@
         "patches/modules/durable_drain_compatibility_v1.py",
         "patches/modules/durable_drain_inbox_carrier_v1.py",
         "patches/modules/gateway_runtime_root_guard_v1.py",
+        "patches/modules/llm_attempt_receipts_v1.py",
         "patches/modules/mcp_in_turn_refresh_v1.py",
         "patches/modules/mcp_legacy_alias_dispatch_v1.py",
         "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
@@ -674,6 +525,7 @@
         "patches/modules/telegram_transaction_canary_v1.py",
         "patches/modules/windows_gateway_task_identity_v1.py",
         "patches/payloads/durable-drain-inbox-v1",
+        "patches/payloads/llm-attempt-receipts-v1",
         "patches/payloads/session-search-current-topic-v2",
         "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
         "patches/registry.yaml",
@@ -695,8 +547,206 @@
       ]
     }
   },
-  "deployment_digest": "744fe796c6389590039e158b3e497eeb1329c5cebd0afdfc47f34cc124798539",
-  "golden_sha": "2f5e428248a1bc72ec6275fb25eddfed65c6c71e",
-  "kind": "golden_runtime_payload_manifest",
-  "schema_version": 1
+  "deployment_digest": "4b274fe95d216805061394a1ce70fc5ca0f26ccaa3e74d46259dd28ea3fdd044",
+  "assembled_runtime_fingerprint": {
+    "digest": "055a770630917e5d7534480dc829358f36ecbf083174d211995a6d8713a25b70",
+    "file_count": 39,
+    "files": {
+      ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
+        "mode": "100644",
+        "sha256": "ccf99447668cbc4d92e5458bdc836ae0fcedaea72aec10ec88f120ffec2924cf",
+        "type": "blob"
+      },
+      "agent/auxiliary_client.py": {
+        "mode": "100644",
+        "sha256": "2a685a8266271eaebbde4ab262aa4e642884206f07d90b32a445d32cd6ec76d7",
+        "type": "blob"
+      },
+      "agent/chat_completion_helpers.py": {
+        "mode": "100644",
+        "sha256": "99c8d5c0432b249492ed363e20972aff2c60ff149d710046aa1c240c5f8e62c3",
+        "type": "blob"
+      },
+      "agent/codex_401_circuit.py": {
+        "mode": "100644",
+        "sha256": "42a4391199577a3c91e627bc3f5fd6bd47f8a2126f49aaf3d30accb599a54847",
+        "type": "blob"
+      },
+      "agent/conversation_loop.py": {
+        "mode": "100644",
+        "sha256": "234700f861ed68ba579b73da7d86c15add7c2adb966b84c3545d89f6272e47de",
+        "type": "blob"
+      },
+      "agent/llm_attempt_receipts.py": {
+        "mode": "100644",
+        "sha256": "0ca246638140fc92031df27e87b01fc810426cabe084e17795b927004fb02b8c",
+        "type": "blob"
+      },
+      "agent/prompt_builder.py": {
+        "mode": "100644",
+        "sha256": "09e702a74e0fcc07b4f321a050efb86a81e6148c0bf824587404706bb2136c80",
+        "type": "blob"
+      },
+      "agent/tool_executor.py": {
+        "mode": "100644",
+        "sha256": "8285ff2d8160da9fa0029d1d63d91d7281daf99c27d9e97c50896ded6ad7778a",
+        "type": "blob"
+      },
+      "gateway/drain_inbox.py": {
+        "mode": "100644",
+        "sha256": "2fb5273e49c8625a665e6537613c8feca1dc29b2b6c90ce97bfd436dd6870c3f",
+        "type": "blob"
+      },
+      "gateway/platforms/base.py": {
+        "mode": "100644",
+        "sha256": "fdcb485871286408570f7de782ed0b1611a76c441bfdf71255ca5556cb3a6118",
+        "type": "blob"
+      },
+      "gateway/platforms/bluebubbles.py": {
+        "mode": "100644",
+        "sha256": "811a21a6925b6bb54777a4b847e7a96681250ba54fb679522ba2dcdb050a332b",
+        "type": "blob"
+      },
+      "gateway/platforms/msgraph_webhook.py": {
+        "mode": "100644",
+        "sha256": "b4f12c7cc075653b5709c5f044621521b89da66bd507fe6543dad77cd76982eb",
+        "type": "blob"
+      },
+      "gateway/platforms/qqbot/adapter.py": {
+        "mode": "100644",
+        "sha256": "659222d8a2649190efd7c12b38bf588c199b46f6cf346c8effe5672cb4341f21",
+        "type": "blob"
+      },
+      "gateway/platforms/webhook.py": {
+        "mode": "100644",
+        "sha256": "cddbb744b32117a66820037e6a6d61610efd4636323a6e06b2b5b32dc9a36381",
+        "type": "blob"
+      },
+      "gateway/platforms/whatsapp_cloud.py": {
+        "mode": "100644",
+        "sha256": "d586fe5f17e98c81f04b0718283bc20ae5955717b2bf70f88c70af3ca99a9128",
+        "type": "blob"
+      },
+      "gateway/run.py": {
+        "mode": "100644",
+        "sha256": "de4de4172b10fdd76a39101666c34c4730cfa27f98e97dd49f0edca972833be0",
+        "type": "blob"
+      },
+      "gateway/session.py": {
+        "mode": "100644",
+        "sha256": "cd22bc242d30464c0b9e9ba159258deecc9379b9ca5cdc3ef963eb4d34b68fb0",
+        "type": "blob"
+      },
+      "gateway/shutdown_flush.py": {
+        "mode": "100644",
+        "sha256": "072b48afb2df9e1000f3320ad51e14010ace2d6013fb70fff564a45f4bd9d65b",
+        "type": "blob"
+      },
+      "gateway/slash_commands.py": {
+        "mode": "100644",
+        "sha256": "577353ac4a20451835126d6c5a3740cf55a94b12f4e230d793e8f72bbb10f97e",
+        "type": "blob"
+      },
+      "gateway/stream_consumer.py": {
+        "mode": "100644",
+        "sha256": "f141cb29c67e200184542cd0d4a49e34f228a9b8f052c55d426dba6dd33a63a2",
+        "type": "blob"
+      },
+      "gateway/telegram_transaction_ledger.py": {
+        "mode": "100644",
+        "sha256": "40bef50b5149177f09f5cd297f8e9b7e91af081429c98de3cba3201b98f9b1bf",
+        "type": "blob"
+      },
+      "hermes_cli/gateway_windows.py": {
+        "mode": "100644",
+        "sha256": "076afe3ced31548dcba42bea25b9170c3f3b688c1393a699d783d48454d96b7e",
+        "type": "blob"
+      },
+      "hermes_state.py": {
+        "mode": "100644",
+        "sha256": "b5761eac90df45ec16b9dc2758f3085d1771f3119338153215340452fc481f52",
+        "type": "blob"
+      },
+      "model_tools.py": {
+        "mode": "100644",
+        "sha256": "ffc59c91f819ac3d399563386d74de8cbcb3c48ed3e90e44f6a6c3c09e05715e",
+        "type": "blob"
+      },
+      "plugins/platforms/telegram/adapter.py": {
+        "mode": "100644",
+        "sha256": "6d95a28d7e89cda7be19f4db63ef9efb6870eb4a4249bd78f50b79a96385d52c",
+        "type": "blob"
+      },
+      "run_agent.py": {
+        "mode": "100644",
+        "sha256": "06b36039edb566cc2ae9f896c99e9bff06ec0b714c3c1d21eeb4d40c654371d8",
+        "type": "blob"
+      },
+      "tests/gateway/restart_test_helpers.py": {
+        "mode": "100644",
+        "sha256": "73c9d5af7c1e7f8230ac581f3b213b5f3999fb5d48fcb3af81b352115bc8fdc3",
+        "type": "blob"
+      },
+      "tests/gateway/test_base_topic_sessions.py": {
+        "mode": "100644",
+        "sha256": "e66ff6f7347b147942c3a53a8fd76a71ea2b6953dc9edb4f38a5b06ea6380c54",
+        "type": "blob"
+      },
+      "tests/gateway/test_drain_inbox.py": {
+        "mode": "100644",
+        "sha256": "ceddb2a215173e1755d44a8694c46219e6a116eb8e9c66aca77bf571db44161a",
+        "type": "blob"
+      },
+      "tests/gateway/test_external_drain_control.py": {
+        "mode": "100644",
+        "sha256": "bd3bebcd9797a80dcff1d32a37eec1bc50e04a1c5922750855e772b6fe220b91",
+        "type": "blob"
+      },
+      "tests/gateway/test_restart_drain.py": {
+        "mode": "100644",
+        "sha256": "5baca0b12178b084eb12d5907310be1931189fff29017e9abf150804e59b3c9f",
+        "type": "blob"
+      },
+      "tests/gateway/test_restart_notification.py": {
+        "mode": "100644",
+        "sha256": "f6673ae4af2fa14b0454035e167a6d38cf7bdceab86527d965dae0a6c36da51c",
+        "type": "blob"
+      },
+      "tests/gateway/test_restart_resume_pending.py": {
+        "mode": "100644",
+        "sha256": "2bcc242ba62fc100dec0d8d13988c59ff62bcc21592d1bc637fe7273ddf8665d",
+        "type": "blob"
+      },
+      "tests/gateway/test_shutdown_flush.py": {
+        "mode": "100644",
+        "sha256": "c4df5601649cb6024c3bd50783df4360aa01b82e66b9617819d10eebe2d97b93",
+        "type": "blob"
+      },
+      "tests/gateway/test_telegram_text_batching.py": {
+        "mode": "100644",
+        "sha256": "5a0f4a6699e60231a003ecd37abf9b4d2e580ec3fe2044cfaf9e6d73f7a2eca1",
+        "type": "blob"
+      },
+      "tests/tools/test_tool_search.py": {
+        "mode": "100644",
+        "sha256": "c777222170835253eba8c698b2ab7c3bb22f69333d9b1316cbb440d610508e67",
+        "type": "blob"
+      },
+      "tools/golden_topic_recall.py": {
+        "mode": "100644",
+        "sha256": "d8b3cfdb5442ace59d80542b13c98e0287cda998ee23e53e18c8db3e1112d95c",
+        "type": "blob"
+      },
+      "tools/session_search_tool.py": {
+        "mode": "100644",
+        "sha256": "de55e35784e9b8880af47eeca8780e333aacb7c876482159976773a5ea500d67",
+        "type": "blob"
+      },
+      "tools/tool_search.py": {
+        "mode": "100644",
+        "sha256": "e18b1b034fe655fdc8ed1633760bd5a394d1619a1e8ae69cdb91fedb543f8add",
+        "type": "blob"
+      }
+    }
+  }
 }

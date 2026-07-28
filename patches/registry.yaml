@@ -1,18 +1,33 @@
 schema_version: 1
 patches:
+  - name: llm_attempt_receipts_v1
+    module: modules/llm_attempt_receipts_v1.py
+    function: patch_llm_attempt_receipts_v1
+    target: agent/conversation_loop.py + agent/chat_completion_helpers.py + agent/auxiliary_client.py + agent/llm_attempt_receipts.py
+    owner: engineering-lead
+    idempotency: HERMES_LLM_ATTEMPT_RECEIPTS_v1
+    test: python3 -m pytest -q bin/test/test_llm_attempt_receipts_v1.py
+    rollback: restore the pre-apply snapshot and remove agent/llm_attempt_receipts.py plus state/llm-attempt-receipts.jsonl
+    client_impact: restart_required
+    tags: [llm, openrouter, accounting, observability, receipts, fallback, streaming]
+    status: extracted
+    route: irreducible
+    reason: main hooks identify logical calls while retries and auxiliary provider calls need one content-free terminal receipt per physical attempt before OpenRouter spend can be attributed safely.
+    upstream_issue: null
+    retirement_condition: remove when upstream emits terminal, content-free per-physical-attempt receipts for main and auxiliary calls with retry/fallback lineage and streaming coverage.
   - name: durable_drain_runtime_v1
     module: modules/durable_drain_inbox_carrier_v1.py
     function: patch_durable_drain_runtime_v1
-    target: gateway/drain_inbox.py + gateway/platforms/base.py + gateway/platforms/bluebubbles.py + gateway/platforms/msgraph_webhook.py + gateway/platforms/qqbot/adapter.py + gateway/platforms/webhook.py + gateway/platforms/whatsapp_cloud.py + gateway/run.py + gateway/session.py + gateway/slash_commands.py + hermes_state.py + tests/gateway/restart_test_helpers.py + tests/gateway/test_drain_inbox.py + tests/gateway/test_restart_resume_pending.py
+    target: gateway/drain_inbox.py + gateway/platforms/base.py + gateway/platforms/bluebubbles.py + gateway/platforms/msgraph_webhook.py + gateway/platforms/qqbot/adapter.py + gateway/platforms/webhook.py + gateway/platforms/whatsapp_cloud.py + gateway/run.py + gateway/session.py + gateway/shutdown_flush.py + gateway/slash_commands.py + hermes_state.py + tests/gateway/restart_test_helpers.py + tests/gateway/test_drain_inbox.py + tests/gateway/test_external_drain_control.py + tests/gateway/test_restart_drain.py + tests/gateway/test_restart_notification.py + tests/gateway/test_restart_resume_pending.py + tests/gateway/test_shutdown_flush.py
     owner: engineering-lead
-    idempotency: HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1 + HERMES_DURABLE_DRAIN_COMPATIBILITY_v1 + HERMES_CRON_SCHEDULER_CAN_DISPATCH_COMPAT_v1
-    test: python3 -m pytest -q bin/test/test_durable_drain_inbox_carrier_v1.py bin/test/test_durable_drain_compatibility_v1.py bin/test/test_cron_scheduler_can_dispatch_compat_v1.py
+    idempotency: HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1 + HERMES_CRON_SCHEDULER_CAN_DISPATCH_COMPAT_v1
+    test: python3 -m pytest -q bin/test/test_durable_drain_inbox_carrier_v1.py bin/test/test_cron_scheduler_can_dispatch_compat_v1.py
     rollback: restore the pre-apply snapshot and remove .golden-runtime-carriers/durable-drain-inbox-v1.json
     client_impact: restart_required
-    tags: [gateway, restart, durable-inbox, startup-barrier, windows, cron, fleet]
+    tags: [gateway, restart, maintenance, durable-inbox, startup-barrier, windows, cron, fleet]
     status: extracted
     route: hotfix
-    reason: Golden pin 3ef6bbd2 predates the reviewed durable drain inbox; its carrier, Windows row/path compatibility, and optional cron drain callback form one lifecycle subsystem.
+    reason: current Hermes has shutdown flush but not durable maintenance admission/replay; the carrier supplies that missing lifecycle, steers concise maintenance context into active work, folds in cross-platform row/path safety, and adds the optional cron drain callback.
     upstream_issue: null
     retirement_condition: remove the full subsystem when upstream.lock contains equivalent durable recovery, cross-platform path/row handling, and drain-aware cron startup.
   - name: telegram_model_commentary_checkpoints_v1
@@ -35,10 +50,10 @@ patches:
   - name: telegram_dm_topic_recovery_root_guard_v1
     module: modules/telegram_dm_topic_recovery_root_guard_v1.py
     function: patch_telegram_dm_topic_recovery_root_guard_v1
-    target: gateway/platforms/base.py, tests/gateway/test_base_topic_sessions.py, tests/gateway/test_telegram_text_batching.py, tests/gateway/test_drain_inbox.py
+    target: gateway/platforms/base.py, tests/gateway/test_base_topic_sessions.py, tests/gateway/test_telegram_text_batching.py
     owner: engineering-lead
     idempotency: HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1
-    test: pytest tests/gateway/test_base_topic_sessions.py tests/gateway/test_telegram_text_batching.py tests/gateway/test_drain_inbox.py -q
+    test: pytest tests/gateway/test_base_topic_sessions.py tests/gateway/test_telegram_text_batching.py -q
     rollback: restore from .bak file
     client_impact: restart_required
     tags: [gateway, telegram, dm-topic, resume, routing]

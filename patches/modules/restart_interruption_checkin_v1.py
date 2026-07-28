@@ -317,11 +317,13 @@ POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE = """    def _schedule_post_startup_dra
         background_tasks.add(task)
         task.add_done_callback(background_tasks.discard)
 """
-PRIMARY_RECONNECT_SUCCESS_BLOCK = """                        logger.info("✓ %s reconnected successfully", platform.value)
+PRIMARY_RECONNECT_SUCCESS_BLOCK = """\
+                        logger.info("✓ %s reconnected successfully", platform.value)
 
                         # Rebuild channel directory with the new adapter
 """
-PRIMARY_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN = """                        logger.info("✓ %s reconnected successfully", platform.value)
+PRIMARY_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN = """\
+                        logger.info("✓ %s reconnected successfully", platform.value)
                         self._schedule_post_startup_drain()
 
                         # Rebuild channel directory with the new adapter
@@ -359,6 +361,7 @@ STARTUP_WAIT_BLOCK_NEW = """        if tasks:
                 )
                 results = []
 """
+NATIVE_BOUNDED_STARTUP_WAIT = "                done, pending = await asyncio.wait(tasks, timeout=timeout)\n"
 
 TEST_REPLACEMENTS = {
     "test_startup_auto_resume_schedules_fresh_pending_sessions": """@pytest.mark.asyncio
@@ -702,6 +705,8 @@ async def test_restart_checkin_never_runs_interrupted_agent():
 """,
 }
 
+OPTIONAL_COMPOSITION_TESTS = frozenset({"test_startup_restore_waits_for_resume_before_final_durable_drain"})
+
 POLICY_TEST_ALTERNATIVES = {
     "test_startup_restore_waits_for_resume_before_draining_inbound": frozenset(
         {
@@ -736,6 +741,8 @@ def _validate_behavior_tests(hermes_dir: Path) -> None:
     for old_name, replacement in TEST_REPLACEMENTS.items():
         new_name = ast.parse(replacement).body[0].name
         if f"async def {old_name}(" not in content and f"async def {new_name}(" not in content:
+            if old_name in OPTIONAL_COMPOSITION_TESTS:
+                continue
             alternatives = POLICY_TEST_ALTERNATIVES.get(old_name, ())
             if alternatives and all(f"def {name}(" in content for name in alternatives):
                 continue
@@ -753,6 +760,8 @@ def _patch_behavior_tests(hermes_dir: Path) -> bool:
         if f"async def {new_name}(" in patched:
             continue
         if f"async def {old_name}(" not in patched:
+            if old_name in OPTIONAL_COMPOSITION_TESTS:
+                continue
             alternatives = POLICY_TEST_ALTERNATIVES.get(old_name, ())
             if alternatives and all(f"def {name}(" in patched for name in alternatives):
                 continue
@@ -802,10 +811,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             if (
                 prior_checkin_block not in original
                 or prior_helper_prefix not in original
-                or (
-                    STALE_RETRY_SEND_TAIL not in original
-                    and RETRY_SEND_TAIL not in original
-                )
+                or (STALE_RETRY_SEND_TAIL not in original and RETRY_SEND_TAIL not in original)
             ):
                 raise RuntimeError("prior restart interruption check-in anchors drifted")
             patched = original.replace(PRIOR_MARKER, MARKER)
@@ -833,13 +839,16 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
                 patched = patched.replace(SCHEDULER_DOC_OLD, SCHEDULER_DOC_NEW, 1)
             patched = patched.replace(SCHEDULE_BLOCK, CHECKIN_BLOCK, 1)
         if STARTUP_WAIT_BLOCK_NEW not in patched:
-            if STARTUP_WAIT_BLOCK_OLD not in patched:
+            if NATIVE_BOUNDED_STARTUP_WAIT in patched:
+                pass
+            elif STARTUP_WAIT_BLOCK_OLD not in patched:
                 raise RuntimeError("restart interruption startup-wait anchor drifted")
-            patched = patched.replace(
-                STARTUP_WAIT_BLOCK_OLD,
-                STARTUP_WAIT_BLOCK_NEW,
-                1,
-            )
+            else:
+                patched = patched.replace(
+                    STARTUP_WAIT_BLOCK_OLD,
+                    STARTUP_WAIT_BLOCK_NEW,
+                    1,
+                )
 
     if POST_STARTUP_DRAIN_BLOCK in patched:
         patched = patched.replace(
@@ -847,10 +856,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE,
             1,
         )
-    elif (
-        DURABLE_DRAIN_METHOD_ANCHOR in patched
-        and POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE not in patched
-    ):
+    elif DURABLE_DRAIN_METHOD_ANCHOR in patched and POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE not in patched:
         raise RuntimeError("post-startup durable drain anchor drifted")
 
     if POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE in patched:
