@@ -24,6 +24,7 @@ import weakref
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from hermes_constants import get_hermes_home
@@ -228,7 +229,7 @@ def _usage_payload(
         from agent.usage_pricing import estimate_usage_cost, normalize_usage
 
         usage = normalize_usage(
-            raw_usage,
+            _usage_attribute_view(raw_usage),
             provider=provider,
             api_mode=api_mode,
         )
@@ -277,6 +278,19 @@ def _is_openrouter(provider: str, base_url: str) -> bool:
     return str(provider or "").lower() == "openrouter" or _base_url_host(
         base_url
     ) == "openrouter.ai"
+
+
+def _usage_attribute_view(value: Any) -> Any:
+    if isinstance(value, dict):
+        return SimpleNamespace(
+            **{
+                str(key): _usage_attribute_view(item)
+                for key, item in value.items()
+            }
+        )
+    if isinstance(value, list):
+        return [_usage_attribute_view(item) for item in value]
+    return value
 
 
 def _has_unreported_usage(raw_usage: Any) -> bool:

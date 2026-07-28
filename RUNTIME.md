@@ -8,7 +8,7 @@ The current public release is `botdoctor-hermes-2026.07.28`:
 - public Golden source: `1e9cf546cdeff7be26109a2c2c407510a8f3726d`;
 - runtime payload: 79 files;
 - assembled runtime fingerprint:
-  `055a770630917e5d7534480dc829358f36ecbf083174d211995a6d8713a25b70`.
+  `7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately

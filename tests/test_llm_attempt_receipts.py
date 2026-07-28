@@ -126,6 +126,53 @@ def test_openrouter_zero_usage_retains_actual_provider_cost(tmp_path, monkeypatc
     assert payload["cost_status"] == "actual"
 
 
+def test_openrouter_mapping_usage_is_normalized_as_reported(tmp_path, monkeypatch):
+    receipts = load_receipts(monkeypatch, tmp_path)
+    observed = {}
+
+    def normalize_usage(raw_usage, **_kwargs):
+        observed["usage"] = raw_usage
+        return SimpleNamespace(
+            input_tokens=90,
+            output_tokens=10,
+            cache_read_tokens=10,
+            cache_write_tokens=0,
+            reasoning_tokens=0,
+            total_tokens=110,
+        )
+
+    pricing = SimpleNamespace(
+        normalize_usage=normalize_usage,
+        estimate_usage_cost=lambda *_args, **_kwargs: SimpleNamespace(
+            amount_usd=0.25,
+            status="estimated",
+            source="test-pricing",
+        ),
+    )
+    monkeypatch.setitem(sys.modules, "agent.usage_pricing", pricing)
+
+    payload = receipts._usage_payload(
+        SimpleNamespace(
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 10,
+                "total_tokens": 110,
+                "prompt_tokens_details": {"cached_tokens": 10},
+            }
+        ),
+        provider="openrouter",
+        model="model",
+        base_url="https://openrouter.ai/api/v1",
+        api_mode="chat",
+    )
+
+    assert observed["usage"].prompt_tokens == 100
+    assert observed["usage"].prompt_tokens_details.cached_tokens == 10
+    assert payload["usage_status"] == "provider_reported"
+    assert payload["input_tokens"] == 90
+    assert payload["cost_usd"] == 0.25
+
+
 def test_reconciler_uses_active_profile_runtime(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "reconcile_test_module", ROOT / "bin/llm-attempt-reconcile.py"
