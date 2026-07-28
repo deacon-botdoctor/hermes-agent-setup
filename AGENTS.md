@@ -51,13 +51,17 @@ Choose a user-owned profile and an immutable candidate path:
 
 ```bash
 export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-export HERMES_CODEX_401_CIRCUIT_STATE="$HERMES_HOME/state/codex-401-circuit.json"
 release_id="$(python3 -c 'import json; print(json.load(open("release.json"))["release"])')"
-candidate="$HERMES_HOME/state/runtime-candidates/$release_id"
+run_id="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+candidate="$HERMES_HOME/state/runtime-candidates/$release_id-$run_id"
+staging_home="$HERMES_HOME/state/setup-staging/$release_id-$run_id"
+test ! -e "$candidate" && test ! -e "$staging_home"
+mkdir -p "$staging_home"
+test -z "$(find "$staging_home" -mindepth 1 -maxdepth 1 -print -quit)"
 
 python3 bin/assemble-runtime.py \
   --output "$candidate" \
-  --prepare-home "$HERMES_HOME"
+  --prepare-home "$staging_home"
 ```
 
 `--prepare-home` runs the pinned upstream dependency installer with a separate
@@ -72,14 +76,18 @@ HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -m hermes_cli.main setup
 "$candidate/venv/bin/python" bin/install-profile.py \
   --hermes-home "$HERMES_HOME" \
   --runtime-dir "$candidate"
+"$candidate/venv/bin/python" bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --runtime-dir "$candidate"
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" doctor
 ```
 
 Review the doctor output before installing the gateway service. Then use the
 candidate's native service command, preserving the intended user/system scope.
-Persist both `HERMES_HOME` and `HERMES_CODEX_401_CIRCUIT_STATE` in the native
-service definition before accepting it; the shell export alone is not the
-service binding:
+The profile-environment binder stores the circuit path in the native loader's
+`$HERMES_HOME/.env` boundary, which survives native service refreshes. It
+treats all other entries as opaque and verifies only the owned key through the
+candidate's pinned environment loader:
 
 ```bash
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway install --no-start-now
@@ -96,18 +104,16 @@ unit="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
 "$candidate/venv/bin/python" bin/bind-service-circuit.py \
   --hermes-home "$HERMES_HOME" \
   --runtime-dir "$candidate" \
-  --kind systemd \
+  --prove-kind systemd \
   --scope user \
+  --service-owner "$(id -un)" \
   --definition "$unit"
-systemctl --user daemon-reload
 systemctl --user start "$(basename "$unit")"
-systemctl --user show "$(basename "$unit")" -p Environment
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
 ```
 
-On macOS, update the exact native plist, reload that plist directly so the
-native refresh path cannot discard the added environment value, and inspect
-the loaded definition:
+On macOS, prove the exact native plist belongs to the current user and targets
+the candidate before starting it:
 
 ```bash
 plist="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
@@ -117,17 +123,19 @@ label="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
 "$candidate/venv/bin/python" bin/bind-service-circuit.py \
   --hermes-home "$HERMES_HOME" \
   --runtime-dir "$candidate" \
-  --kind launchd \
+  --prove-kind launchd \
+  --service-owner "$(id -un)" \
   --definition "$plist"
-launchctl bootout "gui/$UID/$label"
-launchctl bootstrap "gui/$UID" "$plist"
+launchctl kickstart "gui/$UID/$label"
 launchctl print "gui/$UID/$label"
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
 ```
 
-The binding helper prints a backup path. Re-run it after any native gateway
-reinstall. Roll it back with `--hermes-home "$HERMES_HOME" --restore-backup
-/exact/backup/path`, then reload the same service definition.
+When it changes `.env`, the binder prints a backup path. That 0600 backup
+contains the entire prior file and may therefore contain credentials; the
+receipt and output contain only paths, modes, and hashes. Roll it back with
+`--hermes-home "$HERMES_HOME" --restore-backup /exact/backup/path`, then restart
+the same native service.
 
 Do not configure Telegram, a provider, or a connected service with credentials
 the user has not supplied.
@@ -167,9 +175,10 @@ if ($InstallMode -eq "fresh" -and $ProvenServiceOwner -ne $CurrentOperator) {
 }
 $Release = Get-Content .\release.json -Raw | ConvertFrom-Json
 $LiveHome = [IO.Path]::GetFullPath($ProvenHermesHome)
-$Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release)
-$StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release)
-$ProfileHome = if ($InstallMode -eq "existing") { $StagingHome } else { $LiveHome }
+$RunId = [Guid]::NewGuid().ToString("N")
+$Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release + "-" + $RunId)
+$StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release + "-" + $RunId)
+$ProfileHome = $StagingHome
 if ($InstallMode -eq "fresh" -and (Test-Path (Join-Path $LiveHome "config.yaml"))) {
   throw "Fresh classification conflicts with existing Hermes data"
 }
@@ -187,6 +196,16 @@ $PriorUserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 $PriorUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
 $PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
 
+if ((Test-Path $Candidate) -or (Test-Path $StagingHome)) {
+  throw "Candidate and staging paths must be unique and absent"
+}
+New-Item -ItemType Directory -Path $StagingHome | Out-Null
+if ((Get-ChildItem -Force $StagingHome | Select-Object -First 1) -or
+    (Test-Path (Join-Path $StagingHome ".env")) -or
+    (Test-Path (Join-Path $StagingHome "state")) -or
+    (Test-Path (Join-Path $StagingHome "gateway-service"))) {
+  throw "Staging home must be empty before the pinned installer"
+}
 Invoke-WebRequest $InstallerUrl -OutFile $Installer
 $ActualInstallerSha256 = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLowerInvariant()
 if ($ActualInstallerSha256 -ne $ExpectedInstallerSha256) {
@@ -209,10 +228,10 @@ try {
 
 For a fresh machine, finish native setup and activate the native gateway:
 
-Persist `HERMES_HOME` and `HERMES_CODEX_401_CIRCUIT_STATE` in the generated
-native gateway task after installation and before it starts. Verify the task
-and launcher resolve `$ProvenServiceOwner`, `$LiveHome`, and the profile-scoped
-circuit path before accepting `gateway status`.
+Persist the circuit path through the native profile environment before gateway
+installation. Then prove that the generated task principal is exactly
+`$ProvenServiceOwner` and both launchers resolve `$LiveHome` and the exact
+candidate before accepting `gateway status`.
 
 ```powershell
 if ($InstallMode -ne "fresh") { throw "Use the staged existing-install path instead" }
@@ -222,6 +241,8 @@ try {
   & "$Candidate\venv\Scripts\python.exe" -m hermes_cli.main setup
   & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
     --hermes-home $LiveHome --runtime-dir $Candidate
+  & "$Candidate\venv\Scripts\python.exe" .\bin\bind-service-circuit.py `
+    --hermes-home $LiveHome --runtime-dir $Candidate
   & "$Candidate\venv\Scripts\hermes.exe" doctor
   & "$Candidate\venv\Scripts\hermes.exe" gateway install --no-start-now
   $TaskName = (& "$Candidate\venv\Scripts\python.exe" -c `
@@ -230,8 +251,9 @@ try {
     "from hermes_cli.gateway_windows import get_task_script_path; print(get_task_script_path())").Trim()
   $GatewayVbs = [IO.Path]::ChangeExtension($GatewayCmd, ".vbs")
   & "$Candidate\venv\Scripts\python.exe" .\bin\bind-service-circuit.py `
-    --hermes-home $LiveHome --runtime-dir $Candidate --kind windows `
-    --cmd-launcher $GatewayCmd --vbs-launcher $GatewayVbs --task-name $TaskName
+    --hermes-home $LiveHome --runtime-dir $Candidate --prove-kind windows `
+    --service-owner $ProvenServiceOwner --cmd-launcher $GatewayCmd `
+    --vbs-launcher $GatewayVbs --task-name $TaskName
   schtasks.exe /Run /TN $TaskName
   & "$Candidate\venv\Scripts\hermes.exe" gateway status
 } finally {
@@ -279,7 +301,12 @@ live SQLite file without its WAL state is not a valid backup.
 Build the candidate against a separate staging profile:
 
 ```bash
-staging_home="$HERMES_HOME/state/setup-staging/$release_id"
+run_id="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+candidate="$HERMES_HOME/state/runtime-candidates/$release_id-$run_id"
+staging_home="$HERMES_HOME/state/setup-staging/$release_id-$run_id"
+test ! -e "$candidate" && test ! -e "$staging_home"
+mkdir -p "$staging_home"
+test -z "$(find "$staging_home" -mindepth 1 -maxdepth 1 -print -quit)"
 python3 bin/assemble-runtime.py \
   --output "$candidate" \
   --prepare-home "$staging_home"
@@ -328,13 +355,13 @@ At readiness:
 2. Run `bin/install-profile.py` against the live `HERMES_HOME`; it creates a
    local per-file rollback and does not switch the service.
 3. Stop the old gateway through its actual service owner.
-4. Bind that same service scope/profile to the candidate's absolute Python and
-   source root, with `HERMES_HOME` set to the proven live profile and
-   `HERMES_CODEX_401_CIRCUIT_STATE` set to
-   `$HERMES_HOME/state/codex-401-circuit.json` (or the equivalent Windows
-   path). Run `bin/bind-service-circuit.py` against the exact native-generated
-   systemd unit, launchd plist, or Windows CMD/VBS launchers before start, then
-   reload that definition through its actual service owner.
+4. Run `bin/bind-service-circuit.py` against the proven live profile so the
+   pinned native environment loader durably resolves the profile-scoped circuit
+   state. Bind the same native service scope to the candidate's absolute Python
+   and source root, then use the helper's `--prove-kind` mode against the exact
+   systemd unit, launchd plist, or Windows CMD/VBS launchers. For system scope,
+   require its exact `User=` owner; for Windows require the scheduled-task
+   principal; launchd must belong to the current proven user.
 5. Start the candidate and prove the old generation is absent.
 6. Restore durable checkpoints and replay accepted messages exactly once before
    reopening admission.
@@ -351,15 +378,16 @@ python3 bin/install-profile.py \
 
 This restores only files and configuration owned by that profile-install run;
 service and database rollback remain the separately captured cutover rollback.
-The service-binding helper prints its own backup path. Restore it with:
+The profile-environment helper prints its own backup path when `.env` changes.
+Restore it with:
 
 ```bash
 python3 bin/bind-service-circuit.py \
   --hermes-home "$HERMES_HOME" \
-  --restore-backup /exact/service-binding-backup/path
+  --restore-backup /exact/profile-environment-backup/path
 ```
 
-Reload the same systemd unit, launchd plist, or Windows task after restoring.
+Restart the same native service after restoring.
 
 ## Acceptance proof
 

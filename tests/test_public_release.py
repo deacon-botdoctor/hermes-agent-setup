@@ -318,24 +318,88 @@ def test_restore_preserves_config_mode(tmp_path):
     assert config_path.stat().st_mode & 0o777 == 0o640
 
 
-def test_service_circuit_bindings_match_native_definitions(tmp_path):
-    binder = load_script("public_service_binding", "bind-service-circuit.py")
+def test_profile_environment_binding_is_opaque_and_reversible(tmp_path):
+    binder = load_script("public_profile_binding", "bind-service-circuit.py")
     home = tmp_path / "profile"
-    runtime = home / "state" / "runtime-candidates" / "release"
-    runtime.mkdir(parents=True)
-    circuit = home / "state" / "codex-401-circuit.json"
+    home.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    env_path = home / ".env"
+    original = b"PROVIDER_SECRET=private-value\n"
+    env_path.write_bytes(original)
+    env_path.chmod(0o640)
+    expected = str(home / "state" / "codex-401-circuit.json")
 
+    def loaded_value():
+        text = env_path.read_text(encoding="utf-8")
+        matches = [
+            line.split("=", 1)[1].strip().strip('"')
+            for line in text.splitlines()
+            if line.startswith(f"{binder.KEY}=")
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    backup = binder._bind_environment(home, runtime, loaded_value)
+    assert backup is not None
+    assert env_path.read_bytes().startswith(original)
+    assert env_path.stat().st_mode & 0o777 == 0o640
+    assert binder._bind_environment(home, runtime, loaded_value) is None
+    receipt = (backup / "receipt.json").read_text(encoding="utf-8")
+    assert "PROVIDER_SECRET" not in receipt
+    assert binder.KEY not in receipt
+    assert (backup / ".env.before").read_bytes() == original
+    assert (backup / ".env.before").stat().st_mode & 0o777 == 0o600
+
+    binder._restore_backup(home, backup)
+    assert env_path.read_bytes() == original
+    assert env_path.stat().st_mode & 0o777 == 0o640
+
+
+def test_profile_environment_binding_rejects_conflicts(tmp_path):
+    binder = load_script("public_profile_conflict", "bind-service-circuit.py")
+    home = tmp_path / "profile"
+    home.mkdir()
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    env_path = home / ".env"
+    env_path.write_text(f"{binder.KEY}=wrong\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="conflicts"):
+        binder._bind_environment(home, runtime, lambda: "wrong")
+
+    env_path.write_text(
+        f"{binder.KEY}=one\nexport {binder.KEY}=two\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="duplicated"):
+        binder._bind_environment(home, runtime, lambda: "one")
+
+
+def test_native_service_proofs_require_exact_runtime_and_owner():
+    binder = load_script("public_service_proof", "bind-service-circuit.py")
+    home = Path("/profiles/agent")
+    runtime = Path("/runtimes/candidate")
+    owner = "agent-user"
     unit = (
         "[Service]\n"
         f"ExecStart={runtime}/venv/bin/python -m hermes_cli.main gateway run\n"
         f'Environment="HERMES_HOME={home}"\n'
+        f"User={owner}\n"
     ).encode()
-    dropin = binder._systemd_binding(unit, home, runtime).decode()
-    assert f"HERMES_CODEX_401_CIRCUIT_STATE={circuit}" in dropin
+    binder._prove_systemd(unit, home, runtime, "system", owner)
+    with pytest.raises(RuntimeError, match="exact candidate"):
+        binder._prove_systemd(
+            unit.replace(b"/runtimes/candidate/", b"/runtimes/candidate-old/"),
+            home,
+            runtime,
+            "system",
+            owner,
+        )
+    with pytest.raises(RuntimeError, match="proven owner"):
+        binder._prove_systemd(unit, home, runtime, "system", "another-user")
 
     plist = binder.plistlib.dumps(
         {
-            "Label": "ai.hermes.gateway",
             "ProgramArguments": [
                 str(runtime / "venv" / "bin" / "python"),
                 "-m",
@@ -346,86 +410,58 @@ def test_service_circuit_bindings_match_native_definitions(tmp_path):
             "EnvironmentVariables": {"HERMES_HOME": str(home)},
         }
     )
-    bound_plist = binder.plistlib.loads(
-        binder._launchd_binding(plist, home, runtime)
-    )
-    assert bound_plist["EnvironmentVariables"][
-        "HERMES_CODEX_401_CIRCUIT_STATE"
-    ] == str(circuit)
+    binder._prove_launchd(plist, home, runtime, owner, current_user=owner)
+    with pytest.raises(RuntimeError, match="runtime owner"):
+        binder._prove_launchd(
+            plist.replace(b"/runtimes/candidate/", b"/runtimes/candidate-old/"),
+            home,
+            runtime,
+            owner,
+            current_user=owner,
+        )
 
+    windows_home = Path(r"C:\Users\Agent\.hermes")
+    windows_runtime = Path(r"C:\Hermes\candidate")
+    python = rf"{windows_runtime}\venv\Scripts\python.exe"
     cmd = (
         "@echo off\r\n"
-        f'cd /d "{runtime}"\r\n'
-        f'set "HERMES_HOME={home}"\r\n'
+        f'set "HERMES_HOME={windows_home}"\r\n'
+        f'"{python}" -m hermes_cli.main gateway run\r\n'
     ).encode()
     vbs = (
-        f'env.Item("HERMES_HOME") = "{home}"\r\n'
-        f'sh.CurrentDirectory = "{runtime}"\r\n'
+        f'env.Item("HERMES_HOME") = "{windows_home}"\r\n'
+        f'sh.Run """{python}"" -m hermes_cli.main gateway run", 0, False\r\n'
     ).encode()
-    bound_cmd, bound_vbs = binder._windows_launcher_bindings(
-        cmd, vbs, home, runtime
+    binder._prove_windows_launchers(
+        cmd, vbs, windows_home, windows_runtime
     )
-    assert str(circuit).encode() in bound_cmd
-    assert str(circuit).encode() in bound_vbs
-    task_xml = (
-        "<Task><Actions><Exec><Command>wscript.exe</Command>"
-        f'<Arguments>//B //Nologo "{home / "gateway-service" / "Hermes.vbs"}"'
-        "</Arguments></Exec></Actions></Task>"
+    with pytest.raises(RuntimeError, match="exact candidate"):
+        binder._prove_windows_launchers(
+            cmd.replace(b"candidate\\", b"candidate-old\\"),
+            vbs.replace(b"candidate\\", b"candidate-old\\"),
+            windows_home,
+            windows_runtime,
+        )
+    vbs_path = Path(r"C:\Users\Agent\.hermes\gateway-service\Hermes.vbs")
+    task = (
+        "<Task><Principals><Principal><UserId>DOMAIN\\Agent</UserId>"
+        "</Principal></Principals><Actions><Exec><Command>wscript.exe</Command>"
+        f'<Arguments>//B //Nologo "{vbs_path}"</Arguments>'
+        "</Exec></Actions></Task>"
     )
-    assert binder._task_targets_vbs(
-        task_xml, home / "gateway-service" / "Hermes.vbs"
-    )
-    assert not binder._task_targets_vbs(
-        task_xml.replace("Hermes.vbs\"", "Hermes.vbs.evil\""),
-        home / "gateway-service" / "Hermes.vbs",
-    )
+    binder._task_proof(task, vbs_path, r"DOMAIN\Agent")
+    with pytest.raises(RuntimeError, match="proven owner"):
+        binder._task_proof(task, vbs_path, r"DOMAIN\Other")
 
 
-def test_service_binding_backup_is_reversible(tmp_path):
-    binder = load_script(
-        "public_service_binding_rollback", "bind-service-circuit.py"
-    )
-    home = tmp_path / "profile"
-    home.mkdir()
-    service_dir = home / "gateway-service"
-    definition = service_dir / "Hermes.cmd"
-    companion = service_dir / "Hermes.vbs"
-    service_dir.mkdir()
-    definition.write_bytes(b"before\n")
-    companion.write_bytes(b"before-vbs\n")
+def test_prepare_home_rejects_reused_staging(tmp_path):
+    assembler = load_script("public_unique_staging", "assemble-runtime.py")
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / ".env").write_text("LIVE=1\n", encoding="utf-8")
 
-    backup = binder._apply_binding(
-        home,
-        "windows",
-        {
-            definition: (b"after\n", 0o640),
-            companion: (b"after-vbs\n", 0o640),
-        },
-    )
-
-    assert definition.read_bytes() == b"after\n"
-    assert binder._restore_backup(home, backup) == 2
-    assert definition.read_bytes() == b"before\n"
-    assert companion.read_bytes() == b"before-vbs\n"
-
-    pending_backup = binder._apply_binding(
-        home,
-        "windows",
-        {
-            definition: (b"after\n", 0o640),
-            companion: (b"after-vbs\n", 0o640),
-        },
-    )
-    receipt_path = pending_backup / "receipt.json"
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    receipt["status"] = "pending"
-    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
-    definition.write_bytes(b"before\n")
-    definition.chmod(0o644)
-
-    assert binder._restore_backup(home, pending_backup) == 2
-    assert definition.read_bytes() == b"before\n"
-    assert companion.read_bytes() == b"before-vbs\n"
+    with pytest.raises(ValueError, match="unique empty"):
+        assembler.prepare_posix_dependencies(tmp_path / "runtime", staging)
 
 
 def test_windows_source_canonicalization_accepts_only_crlf():
@@ -622,6 +658,11 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     assert instructions.count("HERMES_CODEX_401_CIRCUIT_STATE") >= 4
     assert instructions.count("--initialize-staging") >= 2
     assert "bind-service-circuit.py" in instructions
+    assert '[Guid]::NewGuid().ToString("N")' in instructions
+    assert "--prove-kind windows" in instructions
+    assert "--service-owner $ProvenServiceOwner" in instructions
+    assert "$ProfileHome = $StagingHome" in instructions
+    assert "profile-environment-backups" not in instructions
     assert "gateway install --no-start-now" in instructions
 
 

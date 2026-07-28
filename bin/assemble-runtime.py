@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Build the exact public Bot Doctor runtime from its pinned upstream commit.
 
-This command creates a side-by-side candidate. It never edits HERMES_HOME,
-changes a service, stops a gateway, or switches a live command route.
+This command creates a side-by-side candidate. It never edits a live
+HERMES_HOME, changes a service, stops a gateway, or switches a command route.
 """
 
 from __future__ import annotations
@@ -115,8 +115,17 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
             "--prepare-home is POSIX-only; use the documented isolated "
             "PowerShell installer contract on Windows"
         )
-    profile_home = profile_home.expanduser().resolve()
-    profile_home.mkdir(parents=True, exist_ok=True)
+    profile_home = profile_home.expanduser()
+    if not profile_home.is_absolute():
+        raise ValueError("--prepare-home must be absolute")
+    if profile_home.is_symlink():
+        raise ValueError("--prepare-home must not be a symlink")
+    if profile_home.exists():
+        if not profile_home.is_dir() or any(profile_home.iterdir()):
+            raise ValueError("--prepare-home must be a unique empty directory")
+    else:
+        profile_home.mkdir(parents=True)
+    profile_home = profile_home.resolve()
     isolated_user_home = profile_home / ".installer-user"
     isolated_user_home.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
