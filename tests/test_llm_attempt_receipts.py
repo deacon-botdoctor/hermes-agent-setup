@@ -245,6 +245,25 @@ def test_reconciler_uses_active_profile_runtime(tmp_path, monkeypatch):
     }
 
 
+def test_reconciler_falls_back_without_profile_receipt(tmp_path, monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "reconcile_fallback_test_module", ROOT / "bin/llm-attempt-reconcile.py"
+    )
+    assert spec and spec.loader
+    reconcile = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(reconcile)
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    monkeypatch.setitem(
+        sys.modules,
+        "hermes_constants",
+        SimpleNamespace(get_hermes_home=lambda: tmp_path / "home"),
+    )
+
+    assert Path(reconcile._load_runtime_module().__file__).resolve() == (
+        PAYLOAD
+    ).resolve()
+
+
 def test_public_release_metadata_verifies():
     proc = subprocess.run(
         [sys.executable, str(ROOT / "bin/verify-release.py"), "--json"],

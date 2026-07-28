@@ -41,7 +41,7 @@ def _load_runtime_module():
         Path(__file__).resolve().parents[1] / "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
         home / "hermes-agent/agent/llm_attempt_receipts.py",
     ]
-    source = next((path for path in candidates if path.exists()), None)
+    source = next((path for path in candidates if path is not None and path.exists()), None)
     if source is None:
         raise RuntimeError("llm_attempt_receipts.py is not installed")
     runtime_root = source.parent.parent
