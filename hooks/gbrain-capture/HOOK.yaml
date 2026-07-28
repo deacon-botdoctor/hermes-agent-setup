@@ -1,0 +1,4 @@
+name: gbrain-capture
+description: Opt-in capture of agent turn outcomes into gBrain after response delivery.
+events:
+  - agent:end

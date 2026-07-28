@@ -1,0 +1,7 @@
+id: mcp-on-demand-control
+name: mcp-on-demand-control
+version: 0.1.0
+description: Safely activate and recover allowlisted cold MCP backends inside the running Hermes gateway.
+provides_tools:
+  - mcp_server_status
+  - restart_mcp_server

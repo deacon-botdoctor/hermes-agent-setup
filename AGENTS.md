@@ -1,307 +1,436 @@
-# Migration contract for an agent on the old runtime
+# Install or update the Bot Doctor Hermes runtime
 
-## Who this is for
+## Outcome
 
-Assume you are reading this from an existing customized Hermes runtime. That
-runtime may contain source patches, copied MCP servers, compatibility plugins,
-extra memory databases, custom service wrappers, or old comments that describe
-problems native Hermes now solves.
+Move this machine to the exact release in `release.json` without losing the
+user's identity, conversations, memory, projects, skills, configuration,
+messaging identity, credentials, or unfinished work.
 
-Your job is to move the user to current official Hermes with the smallest
-possible local layer. Do not port the old implementation forward just because
-it exists.
+This repository is a public, source-visible release bundle:
 
-Repository maintainers: these instructions describe a target user's runtime.
-Do not run migration commands against the maintainer workstation while merely
-editing or reviewing this repository.
+- NousResearch Hermes owns the base runtime.
+- `upstream.lock` pins the exact compatible upstream commit.
+- `runtime-payload-source-manifest.json` names every public runtime-payload
+  file by Git blob identity.
+- `patches/registry.yaml` explains why each source patch exists and when it can
+  be removed.
+- `bin/verify-release.py` and `bin/assemble-runtime.py` reproduce the runtime
+  that passed the fleet release.
 
-## Non-negotiable outcome
+Do not silently substitute upstream `main`, an older public bundle, a private
+fleet checkout, or a dirty live runtime.
 
-- Official `NousResearch/hermes-agent` is the runtime code owner.
-- The user's identity, conversations, memory, projects, skills, configuration,
-  messaging identity, and credentials survive unchanged unless the user
-  explicitly requests a change.
-- Native Hermes owns sessions, `state.db`, compaction, memory/search,
-  `MEMORY.md`, `USER.md`, per-session task tracking, persistent goals, gateway,
-  cron, and service installation.
-- Optional browser, Composio, and MCP capabilities are cold until needed. The
-  current official Windows installer provisions browser dependencies and
-  Chromium, but the capability must remain inactive until it has a consumer.
-- The old runtime remains intact and runnable until native verification and a
-  rollback rehearsal both pass.
+## First classify the machine
 
-## Do not carry these defaults forward
+Choose one path from evidence:
 
-Do not recreate or reactivate:
+- **Fresh:** no live Hermes gateway and no user-owned Hermes data.
+- **Existing native/public:** a working Hermes installation already owns the
+  gateway and user data.
+- **Legacy customized:** the live runtime contains old overlays, copied MCPs,
+  duplicate memory/context systems, or ambiguous service wiring.
 
-- source overlay/apply engines;
-- LCM or a second context engine;
-- Anamnesis or a second recall database;
-- AutoDream/nightly-dream services;
-- a separate Telegram transcript database for context recall;
-- automatic broad transcript replay;
-- permanent browser daemons without a current consumer;
-- all MCP servers hot;
-- placeholder/no-op compatibility plugins;
-- custom durable-runtime or session-resume implementations already native;
-- broad GitHub credentials inside the client runtime.
+Never infer the live runtime from a folder name. Record the process, imported
+source root, service definition, command route, effective `HERMES_HOME`, config
+path, and exact Git state.
 
-A real client-local capability may be retained only when you identify its live
-consumer, owner, data boundary, health proof, and independent rollback.
+## Release preflight
 
-## Execution sequence
-
-### 1. Inventory without mutation
-
-Record:
-
-- operating system, user, and effective `HERMES_HOME`;
-- `command -v hermes` / `Get-Command hermes` and the exact code checkout/SHA;
-- dirty/ahead/behind state of the old checkout;
-- the process and service definition that launch the live gateway;
-- current gateway health, messaging identity, active turns, and restart count;
-- hashes of `config.yaml`, service definition, launcher, and environment file;
-- on Windows, the relevant User and process `PATH`, `HERMES_HOME`, and
-  `HERMES_GIT_BASH_PATH` values;
-- paths for `state.db`, `MEMORY.md`, `USER.md`, skills, workspace/projects,
-  media, and client-local data;
-- legacy plugins, MCPs, databases, cron jobs, daemons, and hooks;
-- credential locations by path/name only. Never print secret values.
-
-If the active code route, service owner, runtime home, or credential boundary is
-ambiguous, stop. Resolve ownership before changing anything.
-
-### 2. Build a local immutable rollback
-
-Create a timestamped backup outside the code checkout. Preserve, with local-only
-permissions:
-
-- the old code SHA and dirty diff/bundle;
-- allowlisted config and environment files;
-- service definition and launcher or Windows command-route values;
-- a SQLite-consistent `state.db` snapshot created with the SQLite backup API,
-  plus its integrity result, schema version, and restore procedure;
-- state/data manifest and hashes;
-- identity/context files, skills, and projects;
-- the exact stop/switch/start commands.
-
-Backups may contain credentials only on the same trusted machine. Receipts must
-contain hashes and paths, never secret contents. Prove the rollback command can
-find every required artifact before proceeding. A raw copy of a live
-`state.db` without its WAL state is not a valid backup.
-
-### 3. Install native Hermes in an isolated staging home
-
-Use the official installer, not code from this repository.
-
-Do not run an installer against the live `HERMES_HOME`. The official installers
-write config scaffolding, synchronize skills, change permissions, and may set
-persistent environment/PATH values in addition to installing code. Create a
-separate staging home on the same trusted machine; keep it until the migration
-is accepted because it owns the new code and managed dependencies.
-
-The installers can also change which runtime the user-facing `hermes` command
-resolves to even when an explicit installation directory is supplied.
-Before invoking one, record the current resolved command. On POSIX, preserve
-the launcher's path, contents or link target, mode, and hash, and give the
-installer a staging-only `HOME` so its launcher, Node shims, and shell-profile
-writes cannot reach the live user's route. On Windows, preserve the User and
-process `PATH`, `HERMES_HOME`, and `HERMES_GIT_BASH_PATH` values. Immediately
-after the installer exits, restore those route inputs and prove `command -v
-hermes` / `Get-Command hermes` still reaches the old runtime. Use only the new
-runtime's absolute executable path until the controlled switch. Stop if the
-old route cannot be restored exactly.
-
-POSIX headless example:
+From this repository:
 
 ```bash
-live_home="${HERMES_HOME:-$HOME/.hermes}"
-stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-staging_home="${live_home%/}.native-staging-$stamp"
-staging_user_home="$staging_home/user-home"
-new_runtime="$staging_home/hermes-agent"
-old_hermes="$(command -v hermes)"
-old_hermes_target="$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")"
-old_hermes_mode="$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")"
-old_hermes_hash="$(git hash-object "$old_hermes")"
-mkdir -p "$staging_user_home"
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-  | HOME="$staging_user_home" HERMES_HOME="$staging_home" bash -s -- \
-      --skip-setup --skip-browser \
-      --hermes-home "$staging_home" --dir "$new_runtime"
-test "$(command -v hermes)" = "$old_hermes"
-test "$(readlink "$old_hermes" 2>/dev/null || printf '%s\n' "$old_hermes")" = "$old_hermes_target"
-test "$(stat -f '%Lp' "$old_hermes" 2>/dev/null || stat -c '%a' "$old_hermes")" = "$old_hermes_mode"
-test "$(git hash-object "$old_hermes")" = "$old_hermes_hash"
-git -C "$new_runtime" rev-parse HEAD
-HERMES_HOME="$staging_home" "$new_runtime/venv/bin/hermes" doctor
+python3 bin/verify-release.py
 ```
 
-Windows PowerShell example:
+The command must verify the source blobs, upstream and Golden SHAs, component
+digests, and deployment digest. Stop if it fails.
+
+## Fresh POSIX installation
+
+Choose a user-owned profile and an immutable candidate path:
+
+```bash
+export HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+release_id="$(python3 -c 'import json; print(json.load(open("release.json"))["release"])')"
+run_id="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+candidate="$HERMES_HOME/state/runtime-candidates/$release_id-$run_id"
+staging_home="$HERMES_HOME/state/setup-staging/$release_id-$run_id"
+test ! -e "$candidate" && test ! -e "$staging_home"
+mkdir -p "$staging_home"
+test -z "$(find "$staging_home" -mindepth 1 -maxdepth 1 -print -quit)"
+
+python3 bin/assemble-runtime.py \
+  --output "$candidate" \
+  --prepare-home "$staging_home"
+```
+
+`--prepare-home` runs the pinned upstream dependency installer with a separate
+installer `HOME`, creates the candidate venv and native profile scaffolding,
+then applies and verifies the public Golden payload. It does not install or
+restart a gateway.
+
+Run native setup with the candidate:
+
+```bash
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -m hermes_cli.main setup
+"$candidate/venv/bin/python" bin/install-profile.py \
+  --hermes-home "$HERMES_HOME" \
+  --runtime-dir "$candidate"
+"$candidate/venv/bin/python" bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --runtime-dir "$candidate"
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" doctor
+```
+
+Review the doctor output before installing the gateway service. Then use the
+candidate's native service command, preserving the intended user/system scope.
+The profile-environment binder stores the circuit path in the native loader's
+`$HERMES_HOME/.env` boundary, which survives native service refreshes. It
+treats all other entries as opaque and verifies only the owned key through the
+candidate's pinned environment loader:
+
+```bash
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway install --no-start-now
+```
+
+On Linux, resolve the installed unit through the pinned runtime. This example
+is for the native user scope; use `--scope system`, the runtime's
+`get_systemd_unit_path(system=True)`, and the same authority used for native
+installation when the proven owner is system scope:
+
+```bash
+unit="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
+  'from hermes_cli.gateway import get_systemd_unit_path; print(get_systemd_unit_path())')"
+"$candidate/venv/bin/python" bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --runtime-dir "$candidate" \
+  --prove-kind systemd \
+  --scope user \
+  --service-owner "$(id -un)" \
+  --definition "$unit"
+systemctl --user start "$(basename "$unit")"
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
+```
+
+On macOS, prove the exact native plist belongs to the current user and targets
+the candidate before starting it:
+
+```bash
+plist="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
+  'from hermes_cli.gateway import get_launchd_plist_path; print(get_launchd_plist_path())')"
+label="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
+  'from hermes_cli.gateway import get_launchd_label; print(get_launchd_label())')"
+"$candidate/venv/bin/python" bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --runtime-dir "$candidate" \
+  --prove-kind launchd \
+  --service-owner "$(id -un)" \
+  --definition "$plist"
+launchctl kickstart "gui/$UID/$label"
+launchctl print "gui/$UID/$label"
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
+```
+
+When it changes `.env`, the binder prints a backup path. That 0600 backup
+contains the entire prior file and may therefore contain credentials; the
+receipt and output contain only paths, modes, and hashes. Roll it back with
+`--hermes-home "$HERMES_HOME" --restore-backup /exact/backup/path`, then restart
+the same native service.
+
+Do not configure Telegram, a provider, or a connected service with credentials
+the user has not supplied.
+
+## Fresh or staged Windows installation
+
+Use the pinned upstream PowerShell installer to create an isolated clean
+candidate first. Preserve the prior User and process `PATH`, `HERMES_HOME`, and
+`HERMES_GIT_BASH_PATH` when this is an upgrade. Use a clean release checkout
+created with `git -c core.autocrlf=false clone <release-repository-url>` so
+payload files retain their canonical LF bytes. Verification accepts a normal
+Git-for-Windows CRLF checkout only when LF normalization reproduces every
+declared identity.
+
+Set `$InstallMode`, `$ProvenHermesHome`, and `$ProvenServiceOwner` from the
+evidence collected in **First classify the machine**. For an existing install,
+the home and service owner must come from the live process and service
+definition. For a fresh install, prove there is no live gateway or Hermes user
+data. Stop on missing, contradictory, or ambiguous evidence.
 
 ```powershell
-$LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
-$Stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
-$StagingHome = "${LiveHome}.native-staging-$Stamp"
-$NewRuntime = Join-Path $StagingHome "hermes-agent"
+$InstallMode = "<fresh-or-existing>"
+$ProvenHermesHome = "<absolute-evidence-backed-HERMES_HOME>"
+$ProvenServiceOwner = "<evidence-backed-user-system-or-task-owner>"
+if ($InstallMode -notin @("fresh", "existing")) {
+  throw "InstallMode must be explicitly fresh or existing"
+}
+if ($ProvenHermesHome.StartsWith("<") -or -not [IO.Path]::IsPathRooted($ProvenHermesHome)) {
+  throw "ProvenHermesHome must be an evidence-backed absolute path"
+}
+if ($ProvenServiceOwner.StartsWith("<") -or [string]::IsNullOrWhiteSpace($ProvenServiceOwner)) {
+  throw "ProvenServiceOwner must identify the inspected service scope"
+}
+$CurrentOperator = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+if ($InstallMode -eq "fresh" -and $ProvenServiceOwner -ne $CurrentOperator) {
+  throw "Run fresh activation as the intended native gateway owner"
+}
+$Release = Get-Content .\release.json -Raw | ConvertFrom-Json
+$LiveHome = [IO.Path]::GetFullPath($ProvenHermesHome)
+$RunId = [Guid]::NewGuid().ToString("N")
+$Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release + "-" + $RunId)
+$StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release + "-" + $RunId)
+$ProfileHome = $StagingHome
+if ($InstallMode -eq "fresh" -and (Test-Path (Join-Path $LiveHome "config.yaml"))) {
+  throw "Fresh classification conflicts with existing Hermes data"
+}
+if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "config.yaml"))) {
+  throw "Existing classification conflicts with the proven profile"
+}
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
-$OldHermes = (Get-Command hermes -ErrorAction Stop).Source
-$OldHermesHash = (Get-FileHash $OldHermes -Algorithm SHA256).Hash
-$OldUserPath = [Environment]::GetEnvironmentVariable("Path", "User")
-$OldUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
-$OldUserGitBash = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
-$OldProcessPath = $env:Path
-$OldProcessHermesHome = $env:HERMES_HOME
-$OldProcessGitBash = $env:HERMES_GIT_BASH_PATH
-Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
-try {
-    & $Installer -SkipSetup -HermesHome $StagingHome -InstallDir $NewRuntime
-} finally {
-    [Environment]::SetEnvironmentVariable("Path", $OldUserPath, "User")
-    [Environment]::SetEnvironmentVariable("HERMES_HOME", $OldUserHermesHome, "User")
-    [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $OldUserGitBash, "User")
-    $env:Path = $OldProcessPath
-    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
-    if ($null -eq $OldProcessGitBash) { Remove-Item Env:HERMES_GIT_BASH_PATH -ErrorAction SilentlyContinue } else { $env:HERMES_GIT_BASH_PATH = $OldProcessGitBash }
+$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/3ef6bbd201263d354fd83ec55b3c306ded2eb72a/scripts/install.ps1"
+$ExpectedInstallerSha256 = "b5bdf0e959677de0168f8cfb5f9175c7b57adf5c4319a1c2fc9bec1f46fbdb6e"
+$PriorProcessPath = $env:PATH
+$PriorProcessHermesHome = $env:HERMES_HOME
+$PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
+$PriorProcessCodexCircuitState = $env:HERMES_CODEX_401_CIRCUIT_STATE
+$PriorUserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+$PriorUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
+$PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
+
+if ((Test-Path $Candidate) -or (Test-Path $StagingHome)) {
+  throw "Candidate and staging paths must be unique and absent"
 }
-$RestoredHermes = (Get-Command hermes -ErrorAction Stop).Source
-if ($RestoredHermes -ne $OldHermes) { throw "Hermes command route changed: $RestoredHermes" }
-if ((Get-FileHash $RestoredHermes -Algorithm SHA256).Hash -ne $OldHermesHash) { throw "Hermes launcher changed" }
-if ([Environment]::GetEnvironmentVariable("Path", "User") -ne $OldUserPath) { throw "User PATH was not restored" }
-if ([Environment]::GetEnvironmentVariable("HERMES_HOME", "User") -ne $OldUserHermesHome) { throw "User HERMES_HOME was not restored" }
-if ([Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User") -ne $OldUserGitBash) { throw "User HERMES_GIT_BASH_PATH was not restored" }
-if ($env:Path -ne $OldProcessPath) { throw "Process PATH was not restored" }
-if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored" }
-if ($env:HERMES_GIT_BASH_PATH -ne $OldProcessGitBash) { throw "Process HERMES_GIT_BASH_PATH was not restored" }
-git -C $NewRuntime rev-parse HEAD
-try {
-    $env:HERMES_HOME = $StagingHome
-    & "$NewRuntime\venv\Scripts\hermes.exe" doctor
-} finally {
-    if ($null -eq $OldProcessHermesHome) { Remove-Item Env:HERMES_HOME -ErrorAction SilentlyContinue } else { $env:HERMES_HOME = $OldProcessHermesHome }
+New-Item -ItemType Directory -Path $StagingHome | Out-Null
+if ((Get-ChildItem -Force $StagingHome | Select-Object -First 1) -or
+    (Test-Path (Join-Path $StagingHome ".env")) -or
+    (Test-Path (Join-Path $StagingHome "state")) -or
+    (Test-Path (Join-Path $StagingHome "gateway-service"))) {
+  throw "Staging home must be empty before the pinned installer"
 }
-if ($env:HERMES_HOME -ne $OldProcessHermesHome) { throw "Process HERMES_HOME was not restored after doctor" }
+Invoke-WebRequest $InstallerUrl -OutFile $Installer
+$ActualInstallerSha256 = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLowerInvariant()
+if ($ActualInstallerSha256 -ne $ExpectedInstallerSha256) {
+  throw "Pinned installer digest mismatch: $ActualInstallerSha256"
+}
+try {
+  & $Installer -SkipSetup -Commit $Release.canonical_upstream_sha `
+    -HermesHome $ProfileHome -InstallDir $Candidate
+} finally {
+  $env:PATH = $PriorProcessPath
+  $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_GIT_BASH_PATH = $PriorProcessGitBashPath
+  [Environment]::SetEnvironmentVariable("PATH", $PriorUserPath, "User")
+  [Environment]::SetEnvironmentVariable("HERMES_HOME", $PriorUserHermesHome, "User")
+  [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $PriorUserGitBashPath, "User")
+}
+& "$Candidate\venv\Scripts\python.exe" .\bin\assemble-runtime.py `
+  --output $Candidate --use-existing-clean-runtime
 ```
 
-Record the exact installed SHA. Do not claim “latest” without that proof.
-On Windows, the current official installer has no browser-skip option and
-installs browser npm dependencies and Playwright Chromium. Treat this as a
-packaging exception: do not start or configure browser automation until a real
-consumer requires it.
+For a fresh machine, finish native setup and activate the native gateway:
 
-### 4. Subtract before adding
+Persist the circuit path through the native profile environment before gateway
+installation. Then prove that the generated task principal is exactly
+`$ProvenServiceOwner` and both launchers resolve `$LiveHome` and the exact
+candidate before accepting `gateway status`. This proof is point-in-time:
+later changes to process, User, or System `PYTHONPATH` make it stale, so rerun
+the proof before the next task start.
 
-Start with native config and the user's existing identity/data. Prefer, in
-order: native Hermes, configuration, an official extension point, then a small
-client-local addition. Never begin by copying the old overlay.
+```powershell
+if ($InstallMode -ne "fresh") { throw "Use the staged existing-install path instead" }
+$env:HERMES_HOME = $LiveHome
+$env:HERMES_CODEX_401_CIRCUIT_STATE = Join-Path $LiveHome "state\codex-401-circuit.json"
+try {
+  & "$Candidate\venv\Scripts\python.exe" -m hermes_cli.main setup
+  & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
+    --hermes-home $LiveHome --runtime-dir $Candidate
+  & "$Candidate\venv\Scripts\python.exe" .\bin\bind-service-circuit.py `
+    --hermes-home $LiveHome --runtime-dir $Candidate
+  & "$Candidate\venv\Scripts\hermes.exe" doctor
+  & "$Candidate\venv\Scripts\hermes.exe" gateway install --no-start-now
+  $TaskName = (& "$Candidate\venv\Scripts\python.exe" -c `
+    "from hermes_cli.gateway_windows import get_task_name; print(get_task_name())").Trim()
+  $GatewayCmd = (& "$Candidate\venv\Scripts\python.exe" -c `
+    "from hermes_cli.gateway_windows import get_task_script_path; print(get_task_script_path())").Trim()
+  $GatewayVbs = [IO.Path]::ChangeExtension($GatewayCmd, ".vbs")
+  & "$Candidate\venv\Scripts\python.exe" .\bin\bind-service-circuit.py `
+    --hermes-home $LiveHome --runtime-dir $Candidate --prove-kind windows `
+    --service-owner $ProvenServiceOwner --cmd-launcher $GatewayCmd `
+    --vbs-launcher $GatewayVbs --task-name $TaskName
+  schtasks.exe /Run /TN $TaskName
+  & "$Candidate\venv\Scripts\hermes.exe" gateway status
+} finally {
+  $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
+}
+```
 
-Use [DEFAULTS.md](DEFAULTS.md) as the target posture. Classify every old item as
-`native`, `keep-client-local`, `cold-optional`, `operator-only`, or `retire`.
+For an existing installation, prove only the isolated staged profile here:
 
-Preserve client-local overlays only when they still have a live consumer and
-cannot be expressed through native configuration or an official extension
-point. Preserve their configuration, secrets, data, ownership boundary, health
-check, and rollback separately from runtime code. Do not copy them into the
-public setup or eager-load them into every session.
+```powershell
+if ($InstallMode -ne "existing") { throw "Use the fresh-install activation path instead" }
+& "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
+  --hermes-home $StagingHome --runtime-dir $Candidate
+$env:HERMES_HOME = $StagingHome
+$env:HERMES_CODEX_401_CIRCUIT_STATE = Join-Path $StagingHome "state\codex-401-circuit.json"
+try {
+  & "$Candidate\venv\Scripts\hermes.exe" doctor
+} finally {
+  $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
+}
+```
 
-### 5. Switch only after route proof
+The pinned installer has already created the isolated staging profile and its
+credential-free configuration. Preserve that scaffold; `--initialize-staging`
+is only for a genuinely empty staging home that did not pass through the
+pinned installer.
 
-Before the live switch:
+On an existing installation, the installer must run against an isolated staging
+`HermesHome`, and its User/process environment changes must be restored before
+the live cutover. Do not run `install-profile.py` against `$LiveHome` until the
+controlled-cutover step after preservation and quiescence. Never let staging
+change the currently resolved `hermes` command.
 
-- prove zero active turns;
-- prove the new `hermes` command imports from the new checkout;
-- prove the exact old service definition and rollback command are available;
-- preserve the old code and data untouched.
+## Existing installation: preserve before changing
 
-Restore the live runtime's original command/PATH and `HERMES_HOME` immediately
-after staging. Invoke the new executable by absolute path with `HERMES_HOME`
-explicitly set to the staging home until the final live-data snapshot is
-sealed. Only during the controlled switch may the new service be bound to the
-live data home.
+Before any live write, create an immutable local rollback outside the code
+checkout:
 
-After draining and stopping the old gateway, create and validate a final
-SQLite-consistent `state.db` snapshot. Record the exact commands that stop both
-runtimes, move aside the database and its `-wal`/`-shm` sidecars, restore the
-snapshot, run an integrity check, and restart the old runtime. Native startup
-may migrate the shared database, so a code-only switch is not a rollback.
+- old code SHA plus dirty diff/bundle;
+- config, environment file, service definition, launcher, and command route;
+- a SQLite-consistent `state.db` snapshot made with SQLite's backup API;
+- identity, context, skills, projects, and client-local data;
+- hashes, schema/integrity result, and exact stop/restore/start commands.
 
-Drain the old gateway, reinstall the gateway service using the **new** Hermes
-command while preserving the prior user/system scope and profile, deliberately
-replace the user-facing command route with the new absolute command, then start
-it. Do not edit a dirty old checkout in place.
+Receipts contain paths and hashes, never credential values. A raw copy of a
+live SQLite file without its WAL state is not a valid backup.
 
-### 6. Immediate verification
+Build the candidate against a separate staging profile:
 
-Fail and roll back on any failed check:
+```bash
+run_id="$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+candidate="$HERMES_HOME/state/runtime-candidates/$release_id-$run_id"
+staging_home="$HERMES_HOME/state/setup-staging/$release_id-$run_id"
+test ! -e "$candidate" && test ! -e "$staging_home"
+mkdir -p "$staging_home"
+test -z "$(find "$staging_home" -mindepth 1 -maxdepth 1 -print -quit)"
+python3 bin/assemble-runtime.py \
+  --output "$candidate" \
+  --prepare-home "$staging_home"
+"$candidate/venv/bin/python" bin/install-profile.py \
+  --hermes-home "$staging_home" \
+  --runtime-dir "$candidate"
+```
 
-- `hermes doctor` is clean or has only explicitly accepted optional warnings;
-- gateway process imports from the new checkout;
+The pinned installer has already created this isolated staging profile. Do not
+pass `--initialize-staging`, which is reserved for an otherwise empty manual
+staging home.
+
+Prove the candidate's doctor, imports, tool discovery, and profile files in
+staging. Do not patch a dirty live checkout in place.
+
+## Maintenance-quiescence contract
+
+Before switching an existing gateway, make the pending update visible to the
+active agent at a safe turn/tool boundary:
+
+> Maintenance is pending. Finish the current atomic step and avoid starting new
+> delegated work. If the task cannot finish before the deadline, persist the
+> exact next action and blockers.
+
+Persist the release identity, reason, requested time, deadline, and current
+phase in the runtime's local maintenance state. This is context, not a broad
+behavior prompt and not permission delegated to the model.
+
+Stop admitting new executable work while still durably accepting inbound
+messages by session/topic. Inspect every operation the runtime owns:
+
+- foreground turns and active tools;
+- child, delegated, durable, and asynchronous jobs;
+- cron, API, desktop, voice, and media work;
+- compaction/compression leases;
+- inbound queues and outbound delivery transactions;
+- startup recovery and replay claims.
+
+Switch only when each item has finished or has an exact durable, replayable
+checkpoint. Require the same ready result twice across a stable interval. If
+state is stale, contradictory, unidentified, or not replayable, leave this
+client on the old runtime. Never kill uncertain work to keep an update moving.
+
+## Controlled cutover
+
+At readiness:
+
+1. Take the final SQLite-consistent snapshot and verify rollback.
+2. Run `bin/install-profile.py` against the live `HERMES_HOME`; it creates a
+   local per-file rollback and does not switch the service.
+3. Stop the old gateway through its actual service owner.
+4. Run `bin/bind-service-circuit.py` against the proven live profile so the
+   pinned native environment loader durably resolves the profile-scoped circuit
+   state. Bind the same native service scope to the candidate's absolute Python
+   and source root, then use the helper's `--prove-kind` mode against the exact
+   systemd unit, launchd plist, or Windows CMD/VBS launchers. For system scope,
+   require its exact `User=` owner; for Windows require the scheduled-task
+   principal; launchd must belong to the current proven user.
+5. Start the candidate and prove the old generation is absent.
+6. Restore durable checkpoints and replay accepted messages exactly once before
+   reopening admission.
+
+Do not open the same database from two generations.
+
+The profile receipt prints its backup path. Its bounded rollback is:
+
+```bash
+python3 bin/install-profile.py \
+  --hermes-home "$HERMES_HOME" \
+  --restore-backup /exact/path/from/the/profile-receipt
+```
+
+This restores only files and configuration owned by that profile-install run;
+service and database rollback remain the separately captured cutover rollback.
+The profile-environment helper prints its own backup path when `.env` changes.
+Restore it with:
+
+```bash
+python3 bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --restore-backup /exact/profile-environment-backup/path
+```
+
+Restart the same native service after restoring.
+
+## Acceptance proof
+
+Fail and roll back on any failed required check:
+
+- `bin/verify-release.py --runtime-dir <candidate>` passes;
+- `hermes doctor` has no unaccepted required failure;
+- process imports resolve only inside the candidate root;
 - messaging identity and allowlist are unchanged;
-- private inbound/outbound canary succeeds;
-- restart and resume succeed;
-- two simultaneous topics/sessions do not leak context;
-- a low-signal continuation clarifies rather than borrowing another task;
-- `MEMORY.md`, `USER.md`, native session search, and `state.db` are readable;
-- the built-in task tool works, persistent goals resume, and scheduled work
-  survives restart;
-- one declared optional tool cold-starts successfully, then stops;
-- after a clean session and gateway restart, an ordinary request that needs an
-  optional capability causes the agent to inspect its inventory, choose the
-  correct approved route, load only that capability, invoke it, and verify the
-  result without claiming the cold capability is missing;
-- no retired legacy daemon or second memory/transcript database is active;
-- credential/config hashes are unchanged unless explicitly planned;
-- rollback rehearsal returns to the old healthy runtime and restore returns to
-  native health.
+- a private inbound/outbound turn succeeds;
+- restart and continuation succeed without duplicates;
+- two chats/topics do not leak context;
+- native memory/search, built-in tasks, goals, and cron remain readable;
+- native Tool Search discovers a cold approved capability;
+- the capability router is hot while optional backends remain cold;
+- queued inbound and unfinished delivery records replay exactly once;
+- retired duplicate memory/context daemons are absent;
+- rollback returns to the old healthy runtime and restore returns to the new
+  healthy runtime.
 
-For the rollback rehearsal, first stop native Hermes and take a validated
-SQLite-consistent snapshot of its database. Move the native database and
-sidecars aside, restore the final pre-switch snapshot, and prove the old runtime
-healthy. Stop the old runtime before restoring the native snapshot and service.
-Never open the same database from both runtimes or restore over a live gateway.
+## What not to carry forward
 
-Use an acceptance request that is ordinary for the client and requires one
-cold capability—for example, “Find the next approved customer
-appointment and summarize it without changing anything.” Start from a fresh
-session after a gateway restart. Record proof that the agent:
+Do not recreate LCM, Anamnesis, AutoDream/nightly dream, a second transcript
+recall database, automatic broad transcript replay, all MCPs hot, permanent
+browser daemons, placeholder plugins, copied upstream source, or broad client
+GitHub credentials. Retain a local capability only when its consumer, owner,
+data boundary, health proof, and rollback are known.
 
-1. discovers the relevant configured capability rather than answering “I
-   can't” from the initial tool list;
-2. routes a connected SaaS request through the approved connector/Composio
-   surface, using browser automation only for a verified connector/API gap;
-3. distinguishes cold, unavailable, unauthenticated, unauthorized, and
-   transport failure correctly if the first route does not run;
-4. performs only the requested read, verifies the returned result, and does not
-   infer broader permission from tool or account availability; and
-5. leaves unrelated optional capabilities unloaded.
+## Completion receipt
 
-If the real client has no approved connected capability suitable for this
-test, use an equivalent non-mutating request against a declared optional tool.
-Do not add credentials, authorize an account, or broaden access merely to make
-the acceptance test pass.
+Return the old and new release identities, platform, live/staging homes, service
+scope, active route, backup and manifest hashes, database integrity results,
+quiescence observations, verification results, rollback rehearsal, and every
+remaining local exception.
 
-### 7. Delete only after proof
-
-After the user accepts native health, delete only obsolete **code and service
-bindings**. Do not delete identity, memory, sessions, projects, skills, media,
-credentials, or historical backups. Keep one sealed rollback until the user's
-retention window expires.
-
-## Required completion receipt
-
-Return:
-
-- old and new exact SHAs;
-- platform, live and staging runtime homes, service scope, and active route;
-- backup path and manifest hash;
-- pre-switch and native `state.db` snapshot hashes, schema versions, and
-  integrity results;
-- command-route restoration and controlled-cutover results;
-- preserved/retired/kept-exception counts;
-- every verification result;
-- credential/data-change booleans;
-- rollback command and rehearsal result;
-- any remaining client-local exception with its owner.
-
-“Installed,” “updated,” or “looks healthy” is not completion without this
-evidence.
+“Installed,” “updated,” or “looks healthy” is not completion evidence.

@@ -1,0 +1,702 @@
+{
+  "assembled_runtime_fingerprint": {
+    "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
+    "file_count": 32,
+    "files": {
+      ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
+        "mode": "100644",
+        "sha256": "d93ce9538adba6cb94aa8ad91f1532b68ee0d3dacafc4e1bd213e5e6ed060c0b",
+        "type": "blob"
+      },
+      "agent/chat_completion_helpers.py": {
+        "mode": "100644",
+        "sha256": "191793f60e771fb1f2c6de76aa598ddd8b4d2eac4b3cda41c485cd0a6ab6289a",
+        "type": "blob"
+      },
+      "agent/codex_401_circuit.py": {
+        "mode": "100644",
+        "sha256": "42a4391199577a3c91e627bc3f5fd6bd47f8a2126f49aaf3d30accb599a54847",
+        "type": "blob"
+      },
+      "agent/conversation_loop.py": {
+        "mode": "100644",
+        "sha256": "f46fdf58b3ebc6f460d87e6caae4a2f0c486ade0daf4d51aab6fb053f5006742",
+        "type": "blob"
+      },
+      "agent/prompt_builder.py": {
+        "mode": "100644",
+        "sha256": "fb71f4a851e7599d188148b7c84dc389c860abc6a427f700b5e9660fa1263465",
+        "type": "blob"
+      },
+      "agent/tool_executor.py": {
+        "mode": "100644",
+        "sha256": "30c56376b4ccd47a0279e5ae3810752f9c865c5e94ed8508cb10fdd8604e5dda",
+        "type": "blob"
+      },
+      "gateway/drain_inbox.py": {
+        "mode": "100644",
+        "sha256": "2fb5273e49c8625a665e6537613c8feca1dc29b2b6c90ce97bfd436dd6870c3f",
+        "type": "blob"
+      },
+      "gateway/platforms/base.py": {
+        "mode": "100644",
+        "sha256": "eab9382d365d4b7117ebc55548f972f680603b60bad3ecd052ef28a9477377d8",
+        "type": "blob"
+      },
+      "gateway/platforms/bluebubbles.py": {
+        "mode": "100644",
+        "sha256": "811a21a6925b6bb54777a4b847e7a96681250ba54fb679522ba2dcdb050a332b",
+        "type": "blob"
+      },
+      "gateway/platforms/msgraph_webhook.py": {
+        "mode": "100644",
+        "sha256": "b4f12c7cc075653b5709c5f044621521b89da66bd507fe6543dad77cd76982eb",
+        "type": "blob"
+      },
+      "gateway/platforms/qqbot/adapter.py": {
+        "mode": "100644",
+        "sha256": "0ddf5155f4c09c8870aff60f681f4fdad8f51c05eeb35be7c28513cb363b1e0e",
+        "type": "blob"
+      },
+      "gateway/platforms/webhook.py": {
+        "mode": "100644",
+        "sha256": "724180b7732fd2e663a283f237331cb1592b90bd804a496965a82fb20253f89d",
+        "type": "blob"
+      },
+      "gateway/platforms/whatsapp_cloud.py": {
+        "mode": "100644",
+        "sha256": "ee7af2004960a51e7f9147cb3d7101619fa4f12c6efc365836f4acaa6f4bef61",
+        "type": "blob"
+      },
+      "gateway/run.py": {
+        "mode": "100644",
+        "sha256": "2af993970501b62487b905852b2b696983ecc84b8d70dbe6d3d858eed5405633",
+        "type": "blob"
+      },
+      "gateway/session.py": {
+        "mode": "100644",
+        "sha256": "bc806854a295132a4dc102817617f3c1e1f75e8d9cdb1adb2fbe2bbd4f3e1da1",
+        "type": "blob"
+      },
+      "gateway/slash_commands.py": {
+        "mode": "100644",
+        "sha256": "e75868a891d623170768ace320a93ba3580675a57e325fd9d5d5bbaac275df89",
+        "type": "blob"
+      },
+      "gateway/stream_consumer.py": {
+        "mode": "100644",
+        "sha256": "42eff6327394df1dea22dd1cc4d9a3608d0c8ac8946951f961e1bcfb26d264a9",
+        "type": "blob"
+      },
+      "gateway/telegram_transaction_ledger.py": {
+        "mode": "100644",
+        "sha256": "40bef50b5149177f09f5cd297f8e9b7e91af081429c98de3cba3201b98f9b1bf",
+        "type": "blob"
+      },
+      "hermes_cli/gateway_windows.py": {
+        "mode": "100644",
+        "sha256": "a0f60515ed73bb005a0c16e78383ba767d363b383a4b5f90675c110983edce26",
+        "type": "blob"
+      },
+      "hermes_state.py": {
+        "mode": "100644",
+        "sha256": "ad2afddbe6b5b413f64da15cac1d02bc63bf25931db75dbc7ec43c65e9e5a976",
+        "type": "blob"
+      },
+      "model_tools.py": {
+        "mode": "100644",
+        "sha256": "4b8f2b229c830573bde5f3408f12171a3f6edc13e33e5c1e120983541cf5beae",
+        "type": "blob"
+      },
+      "plugins/platforms/telegram/adapter.py": {
+        "mode": "100644",
+        "sha256": "07ca06995e2f9078856488bf9f3aff3b61d5899510ef32eb76bda4b7cfc9bc84",
+        "type": "blob"
+      },
+      "run_agent.py": {
+        "mode": "100644",
+        "sha256": "9737ff6fba365d006f462f5671f761b29655866c947e82785c290f3331aa6cff",
+        "type": "blob"
+      },
+      "tests/gateway/restart_test_helpers.py": {
+        "mode": "100644",
+        "sha256": "73c9d5af7c1e7f8230ac581f3b213b5f3999fb5d48fcb3af81b352115bc8fdc3",
+        "type": "blob"
+      },
+      "tests/gateway/test_base_topic_sessions.py": {
+        "mode": "100644",
+        "sha256": "e66ff6f7347b147942c3a53a8fd76a71ea2b6953dc9edb4f38a5b06ea6380c54",
+        "type": "blob"
+      },
+      "tests/gateway/test_drain_inbox.py": {
+        "mode": "100644",
+        "sha256": "ceddb2a215173e1755d44a8694c46219e6a116eb8e9c66aca77bf571db44161a",
+        "type": "blob"
+      },
+      "tests/gateway/test_restart_resume_pending.py": {
+        "mode": "100644",
+        "sha256": "c8c338b215be1d47d19da28fddcc1db8342752b9b2e506ca9e5dc7bd79f752c3",
+        "type": "blob"
+      },
+      "tests/gateway/test_telegram_text_batching.py": {
+        "mode": "100644",
+        "sha256": "5a0f4a6699e60231a003ecd37abf9b4d2e580ec3fe2044cfaf9e6d73f7a2eca1",
+        "type": "blob"
+      },
+      "tests/tools/test_tool_search.py": {
+        "mode": "100644",
+        "sha256": "bbd1427940f83525be1e21abcab397c7e144adf397be99438dc271de053b1674",
+        "type": "blob"
+      },
+      "tools/golden_topic_recall.py": {
+        "mode": "100644",
+        "sha256": "d8b3cfdb5442ace59d80542b13c98e0287cda998ee23e53e18c8db3e1112d95c",
+        "type": "blob"
+      },
+      "tools/session_search_tool.py": {
+        "mode": "100644",
+        "sha256": "d01bd8fb4ba0c9026e8d4fc3d7371a853f2ba9933780c7d919e9343836c7e435",
+        "type": "blob"
+      },
+      "tools/tool_search.py": {
+        "mode": "100644",
+        "sha256": "b56793ad065e30014ac3422c8856c60af149bc40ab40805c292d76edcc62c00e",
+        "type": "blob"
+      }
+    }
+  },
+  "canonical_upstream_sha": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+  "components": {
+    "runtime_payload": {
+      "component": "runtime_payload",
+      "digest": "c6dcadcea5e97014feeb656692223d047f0686a08fbb024fbce96c1135bcdd46",
+      "excluded_paths": [],
+      "file_count": 77,
+      "files": [
+        {
+          "blob": "07f58440e5dae380f25cb6461b9a479827a0f8e9",
+          "mode": "100755",
+          "path": "bin/client-local-evidence-query.py",
+          "type": "blob"
+        },
+        {
+          "blob": "79edd1548fe298fbdcb4e2227b66c0d8ca7c1e98",
+          "mode": "100755",
+          "path": "bin/hermes-client-day-review",
+          "type": "blob"
+        },
+        {
+          "blob": "e8510b1e7e57c84b88dd37e042edec52d179fa72",
+          "mode": "100755",
+          "path": "bin/hermes-reflect-candidates-to-drafts.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e59f52a824d57f4685ca97667ddbe416878d49f1",
+          "mode": "100755",
+          "path": "bin/hermes-self-reflect.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7231dded555e6855b3c62f0bcd17b7f9258645c2",
+          "mode": "100755",
+          "path": "bin/hermes-skillify-autopromote.py",
+          "type": "blob"
+        },
+        {
+          "blob": "daf679e8c53698423f481d79c7d24aeaa5cb1852",
+          "mode": "100755",
+          "path": "bin/papercut_inbox.py",
+          "type": "blob"
+        },
+        {
+          "blob": "48cfb7b05daf5040119867a0f5615b9ad208b9ce",
+          "mode": "100755",
+          "path": "bin/registry-sync.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ecb21f1f00f62160a131ff82dcf5dc92d6dda7ce",
+          "mode": "100755",
+          "path": "bin/self-improvement-trigger.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d312f45bea93d1dad0f4e94e710c8c129dfc4d60",
+          "mode": "100644",
+          "path": "bin/telegram-transaction-canary.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7618aba1891f991689666f0cb353623b6d6efa72",
+          "mode": "100644",
+          "path": "hooks/gbrain-capture/HOOK.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "b5aca5dd4f3edba869c330a78b4ab940d27d8317",
+          "mode": "100644",
+          "path": "hooks/gbrain-capture/handler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d137877f28b9cd4a3114f6c8ef8142a7b5045816",
+          "mode": "100644",
+          "path": "hooks/telegram-transcript/HOOK.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "68899e436f6c4bac9c682d37ea20997feb89564e",
+          "mode": "100644",
+          "path": "hooks/telegram-transcript/handler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e2fbcd833f8d0d4df64cdf6643b6126c83c4c095",
+          "mode": "100755",
+          "path": "kit/bin/papercut.py",
+          "type": "blob"
+        },
+        {
+          "blob": "051d3dbb025f7a2e12026c8199a5aa9f103cb235",
+          "mode": "100644",
+          "path": "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
+          "type": "blob"
+        },
+        {
+          "blob": "5c10ba72be3a3414e8540b5b42bc4a3773c12390",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/browser-routing.capability-entry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "de48eec4947736e012bc139eafa9bcba5145a547",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/operating-patterns.capability-entry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "2b8af52eb3e0ff9106a91d778caef31ede8924ea",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/public-floor-registry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "14d36e6ca6994d27944e12ef4dcad1e06c1fbc62",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/pyproject.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/src/capability_router/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "950ab806120ba50f166a6c3c4bf94a818ac5fa5d",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/src/capability_router/server.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7047aab19571ea9e2e015603003d9e1714e63ec8",
+          "mode": "100644",
+          "path": "patches/apply-all-patches.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2bb08e04e3b7054c7fb796d93e330037ae29966d",
+          "mode": "100755",
+          "path": "patches/apply-session-search-current-topic.py",
+          "type": "blob"
+        },
+        {
+          "blob": "67b2f9e11bcaade6e89a16216ea5449657ef0e96",
+          "mode": "100755",
+          "path": "patches/apply-skill-index-allowlist.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ff78d487a9363ca2ec2e01a0f830222c0c282360",
+          "mode": "100644",
+          "path": "patches/apply-telegram-immediate-typing-receipt.py",
+          "type": "blob"
+        },
+        {
+          "blob": "99702281799afe0a133741fbae0f7731e6ab4c8f",
+          "mode": "100644",
+          "path": "patches/modules/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "20990b93cf9d278ac4269637ed82dc346fec26a7",
+          "mode": "100644",
+          "path": "patches/modules/assembled_runtime_contract.py",
+          "type": "blob"
+        },
+        {
+          "blob": "6e21a17f00e6b16e2321c484bbccfbc876f980af",
+          "mode": "100644",
+          "path": "patches/modules/auto_resume_contextual_reset_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "6eea4c3c69f1177e8173e37e2e920877f7fc82f5",
+          "mode": "100644",
+          "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "facc4a72e202e0e1ef50016f84aba7d7c2cd902a",
+          "mode": "100644",
+          "path": "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "8403fa1b074b7d0d33782ff3bb4cf2802eec122c",
+          "mode": "100644",
+          "path": "patches/modules/durable_drain_compatibility_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "6aebb563a2ad7c2aa4c5c1557311037be7474fae",
+          "mode": "100644",
+          "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "db532b972abc2506135c8852fba9fc3259b02d40",
+          "mode": "100644",
+          "path": "patches/modules/gateway_runtime_root_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "114091f15da281b9f0c5620a80b8d93615ab3302",
+          "mode": "100644",
+          "path": "patches/modules/mcp_in_turn_refresh_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "0621c735967d62d8ba7b210d21cd5682c15bdc5e",
+          "mode": "100644",
+          "path": "patches/modules/mcp_legacy_alias_dispatch_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "b25e9607355a9cc71ed1a5f270e356478d84046c",
+          "mode": "100644",
+          "path": "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "30a9b43e562c63113e5383c7722c2f0077943d86",
+          "mode": "100644",
+          "path": "patches/modules/registry_loader.py",
+          "type": "blob"
+        },
+        {
+          "blob": "f75dbfe06388a3b7f59ea1e4f19f546cd2a3d4c1",
+          "mode": "100644",
+          "path": "patches/modules/restart_interruption_checkin_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "9b3c05096964e4d27c8b126a05760a4ecb35fb56",
+          "mode": "100755",
+          "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "9eb6d1f2c72c59445d85bf2b83c9a3b989e2a083",
+          "mode": "100644",
+          "path": "patches/modules/telegram_fresh_topic_continuity_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5c09be33eb674949079e7a0cc8bc7c3725825e35",
+          "mode": "100644",
+          "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1a30b6d6672989fcdb2c525621574d3349c66bda",
+          "mode": "100644",
+          "path": "patches/modules/telegram_poll_liveness_writer_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7dc88f0d367de873790c74d96f57bfce9880cd95",
+          "mode": "100644",
+          "path": "patches/modules/telegram_transaction_canary_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "a913633abafff08f2997a31ff03c5b885022c883",
+          "mode": "100644",
+          "path": "patches/modules/windows_gateway_task_identity_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "094a89b09c5b629c47977fd4338ad0849e712da7",
+          "mode": "100644",
+          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-3ef6bbd2-durable-drain-v1.patch",
+          "type": "blob"
+        },
+        {
+          "blob": "41acbeebf95f09d9d1380a669a1d00526213d9fa",
+          "mode": "100644",
+          "path": "patches/payloads/durable-drain-inbox-v1/manifest.json",
+          "type": "blob"
+        },
+        {
+          "blob": "7aa407fb949fbfa75c21e4816293bd0cc3a9c483",
+          "mode": "100644",
+          "path": "patches/payloads/session-search-current-topic-v2/golden_topic_recall.py",
+          "type": "blob"
+        },
+        {
+          "blob": "85cca07387fc655de4dce9298f37a509e71f9a9a",
+          "mode": "100644",
+          "path": "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d7f9b0a1b0115802b5730a0d5bf2614d678838da",
+          "mode": "100644",
+          "path": "patches/registry.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "cc63043af3fbc53fe1a224fa79fcb458d25412aa",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1d34a366a4a1dea17bde4b9c2105fa4583991516",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/middleware.py",
+          "type": "blob"
+        },
+        {
+          "blob": "70cf7038fcd81c7e099511a70566f07f35ab225f",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "8999c29c9ac7a75bb2d2d038b482e61ec7005f96",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/README.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a27ab9f9d081427584b374a316aacb1ea37c3e48",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5c51baa0d05a32745023a054eb60bfa8d6704297",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/control.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2bf610e13c4075727d8d42c16b1931390fbcc27d",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "7f073061d11884e6df4bc40daa799f088c09425f",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/registration.py",
+          "type": "blob"
+        },
+        {
+          "blob": "9b7b3a1a12eef34a5e050d5f95eb6fa569bce600",
+          "mode": "100644",
+          "path": "plugins/task-ledger/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "b0284fff4a4db83bbda7e07ecfdacec67996f099",
+          "mode": "100644",
+          "path": "plugins/task-ledger/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "d46c38aa5628ae93a4b9846c77c1c9e59bc1748f",
+          "mode": "100644",
+          "path": "plugins/task-ledger/tools.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2c94577240494e5be1f20576dd4648702a21d724",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "a1e59c406f4ed07ab675ec200ba655a7cb9f43e6",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "bfc22a758fe91608fe65916300982ae9d20b0aeb",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/tools.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ab24f0d37d6a1021380328f0ff2747c3c5c649cf",
+          "mode": "100644",
+          "path": "scripts/merge-shared-defaults.py",
+          "type": "blob"
+        },
+        {
+          "blob": "f58c7408dc7bbbe9a49d9f920970e0d9d93fa68a",
+          "mode": "100644",
+          "path": "shared-defaults/README.md",
+          "type": "blob"
+        },
+        {
+          "blob": "185e74f74f964a5a56ad6ee27deee0d4a351fe37",
+          "mode": "100644",
+          "path": "shared-defaults/config-mcp-on-demand-control.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "55a738adb67f88c135ef2b7adeb44f1848312b6d",
+          "mode": "100644",
+          "path": "shared-defaults/config-native-tool-search.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "68445885e58b776a8f9a4a7c2d0a239d401bdf2f",
+          "mode": "100644",
+          "path": "shared-defaults/config-telegram-surface.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "4ca704b009ec27b440551be21f12f1cfafc2b8eb",
+          "mode": "100644",
+          "path": "shared-defaults/retired-policy-defaults-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "b44c7da237c366d912036a9be2d5583f9c035fda",
+          "mode": "100644",
+          "path": "shared-rules/client-isolation.md",
+          "type": "blob"
+        },
+        {
+          "blob": "1f7d15a0579181c963ca7e240b3f88b9e94e214d",
+          "mode": "100644",
+          "path": "shared-rules/content-policy.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d06417587d9b7e34cafe9a4491c9167ae88ccac4",
+          "mode": "100644",
+          "path": "shared-rules/file-delivery.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b5c4d31640f14339133750c28ee4b886234532d2",
+          "mode": "100644",
+          "path": "shared-rules/truth-over-comfort.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d5359f1bd042e83c2d26d35f9dedbf9f2b74feec",
+          "mode": "100644",
+          "path": "shared-rules/westminster-marque.md",
+          "type": "blob"
+        },
+        {
+          "blob": "75b08dc0a5b5464d29fc1473ed2102455f3ea525",
+          "mode": "100644",
+          "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5fe35e5f6ff635f3933b57fe3c24dee0c191504f",
+          "mode": "100644",
+          "path": "skills/fleet/papercuts/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6972af25f620e8d75c6bdca3989f643671d46973",
+          "mode": "100644",
+          "path": "upstream.lock",
+          "type": "blob"
+        }
+      ],
+      "paths": [
+        "bin/hermes-client-day-review",
+        "bin/hermes-reflect-candidates-to-drafts.py",
+        "bin/hermes-self-reflect.py",
+        "bin/hermes-skillify-autopromote.py",
+        "bin/client-local-evidence-query.py",
+        "bin/papercut_inbox.py",
+        "bin/registry-sync.py",
+        "bin/self-improvement-trigger.py",
+        "bin/telegram-transaction-canary.py",
+        "hooks/gbrain-capture",
+        "hooks/telegram-transcript",
+        "kit/bin/papercut.py",
+        "mcp-servers/capability-router",
+        "patches/apply-all-patches.py",
+        "patches/apply-session-search-current-topic.py",
+        "patches/apply-skill-index-allowlist.py",
+        "patches/apply-telegram-immediate-typing-receipt.py",
+        "patches/modules/__init__.py",
+        "patches/modules/assembled_runtime_contract.py",
+        "patches/modules/auto_resume_contextual_reset_v1.py",
+        "patches/modules/codex_401_paid_fallback_circuit_v1.py",
+        "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+        "patches/modules/durable_drain_compatibility_v1.py",
+        "patches/modules/durable_drain_inbox_carrier_v1.py",
+        "patches/modules/gateway_runtime_root_guard_v1.py",
+        "patches/modules/mcp_in_turn_refresh_v1.py",
+        "patches/modules/mcp_legacy_alias_dispatch_v1.py",
+        "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
+        "patches/modules/registry_loader.py",
+        "patches/modules/restart_interruption_checkin_v1.py",
+        "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
+        "patches/modules/telegram_fresh_topic_continuity_v1.py",
+        "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
+        "patches/modules/telegram_poll_liveness_writer_v1.py",
+        "patches/modules/telegram_transaction_canary_v1.py",
+        "patches/modules/windows_gateway_task_identity_v1.py",
+        "patches/payloads/durable-drain-inbox-v1",
+        "patches/payloads/session-search-current-topic-v2",
+        "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
+        "patches/registry.yaml",
+        "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
+        "plugins/botdoctor-immersion",
+        "plugins/mcp-on-demand-control",
+        "plugins/task-ledger",
+        "plugins/telegram-transcript",
+        "scripts/merge-shared-defaults.py",
+        "shared-defaults",
+        "shared-rules/client-isolation.md",
+        "shared-rules/content-policy.md",
+        "shared-rules/file-delivery.md",
+        "shared-rules/westminster-marque.md",
+        "shared-rules/truth-over-comfort.md",
+        "skills/fleet/nightly-client-reflection-default",
+        "skills/fleet/papercuts",
+        "upstream.lock"
+      ]
+    }
+  },
+  "deployment_digest": "744fe796c6389590039e158b3e497eeb1329c5cebd0afdfc47f34cc124798539",
+  "golden_sha": "2f5e428248a1bc72ec6275fb25eddfed65c6c71e",
+  "kind": "golden_runtime_payload_manifest",
+  "schema_version": 1
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "release": "botdoctor-hermes-2026.07.27",
+  "status": "current",
+  "source_manifest": "runtime-payload-source-manifest.json",
+  "golden_sha": "2f5e428248a1bc72ec6275fb25eddfed65c6c71e",
+  "canonical_upstream_sha": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+  "source_scope": "sanitized_runtime_payload_only",
+  "runtime_payload_digest": "c6dcadcea5e97014feeb656692223d047f0686a08fbb024fbce96c1135bcdd46",
+  "deployment_digest": "744fe796c6389590039e158b3e497eeb1329c5cebd0afdfc47f34cc124798539",
+  "assembled_runtime_fingerprint": {
+    "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
+    "file_count": 32
+  },
+  "verification": {
+    "golden_suite": "1472 passed, 29 skipped",
+    "clean_upstream_rehearsal": "16 applied, 0 breakage"
+  },
+  "update_contract": "maintenance-quiescence-v1"
+}

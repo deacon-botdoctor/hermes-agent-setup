@@ -1,0 +1,4 @@
+# Deterministic native schema deferral for enabled MCP servers.
+tools:
+  tool_search:
+    enabled: "on"

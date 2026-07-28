@@ -1,53 +1,60 @@
 # Hermes Agent Setup
 
-A native-first setup and migration guide for
-[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent).
+The public, reproducible setup for the current Bot Doctor Hermes runtime.
 
-This repository does **not** fork Hermes, patch its source, copy MCP servers, or
-ship another memory system. It tells a fresh agent how to install Hermes and
-tells an agent on the old Bot Doctor-style runtime how to move safely to native
-Hermes without losing its identity, conversations, memory, configuration,
-projects, skills, or credentials.
+The release remains native-first: it starts from one exact
+[NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent)
+commit, keeps native memory, sessions, compaction, tasks, gateway, and service
+tooling, then applies only the source-visible compatibility gaps listed in
+[`patches/registry.yaml`](patches/registry.yaml).
+
+[`release.json`](release.json) pins the current upstream and Golden identities,
+runtime-payload digest, and assembled-runtime fingerprint. The sanitized source
+manifest allowlists every shipped runtime file by Git blob identity. Fleet
+health/start adapters, routes, credentials, client identities, private data,
+and operator control are not included.
+
+## Start here
+
+Give the agent access to this repository and say:
+
+> Follow AGENTS.md. Install or update to the exact release in release.json,
+> preserve my data and unfinished work, and do not switch the gateway until the
+> maintenance-quiescence and rollback checks pass.
+
+The agent will select the fresh-install or existing-runtime path in
+[`AGENTS.md`](AGENTS.md). Before doing anything else it should run:
+
+```bash
+python3 bin/verify-release.py
+```
+
+To reproduce the exact source candidate without touching a live profile:
+
+```bash
+python3 bin/assemble-runtime.py \
+  --output /absolute/path/to/new-runtime-candidate
+```
+
+The assembler refuses an existing output path, checks out the pinned upstream
+commit, applies the public payload, and verifies the exact fleet-tested runtime
+fingerprint. It does not stop or install a gateway.
+
+See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 
 ## Choose your path
 
 ### Fresh headless agent
 
-Linux, macOS, WSL2, or Termux:
+Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 
-```bash
-curl -fsSL https://hermes-agent.nousresearch.com/install.sh \
-  | bash -s -- --skip-browser
-```
-
-Start a new login shell (or reload its profile) so the installed command is on
-`PATH`, then run:
-
-```bash
-hermes setup
-hermes doctor
-hermes gateway install
-hermes gateway status
-```
-
-Native Windows PowerShell:
-
-```powershell
-iex (irm https://hermes-agent.nousresearch.com/install.ps1)
-```
-
-Open a new PowerShell window, then run:
-
-```powershell
-hermes doctor
-hermes gateway install
-hermes gateway status
-```
-
-The current official Windows installer always installs browser npm
-dependencies and Playwright Chromium; it does not yet expose the POSIX
-`--skip-browser` option. Keep browser automation inactive until it has a real
-consumer.
+1. verify the public source manifest;
+2. install the pinned upstream dependencies into a side-by-side candidate;
+3. apply and fingerprint the public runtime;
+4. run native `hermes setup`;
+5. install only manifest-owned profile files with a local rollback;
+6. run native `hermes doctor`; and
+7. install the native gateway service only after verification.
 
 Browser automation, Composio, and additional MCP servers should be enabled only
 when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
@@ -66,41 +73,41 @@ loaded on demand. Before saying a task cannot be done, the agent must inspect
 its capability inventory and run a safe health or connection check. The full
 routing and failure-state doctrine is in [DEFAULTS.md](DEFAULTS.md).
 
-### Agent already running the old customized runtime
+### Agent already running an older build
 
-Open [AGENTS.md](AGENTS.md) in the agent's coding environment and say:
+The same contract handles official/native installs, the previous public build,
+and older customized runtimes. It inventories the real process and service,
+builds the candidate separately, preserves a database-consistent rollback,
+waits for active work to finish or checkpoint, switches one runtime generation,
+then proves continuation and rollback.
 
-> Follow the migration contract in AGENTS.md. Start with the read-only
-> inventory and stop before switching the live gateway unless I explicitly
-> authorize the switch.
-
-The detailed human-readable procedure is in [MIGRATION.md](MIGRATION.md).
+The human-readable gate summary is in [MIGRATION.md](MIGRATION.md).
 
 ## What changed from the old public setup
 
-The previous repository contained a second runtime layer: source patches,
-placeholder plugins, copied MCP servers, custom SQLite memory, Anamnesis, LCM,
-AutoDream, transcript storage, and permanent browser wiring. Current Hermes
-already owns the core session, memory, search, compaction, task, gateway, and
-service behavior. Those duplicate implementations have been deleted from the
-active repository.
+The old public setup contained duplicate context/memory systems, placeholder
+plugins, copied MCPs, and permanent browser wiring. Those remain deleted.
+The current bundle adds back only the exact, fleet-tested compatibility payload
+that pinned native Hermes does not yet provide.
 
-The replacement has four rules:
+The replacement has five rules:
 
-1. Use official Hermes code.
+1. Use pinned official Hermes as the base.
 2. Preserve user data and identity separately from code.
-3. Add optional capabilities only for a proven consumer.
-4. Never remove the old runtime until native health and rollback both pass.
+3. Prefer native behavior, configuration, and plugins before source patches.
+4. Add optional capabilities only for a proven consumer.
+5. Never remove the old runtime until current-release health and rollback pass.
 
 ## Ownership model
 
 | Layer | Owner |
 |---|---|
-| Hermes code, installer, memory, sessions, gateway, service tooling | Upstream Hermes |
+| Base runtime, memory, sessions, gateway, service tooling | Upstream Hermes |
+| Public compatibility payload and exact release manifest | This repository |
 | `config.yaml`, `.env`, `state.db`, `MEMORY.md`, `USER.md`, sessions, projects, skills | The local agent/user |
 | Optional tools and MCPs | Local configuration, cold by default |
 | Fleet orchestration, credentials, shared databases | Outside this public repository |
 
-This repository intentionally contains instructions, not a new installer or
-control plane. The official installer and `hermes doctor` remain the executable
-source of truth.
+This repository contains a deterministic assembler and a bounded profile
+installer, not a fleet control plane. Native setup, doctor, gateway services,
+and local user data remain owned by Hermes and the user.

@@ -1,78 +1,77 @@
-# Migrating an old customized Hermes runtime
+# Updating an existing Hermes agent
 
-This is the human-readable companion to [AGENTS.md](AGENTS.md). The agent should
-execute the detailed contract; the operator should expect these five gates.
+This is the human-readable summary. The agent executes the detailed contract in
+[`AGENTS.md`](AGENTS.md).
 
-## 1. Inventory
+## 1. Prove what is live
 
-The agent proves what currently owns the live process. A folder named
-`hermes-agent`, a stale Git remote, or a service file by itself is not proof.
-The active process, imported modules, service definition, and runtime home must
-agree.
+The active process, imported source root, service definition, command route,
+profile, and `HERMES_HOME` must agree. A folder name or Git remote is not proof.
 
-## 2. Backup and rollback
+The agent records active turns and background work, restart history, exact code
+state, config/service hashes, database and identity paths, and legacy
+components. It never prints credential values.
 
-The agent creates a local, permission-restricted backup of code state, config,
-service wiring, identity, and data. The receipt contains hashes—not secrets.
-`state.db` is captured through SQLite's backup API and integrity-checked; a raw
-copy of a live database is insufficient. The old runtime is not modified or
-deleted.
+## 2. Preserve a real rollback
 
-## 3. Isolated native install
+Before changing live state, the agent captures:
 
-The official Hermes installer creates a new checkout and managed dependencies
-under a separate staging `HERMES_HOME`; it does not touch the live data home.
-On POSIX, it also runs with a staging-only `HOME`, leaving the old launcher
-untouched. The agent verifies that launcher or restores and verifies the
-Windows User and process environment route, records the exact upstream SHA,
-and runs `hermes doctor` against staging. The new checkout is addressed only
-by absolute path until cutover.
+- code SHA and dirty changes;
+- configuration, launcher, service, and command route;
+- a SQLite-consistent `state.db` backup with integrity result;
+- identity, projects, skills, and client-local data;
+- exact stop, restore, and start commands.
 
-## 4. Controlled switch and proof
+The old runtime remains intact. A raw copy of a live SQLite database without
+its WAL state is not a rollback.
 
-With zero active turns, the agent drains the old gateway, binds the existing
-service/profile to the new native command, and runs identity, messaging,
-restart, continuity, memory, built-in task-tool, persistent-goal, optional-tool,
-and rollback checks.
-From a clean session after restart, it also proves that an ordinary request can
-discover a cold capability, select the approved native/connector route, invoke
-it, and verify the result. A cold capability must not be reported as missing;
-browser automation is a fallback for a verified connector/API gap, not the
-default SaaS route.
-Immediately before cutover it takes a final consistent database snapshot.
-Rollback stops both runtimes, moves the live database and its WAL sidecars
-aside, restores that snapshot, verifies database integrity, and only then
-starts the old runtime.
+## 3. Build the release separately
 
-Any failure restores the old service. A credential, database-schema, identity,
-or network change is not part of this migration unless the operator separately
-requests it.
+The public source manifest is verified first. The exact upstream commit and
+public Golden payload are assembled into a new candidate directory. The
+candidate must match the runtime fingerprint in `release.json`.
 
-## 5. Retire obsolete code
+Dependencies and profile wiring are prepared under a staging home. The live
+checkout, data, command route, and service remain untouched.
 
-Only after acceptance may the old patch/plugin/MCP code and obsolete service
-bindings be removed. User data and the sealed rollback remain.
+## 4. Let active work settle
 
-## Migration map
+The agent receives a short maintenance event: finish the current atomic step,
+avoid new delegation, or checkpoint the exact next action. New executable work
+stops while inbound messages remain durably queued per chat/topic.
 
-| Old surface | Native-first result |
-|---|---|
-| Source overlay / patch registry | Delete; follow upstream Hermes |
-| Custom durable runtime / replay | Delete; use native sessions and resume |
-| LCM | Delete; use native compaction/context |
-| Anamnesis / second recall DB | Delete; use native memory/search |
-| Telegram transcript recall DB | Delete; use native `state.db` |
-| AutoDream/nightly dream | Off; add no replacement by default |
-| Always-on browser lane | Off; cold-start for a verified consumer |
-| All MCPs hot | Keep only required servers/tools enabled in native MCP configuration |
-| No-op compatibility plugins | Delete |
-| Composio onboarding | Off until the user chooses an integration |
-| Identity, `MEMORY.md`, `USER.md`, projects, skills | Preserve as local data |
-| Credentials and messaging identity | Preserve; never publish or rotate implicitly |
+The controller waits for turns, tools, delegated tasks, cron/API work,
+compression, media handling, and delivery transactions to finish or become
+durably replayable. Readiness must be stable twice. Uncertain work means this
+machine stays on the old runtime; it is never force-killed for rollout speed.
 
-## Stop conditions
+## 5. Switch one generation
 
-Stop before switching if the live route, active turns, backup, service owner,
-credential boundary, or rollback is ambiguous. Stop and roll back after the
-switch on a traceback, model/provider error, missing table, restart loop,
-identity mismatch, context leakage, missing scheduled task, or rollback drift.
+After the final consistent database snapshot:
+
+1. install the manifest-owned profile files, preserving their local rollback;
+2. stop the old gateway through its actual service owner;
+3. bind the same service scope and profile to the candidate;
+4. start exactly one new generation;
+5. restore checkpoints and replay queued messages once; and
+6. reopen admission only after health and continuation proof.
+
+The two generations never open the same database concurrently.
+
+## 6. Verify and rehearse rollback
+
+Required proof includes:
+
+- exact runtime fingerprint and module origins;
+- native doctor and process health;
+- unchanged messaging identity and allowlist;
+- real private ingress-to-egress;
+- restart/continuation without duplicates;
+- cross-topic isolation;
+- native memory, search, tasks, goals, and cron;
+- native Tool Search plus cold capability activation;
+- no retired duplicate memory/context services;
+- successful rollback to the old runtime and restoration to the new one.
+
+Only obsolete code/service bindings may be removed after acceptance. User data
+and one sealed rollback remain for the retention window.

@@ -1,0 +1,244 @@
+schema_version: 1
+patches:
+  - name: durable_drain_runtime_v1
+    module: modules/durable_drain_inbox_carrier_v1.py
+    function: patch_durable_drain_runtime_v1
+    target: gateway/drain_inbox.py + gateway/platforms/base.py + gateway/platforms/bluebubbles.py + gateway/platforms/msgraph_webhook.py + gateway/platforms/qqbot/adapter.py + gateway/platforms/webhook.py + gateway/platforms/whatsapp_cloud.py + gateway/run.py + gateway/session.py + gateway/slash_commands.py + hermes_state.py + tests/gateway/restart_test_helpers.py + tests/gateway/test_drain_inbox.py + tests/gateway/test_restart_resume_pending.py
+    owner: engineering-lead
+    idempotency: HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1 + HERMES_DURABLE_DRAIN_COMPATIBILITY_v1 + HERMES_CRON_SCHEDULER_CAN_DISPATCH_COMPAT_v1
+    test: python3 -m pytest -q bin/test/test_durable_drain_inbox_carrier_v1.py bin/test/test_durable_drain_compatibility_v1.py bin/test/test_cron_scheduler_can_dispatch_compat_v1.py
+    rollback: restore the pre-apply snapshot and remove .golden-runtime-carriers/durable-drain-inbox-v1.json
+    client_impact: restart_required
+    tags: [gateway, restart, durable-inbox, startup-barrier, windows, cron, fleet]
+    status: extracted
+    route: hotfix
+    reason: Golden pin 3ef6bbd2 predates the reviewed durable drain inbox; its carrier, Windows row/path compatibility, and optional cron drain callback form one lifecycle subsystem.
+    upstream_issue: null
+    retirement_condition: remove the full subsystem when upstream.lock contains equivalent durable recovery, cross-platform path/row handling, and drain-aware cron startup.
+  - name: telegram_model_commentary_checkpoints_v1
+    module: modules/telegram_organic_long_running_checkpoints_v1.py
+    function: patch_telegram_organic_long_running_checkpoints_v1
+    target: gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1
+    test: python3 -m pytest -q bin/test/test_telegram_organic_long_running_checkpoints_v1.py
+    rollback: restore gateway/run.py from the pre-apply snapshot or .bak-pre-telegram-model-checkpoints-v1
+    client_impact: restart_required
+    tags: [gateway, telegram, long-running, checkpoint, client-experience]
+    status: extracted
+    route: upstream-pr-pending
+    reason: >-
+      native long-running notices ignore the model commentary already emitted during the active turn; Telegram needs
+      a periodic summary of those real updates without a second model call or inferred tool-result claims.
+    upstream_issue: null
+    retirement_condition: remove when upstream periodic Telegram notifications can summarize newly emitted model commentary and skip rather than invent progress when none exists.
+  - name: telegram_dm_topic_recovery_root_guard_v1
+    module: modules/telegram_dm_topic_recovery_root_guard_v1.py
+    function: patch_telegram_dm_topic_recovery_root_guard_v1
+    target: gateway/platforms/base.py, tests/gateway/test_base_topic_sessions.py, tests/gateway/test_telegram_text_batching.py, tests/gateway/test_drain_inbox.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1
+    test: pytest tests/gateway/test_base_topic_sessions.py tests/gateway/test_telegram_text_batching.py tests/gateway/test_drain_inbox.py -q
+    rollback: restore from .bak file
+    client_impact: restart_required
+    tags: [gateway, telegram, dm-topic, resume, routing]
+    status: extracted
+    route: irreducible
+    reason: pre-session-key routing guard has no current config/plugin seam
+    upstream_issue: null
+    retirement_condition: remove when upstream provides native stripped-reply-only topic recovery or an early topic-recovery hook
+  - name: codex_401_paid_fallback_circuit_v1
+    module: modules/codex_401_paid_fallback_circuit_v1.py
+    function: patch_codex_401_paid_fallback_circuit_v1
+    target: agent/conversation_loop.py + agent/chat_completion_helpers.py + agent/codex_401_circuit.py
+    owner: engineering-lead
+    idempotency: HERMES_CODEX_401_PAID_FALLBACK_CIRCUIT_v1
+    test: python3 -m pytest bin/test/test_codex_401_paid_fallback_circuit_v1.py
+    rollback: restore agent/conversation_loop.py and agent/chat_completion_helpers.py from backup and remove agent/codex_401_circuit.py
+    client_impact: restart_required
+    tags: [codex, oauth, 401, fallback, spend-guard]
+    status: extracted
+    route: irreducible
+    reason: the runtime calls fallback synchronously after a primary-model Codex auth failure; this boundary allows one matching client-turn paid fallback while blocking recursive/internal activations before the broker sidecar can prove primary recovery.
+    upstream_issue: null
+    retirement_condition: remove when upstream exposes a pre-fallback auth-failure hook that can reject a selected fallback.
+  - name: telegram_immediate_typing_receipt_v2
+    module: apply-telegram-immediate-typing-receipt.py
+    function: patch_telegram_immediate_typing_receipt_v2
+    target: plugins/platforms/telegram/adapter.py + gateway/platforms/base.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_IMMEDIATE_TYPING_RECEIPT_v2
+    test: python3 -m pytest bin/test/test_telegram_immediate_typing_receipt.py -q
+    rollback: restore both runtime files from their pre-typing-receipt backups
+    client_impact: restart_required
+    tags: [telegram, gateway, typing, latency, telemetry]
+    status: extracted
+    route: upstream-pr-pending
+    reason: typing currently begins as a background task after Telegram batching and can be starved by synchronous pre-model preparation; there is no time-to-typing telemetry
+    upstream_issue: null
+    retirement_condition: remove when upstream acknowledges accepted inbound before batching with bounded timing telemetry
+  - name: telegram_poll_liveness_writer_v1
+    module: modules/telegram_poll_liveness_writer_v1.py
+    function: patch_telegram_poll_liveness_writer_v1
+    target: plugins/platforms/telegram/adapter.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1
+    test: python3 -m pytest -q bin/test/test_telegram_poll_liveness_writer_v1.py
+    rollback: restore plugins/platforms/telegram/adapter.py from its .bak-*-poll-liveness-writer sibling or the pre-apply snapshot
+    client_impact: restart_required
+    tags: [gateway, telegram, watchdog, polling, liveness, fleet]
+    status: extracted
+    route: upstream-pr-pending
+    reason: native polling detects wedges but does not export the positive heartbeat consumed by the canonical host probe
+    upstream_issue: null
+    retirement_condition: remove when upstream exports a stable positive polling heartbeat consumed by telegram-polling-health-probe.py
+  - name: telegram_transaction_canary_v1
+    module: modules/telegram_transaction_canary_v1.py
+    function: patch_telegram_transaction_canary_v1
+    target: gateway/platforms/base.py + plugins/platforms/telegram/adapter.py (legacy fallback gateway/platforms/telegram.py) + gateway/stream_consumer.py + gateway/telegram_transaction_ledger.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_TRANSACTION_CANARY_v1
+    test: python3 -m pytest -q bin/test/test_telegram_transaction_canary_v1.py
+    rollback: restore the retained .bak-pre-telegram-transaction-canary-v1 backup for gateway/platforms/base.py, gateway/stream_consumer.py, and each unique Telegram adapter file identity (canonical or legacy alias), then remove gateway/telegram_transaction_ledger.py; apply-all also retains its pre-apply snapshot
+    client_impact: restart_required
+    tags: [telegram, observability, canary]
+    status: extracted
+    route: irreducible
+    reason: Telegram exposes inbound and accepted message IDs but no existing lifecycle joins exact ingress, command-bypass handling, and final delivery immutably.
+    upstream_issue: null
+    retirement_condition: upstream provides an immutable receipt-to-final-delivery transaction ledger.
+  - name: auto_resume_contextual_reset_v1
+    module: modules/auto_resume_contextual_reset_v1.py
+    function: patch_auto_resume_contextual_reset_v1
+    target: gateway/session.py + gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_AUTO_RESUME_CONTEXTUAL_RESET_v1
+    test: python3 -m pytest -q bin/test/test_auto_resume_contextual_reset_v1.py
+    rollback: restore both files from their .bak-<timestamp>-pre-contextual-auto-resume siblings and set session_reset.auto_resume_previous_if_contextual false
+    client_impact: restart_required
+    tags: [gateway, context, session-reset, resume]
+    status: extracted
+    route: upstream-pr-pending
+    reason: automatic expiry discards the exact prior session ID before the first post-reset message can safely use native resume semantics
+    upstream_issue: null
+    retirement_condition: remove when upstream can opt into exact-session contextual continuation after idle/daily expiry without mutating inbound user text
+  - name: telegram_fresh_topic_continuity_v1
+    module: modules/telegram_fresh_topic_continuity_v1.py
+    function: patch_telegram_fresh_topic_continuity_v1
+    target: gateway/run.py + hooks/telegram-transcript/handler.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_FRESH_TOPIC_CONTINUITY_v1
+    test: python3 -m pytest -q bin/test/test_telegram_fresh_topic_continuity_v1.py bin/test/test_telegram_transcript_reconciled.py
+    rollback: restore gateway/run.py from the pre-apply snapshot; restore the prior telegram-transcript hook and restart the gateway
+    client_impact: restart_required
+    tags: [gateway, telegram, group-topic, context, fresh-session]
+    status: extracted
+    route: upstream-pr-pending
+    reason: agent-start hooks cannot currently carry same-topic transcript history into the actual model request, and native topic restoration excludes Telegram group forum topics
+    upstream_issue: null
+    retirement_condition: remove when upstream provides model-visible fresh-session topic history for every Telegram thread with strict chat/thread isolation and explicit-reset preservation
+  - name: restart_interruption_checkin_v1
+    module: modules/restart_interruption_checkin_v1.py
+    function: patch_restart_interruption_checkin_v1
+    target: gateway/run.py + tests/gateway/test_restart_resume_pending.py
+    owner: engineering-lead
+    idempotency: HERMES_RESTART_INTERRUPTION_CHECKIN_v3
+    test: python3 -m pytest -q bin/test/test_restart_interruption_checkin_v1.py
+    rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots; direct module runs may use the .bak-pre-restart-interruption-checkin-v3 sibling
+    client_impact: restart_required
+    tags: [gateway, restart, interruption, recovery, no-duplicate]
+    status: extracted
+    route: upstream-pr-pending
+    reason: the native restart scheduler starts a blank internal agent turn, which can emit a generic question or repeat an uncertain action instead of asking the originating client for a decision
+    upstream_issue: null
+    retirement_condition: remove when upstream natively emits a one-shot contextual interruption check-in without auto-running the interrupted turn
+  - name: session_search_current_topic_v1
+    module: apply-session-search-current-topic.py
+    function: patch_session_search_current_topic_v1
+    target: tools/session_search_tool.py + tools/golden_topic_recall.py
+    owner: engineering-lead
+    idempotency: HERMES_SESSION_SEARCH_CURRENT_TOPIC_v2
+    test: python3 -m pytest -q bin/test/test_apply_session_search_current_topic.py
+    rollback: restore tools/session_search_tool.py from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [memory, session-search, telegram, topics, isolation]
+    status: extracted
+    route: upstream-pr-pending
+    reason: default session_search discovery must reuse the current Telegram topic key; only an explicit global prefix may cross topic boundaries, and upstream exposes no tool-override hook
+    upstream_issue: null
+    retirement_condition: remove when upstream session_search natively scopes discovery by Telegram chat/thread metadata
+  - name: mcp_in_turn_refresh_v1
+    module: modules/mcp_in_turn_refresh_v1.py
+    function: patch_mcp_in_turn_refresh_v1
+    target: run_agent.py
+    owner: engineering-lead
+    idempotency: HERMES_MCP_IN_TURN_REFRESH_v1
+    test: python3 -m pytest -q bin/test/test_mcp_in_turn_refresh_v1.py
+    rollback: restore run_agent.py from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [mcp, tools, lazy-loading, gateway]
+    status: extracted
+    route: upstream-pr-pending
+    reason: a policy-approved cold MCP can register during a tool batch, after the current agent has snapshotted valid_tool_names; the next model iteration must receive the new schemas without waiting for another user turn
+    upstream_issue: null
+    retirement_condition: remove when upstream refreshes the current agent tool snapshot after dynamic MCP registration at the post-tool boundary
+  - name: mcp_legacy_alias_bridge_v1
+    module: modules/mcp_legacy_alias_dispatch_v1.py
+    function: patch_mcp_legacy_alias_bridge_v1
+    target: tools/tool_search.py + model_tools.py + agent/tool_executor.py + plugins/mcp-on-demand-control/control.py + tests/tools/test_tool_search.py
+    owner: engineering-lead
+    idempotency: HERMES_MCP_LEGACY_ALIAS_DISPATCH_v1 + HERMES_MCP_LEGACY_COLD_ALIAS_ACTIVATION_v1
+    test: python3 -m pytest -q bin/test/test_mcp_legacy_alias_dispatch_v1.py bin/test/test_mcp_legacy_cold_alias_activation_v1.py tests/tools/test_tool_search.py
+    rollback: restore runtime files from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [mcp, tools, lazy-loading, compatibility]
+    status: extracted
+    route: upstream-pr-pending
+    reason: persisted sessions can replay the retired flattened mcp_server_tool name; resolve only a unique in-scope alias and activate only its uniquely policy-scoped cold backend
+    upstream_issue: null
+    retirement_condition: remove after supported session history no longer contains flattened MCP action names
+  - name: skill_index_allowlist_v1
+    module: apply-skill-index-allowlist.py
+    function: patch_skill_index_allowlist_v1
+    target: agent/prompt_builder.py
+    owner: engineering-lead
+    idempotency: HERMES_SKILL_INDEX_ALLOWLIST_v1
+    test: python3 -m pytest -q bin/test/test_apply_skill_index_allowlist.py
+    rollback: restore agent/prompt_builder.py from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [prompt, skills, lazy-loading, tool-discovery]
+    status: extracted
+    route: upstream-pr-pending
+    reason: the pinned upstream runtime ignores skills.index_allowlist, so exposing the skills discovery tools also injects the entire installed skill catalog into every model turn
+    upstream_issue: null
+    retirement_condition: remove when the pinned upstream runtime natively limits only the rendered skill index while keeping non-indexed skills available through skills_list and skill_view
+  - name: windows_gateway_task_identity_v1
+    module: modules/windows_gateway_task_identity_v1.py
+    function: patch_windows_gateway_task_identity_v1
+    target: hermes_cli/gateway_windows.py
+    owner: engineering-lead
+    idempotency: HERMES_WINDOWS_GATEWAY_TASK_IDENTITY_v1
+    test: python3 -m pytest -q bin/test/test_windows_gateway_task_identity_v1.py tests/test_windows_safe_restart_contract.py
+    rollback: restore hermes_cli/gateway_windows.py from the pre-apply snapshot or .bak-pre-windows-gateway-task-identity-v1; restore the prior safe-restart settings file
+    client_impact: restart_required
+    tags: [windows, gateway, profile, scheduled-task, restart]
+    status: extracted
+    route: upstream-pr-pending
+    reason: an explicitly owned Windows Scheduled Task can differ from the native default, and a named profile must not fall back to the root task, config, or state namespace
+    upstream_issue: null
+    retirement_condition: remove when upstream natively supports an explicit task-name override and profile-bound restart/status contract
+  - name: gateway_runtime_root_guard_v1
+    module: modules/gateway_runtime_root_guard_v1.py
+    function: patch_gateway_runtime_root_guard_v1
+    target: gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1
+    test: python3 -m pytest -q bin/test/test_gateway_runtime_root_guard_v1.py bin/test/test_assembled_runtime_contract.py
+    rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [gateway, runtime, imports, coherence, incident]
+    status: extracted
+    route: upstream-pr-pending
+    reason: gateway AIAgent imports are lazy, so a connected side-by-side runtime can later resolve run_agent from a mutable legacy checkout and combine incompatible caller/callee versions
+    upstream_issue: null
+    retirement_condition: remove when upstream pins lazy agent imports to the active gateway source root and rejects mixed-root modules

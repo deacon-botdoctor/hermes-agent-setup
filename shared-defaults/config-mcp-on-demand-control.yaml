@@ -1,0 +1,14 @@
+plugins:
+  enabled:
+    - botdoctor-immersion
+    - mcp-on-demand-control
+platform_toolsets:
+  cli:
+    - mcp-on-demand-control
+    - mcp-capability-router
+  telegram:
+    - mcp-on-demand-control
+    - mcp-capability-router
+  cron:
+    - mcp-on-demand-control
+    - mcp-capability-router
