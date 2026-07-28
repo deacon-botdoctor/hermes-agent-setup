@@ -322,28 +322,18 @@ def test_profile_environment_binding_is_opaque_and_reversible(tmp_path):
     binder = load_script("public_profile_binding", "bind-service-circuit.py")
     home = tmp_path / "profile"
     home.mkdir()
-    runtime = tmp_path / "runtime"
-    runtime.mkdir()
     env_path = home / ".env"
-    original = b"PROVIDER_SECRET=private-value\n"
+    original = b"PROVIDER_SECRET=\xffprivate-value\n"
     env_path.write_bytes(original)
     env_path.chmod(0o640)
-    expected = str(home / "state" / "codex-401-circuit.json")
 
-    def loaded_value():
-        text = env_path.read_text(encoding="utf-8")
-        matches = [
-            line.split("=", 1)[1].strip().strip('"')
-            for line in text.splitlines()
-            if line.startswith(f"{binder.KEY}=")
-        ]
-        return matches[0] if len(matches) == 1 else None
-
-    backup = binder._bind_environment(home, runtime, loaded_value)
+    original_owner = binder._path_owner(env_path)
+    backup = binder._bind_environment(home)
     assert backup is not None
     assert env_path.read_bytes().startswith(original)
     assert env_path.stat().st_mode & 0o777 == 0o640
-    assert binder._bind_environment(home, runtime, loaded_value) is None
+    assert binder._path_owner(env_path) == original_owner
+    assert binder._bind_environment(home) is None
     receipt = (backup / "receipt.json").read_text(encoding="utf-8")
     assert "PROVIDER_SECRET" not in receipt
     assert binder.KEY not in receipt
@@ -353,26 +343,95 @@ def test_profile_environment_binding_is_opaque_and_reversible(tmp_path):
     binder._restore_backup(home, backup)
     assert env_path.read_bytes() == original
     assert env_path.stat().st_mode & 0o777 == 0o640
+    assert binder._path_owner(env_path) == original_owner
 
 
 def test_profile_environment_binding_rejects_conflicts(tmp_path):
     binder = load_script("public_profile_conflict", "bind-service-circuit.py")
     home = tmp_path / "profile"
     home.mkdir()
-    runtime = tmp_path / "runtime"
-    runtime.mkdir()
     env_path = home / ".env"
     env_path.write_text(f"{binder.KEY}=wrong\n", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="conflicts"):
-        binder._bind_environment(home, runtime, lambda: "wrong")
+        binder._bind_environment(home)
 
     env_path.write_text(
         f"{binder.KEY}=one\nexport {binder.KEY}=two\n",
         encoding="utf-8",
     )
     with pytest.raises(RuntimeError, match="duplicated"):
-        binder._bind_environment(home, runtime, lambda: "one")
+        binder._bind_environment(home)
+
+
+def test_new_profile_environment_uses_profile_owner(tmp_path):
+    binder = load_script("public_profile_owner", "bind-service-circuit.py")
+    home = tmp_path / "profile"
+    home.mkdir()
+    expected_owner = binder._path_owner(home)
+
+    backup = binder._bind_environment(home)
+
+    assert backup is not None
+    assert binder._path_owner(home / ".env") == expected_owner
+    assert (home / ".env").stat().st_mode & 0o777 == 0o600
+    binder._restore_backup(home, backup)
+    assert not (home / ".env").exists()
+
+
+def test_systemd_properties_reload_and_use_selected_scope():
+    binder = load_script("public_systemd_properties", "bind-service-circuit.py")
+    calls = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(argv)
+        output = ""
+        if "show" in argv:
+            output = (
+                "ExecStart={ path=/candidate/venv/bin/python ; }\n"
+                "Environment=HERMES_HOME=/profile\n"
+                "User=\n"
+                "FragmentPath=/unit.service\n"
+                "DropInPaths=\n"
+            )
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    properties = binder._systemd_properties(
+        "hermes-gateway", "user", run=fake_run
+    )
+
+    assert calls[0] == ["systemctl", "--user", "daemon-reload"]
+    assert calls[1][:4] == [
+        "systemctl",
+        "--user",
+        "show",
+        "hermes-gateway",
+    ]
+    assert properties["DropInPaths"] == ""
+
+
+def test_windows_uv_launch_spec_uses_base_pythonw(tmp_path):
+    binder = load_script("public_windows_uv_spec", "bind-service-circuit.py")
+    runtime = tmp_path / "candidate"
+    venv = runtime / "venv"
+    scripts = venv / "Scripts"
+    site_packages = venv / "Lib" / "site-packages"
+    base = tmp_path / "base-python"
+    scripts.mkdir(parents=True)
+    site_packages.mkdir(parents=True)
+    base.mkdir()
+    (scripts / "python.exe").write_bytes(b"")
+    (base / "pythonw.exe").write_bytes(b"")
+    (venv / "pyvenv.cfg").write_text(
+        f"home = {base}\nuv = 0.8.0\n",
+        encoding="utf-8",
+    )
+
+    executable, virtual_env, pythonpath = binder._windows_launch_spec(runtime)
+
+    assert executable == str(base / "pythonw.exe")
+    assert virtual_env == str(venv)
+    assert pythonpath == (str(runtime), str(site_packages))
 
 
 def test_native_service_proofs_require_exact_runtime_and_owner():
@@ -397,6 +456,44 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
         )
     with pytest.raises(RuntimeError, match="proven owner"):
         binder._prove_systemd(unit, home, runtime, "system", "another-user")
+    definition = Path("/etc/systemd/system/hermes-gateway.service")
+    effective = {
+        "ExecStart": (
+            "{ path=/runtimes/candidate/venv/bin/python ; "
+            "argv[]=/runtimes/candidate/venv/bin/python -m hermes_cli.main "
+            "gateway run ; }"
+        ),
+        "Environment": f"HERMES_HOME={home} PYTHONUNBUFFERED=1",
+        "User": owner,
+        "FragmentPath": str(definition),
+        "DropInPaths": "",
+    }
+    binder._prove_effective_systemd(
+        effective, definition, home, runtime, "system", owner
+    )
+    with pytest.raises(RuntimeError, match="drop-in"):
+        binder._prove_effective_systemd(
+            {**effective, "DropInPaths": "/etc/systemd/system/override.conf"},
+            definition,
+            home,
+            runtime,
+            "system",
+            owner,
+        )
+    with pytest.raises(RuntimeError, match="target"):
+        binder._prove_effective_systemd(
+            {
+                **effective,
+                "ExecStart": effective["ExecStart"].replace(
+                    "/runtimes/candidate/", "/runtimes/candidate-old/"
+                ),
+            },
+            definition,
+            home,
+            runtime,
+            "system",
+            owner,
+        )
 
     plist = binder.plistlib.dumps(
         {
@@ -422,25 +519,53 @@ def test_native_service_proofs_require_exact_runtime_and_owner():
 
     windows_home = Path(r"C:\Users\Agent\.hermes")
     windows_runtime = Path(r"C:\Hermes\candidate")
-    python = rf"{windows_runtime}\venv\Scripts\python.exe"
+    venv = rf"{windows_runtime}\venv"
+    site_packages = rf"{venv}\Lib\site-packages"
+    python = r"C:\Python\pythonw.exe"
+    static_pythonpath = f"{windows_runtime};{site_packages}"
     cmd = (
         "@echo off\r\n"
         f'set "HERMES_HOME={windows_home}"\r\n'
+        f'set "VIRTUAL_ENV={venv}"\r\n'
+        f'set "PYTHONPATH={static_pythonpath};%PYTHONPATH%"\r\n'
         f'"{python}" -m hermes_cli.main gateway run\r\n'
     ).encode()
     vbs = (
         f'env.Item("HERMES_HOME") = "{windows_home}"\r\n'
+        f'env.Item("VIRTUAL_ENV") = "{venv}"\r\n'
+        'existing_pp = env.Item("PYTHONPATH")\r\n'
+        f'env.Item("PYTHONPATH") = "{static_pythonpath};" & existing_pp\r\n'
+        f'env.Item("PYTHONPATH") = "{static_pythonpath}"\r\n'
         f'sh.Run """{python}"" -m hermes_cli.main gateway run", 0, False\r\n'
     ).encode()
     binder._prove_windows_launchers(
-        cmd, vbs, windows_home, windows_runtime
+        cmd,
+        vbs,
+        windows_home,
+        windows_runtime,
+        python,
+        venv,
+        (str(windows_runtime), site_packages),
     )
-    with pytest.raises(RuntimeError, match="exact candidate"):
+    with pytest.raises(RuntimeError, match="profile|candidate|PYTHONPATH"):
         binder._prove_windows_launchers(
             cmd.replace(b"candidate\\", b"candidate-old\\"),
             vbs.replace(b"candidate\\", b"candidate-old\\"),
             windows_home,
             windows_runtime,
+            python,
+            venv,
+            (str(windows_runtime), site_packages),
+        )
+    with pytest.raises(RuntimeError, match="omits"):
+        binder._prove_windows_launchers(
+            cmd.replace(f";{site_packages}".encode(), b""),
+            vbs.replace(f";{site_packages}".encode(), b""),
+            windows_home,
+            windows_runtime,
+            python,
+            venv,
+            (str(windows_runtime), site_packages),
         )
     vbs_path = Path(r"C:\Users\Agent\.hermes\gateway-service\Hermes.vbs")
     task = (

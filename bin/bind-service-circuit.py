@@ -75,7 +75,12 @@ def _inside_runtime(raw: str, runtime: Path, *, windows: bool = False) -> bool:
     return True
 
 
-def _atomic_bytes(path: Path, data: bytes, mode: int) -> None:
+def _atomic_bytes(
+    path: Path,
+    data: bytes,
+    mode: int,
+    owner: tuple[int, int] | None = None,
+) -> None:
     _validate_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary_name = tempfile.mkstemp(
@@ -86,22 +91,63 @@ def _atomic_bytes(path: Path, data: bytes, mode: int) -> None:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
             stream.flush()
+            if owner is not None:
+                if not hasattr(os, "fchown"):
+                    raise RuntimeError("file ownership cannot be preserved")
+                os.fchown(stream.fileno(), *owner)
+            if hasattr(os, "fchmod"):
+                os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
-        os.chmod(temporary, mode)
+        if not hasattr(os, "fchmod"):
+            os.chmod(temporary, mode)
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def _occurrence_count(data: bytes) -> int:
+def _parse_assignment_value(raw: bytes) -> str:
+    raw = raw.strip(b" \t")
+    if not raw:
+        return ""
     try:
-        text = data.decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise ValueError("profile environment is not valid UTF-8") from exc
+        raise ValueError("profile circuit assignment is not valid UTF-8") from exc
+    if text.startswith("'") or text.startswith('"'):
+        quote = text[0]
+        if len(text) < 2 or not text.endswith(quote):
+            raise ValueError("profile circuit assignment has invalid quoting")
+        body = text[1:-1]
+        if quote == "'":
+            return body
+        rendered: list[str] = []
+        index = 0
+        while index < len(body):
+            character = body[index]
+            if character != "\\":
+                rendered.append(character)
+                index += 1
+                continue
+            index += 1
+            if index >= len(body) or body[index] not in {'\\', '"'}:
+                raise ValueError("profile circuit assignment has unsupported escaping")
+            rendered.append(body[index])
+            index += 1
+        return "".join(rendered)
+    return text
+
+
+def _binding_values(data: bytes) -> list[str]:
+    key = re.escape(KEY.encode())
     pattern = re.compile(
-        rf"(?m)^\s*(?:export\s+)?{re.escape(KEY)}\s*="
+        rb"^[ \t]*(?:export[ \t]+)?" + key + rb"[ \t]*=(.*)$"
     )
-    return len(pattern.findall(text))
+    values: list[str] = []
+    for line in data.splitlines():
+        match = pattern.fullmatch(line.rstrip(b"\r"))
+        if match:
+            values.append(_parse_assignment_value(match.group(1)))
+    return values
 
 
 def _render_binding(data: bytes, value: str) -> bytes:
@@ -125,40 +171,6 @@ def _runtime_python(runtime: Path) -> Path:
     raise ValueError("candidate runtime Python is missing")
 
 
-def _loaded_value(home: Path, runtime: Path) -> str | None:
-    python = _runtime_python(runtime)
-    code = (
-        "import os,sys;"
-        "from pathlib import Path;"
-        "from hermes_cli.env_loader import load_hermes_dotenv;"
-        "load_hermes_dotenv(hermes_home=Path(sys.argv[1]),"
-        "project_env=Path(sys.argv[2]));"
-        f"sys.stdout.write(os.environ.get({KEY!r},''))"
-    )
-    env = os.environ.copy()
-    env.pop(KEY, None)
-    env.pop("PYTHONHOME", None)
-    env.pop("PYTHONPATH", None)
-    result = subprocess.run(
-        [
-            str(python),
-            "-c",
-            code,
-            str(home),
-            str(runtime / ".botdoctor-no-project-env"),
-        ],
-        cwd=runtime,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=30,
-    )
-    if result.returncode:
-        raise RuntimeError("candidate environment loader verification failed")
-    return result.stdout
-
-
 def _receipt_hash(value: object, field: str) -> str:
     raw = str(value or "")
     if re.fullmatch(r"[0-9a-f]{64}", raw) is None:
@@ -171,6 +183,43 @@ def _receipt_mode(value: object, field: str) -> int:
     if re.fullmatch(r"0[0-7]{3}", raw) is None:
         raise ValueError(f"profile environment receipt has invalid {field}")
     return int(raw, 8)
+
+
+def _receipt_owner(receipt: dict[str, object], prefix: str) -> tuple[int, int] | None:
+    uid = receipt.get(f"{prefix}_uid")
+    gid = receipt.get(f"{prefix}_gid")
+    if uid is None and gid is None:
+        return None
+    if (
+        isinstance(uid, bool)
+        or isinstance(gid, bool)
+        or not isinstance(uid, int)
+        or not isinstance(gid, int)
+        or uid < 0
+        or gid < 0
+    ):
+        raise ValueError(f"profile environment receipt has invalid {prefix} owner")
+    return uid, gid
+
+
+def _path_owner(path: Path) -> tuple[int, int] | None:
+    if os.name == "nt":
+        return None
+    metadata = path.stat()
+    return metadata.st_uid, metadata.st_gid
+
+
+def _new_profile_owner(home: Path) -> tuple[int, int] | None:
+    if os.name == "nt":
+        return None
+    owner = _path_owner(home)
+    if owner is None or pwd is None:
+        raise RuntimeError("profile owner cannot be proven")
+    try:
+        pwd.getpwuid(owner[0])
+    except KeyError as exc:
+        raise RuntimeError("profile owner cannot be proven") from exc
+    return owner
 
 
 def _restore_backup(home: Path, backup: Path) -> None:
@@ -191,7 +240,7 @@ def _restore_backup(home: Path, backup: Path) -> None:
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     if (
         not isinstance(receipt, dict)
-        or receipt.get("schema_version") != 1
+        or receipt.get("schema_version") != 2
         or receipt.get("kind") != "botdoctor_profile_environment_binding"
         or receipt.get("status") not in {"pending", "completed"}
         or receipt.get("hermes_home") != str(home)
@@ -202,6 +251,8 @@ def _restore_backup(home: Path, backup: Path) -> None:
     existed = receipt["existed"]
     before_mode = _receipt_mode(receipt.get("before_mode"), "before_mode")
     after_mode = _receipt_mode(receipt.get("after_mode"), "after_mode")
+    before_owner = _receipt_owner(receipt, "before")
+    after_owner = _receipt_owner(receipt, "after")
     before_hash = receipt.get("before_sha256")
     if existed:
         before_hash = _receipt_hash(before_hash, "before_sha256")
@@ -218,15 +269,19 @@ def _restore_backup(home: Path, backup: Path) -> None:
         if before_hash is not None or saved_path.exists() or saved_path.is_symlink():
             raise ValueError("profile environment receipt has unexpected backup data")
         before = None
+        if before_owner is not None:
+            raise ValueError("profile environment receipt has unexpected owner")
     after_hash = _receipt_hash(receipt.get("after_sha256"), "after_sha256")
     env_path = home / ".env"
     _validate_path(env_path)
     current = env_path.read_bytes() if env_path.is_file() else None
     current_mode = env_path.stat().st_mode & 0o777 if current is not None else None
+    current_owner = _path_owner(env_path) if current is not None else None
     valid_after = (
         current is not None
         and _sha256(current) == after_hash
         and current_mode == after_mode
+        and current_owner == after_owner
     )
     valid_before = (
         existed
@@ -234,6 +289,7 @@ def _restore_backup(home: Path, backup: Path) -> None:
         and before is not None
         and _sha256(current) == _sha256(before)
         and current_mode == before_mode
+        and current_owner == before_owner
     ) or (not existed and current is None)
     if not valid_after and not (
         receipt["status"] == "pending" and valid_before
@@ -242,14 +298,10 @@ def _restore_backup(home: Path, backup: Path) -> None:
     if before is None:
         env_path.unlink(missing_ok=True)
     else:
-        _atomic_bytes(env_path, before, before_mode)
+        _atomic_bytes(env_path, before, before_mode, before_owner)
 
 
-def _bind_environment(
-    home: Path,
-    runtime: Path,
-    verify: Callable[[], str | None],
-) -> Path | None:
+def _bind_environment(home: Path) -> Path | None:
     env_path = home / ".env"
     _validate_path(env_path)
     if env_path.exists() and not env_path.is_file():
@@ -257,12 +309,14 @@ def _bind_environment(
     before = env_path.read_bytes() if env_path.is_file() else b""
     existed = env_path.is_file()
     before_mode = env_path.stat().st_mode & 0o777 if existed else 0
+    before_owner = _path_owner(env_path) if existed else None
+    after_owner = before_owner if existed else _new_profile_owner(home)
     expected = str(home / "state" / "codex-401-circuit.json")
-    occurrences = _occurrence_count(before)
-    if occurrences > 1:
+    values = _binding_values(before)
+    if len(values) > 1:
         raise RuntimeError("profile circuit binding is duplicated")
-    if occurrences == 1:
-        if verify() != expected:
+    if values:
+        if values[0] != expected:
             raise RuntimeError("profile circuit binding conflicts with this profile")
         return None
     after = _render_binding(before, expected)
@@ -276,7 +330,7 @@ def _bind_environment(
     if existed:
         _atomic_bytes(backup / ".env.before", before, 0o600)
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "botdoctor_profile_environment_binding",
         "status": "pending",
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -284,8 +338,12 @@ def _bind_environment(
         "existed": existed,
         "before_sha256": _sha256(before) if existed else None,
         "before_mode": format(before_mode, "04o"),
+        "before_uid": before_owner[0] if before_owner else None,
+        "before_gid": before_owner[1] if before_owner else None,
         "after_sha256": _sha256(after),
         "after_mode": format(after_mode, "04o"),
+        "after_uid": after_owner[0] if after_owner else None,
+        "after_gid": after_owner[1] if after_owner else None,
         "rollback": str(backup),
     }
     receipt_path = backup / "receipt.json"
@@ -295,9 +353,9 @@ def _bind_environment(
         0o600,
     )
     try:
-        _atomic_bytes(env_path, after, after_mode)
-        if verify() != expected:
-            raise RuntimeError("candidate environment loader rejected profile binding")
+        _atomic_bytes(env_path, after, after_mode, after_owner)
+        if _binding_values(env_path.read_bytes()) != [expected]:
+            raise RuntimeError("profile circuit binding verification failed")
     except BaseException:
         _restore_backup(home, backup)
         raise
@@ -352,6 +410,100 @@ def _prove_systemd(
         current_user or _current_identity()[0]
     ).casefold():
         raise RuntimeError("systemd user scope does not match the proven owner")
+
+
+def _systemd_unescape(value: str) -> str:
+    def replace_hex(match: re.Match[str]) -> str:
+        return chr(int(match.group(1), 16))
+
+    value = re.sub(r"\\x([0-9A-Fa-f]{2})", replace_hex, value)
+    return value.replace(r"\s", " ").replace(r"\\", "\\")
+
+
+def _systemd_properties(
+    service: str,
+    scope: str,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, str]:
+    prefix = ["systemctl", "--user"] if scope == "user" else ["systemctl"]
+    reload_result = run(
+        [*prefix, "daemon-reload"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if reload_result.returncode:
+        raise RuntimeError("systemd daemon-reload failed")
+    names = ("ExecStart", "Environment", "User", "FragmentPath", "DropInPaths")
+    result = run(
+        [
+            *prefix,
+            "show",
+            service,
+            "--no-pager",
+            "--property",
+            ",".join(names),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError("effective systemd service query failed")
+    properties: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key in properties:
+            raise RuntimeError("effective systemd properties are ambiguous")
+        properties[key] = value
+    if set(properties) != set(names):
+        raise RuntimeError("effective systemd properties are incomplete")
+    return properties
+
+
+def _prove_effective_systemd(
+    properties: dict[str, str],
+    definition: Path,
+    home: Path,
+    runtime: Path,
+    scope: str,
+    owner: str,
+    current_user: str | None = None,
+) -> None:
+    if properties["DropInPaths"].strip():
+        raise RuntimeError("systemd service has unverified drop-in overrides")
+    fragment = _lexical(Path(_systemd_unescape(properties["FragmentPath"])))
+    if fragment != definition:
+        raise RuntimeError("effective systemd fragment is not the native definition")
+    exec_match = re.search(
+        r"(?:^|[ {])path=(.*?)(?:\s*;|$)",
+        _systemd_unescape(properties["ExecStart"]),
+    )
+    if not exec_match or not _inside_runtime(exec_match.group(1).strip(), runtime):
+        raise RuntimeError("effective systemd service does not target the candidate")
+    try:
+        environment = shlex.split(_systemd_unescape(properties["Environment"]))
+    except ValueError as exc:
+        raise RuntimeError("effective systemd environment is invalid") from exc
+    homes = [
+        token.split("=", 1)[1]
+        for token in environment
+        if token.startswith("HERMES_HOME=")
+    ]
+    if homes != [str(home)]:
+        raise RuntimeError("effective systemd service does not bind the profile")
+    effective_user = properties["User"].strip()
+    if scope == "system":
+        if effective_user != owner:
+            raise RuntimeError("effective systemd service has the wrong owner")
+    elif effective_user or owner.casefold() != (
+        current_user or _current_identity()[0]
+    ).casefold():
+        raise RuntimeError("effective systemd user scope has the wrong owner")
 
 
 def _current_identity() -> tuple[str, Path]:
@@ -418,18 +570,158 @@ def _vbs_literal(raw: str) -> str:
     return raw.replace('""', '"')
 
 
+def _windows_path(value: str) -> str:
+    return ntpath.normcase(ntpath.abspath(value.strip('"')))
+
+
+def _windows_equal(left: str, right: str) -> bool:
+    return _windows_path(left) == _windows_path(right)
+
+
+def _windows_gateway_executable(command: str) -> str:
+    executable = _first_windows_executable(command)
+    if not executable:
+        return ""
+    remainder = command.strip()[len(executable) :]
+    if command.strip().startswith('"'):
+        remainder = command.strip()[len(executable) + 2 :]
+    if re.fullmatch(
+        r'\s+-m\s+hermes_cli\.main'
+        r'(?:\s+--profile\s+(?:"[^"]+"|\S+))?'
+        r"\s+gateway\s+run\s*",
+        remainder,
+        flags=re.IGNORECASE,
+    ) is None:
+        return ""
+    return executable
+
+
+def _windows_launch_spec(runtime: Path) -> tuple[str, str, tuple[str, ...]]:
+    python = _runtime_python(runtime)
+    venv = python.parent.parent
+    windowed = python.with_name(python.stem + "w" + python.suffix)
+    config: dict[str, str] = {}
+    try:
+        for line in (venv / "pyvenv.cfg").read_text(encoding="utf-8").splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                config[key.strip().lower()] = value.strip()
+    except OSError:
+        pass
+    site_packages = venv / "Lib" / "site-packages"
+    base_pythonw = Path(config.get("home", "")) / "pythonw.exe"
+    if "uv" in config and config.get("home") and base_pythonw.is_file():
+        if not site_packages.is_dir():
+            raise RuntimeError("candidate site-packages are missing")
+        return str(base_pythonw), str(venv), (str(runtime), str(site_packages))
+    if not windowed.is_file():
+        windowed = python
+    return str(windowed), str(venv), (str(runtime),)
+
+
+def _cmd_environment(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.fullmatch(
+            r'\s*set\s+"([A-Za-z_][A-Za-z0-9_]*)=(.*)"\s*',
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        key = match.group(1).upper()
+        if key in values:
+            raise RuntimeError("Windows CMD environment is ambiguous")
+        values[key] = match.group(2)
+    return values
+
+
+def _vbs_environment(text: str) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.fullmatch(
+            r'\s*env\.Item\("([A-Za-z_][A-Za-z0-9_]*)"\)\s*=\s*'
+            r'"((?:""|[^"])*)"\s*',
+            line,
+            flags=re.IGNORECASE,
+        )
+        if not match:
+            continue
+        key = match.group(1).upper()
+        if key == "PYTHONPATH":
+            continue
+        if key in values:
+            raise RuntimeError("Windows VBS environment is ambiguous")
+        values[key] = _vbs_literal(match.group(2))
+    return values
+
+
+def _vbs_pythonpath(text: str) -> str:
+    values = [
+        _vbs_literal(match.group(1)).removesuffix(";")
+        for line in text.splitlines()
+        if (
+            match := re.fullmatch(
+                r'\s*env\.Item\("PYTHONPATH"\)\s*=\s*'
+                r'"((?:""|[^"])*)"(?:\s*&\s*existing_pp)?\s*',
+                line,
+                flags=re.IGNORECASE,
+            )
+        )
+    ]
+    if len(values) != 2 or values[0] != values[1]:
+        raise RuntimeError("Windows VBS PYTHONPATH is ambiguous")
+    return values[0]
+
+
+def _prove_windows_pythonpath(
+    rendered: str,
+    runtime: Path,
+    required: tuple[str, ...],
+) -> None:
+    entries = [entry for entry in rendered.split(";") if entry]
+    if not entries or any(
+        not _inside_runtime(entry, runtime, windows=True) for entry in entries
+    ):
+        raise RuntimeError("Windows PYTHONPATH escapes the candidate")
+    normalized = {_windows_path(entry) for entry in entries}
+    if any(_windows_path(path) not in normalized for path in required):
+        raise RuntimeError("Windows PYTHONPATH omits candidate launch paths")
+
+
 def _prove_windows_launchers(
     cmd_data: bytes,
     vbs_data: bytes,
     home: Path,
     runtime: Path,
+    expected_python: str | None = None,
+    venv_dir: str | None = None,
+    required_pythonpath: tuple[str, ...] | None = None,
 ) -> None:
     cmd = cmd_data.decode("utf-8")
     vbs = vbs_data.decode("utf-8")
-    cmd_home = f'set "HERMES_HOME={home}"'
-    vbs_home = f'env.Item("HERMES_HOME") = "{str(home).replace(chr(34), chr(34) * 2)}"'
-    if cmd.splitlines().count(cmd_home) != 1 or vbs.splitlines().count(vbs_home) != 1:
+    if expected_python is None or venv_dir is None or required_pythonpath is None:
+        expected_python, venv_dir, required_pythonpath = _windows_launch_spec(
+            runtime
+        )
+    cmd_env = _cmd_environment(cmd)
+    vbs_env = _vbs_environment(vbs)
+    if (
+        cmd_env.get("HERMES_HOME") != str(home)
+        or vbs_env.get("HERMES_HOME") != str(home)
+        or not _windows_equal(cmd_env.get("VIRTUAL_ENV", ""), venv_dir)
+        or not _windows_equal(vbs_env.get("VIRTUAL_ENV", ""), venv_dir)
+    ):
         raise RuntimeError("Windows launchers do not bind the proven profile")
+    cmd_pythonpath = cmd_env.get("PYTHONPATH", "")
+    suffix = ";%PYTHONPATH%"
+    if not cmd_pythonpath.upper().endswith(suffix):
+        raise RuntimeError("Windows CMD PYTHONPATH is invalid")
+    cmd_static = cmd_pythonpath[: -len(suffix)]
+    vbs_static = _vbs_pythonpath(vbs)
+    if cmd_static != vbs_static:
+        raise RuntimeError("Windows launcher PYTHONPATH values differ")
+    _prove_windows_pythonpath(cmd_static, runtime, required_pythonpath)
     command_lines = [
         line
         for line in cmd.splitlines()
@@ -449,14 +741,14 @@ def _prove_windows_launchers(
     if (
         len(command_lines) != 1
         or len(vbs_runs) != 1
-        or not _inside_runtime(
-            _first_windows_executable(command_lines[0]), runtime, windows=True
+        or not _windows_equal(
+            _windows_gateway_executable(command_lines[0]), expected_python
         )
-        or not _inside_runtime(
-            _first_windows_executable(vbs_runs[0]), runtime, windows=True
+        or not _windows_equal(
+            _windows_gateway_executable(vbs_runs[0]), expected_python
         )
     ):
-        raise RuntimeError("Windows launchers do not target the exact candidate")
+        raise RuntimeError("Windows launchers do not match the pinned launch spec")
 
 
 def _task_proof(task_xml: str, vbs_path: Path, owner: str) -> None:
@@ -541,9 +833,7 @@ def main() -> int:
     if not runtime.is_dir():
         raise ValueError("candidate runtime does not exist")
     if not args.prove_kind:
-        backup = _bind_environment(
-            home, runtime, lambda: _loaded_value(home, runtime)
-        )
+        backup = _bind_environment(home)
         print(
             json.dumps(
                 {
@@ -582,6 +872,20 @@ def main() -> int:
                 raise RuntimeError("systemd definition is not the native path")
             _prove_systemd(
                 definition.read_bytes(),
+                home,
+                runtime,
+                args.scope,
+                args.service_owner,
+            )
+            service = _runtime_value(
+                runtime,
+                home,
+                "from hermes_cli.gateway import get_service_name;"
+                "print(get_service_name())",
+            )
+            _prove_effective_systemd(
+                _systemd_properties(service, args.scope),
+                definition,
                 home,
                 runtime,
                 args.scope,
@@ -642,7 +946,13 @@ def main() -> int:
             or not vbs.is_file()
         ):
             raise RuntimeError("Windows launchers do not match the proven profile")
-        _prove_windows_launchers(cmd.read_bytes(), vbs.read_bytes(), home, runtime)
+        _prove_windows_launchers(
+            cmd.read_bytes(),
+            vbs.read_bytes(),
+            home,
+            runtime,
+            *_windows_launch_spec(runtime),
+        )
         _task_proof(_query_windows_task(args.task_name), vbs, args.service_owner)
     print(
         json.dumps(
