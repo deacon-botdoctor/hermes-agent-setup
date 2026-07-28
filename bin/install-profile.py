@@ -19,6 +19,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,21 @@ REQUIRED_PLUGINS = (
     "botdoctor-immersion",
     "mcp-on-demand-control",
 )
+STAGING_LIVE_FILES = (
+    "auth.json",
+    "gateway.pid",
+    "gateway.lock",
+    "gateway_state.json",
+    "state.db",
+    "state/public-setup-current.json",
+)
+STAGING_LIVE_DIRECTORIES = (
+    "cron",
+    "gateway-service",
+    "memories",
+    "projects",
+    "sessions",
+)
 
 
 def sha256(path: Path) -> str:
@@ -39,10 +55,19 @@ def sha256(path: Path) -> str:
 
 def atomic_bytes(path: Path, data: bytes, mode: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
-    tmp.write_bytes(data)
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", dir=path.parent
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _is_reparse_point(path: Path) -> bool:
@@ -76,6 +101,38 @@ def validate_profile_path(home: Path, path: Path) -> None:
     resolved_parent = path.parent.resolve(strict=False)
     if not resolved_parent.is_relative_to(home):
         raise RuntimeError(f"profile path parent escapes HERMES_HOME: {path}")
+
+
+def initialize_staging_config(home: Path, config_path: Path) -> None:
+    validate_profile_path(home, config_path)
+    if config_path.exists() or config_path.is_symlink():
+        raise RuntimeError("staging config already exists")
+    present_files = [
+        relative
+        for relative in STAGING_LIVE_FILES
+        if (home / relative).exists() or (home / relative).is_symlink()
+    ]
+    populated_directories = [
+        relative
+        for relative in STAGING_LIVE_DIRECTORIES
+        if (home / relative).is_symlink()
+        or _is_reparse_point(home / relative)
+        or (
+            (home / relative).is_dir()
+            and next((home / relative).iterdir(), None) is not None
+        )
+        or (
+            (home / relative).exists()
+            and not (home / relative).is_dir()
+        )
+    ]
+    present = present_files + populated_directories
+    if present:
+        raise RuntimeError(
+            "staging home contains live state or service markers: "
+            + ", ".join(present)
+        )
+    atomic_bytes(config_path, b"{}\n", 0o600)
 
 
 def runtime_python(runtime: Path, explicit: Path | None) -> Path:
@@ -245,10 +302,10 @@ def _receipt_sha256(value: object, field: str) -> str:
     return digest
 
 
-def _receipt_mode(value: object) -> int:
+def _receipt_mode(value: object, field: str = "before_mode") -> int:
     raw = str(value or "")
     if re.fullmatch(r"0[0-7]{3}", raw) is None:
-        raise ValueError("rollback receipt has invalid before_mode")
+        raise ValueError(f"rollback receipt has invalid {field}")
     return int(raw, 8)
 
 
@@ -257,24 +314,47 @@ def _preflight_restore(
     backup: Path,
     home: Path,
     config_path: Path,
+    config_existed_before: object,
     config_sha256_before: object,
-) -> tuple[list[tuple[Path, bool, bytes | None, int]], bytes]:
+    config_mode_before: object,
+) -> tuple[
+    list[tuple[Path, bool, bytes | None, int]],
+    bytes | None,
+    int | None,
+]:
     validate_profile_path(home, backup / "files")
     validate_profile_path(home, config_path)
     saved_config = backup / "config.yaml.before"
     validate_profile_path(home, saved_config)
-    expected_config_sha = _receipt_sha256(
-        config_sha256_before, "config_sha256_before"
-    )
-    if (
-        not saved_config.is_file()
+    if not isinstance(config_existed_before, bool):
+        raise ValueError("rollback receipt config existence is invalid")
+    config_data: bytes | None = None
+    expected_config_mode: int | None = None
+    if config_existed_before:
+        expected_config_sha = _receipt_sha256(
+            config_sha256_before, "config_sha256_before"
+        )
+        expected_config_mode = _receipt_mode(
+            config_mode_before, "config_mode_before"
+        )
+        if (
+            not saved_config.is_file()
+            or saved_config.is_symlink()
+            or _is_reparse_point(saved_config)
+        ):
+            raise RuntimeError(
+                f"rollback config is missing or unsafe: {saved_config}"
+            )
+        config_data = saved_config.read_bytes()
+        if hashlib.sha256(config_data).hexdigest() != expected_config_sha:
+            raise RuntimeError("rollback config hash does not match receipt")
+    elif (
+        config_sha256_before is not None
+        or config_mode_before is not None
+        or saved_config.exists()
         or saved_config.is_symlink()
-        or _is_reparse_point(saved_config)
     ):
-        raise RuntimeError(f"rollback config is missing or unsafe: {saved_config}")
-    config_data = saved_config.read_bytes()
-    if hashlib.sha256(config_data).hexdigest() != expected_config_sha:
-        raise RuntimeError("rollback config hash does not match receipt")
+        raise ValueError("rollback receipt has config data for an absent config")
 
     checked: list[tuple[Path, bool, bytes | None, int]] = []
     seen: set[Path] = set()
@@ -327,7 +407,7 @@ def _preflight_restore(
                 "rollback receipt has a hash for a nonexistent destination"
             )
         checked.append((destination, existed, saved_data, mode))
-    return checked, config_data
+    return checked, config_data, expected_config_mode
 
 
 def restore(
@@ -335,10 +415,18 @@ def restore(
     backup: Path,
     home: Path,
     config_path: Path,
+    config_existed_before: object,
     config_sha256_before: object,
+    config_mode_before: object,
 ) -> None:
-    checked, config_data = _preflight_restore(
-        rows, backup, home, config_path, config_sha256_before
+    checked, config_data, config_mode = _preflight_restore(
+        rows,
+        backup,
+        home,
+        config_path,
+        config_existed_before,
+        config_sha256_before,
+        config_mode_before,
     )
     for destination, existed, saved_data, mode in reversed(checked):
         validate_profile_path(home, destination)
@@ -347,7 +435,15 @@ def restore(
             atomic_bytes(destination, saved_data, mode)
         elif destination.is_file() or destination.is_symlink():
             destination.unlink()
-    atomic_bytes(config_path, config_data, 0o600)
+    validate_profile_path(home, config_path)
+    if config_data is None:
+        if config_path.is_file() or config_path.is_symlink():
+            config_path.unlink()
+        elif config_path.exists():
+            raise RuntimeError(f"unsafe rollback config destination: {config_path}")
+    else:
+        assert config_mode is not None
+        atomic_bytes(config_path, config_data, config_mode)
 
 
 def main() -> int:
@@ -355,6 +451,11 @@ def main() -> int:
     parser.add_argument("--hermes-home", type=Path, required=True)
     parser.add_argument("--runtime-dir", type=Path)
     parser.add_argument("--runtime-python", type=Path)
+    parser.add_argument(
+        "--initialize-staging",
+        action="store_true",
+        help="Create a credential-free empty config only in an unused staging home",
+    )
     parser.add_argument(
         "--restore-backup",
         type=Path,
@@ -366,6 +467,10 @@ def main() -> int:
     config_path = home / "config.yaml"
     validate_profile_path(home, config_path)
     if args.restore_backup:
+        if args.initialize_staging:
+            parser.error(
+                "--initialize-staging cannot be combined with --restore-backup"
+            )
         backup = _lexical_path(args.restore_backup)
         backup_root = home / "state" / "public-setup-backups"
         validate_profile_path(home, backup)
@@ -396,7 +501,9 @@ def main() -> int:
             backup,
             home,
             config_path,
+            receipt.get("config_existed_before"),
             receipt.get("config_sha256_before"),
+            receipt.get("config_mode_before"),
         )
         current_receipt = home / "state" / "public-setup-current.json"
         validate_profile_path(home, current_receipt)
@@ -418,11 +525,17 @@ def main() -> int:
     if args.runtime_dir is None:
         parser.error("--runtime-dir is required unless --restore-backup is used")
     runtime = args.runtime_dir.expanduser().resolve()
+    verify_runtime(runtime)
+    config_existed_before = config_path.is_file()
+    config_mode_before = (
+        config_path.stat().st_mode & 0o777 if config_existed_before else None
+    )
+    if args.initialize_staging:
+        initialize_staging_config(home, config_path)
     if not config_path.is_file():
         raise ValueError(
             f"missing {config_path}; run native hermes setup in this profile first"
         )
-    verify_runtime(runtime)
     python = runtime_python(runtime, args.runtime_python)
 
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
@@ -431,7 +544,10 @@ def main() -> int:
         raise RuntimeError(f"backup path collision: {backup}")
     validate_profile_path(home, backup / "files")
     (backup / "files").mkdir(parents=True, mode=0o700)
-    atomic_bytes(backup / "config.yaml.before", config_path.read_bytes(), 0o600)
+    if config_existed_before:
+        atomic_bytes(
+            backup / "config.yaml.before", config_path.read_bytes(), 0o600
+        )
 
     rows: list[dict[str, Any]] = []
     for source, destination, mode in profile_files(home):
@@ -474,7 +590,15 @@ def main() -> int:
         "hermes_home": str(home),
         "runtime_dir": str(runtime),
         "files": rows,
-        "config_sha256_before": sha256(config_path),
+        "config_existed_before": config_existed_before,
+        "config_sha256_before": (
+            sha256(config_path) if config_existed_before else None
+        ),
+        "config_mode_before": (
+            format(config_mode_before, "04o")
+            if config_mode_before is not None
+            else None
+        ),
         "credentials_read": False,
         "service_switched": False,
         "gateway_restarted": False,
@@ -522,7 +646,9 @@ def main() -> int:
             backup,
             home,
             config_path,
+            receipt["config_existed_before"],
             receipt["config_sha256_before"],
+            receipt["config_mode_before"],
         )
         raise
 

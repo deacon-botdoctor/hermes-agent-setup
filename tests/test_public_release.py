@@ -208,6 +208,39 @@ def test_profile_paths_reject_reparse_parents(tmp_path, monkeypatch):
         installer.validate_profile_path(home, parent / "plugin.py")
 
 
+def test_staging_initializer_is_explicit_and_credential_free(tmp_path):
+    installer = load_script("public_install_staging", "install-profile.py")
+    home = tmp_path / "staging"
+    config_path = home / "config.yaml"
+
+    installer.initialize_staging_config(home, config_path)
+
+    assert config_path.read_bytes() == b"{}\n"
+    assert config_path.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(RuntimeError, match="already exists"):
+        installer.initialize_staging_config(home, config_path)
+    backup = home / "state" / "public-setup-backups" / "receipt"
+    (backup / "files").mkdir(parents=True)
+    installer.restore([], backup, home, config_path, False, None, None)
+    assert not config_path.exists()
+
+    scaffolded_home = tmp_path / "scaffolded"
+    (scaffolded_home / "sessions").mkdir(parents=True)
+    (scaffolded_home / "memories").mkdir()
+    installer.initialize_staging_config(
+        scaffolded_home, scaffolded_home / "config.yaml"
+    )
+
+    marked_home = tmp_path / "marked"
+    marked_home.mkdir()
+    (marked_home / "sessions").mkdir()
+    (marked_home / "sessions" / "live.json").write_text("{}\n")
+    with pytest.raises(RuntimeError, match="live state or service markers"):
+        installer.initialize_staging_config(
+            marked_home, marked_home / "config.yaml"
+        )
+
+
 def test_restore_preflights_all_hashes_before_writing(tmp_path, monkeypatch):
     installer = load_script("public_install_restore", "install-profile.py")
     home = tmp_path / "profile"
@@ -253,10 +286,146 @@ def test_restore_preflights_all_hashes_before_writing(tmp_path, monkeypatch):
             backup,
             home,
             config_path,
+            True,
             hashlib.sha256(config_data).hexdigest(),
+            "0640",
         )
 
     assert writes == []
+
+
+def test_restore_preserves_config_mode(tmp_path):
+    installer = load_script("public_install_config_mode", "install-profile.py")
+    home = tmp_path / "profile"
+    backup = home / "state" / "public-setup-backups" / "receipt"
+    (backup / "files").mkdir(parents=True)
+    config_path = home / "config.yaml"
+    config_path.write_text("after\n", encoding="utf-8")
+    before = b"before\n"
+    (backup / "config.yaml.before").write_bytes(before)
+
+    installer.restore(
+        [],
+        backup,
+        home,
+        config_path,
+        True,
+        hashlib.sha256(before).hexdigest(),
+        "0640",
+    )
+
+    assert config_path.read_bytes() == before
+    assert config_path.stat().st_mode & 0o777 == 0o640
+
+
+def test_service_circuit_bindings_match_native_definitions(tmp_path):
+    binder = load_script("public_service_binding", "bind-service-circuit.py")
+    home = tmp_path / "profile"
+    runtime = home / "state" / "runtime-candidates" / "release"
+    runtime.mkdir(parents=True)
+    circuit = home / "state" / "codex-401-circuit.json"
+
+    unit = (
+        "[Service]\n"
+        f"ExecStart={runtime}/venv/bin/python -m hermes_cli.main gateway run\n"
+        f'Environment="HERMES_HOME={home}"\n'
+    ).encode()
+    dropin = binder._systemd_binding(unit, home, runtime).decode()
+    assert f"HERMES_CODEX_401_CIRCUIT_STATE={circuit}" in dropin
+
+    plist = binder.plistlib.dumps(
+        {
+            "Label": "ai.hermes.gateway",
+            "ProgramArguments": [
+                str(runtime / "venv" / "bin" / "python"),
+                "-m",
+                "hermes_cli.main",
+                "gateway",
+                "run",
+            ],
+            "EnvironmentVariables": {"HERMES_HOME": str(home)},
+        }
+    )
+    bound_plist = binder.plistlib.loads(
+        binder._launchd_binding(plist, home, runtime)
+    )
+    assert bound_plist["EnvironmentVariables"][
+        "HERMES_CODEX_401_CIRCUIT_STATE"
+    ] == str(circuit)
+
+    cmd = (
+        "@echo off\r\n"
+        f'cd /d "{runtime}"\r\n'
+        f'set "HERMES_HOME={home}"\r\n'
+    ).encode()
+    vbs = (
+        f'env.Item("HERMES_HOME") = "{home}"\r\n'
+        f'sh.CurrentDirectory = "{runtime}"\r\n'
+    ).encode()
+    bound_cmd, bound_vbs = binder._windows_launcher_bindings(
+        cmd, vbs, home, runtime
+    )
+    assert str(circuit).encode() in bound_cmd
+    assert str(circuit).encode() in bound_vbs
+    task_xml = (
+        "<Task><Actions><Exec><Command>wscript.exe</Command>"
+        f'<Arguments>//B //Nologo "{home / "gateway-service" / "Hermes.vbs"}"'
+        "</Arguments></Exec></Actions></Task>"
+    )
+    assert binder._task_targets_vbs(
+        task_xml, home / "gateway-service" / "Hermes.vbs"
+    )
+    assert not binder._task_targets_vbs(
+        task_xml.replace("Hermes.vbs\"", "Hermes.vbs.evil\""),
+        home / "gateway-service" / "Hermes.vbs",
+    )
+
+
+def test_service_binding_backup_is_reversible(tmp_path):
+    binder = load_script(
+        "public_service_binding_rollback", "bind-service-circuit.py"
+    )
+    home = tmp_path / "profile"
+    home.mkdir()
+    service_dir = home / "gateway-service"
+    definition = service_dir / "Hermes.cmd"
+    companion = service_dir / "Hermes.vbs"
+    service_dir.mkdir()
+    definition.write_bytes(b"before\n")
+    companion.write_bytes(b"before-vbs\n")
+
+    backup = binder._apply_binding(
+        home,
+        "windows",
+        {
+            definition: (b"after\n", 0o640),
+            companion: (b"after-vbs\n", 0o640),
+        },
+    )
+
+    assert definition.read_bytes() == b"after\n"
+    assert binder._restore_backup(home, backup) == 2
+    assert definition.read_bytes() == b"before\n"
+    assert companion.read_bytes() == b"before-vbs\n"
+
+    pending_backup = binder._apply_binding(
+        home,
+        "windows",
+        {
+            definition: (b"after\n", 0o640),
+            companion: (b"after-vbs\n", 0o640),
+        },
+    )
+    receipt_path = pending_backup / "receipt.json"
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["status"] = "pending"
+    receipt_path.write_text(json.dumps(receipt), encoding="utf-8")
+    definition.write_bytes(b"before\n")
+    definition.chmod(0o644)
+
+    assert binder._restore_backup(home, pending_backup) == 2
+    assert definition.read_bytes() == b"before\n"
+    assert companion.read_bytes() == b"before-vbs\n"
 
 
 def test_windows_source_canonicalization_accepts_only_crlf():
@@ -372,6 +541,7 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
     assert len(backups) == 1
     receipt = json.loads((backups[0] / "receipt.json").read_text(encoding="utf-8"))
     assert receipt["status"] == "pending"
+    assert receipt["config_mode_before"] == "0644"
     assert len(receipt["files"]) == 2
 
 
@@ -450,6 +620,9 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     )
     assert "core.autocrlf=false" in instructions
     assert instructions.count("HERMES_CODEX_401_CIRCUIT_STATE") >= 4
+    assert instructions.count("--initialize-staging") >= 2
+    assert "bind-service-circuit.py" in instructions
+    assert "gateway install --no-start-now" in instructions
 
 
 def test_public_text_has_no_private_runtime_routes():
