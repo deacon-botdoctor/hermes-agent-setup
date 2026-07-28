@@ -53,7 +53,7 @@ def test_release_identity_matches_source_manifest():
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "055a770630917e5d7534480dc829358f36ecbf083174d211995a6d8713a25b70",
+        "digest": "0ef7d8cbf88fdc7089a9f0820e86310f91b558198554c83f3ad42de8981e7241",
         "file_count": 39,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (

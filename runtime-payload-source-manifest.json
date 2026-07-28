@@ -6,7 +6,7 @@
   "components": {
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "9dcfcc7cfb1826337e43086f433f1e34e863047b5b2936ea8f805243c5923e04",
+      "digest": "946e5f530a2efd70d588dfd76af5a64cf5ca9e940fce677824d85ac52a25c433",
       "excluded_paths": [],
       "file_count": 79,
       "files": [
@@ -41,7 +41,7 @@
           "type": "blob"
         },
         {
-          "blob": "5ca056258638b8299118c138c6125bd8f5e58b25",
+          "blob": "b88291979182053b76fbdb6fa6ae50cc5a57247c",
           "mode": "100755",
           "path": "bin/llm-attempt-reconcile.py",
           "type": "blob"
@@ -293,7 +293,7 @@
           "type": "blob"
         },
         {
-          "blob": "21e31bf096a6a2c221e2a62f26df60b92c17c8b9",
+          "blob": "cf86f535b9b6e76970c09b5b9170c5acbdcf7ca0",
           "mode": "100644",
           "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
           "type": "blob"
@@ -547,9 +547,9 @@
       ]
     }
   },
-  "deployment_digest": "4b274fe95d216805061394a1ce70fc5ca0f26ccaa3e74d46259dd28ea3fdd044",
+  "deployment_digest": "4d029eb5a400120e2a307181a5cdd2c4b36ba4a92bf0977a35e79c120d989af1",
   "assembled_runtime_fingerprint": {
-    "digest": "055a770630917e5d7534480dc829358f36ecbf083174d211995a6d8713a25b70",
+    "digest": "0ef7d8cbf88fdc7089a9f0820e86310f91b558198554c83f3ad42de8981e7241",
     "file_count": 39,
     "files": {
       ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
@@ -579,7 +579,7 @@
       },
       "agent/llm_attempt_receipts.py": {
         "mode": "100644",
-        "sha256": "0ca246638140fc92031df27e87b01fc810426cabe084e17795b927004fb02b8c",
+        "sha256": "9f5983e88e35454a1fccae0c112ffcbfe3ee270836a677b82d8fe7db27dc5d28",
         "type": "blob"
       },
       "agent/prompt_builder.py": {
