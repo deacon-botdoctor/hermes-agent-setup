@@ -56,6 +56,12 @@ _X_STATUS_URL_RE = re.compile(
 )
 
 
+def _capture_enabled() -> bool:
+    return os.environ.get(
+        "HERMES_ENABLE_TELEGRAM_TRANSCRIPT", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _normalize_x_status_url(url: str) -> str:
     return (url or "").rstrip("\"'])}>")
 
@@ -474,6 +480,8 @@ def _recent_duplicate_exists(
 
 
 async def handle(event_type: str, context: dict):
+    if not _capture_enabled():
+        return
     try:
         platform = str(context.get("platform", "") or "").strip().lower()
         raw_chat_id, thread_id, user_id, chat_type, chat_id = _coerce_routing(context)

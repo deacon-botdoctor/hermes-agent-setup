@@ -114,7 +114,7 @@ TELEGRAM_HISTORY_SCHEMA = {
         "properties": {
             "chat_id": {
                 "type": "string",
-                "description": "The chat ID to read. Format: 'telegram:{chat_id}' for a DM or bare group, or 'telegram:{chat_id}:{thread_id}' for a specific forum topic. IMPORTANT: when you are inside a Telegram group topic (the Source context shows 'thread: N'), you MUST use the topic-scoped form 'telegram:{chat_id}:{thread_id}' — never the bare group ID. The bare group ID crosses topic boundaries and will return messages from unrelated topics. Examples: 'telegram:0' (the operator DM), 'telegram:-5217351028:42' (Ridley Chat topic 42), 'telegram:-100XXXXXXXXXX:15470' (group topic)."
+                "description": "The chat ID to read. Format: 'telegram:{chat_id}' for a DM or bare group, or 'telegram:{chat_id}:{thread_id}' for a specific forum topic. IMPORTANT: when you are inside a Telegram group topic (the Source context shows 'thread: N'), you MUST use the topic-scoped form 'telegram:{chat_id}:{thread_id}' — never the bare group ID. The bare group ID crosses topic boundaries and will return messages from unrelated topics."
             },
             "limit": {
                 "type": "integer",
@@ -236,14 +236,6 @@ def _provenance_lookup(chat_id: str, thread_id: Optional[str], message_id: Optio
     if not message_id:
         return []
     try:
-        import sys as _sys
-        _hermes_agent = os.path.join(str(HERMES_HOME), "hermes-agent")
-        venv_sp = os.path.join(
-            _hermes_agent, "venv", "lib", "python3.11", "site-packages"
-        )
-        for _p in (_hermes_agent, venv_sp):
-            if _p not in _sys.path and os.path.isdir(_p):
-                _sys.path.insert(0, _p)
         from gateway import media_provenance  # type: ignore
     except Exception:
         return []

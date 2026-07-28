@@ -209,7 +209,7 @@ def _host_level_target_absent(entry: dict, hermes_dir: Path) -> bool:
 
     Covers host-level (non-agent-tree) artifact roots: bin/, crons/, hooks/,
     LaunchAgents, and MCP server trees (mcp-servers/, local-mcp-servers/).
-    mcp-servers/ added 2026-07-02: anamnesis server.py is an Enoch-only
+    mcp-servers/ added 2026-07-02: anamnesis server.py is a private-control
     artifact, so its recall patches must classify as env-skip (not
     ANCHOR-MISS) on client hosts where the server is absent.
     """
@@ -697,7 +697,7 @@ def main():
         elif hermes_dir.parent.name == ".hermes":
             receipt_home = hermes_dir.parent
         else:
-            # Spark/Linux client convention keeps hermes-agent as a peer of
+            # Some Linux client layouts keep hermes-agent as a peer of
             # ~/.hermes; preserve the established receipt location there.
             receipt_home = Path.home() / ".hermes"
         state_dir = receipt_home / "state"

@@ -2,11 +2,11 @@
 task-ledger tools
 """
 
+import importlib.util
 import json
 import logging
 import os
 import sqlite3
-import sys
 import time
 import uuid
 from pathlib import Path
@@ -14,9 +14,12 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path.home() / ".hermes" / "data" / "task-ledger.db"
+HERMES_HOME = Path(
+    os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))
+).expanduser()
+DB_PATH = HERMES_HOME / "data" / "task-ledger.db"
 AGENT_NAME = os.environ.get("HERMES_AGENT_NAME") or os.environ.get("AGENT_NAME") or "agent"
-CHANGELOG_DIR = Path.home() / ".shared-agent-memory"
+CHANGELOG_DIR = os.environ.get("HERMES_TASK_CHANGELOG_DIR", "").strip()
 
 _db_conn: Optional[sqlite3.Connection] = None
 _record_change = None
@@ -152,12 +155,19 @@ def _load_changelog_backend():
     if _changelog_load_attempted:
         return _record_change, _new_reflection_entry
     _changelog_load_attempted = True
+    if not CHANGELOG_DIR:
+        return _record_change, _new_reflection_entry
     try:
-        sys.path.insert(0, str(CHANGELOG_DIR))
-        from changelog import new_reflection_entry, record_change  # type: ignore
-
-        _record_change = record_change
-        _new_reflection_entry = new_reflection_entry
+        module_path = Path(CHANGELOG_DIR).expanduser().resolve() / "changelog.py"
+        spec = importlib.util.spec_from_file_location(
+            "hermes_task_ledger_changelog", module_path
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"cannot load changelog backend: {module_path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _record_change = module.record_change
+        _new_reflection_entry = module.new_reflection_entry
     except Exception:
         logger.exception("task-ledger: failed to load changelog backend")
     return _record_change, _new_reflection_entry
@@ -166,7 +176,7 @@ def _load_changelog_backend():
 TASK_OPEN_SCHEMA = {
     "name": "task_open",
     "description": (
-        "Register a new work item when the user (Deacon) asks you to do something that "
+        "Register a new work item when the user asks you to do something that "
         "will take effort, produce an artifact, or span multiple turns. Call this IMMEDIATELY "
         "when you see an ask. Returns a task_id you must later pass to task_done or task_block."
     ),
@@ -208,7 +218,7 @@ def task_open_handler(
         session_id = kwargs.get("session_id", "") or os.environ.get("HERMES_SESSION_ID", "")
         platform = kwargs.get("platform", "") or os.environ.get("HERMES_SESSION_PLATFORM", "")
         ctx = _extract_chat_context(session_id, platform)
-        requested_by = kwargs.get("sender_name") or kwargs.get("sender_id") or "Deacon"
+        requested_by = kwargs.get("sender_name") or kwargs.get("sender_id") or "user"
         ask = _clean_text(ask)
         expected_artifact = _clean_text(expected_artifact)
         client_slug = _clean_text(client_slug)

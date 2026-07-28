@@ -10,7 +10,7 @@ agent's message count since last reflection, and fires the cycle when:
 This means high-volume agents reflect more often, quiet agents don't waste
 model calls, and reflection is always triggered by having enough signal.
 
-Usage (cron every 2h on Mini):
+Usage (cron every 2h):
     python3 self-improvement-trigger.py [--dry-run]
 """
 
@@ -44,7 +44,7 @@ TRIGGER_LOG = HERMES_HOME / "logs" / "self-improvement-trigger.log"
 TOOL_READINESS_FILE = HERMES_HOME / "state" / "tool-readiness-probe-latest.json"
 TOOL_READINESS_CONTEXT_FILE = HERMES_HOME / "state" / "tool-readiness-reflection-context.json"
 REPAIR_ENVELOPE_DIR = HERMES_HOME / "state" / "repair-envelopes"
-SPARK_SSH_HOST = os.environ.get("HERMES_SPARK_SSH_HOST", "")
+REMOTE_SSH_HOST = os.environ.get("HERMES_REMOTE_SSH_HOST", "")
 
 # Thresholds
 MSG_THRESHOLD = int(os.environ.get("SI_MSG_THRESHOLD", "100"))
@@ -75,20 +75,20 @@ def _local_agent_id() -> str:
     except Exception:
         pass
     user = os.environ.get("USER", "agent").strip()
-    return user.replace("spark-", "") or "agent"
+    return user or "agent"
 
 
-ALL_MINI_AGENTS = [_local_agent_id()]
-ALL_SPARK_AGENT_USERS: list[str] = []
+ALL_LOCAL_AGENTS = [_local_agent_id()]
+ALL_REMOTE_AGENT_USERS: list[str] = []
 AGENT_ALIASES: dict[str, str] = {}
 
 if _agent_filter:
     _filtered = set(a.strip().lower() for a in _agent_filter.split(","))
-    MINI_AGENTS = [a for a in ALL_MINI_AGENTS if a.lower() in _filtered]
-    SPARK_AGENT_USERS: list[str] = []
+    LOCAL_AGENTS = [a for a in ALL_LOCAL_AGENTS if a.lower() in _filtered]
+    REMOTE_AGENT_USERS: list[str] = []
 else:
-    MINI_AGENTS = ALL_MINI_AGENTS
-    SPARK_AGENT_USERS: list[str] = []
+    LOCAL_AGENTS = ALL_LOCAL_AGENTS
+    REMOTE_AGENT_USERS: list[str] = []
 
 
 def utc_now() -> str:
@@ -315,8 +315,8 @@ def _count_new_error_lines(log_dir: Path, state: dict, since_ts: float, *, prefi
     return count
 
 
-def count_mini_messages(agent_id: str, since_ts: float, state: dict | None = None) -> tuple[int, int]:
-    """Count messages and errors for a Mini agent since timestamp."""
+def count_local_messages(agent_id: str, since_ts: float, state: dict | None = None) -> tuple[int, int]:
+    """Count messages and errors for a local agent since timestamp."""
     msg_count = 0
     error_count = 0
 
@@ -340,15 +340,15 @@ def count_mini_messages(agent_id: str, since_ts: float, state: dict | None = Non
     return msg_count, error_count
 
 
-def count_spark_messages(user: str, since_ts: float) -> tuple[int, int]:
-    """Count messages and errors for a Spark agent via SSH."""
+def count_remote_messages(user: str, since_ts: float) -> tuple[int, int]:
+    """Count messages and errors for a remote agent via SSH."""
     try:
         result = subprocess.run(
             [
                 "ssh",
                 "-o",
                 "ConnectTimeout=10",
-                f"{user}@{SPARK_SSH_HOST}",
+                f"{user}@{REMOTE_SSH_HOST}",
                 (
                     'sqlite3 ~/.hermes/state.db "SELECT COUNT(*) FROM messages '
                     f'WHERE timestamp > {since_ts}" 2>/dev/null || echo 0'
@@ -365,7 +365,7 @@ def count_spark_messages(user: str, since_ts: float) -> tuple[int, int]:
                 "ssh",
                 "-o",
                 "ConnectTimeout=10",
-                f"{user}@{SPARK_SSH_HOST}",
+                f"{user}@{REMOTE_SSH_HOST}",
                 "python3 - <<'PY'\n"
                 "from pathlib import Path\n"
                 "import os, re, time\n"
@@ -624,20 +624,22 @@ def act_on_reflection(
                 friction_summary.append(f"{ftype}: {count}")
 
     if friction_summary and self_reflection:
-        # Durable synthesis belongs to the central router/Doc path. Do not let a
+        # Durable synthesis belongs to the central review path. Do not let a
         # fleet runtime rewrite its own shared behavior or strategy from a
         # reflection result.
         log(f"reflection friction retained in local report for central review: {', '.join(friction_summary)}")
 
     external_context = (report.get("self_reflection_meta", {}) or {}).get("external_context", {})
     readiness_items = external_context.get("actionable", []) if isinstance(external_context, dict) else []
-    readiness_needs_doc = any(
+    readiness_needs_operator = any(
         isinstance(item, dict) and str(item.get("status", "")).lower() in {"broken", "degraded", "error"}
         for item in readiness_items
     )
-    model_escalates = isinstance(self_reflection, dict) and self_reflection.get("escalate_to_doc")
+    model_escalates = isinstance(self_reflection, dict) and self_reflection.get(
+        "escalate_to_operator"
+    )
     papercut_repairs = papercut_repair_actions(report, self_reflection) if isinstance(self_reflection, dict) else []
-    if readiness_needs_doc or model_escalates or papercut_repairs:
+    if readiness_needs_operator or model_escalates or papercut_repairs:
         log(f"ESCALATION: {agent_id} self-assessment flagged escalation needed")
         packet = {
             "ts": utc_now(),
@@ -649,8 +651,8 @@ def act_on_reflection(
                 "papercut_remediation"
                 if papercut_repairs
                 else "tool_readiness_degraded"
-                if readiness_needs_doc
-                else "self_reflection_escalate_to_doc"
+                if readiness_needs_operator
+                else "self_reflection_escalate_to_operator"
             ),
             "tool_readiness_context": external_context,
             "papercut_actions": papercut_repairs,
@@ -745,11 +747,11 @@ def main():
     if tool_context and tool_context.get("status") != "ok":
         log(f"Tool readiness context skipped: {tool_context.get('status')} {tool_context.get('detail', '')}")
 
-    for agent_id in MINI_AGENTS:
+    for agent_id in LOCAL_AGENTS:
         agent_state = state["agents"].get(agent_id, {})
         since_ts = agent_state.get("last_run_ts", now_ts - 7 * 86400)  # default 7 days
 
-        msg_count, error_count = count_mini_messages(agent_id, since_ts, state)
+        msg_count, error_count = count_local_messages(agent_id, since_ts, state)
         should, reason = should_trigger(agent_id, state, msg_count, error_count, papercut_count)
         if tool_reason:
             should, reason = True, tool_reason
@@ -776,19 +778,19 @@ def main():
             skipped.append(f"{agent_id} ({reason})")
         remember_tool_readiness_seen(state, tool_context)
 
-    for user in SPARK_AGENT_USERS:
-        agent_id = user.replace("spark-", "")
+    for user in REMOTE_AGENT_USERS:
+        agent_id = user
         agent_state = state["agents"].get(agent_id, {})
         since_ts = agent_state.get("last_run_ts", now_ts - 7 * 86400)
 
-        msg_count, error_count = count_spark_messages(user, since_ts)
+        msg_count, error_count = count_remote_messages(user, since_ts)
         should, reason = should_trigger(agent_id, state, msg_count, error_count)
 
         if should:
             log(f"TRIGGER {agent_id} ({user}): {reason}")
             triggered.append(agent_id)
             if not dry_run:
-                run_result = launch_reflection(agent_id, SPARK_SSH_HOST, user)
+                run_result = launch_reflection(agent_id, REMOTE_SSH_HOST, user)
                 state["agents"][agent_id] = {
                     "last_run_ts": now_ts,
                     "last_reason": reason,

@@ -123,7 +123,7 @@ def _venv_bin_dirs(home: Path):
 
 
 def _venv_pythons(home: Path):
-    """Candidate venv python interpreters across known layouts (Mini/Spark/Windows)."""
+    """Candidate venv python interpreters across known POSIX and Windows layouts."""
     runtime_parents = list(home.parents)
     if IS_WIN:
         return [
@@ -283,7 +283,7 @@ def derive_generic_contract(home, cfg):
                     "intended_outcome": "actionable client request receives a useful response or explicit blocker",
                     "required_tools": ["telegram", "conversation_memory"],
                     "deliverable": "client_response_or_explicit_blocker",
-                    "independent_certifier": "client_acceptance_or_doc_verdict",
+                    "independent_certifier": "client_acceptance_or_operator_verdict",
                 },
                 "skillify_when": [
                     "same client request pattern appears at least three times in seven days",
@@ -469,7 +469,7 @@ def build_prompt(deterministic, insights, agent_name, external_context=None):
         '  "operator_systems_lessons": [short strings: durable operational lessons from today],\n'
         '  "papercut_actions": [{"papercut_ids": [str], "lesson": str, "next_action": str, '
         '"disposition": "monitor"|"repair"|"skill_candidate"|"escalate"}],\n'
-        '  "escalate_to_doc": true|false  (true only if a human operator should look).\n'
+        '  "escalate_to_operator": true|false  (true only if a human operator should look).\n'
         "For proposal_inputs, prefer no proposal. Emit one only for repeated "
         "class-level evidence, not ordinary one-off sessions. "
         "Skill creation is proposal-first: target memory for single durable "
@@ -531,7 +531,7 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback):
         "narrative": "",
         "did_it_suck": None,
         "failures": [],
-        "escalate_to_doc": False,
+        "escalate_to_operator": False,
         "raw_available": bool(raw),
         "fallback_no_model": used_fallback,
         "operator_systems_lessons": [],
@@ -544,7 +544,9 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback):
         sr["failures"] = (
             reflection_obj.get("failures", [])[:12] if isinstance(reflection_obj.get("failures"), list) else []
         )
-        sr["escalate_to_doc"] = bool(reflection_obj.get("escalate_to_doc"))
+        sr["escalate_to_operator"] = bool(
+            reflection_obj.get("escalate_to_operator")
+        )
         lessons = reflection_obj.get("operator_systems_lessons", [])
         if isinstance(lessons, list):
             sr["operator_systems_lessons"] = [str(item)[:400] for item in lessons[:12]]
@@ -587,7 +589,7 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback):
     rep["open_promises"] = open_promises
     rep["self_reflection"] = sr
     # let an honest self-escalation bump a green/yellow verdict note (not override red)
-    if sr["escalate_to_doc"] and rep.get("verdict", {}).get("level") == "green":
+    if sr["escalate_to_operator"] and rep.get("verdict", {}).get("level") == "green":
         rep["verdict"]["self_escalated"] = True
     return rep
 
@@ -730,7 +732,7 @@ def main():
                     "report_id": report["report_id"],
                     "verdict": report.get("verdict", {}).get("level"),
                     "did_it_suck": sr.get("did_it_suck"),
-                    "escalate_to_doc": sr.get("escalate_to_doc"),
+                    "escalate_to_operator": sr.get("escalate_to_operator"),
                     "fallback_no_model": sr.get("fallback_no_model"),
                     "contract_source": contract_src,
                     "written": None if args.dry_run else str(out_dir / f"{report['report_id']}.json"),

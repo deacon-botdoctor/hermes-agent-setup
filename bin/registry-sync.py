@@ -7,7 +7,7 @@ registry that the capability-router MCP reads.
 
 Locations (Hermes default):
   CANONICAL:    ~/.hermes/state/registry-canonical.json    (fleet-wide; pulled from
-                 a shared source — overlay, rsync from Spark, or local snapshot)
+                 a shared source — overlay, remote sync, or local snapshot)
   LOCAL EXTRAS: ~/.hermes/state/registry-local-extras.json (per-runtime additions;
                  optional — file may not exist on most runtimes)
   WORKING:      ~/.hermes/mcp-servers/capability-router/registry.json (consumed)

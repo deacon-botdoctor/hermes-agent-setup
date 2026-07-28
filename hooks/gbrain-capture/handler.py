@@ -86,6 +86,15 @@ MAX_PAGE_CHARS = 60000
 MAX_MESSAGES_PER_TOPIC = 200
 
 
+def _capture_enabled() -> bool:
+    return os.environ.get("HERMES_ENABLE_GBRAIN_CAPTURE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def _log(msg: str) -> None:
     try:
         LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -457,7 +466,7 @@ def _do_capture(context: dict) -> None:
 
 async def handle(event_type: str, context: dict):
     """Async hook entry point — required signature per Hermes hook contract."""
-    if event_type not in ("processing:complete", "agent:end"):
+    if not _capture_enabled() or event_type not in ("processing:complete", "agent:end"):
         return
     try:
         # Offload to thread executor so the synchronous DB + subprocess work

@@ -1,4 +1,4 @@
 name: gbrain-capture
-description: Real-time capture of agent turn outcomes into gBrain after response delivery through the gateway's bounded agent:end callback.
+description: Opt-in capture of agent turn outcomes into gBrain after response delivery.
 events:
   - agent:end

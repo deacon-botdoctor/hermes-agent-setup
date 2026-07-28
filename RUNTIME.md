@@ -8,7 +8,7 @@ The current public release is `botdoctor-hermes-2026.07.27`:
 - public Golden source: `2f5e428248a1bc72ec6275fb25eddfed65c6c71e`;
 - runtime payload: 77 files;
 - assembled runtime fingerprint:
-  `de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067`.
+  `13b68395c7dfc4b28256697a51cee7f179f06e90b78b94c62b7689a4830ece5c`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately
@@ -69,10 +69,11 @@ cohesive registry entries in this release.
 
 The bounded profile installer places only manifest-owned files:
 
-- four small plugins for output hygiene, on-demand MCP control, task ledger
-  tools, and local Telegram transcript tools;
+- two enabled plugins for output hygiene and on-demand MCP control, plus
+  disabled task-ledger and local Telegram transcript plugins;
 - the capability-router MCP and its public registry;
-- two runtime hooks;
+- two opt-in runtime hooks that remain inert unless their profile environment
+  flags are enabled;
 - shared isolation, content, file-delivery, truth, and operating rules;
 - reflection and papercut skills/scripts;
 - runtime-owned reflection, transaction, and papercut helpers.

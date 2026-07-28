@@ -1,5 +1,5 @@
 name: telegram-transcript
-description: Real-time Telegram message indexing into SQLite for chat history retrieval
+description: Opt-in Telegram message indexing into SQLite for chat history retrieval
 events:
   - agent:start
   - agent:end

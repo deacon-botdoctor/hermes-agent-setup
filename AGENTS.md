@@ -95,22 +95,44 @@ candidate first. Preserve the prior User and process `PATH`, `HERMES_HOME`, and
 $Release = Get-Content .\release.json -Raw | ConvertFrom-Json
 $LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
 $Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release)
+$StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release)
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
+$PriorProcessPath = $env:PATH
+$PriorProcessHermesHome = $env:HERMES_HOME
+$PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
+$PriorUserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+$PriorUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
+$PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
 
 Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
-& $Installer -SkipSetup -Commit $Release.canonical_upstream_sha `
-  -HermesHome $LiveHome -InstallDir $Candidate
+try {
+  & $Installer -SkipSetup -Commit $Release.canonical_upstream_sha `
+    -HermesHome $StagingHome -InstallDir $Candidate
+} finally {
+  $env:PATH = $PriorProcessPath
+  $env:HERMES_HOME = $PriorProcessHermesHome
+  $env:HERMES_GIT_BASH_PATH = $PriorProcessGitBashPath
+  [Environment]::SetEnvironmentVariable("PATH", $PriorUserPath, "User")
+  [Environment]::SetEnvironmentVariable("HERMES_HOME", $PriorUserHermesHome, "User")
+  [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $PriorUserGitBashPath, "User")
+}
 python .\bin\assemble-runtime.py `
   --output $Candidate --use-existing-clean-runtime
 & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
-  --hermes-home $LiveHome --runtime-dir $Candidate
-& "$Candidate\venv\Scripts\hermes.exe" doctor
+  --hermes-home $StagingHome --runtime-dir $Candidate
+$env:HERMES_HOME = $StagingHome
+try {
+  & "$Candidate\venv\Scripts\hermes.exe" doctor
+} finally {
+  $env:HERMES_HOME = $PriorProcessHermesHome
+}
 ```
 
 On an existing installation, the installer must run against an isolated staging
 `HermesHome`, and its User/process environment changes must be restored before
-the live cutover. Never let staging change the currently resolved `hermes`
-command.
+the live cutover. Do not run `install-profile.py` against `$LiveHome` until the
+controlled-cutover step. Never let staging change the currently resolved
+`hermes` command.
 
 ## Existing installation: preserve before changing
 

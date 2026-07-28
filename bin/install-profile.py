@@ -28,8 +28,6 @@ SOURCE_MANIFEST = json.loads(
 REQUIRED_PLUGINS = (
     "botdoctor-immersion",
     "mcp-on-demand-control",
-    "task-ledger",
-    "telegram-transcript",
 )
 
 
@@ -160,18 +158,28 @@ def ensure_public_config(
     servers = config.setdefault("mcp_servers", {})
     if not isinstance(servers, dict):
         raise ValueError("config mcp_servers must be a mapping")
-    if "capability-router" not in servers:
-        servers["capability-router"] = {
-            "command": str(python),
-            "args": ["-m", "capability_router.server"],
-            "env": {
-                "PYTHONPATH": str(
-                    home / "mcp-servers" / "capability-router" / "src"
-                ),
-                "HERMES_HOME": str(home),
-            },
-            "enabled": True,
-        }
+    current_router = servers.get("capability-router")
+    if current_router is not None and not isinstance(current_router, dict):
+        raise ValueError("config mcp_servers.capability-router must be a mapping")
+    current_router = current_router or {}
+    current_env = current_router.get("env")
+    if current_env is not None and not isinstance(current_env, dict):
+        raise ValueError("config mcp_servers.capability-router.env must be a mapping")
+    wanted_router = {
+        **current_router,
+        "command": str(python),
+        "args": ["-m", "capability_router.server"],
+        "env": {
+            **(current_env or {}),
+            "PYTHONPATH": str(
+                home / "mcp-servers" / "capability-router" / "src"
+            ),
+            "HERMES_HOME": str(home),
+        },
+        "enabled": True,
+    }
+    if wanted_router != current_router:
+        servers["capability-router"] = wanted_router
         changed.append("mcp_servers.capability-router")
 
     policy = config.setdefault("mcp_policy", {})
@@ -271,37 +279,64 @@ def main() -> int:
     atomic_bytes(backup / "config.yaml.before", config_path.read_bytes(), 0o600)
 
     rows: list[dict[str, Any]] = []
+    for source, destination, mode in profile_files(home):
+        if not source.is_file() or source.is_symlink():
+            raise RuntimeError(f"unsafe or missing source: {source}")
+        existed = destination.exists()
+        if destination.is_symlink() or (existed and not destination.is_file()):
+            raise RuntimeError(f"unsafe destination: {destination}")
+        before_mode = destination.stat().st_mode & 0o777 if existed else 0
+        backup_key = hashlib.sha256(
+            str(destination.relative_to(home)).encode()
+        ).hexdigest()
+        if existed:
+            atomic_bytes(
+                backup / "files" / backup_key,
+                destination.read_bytes(),
+                before_mode,
+            )
+        rows.append(
+            {
+                "destination": str(destination),
+                "source": str(source.relative_to(ROOT)),
+                "mode": format(mode, "04o"),
+                "backup_key": backup_key,
+                "existed": existed,
+                "before_mode": format(before_mode, "04o"),
+                "before_sha256": sha256(destination) if existed else None,
+            }
+        )
+
+    receipt = {
+        "schema_version": 1,
+        "kind": "botdoctor_public_profile_install",
+        "status": "pending",
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "release": RELEASE["release"],
+        "golden_sha": RELEASE["golden_sha"],
+        "runtime_fingerprint": RELEASE["assembled_runtime_fingerprint"]["digest"],
+        "hermes_home": str(home),
+        "runtime_dir": str(runtime),
+        "files": rows,
+        "config_sha256_before": sha256(config_path),
+        "credentials_read": False,
+        "service_switched": False,
+        "gateway_restarted": False,
+        "rollback": str(backup),
+    }
+    atomic_bytes(
+        backup / "receipt.json",
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+        0o600,
+    )
+
     changed_config: list[str] = []
     try:
-        for source, destination, mode in profile_files(home):
-            if not source.is_file() or source.is_symlink():
-                raise RuntimeError(f"unsafe or missing source: {source}")
-            existed = destination.exists()
-            if destination.is_symlink() or (existed and not destination.is_file()):
-                raise RuntimeError(f"unsafe destination: {destination}")
-            before_mode = destination.stat().st_mode & 0o777 if existed else 0
-            backup_key = hashlib.sha256(
-                str(destination.relative_to(home)).encode()
-            ).hexdigest()
-            if existed:
-                atomic_bytes(
-                    backup / "files" / backup_key,
-                    destination.read_bytes(),
-                    before_mode,
-                )
-            before_sha = sha256(destination) if existed else None
-            atomic_bytes(destination, source.read_bytes(), mode)
-            rows.append(
-                {
-                    "destination": str(destination),
-                    "source": str(source.relative_to(ROOT)),
-                    "backup_key": backup_key,
-                    "existed": existed,
-                    "before_mode": format(before_mode, "04o"),
-                    "before_sha256": before_sha,
-                    "after_sha256": sha256(destination),
-                }
-            )
+        for row in rows:
+            source = ROOT / row["source"]
+            destination = Path(row["destination"])
+            atomic_bytes(destination, source.read_bytes(), int(row["mode"], 8))
+            row["after_sha256"] = sha256(destination)
 
         merge = subprocess.run(
             [
@@ -324,27 +359,17 @@ def main() -> int:
                 + (merge.stderr or merge.stdout).strip()[-1000:]
             )
         changed_config = ensure_public_config(config_path, home, python)
-    except Exception:
+    except BaseException:
         restore(rows, backup, home, config_path)
         raise
 
-    receipt = {
-        "schema_version": 1,
-        "kind": "botdoctor_public_profile_install",
-        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "release": RELEASE["release"],
-        "golden_sha": RELEASE["golden_sha"],
-        "runtime_fingerprint": RELEASE["assembled_runtime_fingerprint"]["digest"],
-        "hermes_home": str(home),
-        "runtime_dir": str(runtime),
-        "files": rows,
-        "config_sha256": sha256(config_path),
-        "config_paths_added": changed_config,
-        "credentials_read": False,
-        "service_switched": False,
-        "gateway_restarted": False,
-        "rollback": str(backup),
-    }
+    receipt.update(
+        {
+            "status": "completed",
+            "config_sha256": sha256(config_path),
+            "config_paths_added": changed_config,
+        }
+    )
     atomic_bytes(
         backup / "receipt.json",
         (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),

@@ -38,7 +38,8 @@ _PROCESS_STATE_LOCK = threading.Lock()
 
 
 def _state_path() -> Path:
-    default = Path.home() / ".hermes" / "state" / "codex-401-circuit.json"
+    home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    default = home / "state" / "codex-401-circuit.json"
     return Path(os.environ.get("HERMES_CODEX_401_CIRCUIT_STATE", default))
 
 
