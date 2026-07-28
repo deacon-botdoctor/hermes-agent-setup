@@ -96,7 +96,11 @@ $Release = Get-Content .\release.json -Raw | ConvertFrom-Json
 $LiveHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { "$env:LOCALAPPDATA\hermes" }
 $Candidate = Join-Path $LiveHome ("state\runtime-candidates\" + $Release.release)
 $StagingHome = Join-Path $env:TEMP ("botdoctor-hermes-staging-" + $Release.release)
+$ExistingInstall = Test-Path (Join-Path $LiveHome "config.yaml")
+$ProfileHome = if ($ExistingInstall) { $StagingHome } else { $LiveHome }
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
+$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/3ef6bbd201263d354fd83ec55b3c306ded2eb72a/scripts/install.ps1"
+$ExpectedInstallerSha256 = "b5bdf0e959677de0168f8cfb5f9175c7b57adf5c4319a1c2fc9bec1f46fbdb6e"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
 $PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
@@ -104,10 +108,14 @@ $PriorUserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
 $PriorUserHermesHome = [Environment]::GetEnvironmentVariable("HERMES_HOME", "User")
 $PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_PATH", "User")
 
-Invoke-WebRequest https://hermes-agent.nousresearch.com/install.ps1 -OutFile $Installer
+Invoke-WebRequest $InstallerUrl -OutFile $Installer
+$ActualInstallerSha256 = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLowerInvariant()
+if ($ActualInstallerSha256 -ne $ExpectedInstallerSha256) {
+  throw "Pinned installer digest mismatch: $ActualInstallerSha256"
+}
 try {
   & $Installer -SkipSetup -Commit $Release.canonical_upstream_sha `
-    -HermesHome $StagingHome -InstallDir $Candidate
+    -HermesHome $ProfileHome -InstallDir $Candidate
 } finally {
   $env:PATH = $PriorProcessPath
   $env:HERMES_HOME = $PriorProcessHermesHome
@@ -118,6 +126,29 @@ try {
 }
 python .\bin\assemble-runtime.py `
   --output $Candidate --use-existing-clean-runtime
+```
+
+For a fresh machine, finish native setup and activate the native gateway:
+
+```powershell
+if ($ExistingInstall) { throw "Use the staged existing-install path instead" }
+$env:HERMES_HOME = $LiveHome
+try {
+  & "$Candidate\venv\Scripts\python.exe" -m hermes_cli.main setup
+  & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
+    --hermes-home $LiveHome --runtime-dir $Candidate
+  & "$Candidate\venv\Scripts\hermes.exe" doctor
+  & "$Candidate\venv\Scripts\hermes.exe" gateway install
+  & "$Candidate\venv\Scripts\hermes.exe" gateway status
+} finally {
+  $env:HERMES_HOME = $PriorProcessHermesHome
+}
+```
+
+For an existing installation, prove only the isolated staged profile here:
+
+```powershell
+if (-not $ExistingInstall) { throw "Use the fresh-install activation path instead" }
 & "$Candidate\venv\Scripts\python.exe" .\bin\install-profile.py `
   --hermes-home $StagingHome --runtime-dir $Candidate
 $env:HERMES_HOME = $StagingHome
@@ -131,8 +162,8 @@ try {
 On an existing installation, the installer must run against an isolated staging
 `HermesHome`, and its User/process environment changes must be restored before
 the live cutover. Do not run `install-profile.py` against `$LiveHome` until the
-controlled-cutover step. Never let staging change the currently resolved
-`hermes` command.
+controlled-cutover step after preservation and quiescence. Never let staging
+change the currently resolved `hermes` command.
 
 ## Existing installation: preserve before changing
 

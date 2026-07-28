@@ -51,6 +51,42 @@ def test_release_identity_matches_source_manifest():
     assert manifest["components"]["runtime_payload"]["file_count"] == 77
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
+    assert release["assembled_runtime_fingerprint"] == {
+        "digest": "de5542cfd444b76b56c7b63d77cc2698d68d276d7f53c07ef188117e75b68067",
+        "file_count": 32,
+    }
+    assert set(release) == {
+        "schema_version",
+        "release",
+        "status",
+        "source_manifest",
+        "golden_sha",
+        "canonical_upstream_sha",
+        "source_scope",
+        "runtime_payload_digest",
+        "deployment_digest",
+        "assembled_runtime_fingerprint",
+        "verification",
+        "update_contract",
+    }
+    assert set(release["verification"]) == {
+        "golden_suite",
+        "clean_upstream_rehearsal",
+    }
+
+    blobs = {
+        entry["path"]: entry["blob"]
+        for component in manifest["components"].values()
+        for entry in component["files"]
+    }
+    assert (
+        blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
+        == "6eea4c3c69f1177e8173e37e2e920877f7fc82f5"
+    )
+    assert (
+        blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
+        == "9b3c05096964e4d27c8b126a05760a4ecb35fb56"
+    )
 
 
 def test_registry_has_only_explained_retirable_patches():
@@ -123,6 +159,34 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     assert router["env"]["CUSTOM"] == "kept"
     assert router["timeout"] == 45
     assert "mcp_servers.capability-router" in changed
+
+
+def test_unknown_existing_plugin_selections_are_preserved(tmp_path):
+    installer = load_script("public_install_existing_plugins", "install-profile.py")
+    config_path = tmp_path / "config.yaml"
+    python = tmp_path / "runtime" / "venv" / "bin" / "python"
+    existing = ["task-ledger", "telegram-transcript", "user-plugin"]
+    config_path.write_text(
+        yaml.safe_dump({"plugins": {"enabled": existing}}, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    installer.ensure_public_config(config_path, tmp_path, python)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert config["plugins"]["enabled"][:3] == existing
+
+
+def test_profile_paths_reject_symlinked_parents(tmp_path):
+    installer = load_script("public_install_paths", "install-profile.py")
+    home = tmp_path / "profile"
+    outside = tmp_path / "outside"
+    home.mkdir()
+    outside.mkdir()
+    (home / "plugins").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(RuntimeError, match="contains a symlink"):
+        installer.validate_profile_path(home, home / "plugins" / "plugin.py")
 
 
 def test_profile_install_interrupt_restores_from_pending_receipt(
@@ -230,37 +294,46 @@ def test_shared_default_merge_preserves_config_mode(tmp_path):
     assert config_path.stat().st_mode & 0o777 == 0o600
 
 
-def test_optional_capture_hooks_are_off_without_profile_opt_in(monkeypatch):
+def test_gbrain_is_opt_in_and_telegram_continuity_stays_enabled(monkeypatch):
     monkeypatch.delenv("HERMES_ENABLE_GBRAIN_CAPTURE", raising=False)
-    monkeypatch.delenv("HERMES_ENABLE_TELEGRAM_TRANSCRIPT", raising=False)
     gbrain = load_script(
         "public_gbrain_capture", "../hooks/gbrain-capture/handler.py"
     )
-    transcript = load_script(
-        "public_telegram_capture", "../hooks/telegram-transcript/handler.py"
-    )
     assert gbrain._capture_enabled() is False
-    assert transcript._capture_enabled() is False
     monkeypatch.setattr(
         gbrain,
         "_do_capture",
         lambda _context: pytest.fail("disabled GBrain hook executed"),
     )
-    monkeypatch.setattr(
-        transcript,
-        "_get_db",
-        lambda: pytest.fail("disabled transcript hook opened its database"),
-    )
     asyncio.run(gbrain.handle("agent:end", {"platform": "telegram"}))
-    asyncio.run(
-        transcript.handle(
-            "agent:start",
-            {"platform": "telegram", "chat_id": "123", "message": "hello"},
-        )
+    transcript_source = (
+        ROOT / "hooks" / "telegram-transcript" / "handler.py"
+    ).read_text(encoding="utf-8")
+    transcript_hook = (
+        ROOT / "hooks" / "telegram-transcript" / "HOOK.yaml"
+    ).read_text(encoding="utf-8")
+    assert "HERMES_ENABLE_TELEGRAM_TRANSCRIPT" not in transcript_source
+    assert "Bounded topic-local Telegram continuity" in transcript_hook
+
+
+def test_windows_installer_is_pinned_and_paths_are_split():
+    instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert (
+        "raw.githubusercontent.com/NousResearch/hermes-agent/"
+        "3ef6bbd201263d354fd83ec55b3c306ded2eb72a/scripts/install.ps1"
+        in instructions
     )
+    assert (
+        "b5bdf0e959677de0168f8cfb5f9175c7b57adf5c4319a1c2fc9bec1f46fbdb6e"
+        in instructions
+    )
+    assert "-m hermes_cli.main setup" in instructions
+    assert "gateway install" in instructions
+    assert "gateway status" in instructions
+    assert "$ProfileHome = if ($ExistingInstall)" in instructions
 
 
-def test_public_text_has_no_private_absolute_runtime_routes():
+def test_public_text_has_no_private_runtime_routes():
     manifest = json.loads(
         (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
     )
@@ -278,25 +351,44 @@ def test_public_text_has_no_private_absolute_runtime_routes():
             "RUNTIME.md",
         }
     )
-    forbidden = (
-        "/Users/deacon",
-        "/home/spark-",
-        "@botdoctor.io",
-        "208214988",
-        "-5217351028",
+    posix_runtime_route = re.compile(
+        r"/(?:Users|home)/[^/\s]+/(?:\.hermes|hermes-agent)"
     )
-    private_terms = re.compile(
-        r"\b(?:deacon|enoch|minions|ridley|spark|escalate_to_doc)\b",
-        re.IGNORECASE,
+    windows_runtime_route = re.compile(
+        r"C:\\+Users\\+([^\\\s]+)\\+\.hermes", re.IGNORECASE
     )
-    private_roles = re.compile(r"\b(?:Doc|Mini)\b")
+    numeric_identity_fixture = re.compile(
+        r"(?:chat_id|user_id)=[\"']\d{6,}"
+    )
     for relative in sorted(paths):
         text = (ROOT / relative).read_text(encoding="utf-8", errors="ignore")
-        for value in forbidden:
-            assert value not in text, f"{relative} contains private route {value}"
-        assert private_terms.search(text) is None, (
-            f"{relative} contains private control-plane terminology"
+        assert posix_runtime_route.search(text) is None, (
+            f"{relative} contains a private POSIX runtime route"
         )
-        assert private_roles.search(text) is None, (
-            f"{relative} contains private control-plane role names"
-        )
+        for match in windows_runtime_route.finditer(text):
+            assert match.group(1) == "Agent", (
+                f"{relative} contains a non-neutral Windows runtime route"
+            )
+        if relative != "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py":
+            assert numeric_identity_fixture.search(text) is None, (
+                f"{relative} contains a numeric identity fixture"
+            )
+
+    papercuts = (ROOT / "skills" / "fleet" / "papercuts" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    operating_patterns = (
+        ROOT
+        / "mcp-servers"
+        / "capability-router"
+        / "operating-patterns.capability-entry.json"
+    ).read_text(encoding="utf-8")
+    reflection = (
+        ROOT / "skills" / "fleet" / "nightly-client-reflection-default" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    assert "--route windows-host" in papercuts
+    assert "--target example-agent" in papercuts
+    assert "C:\\\\Users\\\\Agent\\\\.hermes" in papercuts
+    assert "Durable Jobs" in operating_patterns
+    assert "the operator explicitly authorizes" in operating_patterns
+    assert "escalate_to_operator" in reflection

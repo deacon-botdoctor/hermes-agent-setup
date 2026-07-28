@@ -13,10 +13,10 @@ Do not include secrets, tokens, full client messages, or private document conten
 python3 "${HERMES_HOME:-$HOME/.hermes}/bin/papercut.py" \
   --kind routing \
   --operation fleet-update \
-  --route josh-windows \
-  --target posca \
+  --route windows-host \
+  --target example-agent \
   --summary "Active runtime path differed from the default Windows tree" \
-  --evidence "Updater initially targeted C:\\Users\\Joshua\\.hermes\\hermes-agent"
+  --evidence "Updater initially targeted C:\\Users\\Agent\\.hermes\\hermes-agent"
 ```
 
 Choose the narrowest kind: `routing`, `update`, `tool`, `auth`, `dependency`, or `other`. Use `--severity error` only when client delivery, a rollout, or safe recovery is blocked.

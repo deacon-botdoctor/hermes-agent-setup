@@ -43,6 +43,23 @@ def atomic_bytes(path: Path, data: bytes, mode: int) -> None:
     os.replace(tmp, path)
 
 
+def validate_profile_path(home: Path, path: Path) -> None:
+    try:
+        relative = path.relative_to(home)
+    except ValueError:
+        raise RuntimeError(f"profile path escapes HERMES_HOME: {path}") from None
+    current = home
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise RuntimeError(f"profile path contains a symlink: {current}")
+        if current != path and current.exists() and not current.is_dir():
+            raise RuntimeError(f"profile path parent is not a directory: {current}")
+    resolved_parent = path.parent.resolve(strict=False)
+    if not resolved_parent.is_relative_to(home):
+        raise RuntimeError(f"profile path parent escapes HERMES_HOME: {path}")
+
+
 def runtime_python(runtime: Path, explicit: Path | None) -> Path:
     if explicit:
         candidate = explicit.expanduser().resolve()
@@ -232,6 +249,7 @@ def main() -> int:
 
     home = args.hermes_home.expanduser().resolve()
     config_path = home / "config.yaml"
+    validate_profile_path(home, config_path)
     if args.restore_backup:
         backup = args.restore_backup.expanduser().resolve()
         backup_root = home / "state" / "public-setup-backups"
@@ -275,6 +293,7 @@ def main() -> int:
     backup = home / "state" / "public-setup-backups" / stamp
     if backup.exists():
         raise RuntimeError(f"backup path collision: {backup}")
+    validate_profile_path(home, backup / "files")
     (backup / "files").mkdir(parents=True, mode=0o700)
     atomic_bytes(backup / "config.yaml.before", config_path.read_bytes(), 0o600)
 
@@ -282,6 +301,7 @@ def main() -> int:
     for source, destination, mode in profile_files(home):
         if not source.is_file() or source.is_symlink():
             raise RuntimeError(f"unsafe or missing source: {source}")
+        validate_profile_path(home, destination)
         existed = destination.exists()
         if destination.is_symlink() or (existed and not destination.is_file()):
             raise RuntimeError(f"unsafe destination: {destination}")
@@ -335,6 +355,7 @@ def main() -> int:
         for row in rows:
             source = ROOT / row["source"]
             destination = Path(row["destination"])
+            validate_profile_path(home, destination)
             atomic_bytes(destination, source.read_bytes(), int(row["mode"], 8))
             row["after_sha256"] = sha256(destination)
 
@@ -375,8 +396,10 @@ def main() -> int:
         (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
         0o600,
     )
+    current_receipt = home / "state" / "public-setup-current.json"
+    validate_profile_path(home, current_receipt)
     atomic_bytes(
-        home / "state" / "public-setup-current.json",
+        current_receipt,
         (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
         0o600,
     )

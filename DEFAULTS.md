@@ -26,11 +26,13 @@ active runtime generation assembled from the exact release in `release.json`.
 - Store secrets only in the platform-supported local secret/config path.
 - Use an external knowledge system only as an explicitly declared boundary;
   never silently substitute a local database for a shared canonical one.
-- Keep the bundled task-ledger and Telegram transcript plugins disabled unless
-  the user explicitly selects them. Transcript capture requires
-  `HERMES_ENABLE_TELEGRAM_TRANSCRIPT=1`; external GBrain capture separately
-  requires `HERMES_ENABLE_GBRAIN_CAPTURE=1`. A task-ledger changelog backend
-  is loaded only from an explicitly configured `HERMES_TASK_CHANGELOG_DIR`.
+- Keep the bundled task-ledger and Telegram transcript read-tool plugins
+  disabled unless the user explicitly selects them. The narrow Telegram hook
+  remains active to index only the current chat/topic for fresh-topic
+  rehydration and current-topic search; it is not broad replay or a second
+  memory authority. External GBrain capture separately requires
+  `HERMES_ENABLE_GBRAIN_CAPTURE=1`. A task-ledger changelog backend is loaded
+  only from an explicitly configured `HERMES_TASK_CHANGELOG_DIR`.
 
 ## Capability model
 
@@ -97,7 +99,7 @@ new integration.
 - Anamnesis;
 - AutoDream or nightly-dream jobs;
 - Qdrant/Ollama solely to recreate old memory behavior;
-- a Telegram transcript database;
+- a second or broadly replayed transcript database;
 - permanent browser daemons;
 - all MCP servers at startup;
 - copied upstream source or placeholder compatibility plugins;

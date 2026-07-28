@@ -3,7 +3,7 @@
   "components": {
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "6782b60ad9beec93fa72b6db32ac9ecb06a1236b001dbc16ffb47fec1900b49d",
+      "digest": "c6dcadcea5e97014feeb656692223d047f0686a08fbb024fbce96c1135bcdd46",
       "excluded_paths": [],
       "file_count": 77,
       "files": [
@@ -74,13 +74,13 @@
           "type": "blob"
         },
         {
-          "blob": "f82ab89793ac0e512a903a8d3c709b136406905b",
+          "blob": "d137877f28b9cd4a3114f6c8ef8142a7b5045816",
           "mode": "100644",
           "path": "hooks/telegram-transcript/HOOK.yaml",
           "type": "blob"
         },
         {
-          "blob": "a19e2f5c74e96777a50d78e2a91f334532d88826",
+          "blob": "68899e436f6c4bac9c682d37ea20997feb89564e",
           "mode": "100644",
           "path": "hooks/telegram-transcript/handler.py",
           "type": "blob"
@@ -176,7 +176,7 @@
           "type": "blob"
         },
         {
-          "blob": "5ecc59f813c206e408d2a86a108a5e6d61aa177e",
+          "blob": "6eea4c3c69f1177e8173e37e2e920877f7fc82f5",
           "mode": "100644",
           "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
           "type": "blob"
@@ -236,7 +236,7 @@
           "type": "blob"
         },
         {
-          "blob": "72aebc007bfb5e8f1106f78adbc9f856dc83ec55",
+          "blob": "9b3c05096964e4d27c8b126a05760a4ecb35fb56",
           "mode": "100755",
           "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
           "type": "blob"
@@ -458,7 +458,7 @@
           "type": "blob"
         },
         {
-          "blob": "36352cf45ac9d79286e7131dd22b985ad2f9b05f",
+          "blob": "5fe35e5f6ff635f3933b57fe3c24dee0c191504f",
           "mode": "100644",
           "path": "skills/fleet/papercuts/SKILL.md",
           "type": "blob"
@@ -529,7 +529,7 @@
       ]
     }
   },
-  "deployment_digest": "70a96973054e0873e8f100c20cec651c29d560904c1d08a25fc389b13418ccc5",
+  "deployment_digest": "744fe796c6389590039e158b3e497eeb1329c5cebd0afdfc47f34cc124798539",
   "golden_sha": "2f5e428248a1bc72ec6275fb25eddfed65c6c71e",
   "kind": "golden_runtime_payload_manifest",
   "schema_version": 1
