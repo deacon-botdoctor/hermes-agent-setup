@@ -218,19 +218,10 @@ def _usage_payload(
     api_mode: str,
 ) -> dict[str, Any]:
     raw_usage = _obj_get(response, "usage")
-    if raw_usage is None:
-        return {
-            "input_tokens": None,
-            "output_tokens": None,
-            "cache_read_tokens": None,
-            "cache_write_tokens": None,
-            "reasoning_tokens": None,
-            "total_tokens": None,
-            "usage_status": "unavailable",
-            "cost_usd": None,
-            "cost_status": "unknown",
-            "cost_source": "none",
-        }
+    if raw_usage is None or (
+        _is_openrouter(provider, base_url) and _has_only_zero_usage(raw_usage)
+    ):
+        return _unavailable_usage_payload()
 
     try:
         from agent.usage_pricing import estimate_usage_cost, normalize_usage
@@ -250,15 +241,7 @@ def _usage_payload(
             "usage_status": "provider_reported",
         }
     except Exception:
-        result = {
-            "input_tokens": None,
-            "output_tokens": None,
-            "cache_read_tokens": None,
-            "cache_write_tokens": None,
-            "reasoning_tokens": None,
-            "total_tokens": None,
-            "usage_status": "unavailable",
-        }
+        result = _unavailable_usage_payload()
         usage = None
 
     actual = None
@@ -301,6 +284,46 @@ def _usage_payload(
             pass
     result.update(cost_usd=None, cost_status="unknown", cost_source="none")
     return result
+
+
+def _is_openrouter(provider: str, base_url: str) -> bool:
+    return str(provider or "").lower() == "openrouter" or _base_url_host(
+        base_url
+    ) == "openrouter.ai"
+
+
+def _has_only_zero_usage(raw_usage: Any) -> bool:
+    values = []
+    for name in (
+        "prompt_tokens",
+        "completion_tokens",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+    ):
+        value = _obj_get(raw_usage, name)
+        if value is None:
+            continue
+        try:
+            values.append(int(value))
+        except (TypeError, ValueError):
+            return False
+    return bool(values) and not any(values)
+
+
+def _unavailable_usage_payload() -> dict[str, Any]:
+    return {
+        "input_tokens": None,
+        "output_tokens": None,
+        "cache_read_tokens": None,
+        "cache_write_tokens": None,
+        "reasoning_tokens": None,
+        "total_tokens": None,
+        "usage_status": "unavailable",
+        "cost_usd": None,
+        "cost_status": "unknown",
+        "cost_source": "none",
+    }
 
 
 @dataclass

@@ -68,6 +68,27 @@ def test_openrouter_missing_usage_is_recorded_without_enrichment(tmp_path, monke
     assert payload["cost_status"] == "unknown"
 
 
+def test_openrouter_zero_usage_is_not_priced_as_spend(tmp_path, monkeypatch):
+    receipts = load_receipts(monkeypatch, tmp_path)
+    payload = receipts._usage_payload(
+        SimpleNamespace(
+            usage=SimpleNamespace(
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+            )
+        ),
+        provider="openrouter",
+        model="model",
+        base_url="https://openrouter.ai/api/v1",
+        api_mode="chat",
+    )
+
+    assert payload["usage_status"] == "unavailable"
+    assert payload["cost_usd"] is None
+    assert payload["cost_status"] == "unknown"
+
+
 def test_reconciler_uses_active_profile_runtime(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location(
         "reconcile_test_module", ROOT / "bin/llm-attempt-reconcile.py"
