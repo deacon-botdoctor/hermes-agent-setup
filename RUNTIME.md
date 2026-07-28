@@ -62,8 +62,11 @@ values only when they still exactly match the old defaults.
   Scheduled Task and state namespace.
 - **Codex 401 spend guard:** one bounded client-turn fallback may run while
   recursive/internal paid fallbacks remain blocked.
-- **LLM attempt receipts:** every model attempt records grounded provider,
-  outcome, and usage evidence without changing the model's decision-making.
+- **LLM attempt receipts:** each observed main or auxiliary provider attempt
+  writes a content-free local receipt with route, outcome, and usage evidence.
+  Receipt failures are logged but never block the model path; reconciliation
+  resolves the active installed runtime and treats missing, empty, or zero usage
+  as unavailable while retaining a provider-reported cost.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
 condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 17
@@ -80,7 +83,8 @@ The bounded profile installer places only manifest-owned files:
   capture hook;
 - shared isolation, content, file-delivery, truth, and operating rules;
 - reflection and papercut skills/scripts;
-- runtime-owned reflection, transaction, and papercut helpers.
+- runtime-owned reflection, transaction, LLM-receipt reconciliation, and
+  papercut helpers.
 
 It backs up every replaced destination, preserves unrelated local files, never
 reads `.env`, and does not switch or restart a service.
