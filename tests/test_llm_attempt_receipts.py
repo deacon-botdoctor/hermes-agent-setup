@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = ROOT / "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py"
 
 

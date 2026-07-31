@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-ROOT = Path(__file__).parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def load_script(name: str, filename: str):
