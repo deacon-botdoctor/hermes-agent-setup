@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.31`:
+The current public release is `botdoctor-hermes-2026.07.31-semantic-control-v2`:
 
 - upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `027f2126cae1b499f055961a85b4fddecbe1a463`;
-- runtime payload: 82 files;
+- public Golden source: `ef8e7655848791a17591b6f065b185c896cae179`;
+- runtime payload: 86 files;
 - assembled runtime fingerprint:
-  `0807790946c8b39f64090247dae8aaf2be8092038044e9f60f5293b681087681`.
+  `4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately
@@ -74,6 +74,13 @@ values only when they still exactly match the old defaults.
 - **Deferred-tool safety:** a model may defer an approved capability, but a
   bridge guard prevents an unresolved deferred tool from being misreported as
   completed work.
+- **Optional semantic computer control:** the guard and lazy skill are packaged
+  but disabled by default. An opted-in profile keeps control background-first,
+  rejects raw-coordinate and direct-script fallbacks, and requires a session,
+  task, or turn identity for every computer-use call.
+- **Abandoned-stream cleanup:** LLM attempt receipts now close partially
+  consumed provider streams across sync finalization, async loop shutdown, and
+  context-manager failures without blocking receipt enrichment.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
 condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 18
@@ -84,12 +91,13 @@ cohesive registry entries in this release.
 The bounded profile installer places only manifest-owned files:
 
 - two enabled plugins for output hygiene and on-demand MCP control, plus
-  disabled task-ledger and Telegram transcript read-tool plugins;
+  disabled task-ledger, Telegram transcript read-tool, and semantic-control
+  plugins;
 - the capability-router MCP and its public registry;
 - one bounded topic-local Telegram continuity hook and one opt-in GBrain
   capture hook;
 - shared isolation, content, file-delivery, truth, and operating rules;
-- reflection and papercut skills/scripts;
+- reflection and papercut skills/scripts, plus the lazy semantic-control skill;
 - runtime-owned reflection, transaction, LLM-receipt reconciliation, and
   papercut helpers.
 

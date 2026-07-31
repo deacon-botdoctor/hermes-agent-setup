@@ -15,7 +15,6 @@
       "on_session_end"
     ]
   },
-  "shared_rule": "semantic-computer-control.md",
   "skill": "fleet/golden-computer-use-v2/SKILL.md",
   "toolset": "computer_use",
   "runtime_source": "tools/computer_use/tool.py",

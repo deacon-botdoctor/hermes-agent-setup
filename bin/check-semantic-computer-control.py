@@ -31,7 +31,6 @@ def load_contract(path: Path) -> dict[str, Any]:
         or not all(isinstance(item, str) and item for item in plugin["files"])
         or not isinstance(plugin.get("hooks"), list)
         or not all(isinstance(item, str) and item for item in plugin["hooks"])
-        or not isinstance(data.get("shared_rule"), str)
         or not isinstance(data.get("skill"), str)
         or not isinstance(data.get("toolset"), str)
         or not isinstance(data.get("runtime_source"), str)
@@ -224,12 +223,9 @@ def audit(
             if marker not in guard_text:
                 gaps.append(f"plugin:guard-marker-missing:{marker}")
 
-    for label, path in (
-        ("shared-rule", home / "shared-rules" / contract["shared_rule"]),
-        ("skill", home / "skills" / contract["skill"]),
-    ):
-        if not path.is_file():
-            gaps.append(f"{label}:missing")
+    skill_path = home / "skills" / contract["skill"]
+    if not skill_path.is_file():
+        gaps.append("skill:missing")
 
     runtime_path = runtime_root / contract["runtime_source"]
     runtime_text = compile_python(runtime_path, "runtime:computer-use", gaps)

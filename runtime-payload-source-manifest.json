@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "kind": "golden_runtime_payload_manifest",
-  "golden_sha": "027f2126cae1b499f055961a85b4fddecbe1a463",
+  "golden_sha": "ef8e7655848791a17591b6f065b185c896cae179",
   "canonical_upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
-  "deployment_digest": "bca06d44f95ebc31d2081ed55eb239347460f9c3187d49519bc05050437e3b07",
+  "deployment_digest": "5d620b2d562422e5fa970b9b4cc13517d0e41dfea98a26b5acc6b0296060c2e3",
   "components": {
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "87c7bd9828f10a078986f6b601275a03adfa436928bd297cac5941f61ba496da",
+      "digest": "9e89725701fc14d31a382c73423f8bd118a0b7761ff77ffc102254a9f20e167c",
       "excluded_paths": [],
-      "file_count": 82,
+      "file_count": 86,
       "files": [
         {
           "blob": "07f58440e5dae380f25cb6461b9a479827a0f8e9",
@@ -312,7 +312,7 @@
           "type": "blob"
         },
         {
-          "blob": "21e31bf096a6a2c221e2a62f26df60b92c17c8b9",
+          "blob": "abf1fbe8a79850e9b959f88c08df6f1a415d2d1b",
           "mode": "100644",
           "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
           "type": "blob"
@@ -330,7 +330,7 @@
           "type": "blob"
         },
         {
-          "blob": "cd2219977c448116b5ee5ce01ca9d392dd7fc3ce",
+          "blob": "5d5265d2f9d9b7eba42bf975bbcd85032830a2b5",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -381,6 +381,24 @@
           "blob": "7f073061d11884e6df4bc40daa799f088c09425f",
           "mode": "100644",
           "path": "plugins/mcp-on-demand-control/registration.py",
+          "type": "blob"
+        },
+        {
+          "blob": "29321e8e8d68d5970a51c5284956e01a375c370a",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2178035e34892d0072e7332f81a106cbf8b31fe5",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/guard.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5c5f399ed41434973280214d7485c00b367098a9",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/plugin.yaml",
           "type": "blob"
         },
         {
@@ -486,6 +504,12 @@
           "type": "blob"
         },
         {
+          "blob": "f2dceb397f2684d4d0657787dc537de979f29647",
+          "mode": "100644",
+          "path": "skills/fleet/golden-computer-use-v2/SKILL.md",
+          "type": "blob"
+        },
+        {
           "blob": "904ecd870bec022ec3d6424a873a02ec13bea8f1",
           "mode": "100644",
           "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
@@ -554,6 +578,7 @@
         "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
         "plugins/botdoctor-immersion",
         "plugins/mcp-on-demand-control",
+        "plugins/semantic-computer-control-guard",
         "plugins/task-ledger",
         "plugins/telegram-transcript",
         "scripts/merge-shared-defaults.py",
@@ -565,12 +590,13 @@
         "shared-rules/truth-over-comfort.md",
         "skills/fleet/nightly-client-reflection-default",
         "skills/fleet/papercuts",
+        "skills/fleet/golden-computer-use-v2",
         "upstream.lock"
       ]
     }
   },
   "assembled_runtime_fingerprint": {
-    "digest": "0807790946c8b39f64090247dae8aaf2be8092038044e9f60f5293b681087681",
+    "digest": "4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd",
     "excluded_state_or_artifacts": [
       "gateway/platforms/base.py.bak-pre-telegram-transaction-canary-v1",
       "gateway/stream_consumer.py.bak-pre-telegram-transaction-canary-v1",
@@ -611,7 +637,7 @@
       },
       "agent/llm_attempt_receipts.py": {
         "mode": "100644",
-        "sha256": "0ca246638140fc92031df27e87b01fc810426cabe084e17795b927004fb02b8c",
+        "sha256": "af4781df5665f032e25928f62b56212b793e672bc472d27993a87d2e15e30786",
         "type": "blob"
       },
       "agent/prompt_builder.py": {
@@ -785,7 +811,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "027f2126cae1b499f055961a85b4fddecbe1a463",
+    "golden_sha": "ef8e7655848791a17591b6f065b185c896cae179",
     "upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
     "verified": true
   }

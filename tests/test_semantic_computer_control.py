@@ -79,9 +79,6 @@ def install_candidate(home: Path, runtime_root: Path) -> None:
         "    return None\n",
         encoding="utf-8",
     )
-    rule = home / "shared-rules/semantic-computer-control.md"
-    rule.parent.mkdir(parents=True)
-    rule.write_text("# Semantic computer control\n", encoding="utf-8")
     skill = home / "skills/fleet/golden-computer-use-v2/SKILL.md"
     skill.parent.mkdir(parents=True)
     skill.write_text("# Golden computer use v2\n", encoding="utf-8")
@@ -157,6 +154,19 @@ def test_missing_guard_marker_fails_closed(tmp_path):
 
     assert result["ok"] is False
     assert "plugin:guard-marker-missing:action_inflight" in result["gaps"]
+
+
+def test_missing_lazy_skill_fails_closed(tmp_path):
+    home = tmp_path / ".hermes"
+    runtime = tmp_path / "runtime"
+    write_config(home, True)
+    install_candidate(home, runtime)
+    (home / "skills/fleet/golden-computer-use-v2/SKILL.md").unlink()
+
+    result = CHECK.audit(CHECK.load_contract(CONTRACT_PATH), home, runtime)
+
+    assert result["ok"] is False
+    assert "skill:missing" in result["gaps"]
 
 
 def test_semantic_probe_uses_only_list_windows(tmp_path, monkeypatch):
