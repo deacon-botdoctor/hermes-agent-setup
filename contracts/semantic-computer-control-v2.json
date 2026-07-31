@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "contract_id": "semantic-computer-control-v2",
+  "policy_key": "plugins.entries.semantic-computer-control-guard.semantic_control_only",
+  "plugin": {
+    "name": "semantic-computer-control-guard",
+    "files": [
+      "plugin.yaml",
+      "__init__.py",
+      "guard.py"
+    ],
+    "hooks": [
+      "pre_tool_call",
+      "post_tool_call",
+      "on_session_end"
+    ]
+  },
+  "shared_rule": "semantic-computer-control.md",
+  "skill": "fleet/golden-computer-use-v2/SKILL.md",
+  "toolset": "computer_use",
+  "runtime_source": "tools/computer_use/tool.py",
+  "runtime_permission_resolver": "_cua_permission_mode",
+  "guard_markers": [
+    "_pin_standard_permission_mode",
+    "_BLOCKED_CALLS",
+    "action_inflight",
+    "direct desktop scripting or input injection is forbidden",
+    "raw coordinates are forbidden"
+  ],
+  "probe_action": "list_windows"
+}
