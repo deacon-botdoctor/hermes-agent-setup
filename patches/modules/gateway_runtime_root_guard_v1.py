@@ -8,10 +8,44 @@ from pathlib import Path
 
 MARKER = "HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1"
 PATH_ANCHOR = "sys.path.insert(0, str(Path(__file__).parent.parent))\n"
+EARLY_IMPORT_RE = re.compile(
+    r"^from pathlib import Path[ \t]*$",
+    re.MULTILINE,
+)
+EARLY_PATH_MARKER = "HERMES_GATEWAY_RUNTIME_PATH_PRELOAD_v1"
+EARLY_PATH_PRELOAD = f'''
+
+# [{EARLY_PATH_MARKER}] Select this gateway's runtime root before any local
+# agent or scheduler package can be imported through a stale service path.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+'''
+HELPER_RETURN_ANCHOR = "    return _RuntimeAIAgent\n"
+EAGER_PRELOAD = "\n\n_load_runtime_ai_agent_class()\n"
 IMPORT_RE = re.compile(
     r"^(?P<indent>[ \t]*)from run_agent import AIAgent[ \t]*$",
     re.MULTILINE,
 )
+API_IMPORT_BLOCK_ANCHOR = '''        from run_agent import AIAgent
+        from gateway.run import (
+            _checkpoint_agent_kwargs,
+            _current_max_iterations,
+            _resolve_runtime_agent_kwargs,
+            _resolve_gateway_model,
+            _load_gateway_config,
+            GatewayRunner,
+        )
+'''
+API_IMPORT_BLOCK_REPLACEMENT = '''        from gateway.run import (
+            _checkpoint_agent_kwargs,
+            _current_max_iterations,
+            _resolve_runtime_agent_kwargs,
+            _resolve_gateway_model,
+            _load_gateway_config,
+            _load_runtime_ai_agent_class,
+            GatewayRunner,
+        )
+        AIAgent = _load_runtime_ai_agent_class()
+'''
 HELPER = f'''
 
 def _load_runtime_ai_agent_class():
@@ -65,13 +99,42 @@ def _load_runtime_ai_agent_class():
             ) from _exc
 
     return _RuntimeAIAgent
+
+
+_load_runtime_ai_agent_class()
 '''
 
 
 def patch_gateway_runtime_root_guard_text(source: str) -> str:
+    path_anchor_count = source.count(PATH_ANCHOR)
+    early_preload_count = source.count(EARLY_PATH_PRELOAD)
+    if early_preload_count == 0:
+        if len(EARLY_IMPORT_RE.findall(source)) != 1:
+            raise RuntimeError("gateway runtime-root early import anchor drift")
+        source, replaced = EARLY_IMPORT_RE.subn(
+            lambda match: match.group(0) + EARLY_PATH_PRELOAD,
+            source,
+            count=1,
+        )
+        if replaced != 1:
+            raise RuntimeError("gateway runtime-root early import replacement drift")
+    elif early_preload_count != 1:
+        raise RuntimeError("gateway runtime-root early preload drift")
+
     if MARKER in source:
-        return source
-    if source.count(PATH_ANCHOR) != 1:
+        preload_count = source.count(EAGER_PRELOAD)
+        if preload_count == 1:
+            return source
+        if preload_count != 0:
+            raise RuntimeError("gateway runtime-root eager preload drift")
+        if source.count(HELPER_RETURN_ANCHOR) != 1:
+            raise RuntimeError("gateway runtime-root guard helper drift")
+        return source.replace(
+            HELPER_RETURN_ANCHOR,
+            HELPER_RETURN_ANCHOR + EAGER_PRELOAD,
+            1,
+        )
+    if path_anchor_count != 1:
         raise RuntimeError("gateway runtime-root path anchor drift")
 
     import_count = len(IMPORT_RE.findall(source))
@@ -88,13 +151,46 @@ def patch_gateway_runtime_root_guard_text(source: str) -> str:
     return patched
 
 
+def patch_api_server_text(source: str) -> str:
+    """Keep API-server agent creation on the same guarded runtime loader."""
+    if API_IMPORT_BLOCK_REPLACEMENT in source:
+        return source
+    if source.count(API_IMPORT_BLOCK_ANCHOR) != 1:
+        raise RuntimeError("API server runtime-root loader anchor drift")
+    return source.replace(
+        API_IMPORT_BLOCK_ANCHOR,
+        API_IMPORT_BLOCK_REPLACEMENT,
+        1,
+    )
+
+
 def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
-    target = Path(hermes_dir) / "gateway" / "run.py"
-    original = target.read_text(encoding="utf-8")
-    patched = patch_gateway_runtime_root_guard_text(original)
-    if patched == original:
+    targets = {
+        Path(hermes_dir) / "gateway" / "run.py": (
+            patch_gateway_runtime_root_guard_text
+        ),
+        Path(hermes_dir) / "gateway" / "platforms" / "api_server.py": (
+            patch_api_server_text
+        ),
+    }
+    if not all(target.is_file() for target in targets):
         return False
-    target.write_text(patched, encoding="utf-8")
+    originals = {
+        target: target.read_text(encoding="utf-8")
+        for target in targets
+    }
+    patched = {
+        target: patcher(originals[target])
+        for target, patcher in targets.items()
+    }
+    changed = [
+        target for target in targets
+        if patched[target] != originals[target]
+    ]
+    if not changed:
+        return False
+    for target in changed:
+        target.write_text(patched[target], encoding="utf-8")
     return True
 
 

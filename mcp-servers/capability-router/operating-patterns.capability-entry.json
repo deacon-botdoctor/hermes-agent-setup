@@ -55,16 +55,16 @@
       "id": "ops-pattern.gbrain-local-admin",
       "kind": "operating_pattern",
       "category": "knowledge-rag",
-      "label": "GBrain Local Admin Via Durable Jobs",
-      "summary": "Run local-only GBrain admin operations through durable shell jobs with inherited secrets, not through thin-client MCP or raw secret env.",
+      "label": "GBrain Local Admin Via Minions",
+      "summary": "Run local-only GBrain admin operations through Minions shell jobs with inherited secrets, not through thin-client MCP or raw secret env.",
       "inputs": {
         "operation": "sync|embed|extract|dream|doctor|autopilot-support|storage|repair-jsonb|integrity",
         "cwd": "Brain repo or gbrain workspace path",
         "inherit": "Config secret names such as database_url; never raw values"
       },
-      "outputs": "Durable job id plus GBrain health/status result.",
+      "outputs": "Minions job id plus GBrain health/status result.",
       "cost_per_call": "local runtime plus provider costs for embed/dream/remediate",
-      "rate_limit": "Durable queue/supervisor controlled",
+      "rate_limit": "Minions queue/supervisor controlled",
       "requires_creds": [
         "gbrain worker config for inherited secrets when DB/provider access is needed"
       ],
@@ -77,7 +77,7 @@
         "localOnly",
         "remediate brain",
         "maintenance",
-        "durable shell job"
+        "minions shell"
       ],
       "deprioritize_for": [
         "gbrain search",
@@ -92,7 +92,7 @@
         "direct_ok": [
           "Read-only MCP-equivalent operations such as search/query/get/list can run directly or through MCP."
         ],
-        "durable_job_required_for": [
+        "minions_required_for": [
           "Long-running sync/embed/extract/dream/doctor remediation.",
           "Any local-only op from a thin-client/control surface.",
           "Any admin op that needs retry/audit history."
@@ -199,7 +199,7 @@
       "kind": "operating_pattern",
       "category": "monitoring-obs",
       "label": "Local Inference Admission Gate",
-      "summary": "Bound local-model worker concurrency by measured capacity and meaningful liveness instead of launching unlimited agents.",
+      "summary": "Bound Spark/local-model worker concurrency by measured capacity and meaningful liveness instead of launching unlimited agents.",
       "inputs": {
         "model": "Local model/backend",
         "estimated_tokens": "Optional workload estimate",
@@ -212,7 +212,7 @@
       "requires_creds": [],
       "preferred_for": [
         "local model",
-        "local accelerator",
+        "spark",
         "vllm",
         "ollama",
         "decode gate",

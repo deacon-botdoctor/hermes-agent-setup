@@ -42,8 +42,10 @@ stops while inbound messages remain durably queued per chat/topic.
 
 The controller waits for turns, tools, delegated tasks, cron/API work,
 compression, media handling, and delivery transactions to finish or become
-durably replayable. Readiness must be stable twice. Uncertain work means this
-machine stays on the old runtime; it is never force-killed for rollout speed.
+durably replayable. It samples the live gateway at least twice across a stable
+interval; both observations must name the same positive PID and report zero
+active operations. Stale or uncertain state means this machine stays on the old
+runtime; it is reconciled, never force-killed or ignored for rollout speed.
 
 ## 5. Switch one generation
 
@@ -63,6 +65,7 @@ The two generations never open the same database concurrently.
 Required proof includes:
 
 - exact runtime fingerprint and module origins;
+- one coherent service, launcher, profile, process, and imported runtime root;
 - native doctor and process health;
 - unchanged messaging identity and allowlist;
 - real private ingress-to-egress;
@@ -72,6 +75,10 @@ Required proof includes:
 - native Tool Search plus cold capability activation;
 - no retired duplicate memory/context services;
 - successful rollback to the old runtime and restoration to the new one.
+
+On Windows, the configured Scheduled Task name, task action, readiness task,
+CMD/VBS launchers, service owner, and running process must all resolve the same
+profile and candidate root. A running task by itself is not acceptance.
 
 Only obsolete code/service bindings may be removed after acceptance. User data
 and one sealed rollback remain for the retention window.

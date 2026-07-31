@@ -30,7 +30,7 @@ GENERIC_TASK_CONTRACT = {
     "intended_outcome": "actionable client request receives a useful response or explicit blocker",
     "required_tools": ["telegram", "conversation_memory"],
     "deliverable": "client_response_or_explicit_blocker",
-    "independent_certifier": "client_acceptance_or_operator_verdict",
+    "independent_certifier": "client_acceptance_or_doc_verdict",
 }
 GENERIC_SUCCESS_CONTRACT_REFERENCE = "generic-client-chat@1:client-chat-help"
 NEG_PAT = re.compile(
@@ -1004,7 +1004,7 @@ def summarize_friction(friction: dict[str, Any]) -> str:
     )
 
 
-def build_operator_review_packet(
+def build_doc_review_packet(
     contract: dict[str, Any],
     home: Path,
     report_id: str,
@@ -1048,11 +1048,11 @@ def build_operator_review_packet(
     ]
     initial_answers = [
         (
-            f"Initial scope: {client_id}/{agent_id} local report only; fleet-wide impact is unproven until the operator reviewer "
+            f"Initial scope: {client_id}/{agent_id} local report only; fleet-wide impact is unproven until Doc "
             "researches it."
         ),
         (
-            "Golden repo involvement: unknown from local report alone; the operator reviewer should verify by mapping evidence paths "
+            "Golden repo involvement: unknown from local report alone; Doc should verify by mapping evidence paths "
             "to shared repo code/config."
         ),
         (
@@ -1099,7 +1099,7 @@ def build_operator_review_packet(
         "envelope": {
             "type": "decision_packet",
             "from": agent_id,
-            "to": "operator-review",
+            "to": "doc",
             "priority": "p1" if level in {"yellow", "red"} else "p2",
             "classification": "client_internal",
             "scope": f"client:{client_id}",
@@ -1110,7 +1110,7 @@ def build_operator_review_packet(
                 "proposed-change approval card if repair is warranted."
             ),
             "why_you": (
-                "The operator reviewer owns investigation, cross-client comparison, and repair proposal packaging for operator approval."
+                "Doc owns investigation, cross-client comparison, and repair proposal packaging for Deacon approval."
             ),
             "constraint": (
                 "Propose-only. Do not modify files, restart services, send client-visible messages, or change "
@@ -1121,7 +1121,7 @@ def build_operator_review_packet(
             "requires_ack": True,
         },
         "morning_digest": body
-        + " The operator reviewer should investigate automatically; no operator approval is needed until there is a concrete "
+        + " Doc should investigate automatically; no Deacon approval is needed until there is a concrete "
         "proposed change.",
         "approval_cards": cards,
     }
@@ -1701,7 +1701,7 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
     client = contract["client"]
     report_id = f"{client['client_id']}-{end.strftime('%Y%m%dT%H%M%SZ')}"
     report_path = home / "workspace/ops/reports/client-day-review" / f"{report_id}.json"
-    operator_review_packet = build_operator_review_packet(
+    doc_review_packet = build_doc_review_packet(
         contract, home, report_id, report_path, level, scores, friction, cleanup_plan, audit_directions, expected_broken
     )
     expected_caps = contract.get("capabilities", {}).get("expected", [])
@@ -1755,7 +1755,7 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
         "escalations": escalations,
         "cleanup_plan": cleanup_plan,
         "audit_directions": audit_directions,
-        "operator_review_packet": operator_review_packet,
+        "doc_review_packet": doc_review_packet,
         "coverage": {"sources_checked": checked + [transcript_path], "sources_missing": missing, "blind_spots": blind},
     }
 
@@ -1868,7 +1868,7 @@ def derive_generic_contract(home: Path) -> dict:
                     "intended_outcome": "actionable client request receives a useful response or explicit blocker",
                     "required_tools": ["telegram", "conversation_memory"],
                     "deliverable": "client_response_or_explicit_blocker",
-                    "independent_certifier": "client_acceptance_or_operator_verdict",
+                    "independent_certifier": "client_acceptance_or_doc_verdict",
                 },
                 "skillify_when": [
                     "same request pattern appears 3+ times in 7 days",

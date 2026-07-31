@@ -1,6 +1,6 @@
 # Single source of truth for the upstream Hermes version pinned by hermes-golden.
-tag: main@2026-07-28
-commit: f228e145ba35cbbf785eded2021ae6682285b91b
-hermes_version: 0.19.0
-pinned_at: 2026-07-28
+tag: v2026.7.30
+commit: cc4cab2f592e60a197e796506de9168f74baf3ea
+hermes_version: 0.19.1
+pinned_at: 2026-07-30
 source_repo: https://github.com/NousResearch/hermes-agent.git

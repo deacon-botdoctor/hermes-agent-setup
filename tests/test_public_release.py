@@ -49,18 +49,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 79
+    assert manifest["components"]["runtime_payload"]["file_count"] == 82
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d",
-        "file_count": 39,
+        "digest": "0807790946c8b39f64090247dae8aaf2be8092038044e9f60f5293b681087681",
+        "file_count": 41,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 39
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 39
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 41
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 41
     assert set(release) == {
         "schema_version",
         "release",
@@ -87,7 +87,7 @@ def test_release_identity_matches_source_manifest():
     }
     assert (
         blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
-        == "6eea4c3c69f1177e8173e37e2e920877f7fc82f5"
+        == "47a67853f523b7af13aecc2188086ff0eedb7d44"
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
@@ -100,7 +100,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 17
+    assert len(patches) == 18
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -1224,11 +1224,11 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert (
         "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "f228e145ba35cbbf785eded2021ae6682285b91b/scripts/install.ps1"
+        "cc4cab2f592e60a197e796506de9168f74baf3ea/scripts/install.ps1"
         in instructions
     )
     assert (
-        "558456de6dc680cecd286018fa1a565a8b31454ed45e6d5b74bdada3142f6c3c"
+        "7265f8ad1566bdeb2082f04b379d6794c9dd44b0c129eaa7f016b024d9a8f812"
         in instructions
     )
     assert "-m hermes_cli.main setup" in instructions
@@ -1338,4 +1338,5 @@ def test_public_text_has_no_private_runtime_routes():
     assert "the operator explicitly authorizes" in coding_worktree[
         "routing_policy"
     ]["dirty_repo_rule"]
-    assert "escalate_to_operator" in reflection
+    assert "escalate_to_doc" in reflection
+    assert "preserve approval gates" in reflection

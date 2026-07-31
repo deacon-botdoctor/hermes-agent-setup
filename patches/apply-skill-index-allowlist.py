@@ -140,13 +140,35 @@ def patch(path: Path) -> bool:
     )
     changed = changed or did
 
-    patched, did = _replace_once(
-        patched,
-        '''            skills_by_category.setdefault(category, []).append(
+    unified_description_old = '''    for entry in visible_entries:
+        fm = entry.get("frontmatter_name") or entry.get("skill_name") or ""
+        desc = entry.get("description", "")
+'''
+    unified_description_new = '''    for entry in visible_entries:
+        fm = entry.get("frontmatter_name") or entry.get("skill_name") or ""
+        desc = _truncate_skill_index_description(
+            entry.get("description", ""), index_description_max
+        )
+'''
+    unified_render = (
+        unified_description_old in patched or unified_description_new in patched
+    )
+    if unified_render:
+        patched, did = _replace_once(
+            patched,
+            unified_description_old,
+            unified_description_new,
+            "unified description truncate",
+        )
+        changed = changed or did
+    else:
+        patched, did = _replace_once(
+            patched,
+            '''            skills_by_category.setdefault(category, []).append(
                 (frontmatter_name, entry.get("description", ""))
             )
 ''',
-        '''            skills_by_category.setdefault(category, []).append(
+            '''            skills_by_category.setdefault(category, []).append(
                 (
                     frontmatter_name,
                     _truncate_skill_index_description(
@@ -155,9 +177,9 @@ def patch(path: Path) -> bool:
                 )
             )
 ''',
-        "snapshot truncate",
-    )
-    changed = changed or did
+            "snapshot truncate",
+        )
+        changed = changed or did
 
     patched, did = _replace_once(
         patched,
@@ -175,13 +197,14 @@ def patch(path: Path) -> bool:
     )
     changed = changed or did
 
-    patched, did = _replace_once(
-        patched,
-        '''            skills_by_category.setdefault(entry["category"], []).append(
+    if not unified_render:
+        patched, did = _replace_once(
+            patched,
+            '''            skills_by_category.setdefault(entry["category"], []).append(
                 (entry["frontmatter_name"], entry["description"])
             )
 ''',
-        '''            skills_by_category.setdefault(entry["category"], []).append(
+            '''            skills_by_category.setdefault(entry["category"], []).append(
                 (
                     entry["frontmatter_name"],
                     _truncate_skill_index_description(
@@ -190,9 +213,9 @@ def patch(path: Path) -> bool:
                 )
             )
 ''',
-        "cold truncate",
-    )
-    changed = changed or did
+            "cold truncate",
+        )
+        changed = changed or did
 
     patched, did = _replace_once(
         patched,

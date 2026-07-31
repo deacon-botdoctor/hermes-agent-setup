@@ -25,14 +25,12 @@ OLD_FINISH = '            processing_ok = delivery_succeeded if delivery_attempt
 NEW_FINISH = '            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n            semantic_failure = _telegram_tx.is_error_envelope(response)\n            _telegram_tx.finish(\n                failed=not processing_ok or semantic_failure,\n                error="agent error envelope" if semantic_failure else None if processing_ok else "processing or delivery failed",\n            )\n'
 NORMAL_FINISH = (
     "            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n"
-    "            await self._run_processing_hook("
 )
-NORMAL_FINISH_BLOCK = NEW_FINISH + "            await self._run_processing_hook("
-OLD_FINISH_BLOCK = OLD_FINISH + "            await self._run_processing_hook("
+NORMAL_FINISH_BLOCK = NEW_FINISH
+OLD_FINISH_BLOCK = OLD_FINISH
 NORMAL_FINISH_WITHOUT_TERMINAL = (
     "            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n"
     "            semantic_failure = _telegram_tx.is_error_envelope(response)\n"
-    "            await self._run_processing_hook("
 )
 NORMAL_FINISH_WITHOUT_SEMANTIC = NORMAL_FINISH_BLOCK.replace(
     "            semantic_failure = _telegram_tx.is_error_envelope(response)\n",
@@ -1069,7 +1067,12 @@ def _normalized_canary_source(text: str, kind: str) -> str:
             "handle_message",
             _with_direct_hooks,
         )
-        return _with_bypass_hooks(_with_core_hooks(text))
+        normalized = _with_bypass_hooks(_with_core_hooks(text))
+        media = _load_ordered_predecessor_module(
+            "modules/media_same_path_resend_v1.py",
+            "media_same_path_resend_normalizer_dependency",
+        )
+        return _with_media_delivery_dedup(media, normalized)
     if kind == "stream":
         normalized = _with_stream_hooks(text)
         # Repairing an old missing-call variant can consume the blank line at
@@ -1116,6 +1119,53 @@ def _load_ordered_predecessor_module(relative_path: str, name: str):
     return module
 
 
+def _media_resend_plan(root: Path):
+    module = _load_ordered_predecessor_module(
+        "modules/media_same_path_resend_v1.py",
+        "media_same_path_resend_transaction_dependency",
+    )
+    target = root / "gateway/run.py"
+    if not target.is_file():
+        raise RuntimeError(f"media resend gateway source missing: {target}")
+    original = target.read_text()
+    patched = module.patch_source(original)
+    backup = Path(str(target) + module.BACKUP_SUFFIX)
+    return module, target, original, patched, backup
+
+
+def _with_media_delivery_dedup(module, source: str) -> str:
+    patched = module.patch_base_source(source)
+    return source if patched is None else patched
+
+
+def _apply_media_resend_plan(plan) -> bool:
+    _module, target, original, patched, backup = plan
+    if patched is None:
+        return False
+    backup_created = not backup.exists()
+    if not backup_created and backup.read_text() != original:
+        raise RuntimeError(f"media resend rollback backup does not match source: {target}")
+    if backup_created:
+        shutil.copy2(target, backup)
+    try:
+        target.write_text(patched)
+    except Exception:
+        target.write_text(original)
+        if backup_created:
+            backup.unlink(missing_ok=True)
+        raise
+    return backup_created
+
+
+def _rollback_media_resend_plan(plan, backup_created: bool) -> None:
+    _module, target, original, patched, backup = plan
+    if patched is None:
+        return
+    target.write_text(original)
+    if backup_created:
+        backup.unlink(missing_ok=True)
+
+
 def _matches_ordered_base_predecessors(backup_text: str, installed_text: str) -> bool:
     """Accept only the exact root-guard/typing predecessor chain from the registry."""
     try:
@@ -1137,6 +1187,7 @@ def _matches_ordered_base_predecessors(backup_text: str, installed_text: str) ->
 
 def patch_telegram_transaction_canary_v1(root: Path) -> bool:
     root = Path(root)
+    media_plan = _media_resend_plan(root)
     payload_text = PAYLOAD.read_text()
     compile(payload_text, str(PAYLOAD), "exec")
     base = root / "gateway/platforms/base.py"
@@ -1192,7 +1243,19 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
             and all(_slash_confirm_hook_current(text) for text in telegram_texts.values())
             and _stream_hooks_current(stream_text)
         ):
-            return False
+            media_base = _with_media_delivery_dedup(media_plan[0], base_text)
+            if media_plan[3] is None and media_base == base_text:
+                return False
+            media_backup_created = False
+            try:
+                if media_base != base_text:
+                    base.write_text(media_base)
+                media_backup_created = _apply_media_resend_plan(media_plan)
+            except Exception:
+                base.write_text(base_text)
+                _rollback_media_resend_plan(media_plan, media_backup_created)
+                raise
+            return True
         upgraded = _patch_method_lexical(
             base_text,
             "BasePlatformAdapter",
@@ -1213,6 +1276,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
         )
         upgraded = _with_core_hooks(upgraded)
         upgraded = _with_bypass_hooks(upgraded)
+        upgraded = _with_media_delivery_dedup(media_plan[0], upgraded)
         upgraded_telegrams = {telegram: _with_slash_confirm_hook(text) for telegram, text in telegram_texts.items()}
         upgraded_stream = _with_stream_hooks(stream_text)
         compile(upgraded, str(base), "exec")
@@ -1221,6 +1285,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
         compile(upgraded_stream, str(stream), "exec")
         new_backup_paths = set(recovered_backup_texts)
         new_backup_paths.update(backups[telegram] for telegram in telegrams if telegram_backups_missing[telegram])
+        media_backup_created = False
         try:
             for backup, recovered in recovered_backup_texts.items():
                 backup.write_text(recovered)
@@ -1232,6 +1297,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
                 telegram.write_text(upgraded_telegram)
             stream.write_text(upgraded_stream)
             shutil.copy2(PAYLOAD, owned)
+            media_backup_created = _apply_media_resend_plan(media_plan)
         except Exception:
             base.write_text(base_text)
             for telegram, telegram_text in telegram_texts.items():
@@ -1243,6 +1309,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
                 owned.unlink(missing_ok=True)
             for backup in new_backup_paths:
                 backup.unlink(missing_ok=True)
+            _rollback_media_resend_plan(media_plan, media_backup_created)
             raise
         return True
     _validate_pre_canary(base, "base")
@@ -1252,6 +1319,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
     originals = {p: p.read_text() for p in (base, *telegrams, stream)}
     b = _with_core_hooks(originals[base])
     b = _with_bypass_hooks(b)
+    b = _with_media_delivery_dedup(media_plan[0], b)
     s = _with_stream_hooks(originals[stream])
     telegram_outputs = {telegram: _with_slash_confirm_hook(originals[telegram]) for telegram in telegrams}
     compile(b, str(base), "exec")
@@ -1274,6 +1342,7 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
                 rebound_backups[backup] = backup.read_bytes()
         else:
             _validate_pre_canary(path, kind)
+    media_backup_created = False
     try:
         for path, _, _ in items:
             backup = Path(str(path) + BACKUP_SUFFIX)
@@ -1287,11 +1356,13 @@ def patch_telegram_transaction_canary_v1(root: Path) -> bool:
             p.write_text(patched)
         owned.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(PAYLOAD, owned)
+        media_backup_created = _apply_media_resend_plan(media_plan)
     except Exception:
         for p, t in originals.items():
             p.write_text(t)
         owned.unlink(missing_ok=True)
         for backup, original_bytes in rebound_backups.items():
             backup.write_bytes(original_bytes)
+        _rollback_media_resend_plan(media_plan, media_backup_created)
         raise
     return True

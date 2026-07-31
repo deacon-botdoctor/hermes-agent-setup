@@ -8,6 +8,114 @@ from pathlib import Path
 
 MARKER = "HERMES_LLM_ATTEMPT_RECEIPTS_v1"
 PAYLOAD = Path(__file__).resolve().parent.parent / "payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py"
+TRUNCATED_RETRY_MARKER = "HERMES_TRUNCATED_TOOL_RETRY_CACHE_BUST_v1"
+ITERATION_SUMMARY_MARKER = "HERMES_XAI_ITERATION_SUMMARY_TOOLLESS_v1"
+
+TRUNCATED_RETRY_ANCHOR = """                                # Don't append the broken response to messages;
+                                # just re-run the same API call from the current
+                                # message state, giving the model another chance.
+                                continue
+"""
+
+TRUNCATED_RETRY_REPLACEMENT = f"""                                # [{TRUNCATED_RETRY_MARKER}]
+                                # Repeating the identical request can replay a
+                                # provider-side cached broken completion forever,
+                                # especially when the output cap is already at its
+                                # ceiling. Append a bounded recovery instruction to
+                                # both durable and wire messages so every retry has
+                                # a fresh request identity and the next transcript
+                                # remains byte-consistent with what the model saw.
+                                _tool_retry_message = {{
+                                    "role": "user",
+                                    "content": (
+                                        "The previous tool call was incomplete and was not "
+                                        "executed. Retry the same intended action now, but "
+                                        "keep the tool arguments concise and split large "
+                                        "content or scripts into smaller tool calls. "
+                                        f"Recovery attempt {{truncated_tool_call_retries}}/4."
+                                    ),
+                                }}
+                                messages.append(_tool_retry_message)
+                                if api_messages is not messages:
+                                    api_messages.append(dict(_tool_retry_message))
+                                agent._session_messages = messages
+                                continue
+"""
+
+TRUNCATED_TOOL_TAIL_ANCHOR = """                            # Prior successful tool batches (or injected tool
+                            # errors) can leave a tool-result tail; this path
+                            # never reaches finalize_turn (#48879 class).
+                            close_interrupted_tool_sequence(messages, _final_response)
+"""
+
+TRUNCATED_TOOL_TAIL_REPLACEMENT = """                            # A recovery instruction is a real user message.
+                            # Close it with the safe assistant response before
+                            # persisting so the next turn never starts from a
+                            # dangling user tail.
+                            if messages and messages[-1].get("role") == "user":
+                                messages.append(
+                                    {"role": "assistant", "content": _final_response}
+                                )
+                            # Prior successful tool batches (or injected tool
+                            # errors) can leave a tool-result tail; this path
+                            # never reaches finalize_turn (#48879 class).
+                            close_interrupted_tool_sequence(messages, _final_response)
+"""
+
+TRUNCATED_TOOL_SAFE_MESSAGE = (
+    "The action was truncated due to output length limit before it finished. "
+    "I did not run the incomplete action. Please retry; I’ll continue in smaller steps."
+)
+
+TRUNCATED_TEST_CLASS_ANCHOR = "\n\nclass TestHookPayloadSanitizesSimpleNamespace:"
+
+TRUNCATED_TEST_METHOD = f'''
+
+    # [{TRUNCATED_RETRY_MARKER}] behavioral regression
+    def test_truncated_tool_retry_changes_request_identity(self, agent):
+        """A truncated tool call must not replay an identical cached request."""
+        self._setup_agent(agent)
+        agent.valid_tool_names.add("write_file")
+        bad_tc = _mock_tool_call(
+            name="write_file",
+            arguments='{{"path":"report.md","content":"partial',
+            call_id="c1",
+        )
+        good_tc = _mock_tool_call(
+            name="write_file",
+            arguments='{{"path":"report.md","content":"full content"}}',
+            call_id="c2",
+        )
+        responses = iter(
+            [
+                _mock_response(content="", finish_reason="length", tool_calls=[bad_tc]),
+                _mock_response(content="", finish_reason="stop", tool_calls=[good_tc]),
+                _mock_response(content="Done!", finish_reason="stop"),
+            ]
+        )
+        seen_messages = []
+
+        def _create(**kwargs):
+            seen_messages.append(json.loads(json.dumps(kwargs["messages"])))
+            return next(responses)
+
+        agent.client.chat.completions.create.side_effect = _create
+        with (
+            patch("run_agent.handle_function_call", return_value='{{"success":true}}') as mock_hfc,
+            patch.object(agent, "_persist_session"),
+            patch.object(agent, "_save_trajectory"),
+            patch.object(agent, "_cleanup_task_resources"),
+        ):
+            result = agent.run_conversation("write the report")
+
+        assert result["final_response"] == "Done!"
+        assert len(seen_messages) == 3
+        assert seen_messages[0] != seen_messages[1]
+        assert seen_messages[1][-1]["role"] == "user"
+        assert "Recovery attempt 1/4" in seen_messages[1][-1]["content"]
+        assert "smaller tool calls" in seen_messages[1][-1]["content"]
+        mock_hfc.assert_called_once()
+'''
 
 
 class PatchError(RuntimeError):
@@ -20,9 +128,62 @@ def _replace_once(content: str, old: str, new: str, label: str) -> str:
     return content.replace(old, new, 1)
 
 
+def _patch_truncated_tool_retry(content: str) -> str:
+    if TRUNCATED_RETRY_MARKER in content:
+        return content
+    content = _replace_once(
+        content,
+        TRUNCATED_RETRY_ANCHOR,
+        TRUNCATED_RETRY_REPLACEMENT,
+        "truncated tool retry",
+    )
+    content = _replace_once(
+        content,
+        TRUNCATED_TOOL_TAIL_ANCHOR,
+        TRUNCATED_TOOL_TAIL_REPLACEMENT,
+        "truncated tool exhaustion tail",
+    )
+    content = _replace_once(
+        content,
+        'else "Response truncated due to output length limit"',
+        f"else {TRUNCATED_TOOL_SAFE_MESSAGE!r}",
+        "truncated plain-text response",
+    )
+    content = _replace_once(
+        content,
+        '"final_response": "Response truncated due to output length limit",',
+        f'"final_response": {TRUNCATED_TOOL_SAFE_MESSAGE!r},',
+        "truncated tool response",
+    )
+    content = _replace_once(
+        content,
+        '"final_response": "First response truncated due to output length limit",',
+        f'"final_response": {TRUNCATED_TOOL_SAFE_MESSAGE!r},',
+        "first truncated tool response",
+    )
+    content = _replace_once(
+        content,
+        '_final_response = "Response truncated due to output length limit"',
+        f"_final_response = {TRUNCATED_TOOL_SAFE_MESSAGE!r}",
+        "truncated fallback response",
+    )
+    return content
+
+
+def _patch_truncated_tool_test(content: str) -> str:
+    if f"# [{TRUNCATED_RETRY_MARKER}] behavioral regression" in content:
+        return content
+    return _replace_once(
+        content,
+        TRUNCATED_TEST_CLASS_ANCHOR,
+        TRUNCATED_TEST_METHOD + TRUNCATED_TEST_CLASS_ANCHOR,
+        "truncated retry regression test",
+    )
+
+
 def _patch_main_loop(content: str) -> str:
     if MARKER in content:
-        return content
+        return _patch_truncated_tool_retry(content)
     old_template = """                def _perform_api_call(next_api_kwargs):
                     if agent.api_mode == "codex_responses":
                         next_api_kwargs = agent._get_transport().preflight_kwargs(
@@ -39,6 +200,40 @@ def _patch_main_loop(content: str) -> str:
     old_variants = (
         old_template.format(copilot_expression="agent._is_copilot_url()"),
         old_template.format(copilot_expression=('bool(getattr(agent, "_is_copilot_url", lambda: False)())')),
+        """                def _perform_api_call(next_api_kwargs):
+                    if agent.api_mode == "codex_responses":
+                        next_api_kwargs = agent._get_transport().preflight_kwargs(
+                            next_api_kwargs,
+                            allow_stream=False,
+                            is_github_responses=agent._is_copilot_url(),
+                        )
+                    if _use_streaming:
+                        return agent._interruptible_streaming_api_call(
+                            next_api_kwargs, on_first_delta=_stop_spinner
+                        )
+                    from agent import relay_llm
+
+                    return relay_llm.execute(
+                        next_api_kwargs,
+                        agent._interruptible_api_call,
+                        session_id=str(agent.session_id or ""),
+                        name=str(agent.provider or "provider"),
+                        model_name=str(agent.model or ""),
+                        metadata={
+                            "api_mode": agent.api_mode,
+                            "api_request_id": api_request_id,
+                            "call_role": (
+                                "delegated"
+                                if getattr(agent, "is_subagent", False)
+                                else "fallback"
+                                if int(getattr(agent, "_fallback_index", 0) or 0) > 0
+                                else "primary"
+                            ),
+                            "retry_count": retry_count,
+                        },
+                        defer_logical_completion=True,
+                    )
+""",
     )
     new = """                def _perform_api_call(next_api_kwargs):
                     # HERMES_LLM_ATTEMPT_RECEIPTS_v1: this callback is invoked
@@ -62,7 +257,33 @@ def _patch_main_loop(content: str) -> str:
                             return agent._interruptible_streaming_api_call(
                                 next_api_kwargs, on_first_delta=_stop_spinner
                             )
-                        return agent._interruptible_api_call(next_api_kwargs)
+                        # Preserve Hermes's native Relay seam when present.
+                        # The local receipt remains the always-on content-free
+                        # accounting record; Relay may be disabled at runtime.
+                        try:
+                            from agent import relay_llm
+                        except ImportError:
+                            return agent._interruptible_api_call(next_api_kwargs)
+                        return relay_llm.execute(
+                            next_api_kwargs,
+                            agent._interruptible_api_call,
+                            session_id=str(agent.session_id or ""),
+                            name=str(agent.provider or "provider"),
+                            model_name=str(agent.model or ""),
+                            metadata={
+                                "api_mode": agent.api_mode,
+                                "api_request_id": api_request_id,
+                                "call_role": (
+                                    "delegated"
+                                    if getattr(agent, "is_subagent", False)
+                                    else "fallback"
+                                    if int(getattr(agent, "_fallback_index", 0) or 0) > 0
+                                    else "primary"
+                                ),
+                                "retry_count": retry_count,
+                            },
+                            defer_logical_completion=True,
+                        )
 
                     from agent.llm_attempt_receipts import execute_main_attempt
                     return execute_main_attempt(
@@ -134,22 +355,22 @@ def _patch_main_loop(content: str) -> str:
                 if response_invalid:
                     agent._invoke_api_request_error_hook(
 """
-    return _replace_once(
+    content = _replace_once(
         content,
         validation_anchor,
         validation_new,
         "main validated response terminal",
     )
+    return _patch_truncated_tool_retry(content)
 
 
 def _patch_fallback_cause(content: str) -> str:
-    if "_active_fallback_cause" in content:
-        return content
-    old = """        agent._fallback_activated = True
+    if "_active_fallback_cause" not in content:
+        old = """        agent._fallback_activated = True
 
         # Rebind the credential pool to the fallback provider when the provider
 """
-    new = """        agent._fallback_activated = True
+        new = """        agent._fallback_activated = True
         # HERMES_LLM_ATTEMPT_RECEIPTS_v1: retain the classified cause on the
         # selected route so the next physical attempt is not inferred from key
         # identity or provider spend.
@@ -160,7 +381,125 @@ def _patch_fallback_cause(content: str) -> str:
 
         # Rebind the credential pool to the fallback provider when the provider
 """
-    return _replace_once(content, old, new, "fallback activation cause")
+        content = _replace_once(content, old, new, "fallback activation cause")
+    return _patch_iteration_summary(content)
+
+
+def _patch_iteration_summary(content: str) -> str:
+    if ITERATION_SUMMARY_MARKER in content:
+        return content
+
+    toolless_anchor = """            codex_kwargs = agent._build_api_kwargs(api_messages)
+            codex_kwargs.pop("tools", None)
+"""
+    toolless_replacement = f"""            codex_kwargs = agent._build_api_kwargs(api_messages)
+            # {ITERATION_SUMMARY_MARKER}: these fields are one
+            # contract. Leaving tool_choice behind after removing tools makes
+            # strict Responses providers reject the fallback summary request.
+            for tool_only_key in ("tools", "tool_choice", "parallel_tool_calls"):
+                codex_kwargs.pop(tool_only_key, None)
+"""
+    content = _replace_once(
+        content,
+        toolless_anchor,
+        toolless_replacement,
+        "initial toolless iteration summary",
+    )
+    retry_anchor = """                codex_kwargs = agent._build_api_kwargs(api_messages)
+                codex_kwargs.pop("tools", None)
+"""
+    retry_replacement = """                codex_kwargs = agent._build_api_kwargs(api_messages)
+                for tool_only_key in ("tools", "tool_choice", "parallel_tool_calls"):
+                    codex_kwargs.pop(tool_only_key, None)
+"""
+    content = _replace_once(
+        content,
+        retry_anchor,
+        retry_replacement,
+        "retry toolless iteration summary",
+    )
+
+    raw_error_anchor = (
+        '        final_response = f"I reached the maximum iterations '
+        "({agent.max_iterations}) but couldn't summarize. Error: {str(e)}\"\n"
+    )
+    safe_error_replacement = """        final_response = (
+            "I reached the iteration limit before I could finish. "
+            "Send “continue” and I’ll pick up from the preserved conversation."
+        )
+"""
+    return _replace_once(
+        content,
+        raw_error_anchor,
+        safe_error_replacement,
+        "iteration summary safe failure",
+    )
+
+
+def _patch_iteration_status(content: str) -> str:
+    status_anchor = """        agent._emit_status(
+            f"⚠️ Iteration budget exhausted ({api_call_count}/{agent.max_iterations}) "
+            "— asking model to summarise"
+        )
+"""
+    status_replacement = """        logger.info(
+            "Iteration budget exhausted (%d/%d); requesting toolless summary",
+            api_call_count,
+            agent.max_iterations,
+        )
+"""
+    if status_replacement in content:
+        return content
+    return _replace_once(
+        content,
+        status_anchor,
+        status_replacement,
+        "iteration summary transcript status",
+    )
+
+
+def _patch_iteration_tests(content: str) -> str:
+    old_name = "    def test_api_failure_returns_error(self, agent):\n"
+    new_name = "    def test_api_failure_returns_safe_continuation_message(self, agent):\n"
+    if new_name not in content:
+        content = _replace_once(
+            content,
+            old_name,
+            new_name,
+            "iteration summary safe-failure test name",
+        )
+    old_assertions = (
+        '        assert "error" in result.lower()\n'
+        '        assert "API down" in result\n'
+    )
+    new_assertions = (
+        '        assert "continue" in result.lower()\n'
+        '        assert "API down" not in result\n'
+    )
+    if new_assertions not in content:
+        content = _replace_once(
+            content,
+            old_assertions,
+            new_assertions,
+            "iteration summary safe-failure assertions",
+        )
+    codex_assert_anchor = """        assert result == "Summary"
+        input_items = captured["input"]
+"""
+    codex_assert_replacement = """        assert result == "Summary"
+        assert "tools" not in captured
+        assert "tool_choice" not in captured
+        assert "parallel_tool_calls" not in captured
+        input_items = captured["input"]
+"""
+    if codex_assert_replacement not in content:
+        content = _replace_once(
+            content,
+            codex_assert_anchor,
+            codex_assert_replacement,
+            "iteration summary request regression",
+        )
+    return content
 
 
 def _resolver_wrapper() -> str:
@@ -423,8 +762,17 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
     helper = target / "agent/llm_attempt_receipts.py"
     main_loop = target / "agent/conversation_loop.py"
     fallback = target / "agent/chat_completion_helpers.py"
+    turn_finalizer = target / "agent/turn_finalizer.py"
     auxiliary = target / "agent/auxiliary_client.py"
-    for path in (main_loop, fallback, auxiliary, PAYLOAD):
+    run_agent_test = target / "tests/run_agent/test_run_agent.py"
+    for path in (
+        main_loop,
+        fallback,
+        turn_finalizer,
+        auxiliary,
+        run_agent_test,
+        PAYLOAD,
+    ):
         if not path.exists():
             raise PatchError(f"required file missing: {path}")
 
@@ -438,7 +786,14 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
     updates = (
         (main_loop, _patch_main_loop),
         (fallback, _patch_fallback_cause),
+        (turn_finalizer, _patch_iteration_status),
         (auxiliary, _patch_auxiliary),
+        (
+            run_agent_test,
+            lambda content: _patch_iteration_tests(
+                _patch_truncated_tool_test(content)
+            ),
+        ),
     )
     for path, transform in updates:
         before = path.read_text(encoding="utf-8")

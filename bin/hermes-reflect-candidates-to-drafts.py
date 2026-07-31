@@ -73,7 +73,7 @@ GENERIC_TASK_CONTRACT = {
     "intended_outcome": "actionable client request receives a useful response or explicit blocker",
     "required_tools": ["telegram", "conversation_memory"],
     "deliverable": "client_response_or_explicit_blocker",
-    "independent_certifier": "client_acceptance_or_operator_verdict",
+    "independent_certifier": "client_acceptance_or_doc_verdict",
 }
 GENERIC_SUCCESS_CONTRACT_REFERENCE = "generic-client-chat@1:client-chat-help"
 
