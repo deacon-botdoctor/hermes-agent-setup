@@ -155,6 +155,45 @@ def runtime_python(runtime: Path, explicit: Path | None) -> Path:
     raise ValueError("assembled runtime has no managed Python; pass --runtime-python")
 
 
+def ensure_cua_driver(
+    python: Path, home: Path, *, require_ready: bool = False
+) -> dict[str, Any]:
+    command = [
+        sys.executable,
+        str(ROOT / "bin" / "ensure-cua-driver.py"),
+        "--hermes-python",
+        str(python),
+        "--hermes-home",
+        str(home),
+        "--contract",
+        str(ROOT / "contracts" / "cua-driver-release-v1.json"),
+    ]
+    if require_ready:
+        command.append("--require-ready")
+    proc = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        timeout=960,
+    )
+    try:
+        receipt = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError(
+            "Cua Driver installer returned invalid JSON: "
+            + (proc.stderr or proc.stdout).strip()[-500:]
+        ) from None
+    if proc.returncode != 0 or receipt.get("ok") is not True:
+        detail = receipt.get("error") or receipt.get("status") or "unknown failure"
+        raise RuntimeError(f"pinned Cua Driver installation failed: {detail}")
+    if receipt.get("after", {}).get("version") != RELEASE["cua_driver"]["version"]:
+        raise RuntimeError("pinned Cua Driver version was not verified")
+    return receipt
+
+
 def verify_runtime(runtime: Path) -> None:
     proc = subprocess.run(
         [
@@ -474,6 +513,11 @@ def main() -> int:
     parser.add_argument("--runtime-dir", type=Path)
     parser.add_argument("--runtime-python", type=Path)
     parser.add_argument(
+        "--require-computer-use-ready",
+        action="store_true",
+        help="Require native Cua Driver doctor readiness in addition to exact-version presence",
+    )
+    parser.add_argument(
         "--initialize-staging",
         action="store_true",
         help="Create a credential-free empty config only in an unused staging home",
@@ -559,6 +603,11 @@ def main() -> int:
             f"missing {config_path}; run native hermes setup in this profile first"
         )
     python = runtime_python(runtime, args.runtime_python)
+    driver_receipt = ensure_cua_driver(
+        python,
+        home,
+        require_ready=args.require_computer_use_ready,
+    )
 
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     backup = home / "state" / "public-setup-backups" / stamp
@@ -624,6 +673,7 @@ def main() -> int:
         "credentials_read": False,
         "service_switched": False,
         "gateway_restarted": False,
+        "cua_driver": driver_receipt,
         "rollback": str(backup),
     }
     atomic_bytes(
@@ -700,6 +750,8 @@ def main() -> int:
                 "release": RELEASE["release"],
                 "files_installed": len(rows),
                 "config_paths_added": changed_config,
+                "cua_driver_version": driver_receipt["after"]["version"],
+                "cua_driver_ready": driver_receipt["doctor_ready"],
                 "backup": str(backup),
                 "service_switched": False,
             },

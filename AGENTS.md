@@ -82,6 +82,12 @@ HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -m hermes_cli.main setup
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" doctor
 ```
 
+`install-profile.py` installs and verifies the release-pinned Cua Driver before
+it mutates profile files. On a local GUI host, add
+`--require-computer-use-ready`; on macOS, approve Accessibility and Screen
+Recording for `CuaDriver.app` (or use an authorized managed-device policy) and
+rerun the command. Do not bypass a failed native doctor.
+
 Review the doctor output before installing the gateway service. Then use the
 candidate's native service command, preserving the intended user/system scope.
 The profile-environment binder stores the circuit path in the native loader's

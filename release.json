@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "release": "botdoctor-hermes-2026.07.31-semantic-control-v2",
+  "release": "botdoctor-hermes-2026.07.31-semantic-control-v2-cua-driver-v1",
   "status": "current",
   "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "d87a2c99fb17a6bcad5bbd550a38ca94addc473a",
+  "golden_sha": "7354b56138ff377bba0c188ea0732e70be1e2440",
   "canonical_upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
   "source_scope": "sanitized_runtime_payload_only",
   "runtime_payload_digest": "9e89725701fc14d31a382c73423f8bd118a0b7761ff77ffc102254a9f20e167c",
@@ -13,8 +13,23 @@
     "file_count": 41
   },
   "verification": {
-    "golden_suite": "1550 passed, 28 skipped",
+    "golden_suite": "1576 passed, 28 skipped",
     "clean_upstream_rehearsal": "18 applied, 0 breakage"
+  },
+  "cua_driver": {
+    "version": "0.14.2",
+    "tag": "cua-driver-rs-v0.14.2",
+    "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
+    "helper": {
+      "path": "bin/ensure-cua-driver.py",
+      "sha256": "2ed10b597aafc7e82c220cc1c9369164ef17c1c31ea0d87261533dc710c96b09"
+    },
+    "contract": {
+      "path": "contracts/cua-driver-release-v1.json",
+      "sha256": "3b1b184d270724326f7b17c302b3627eb322f091b697406eaf525918a9b61c38"
+    },
+    "baseline_acceptance": "exact_version_present",
+    "gui_acceptance": "doctor_ready_and_list_windows"
   },
   "update_contract": "maintenance-quiescence-v2"
 }

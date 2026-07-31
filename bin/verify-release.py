@@ -80,6 +80,62 @@ def _safe_path(raw: object) -> str:
     return value
 
 
+def verify_cua_driver_contract(
+    release: dict[str, Any], errors: list[str]
+) -> None:
+    driver = release.get("cua_driver")
+    if not isinstance(driver, dict):
+        errors.append("release cua_driver contract is missing")
+        return
+    version = str(driver.get("version") or "")
+    if (
+        re.fullmatch(r"\d+(?:\.\d+){2,}", version) is None
+        or driver.get("tag") != f"cua-driver-rs-v{version}"
+        or re.fullmatch(r"[0-9a-f]{40}", str(driver.get("source_commit") or ""))
+        is None
+        or driver.get("baseline_acceptance") != "exact_version_present"
+        or driver.get("gui_acceptance") != "doctor_ready_and_list_windows"
+    ):
+        errors.append("release cua_driver identity is invalid")
+        return
+    loaded: dict[str, dict[str, Any]] = {}
+    for label in ("helper", "contract"):
+        entry = driver.get(label)
+        if not isinstance(entry, dict):
+            errors.append(f"release cua_driver {label} is invalid")
+            continue
+        try:
+            relative = _safe_path(entry.get("path"))
+        except ValueError as exc:
+            errors.append(f"release cua_driver {label}: {exc}")
+            continue
+        expected = str(entry.get("sha256") or "")
+        path = ROOT / relative
+        if re.fullmatch(r"[0-9a-f]{64}", expected) is None:
+            errors.append(f"release cua_driver {label} digest is invalid")
+        elif not path.is_file() or path.is_symlink():
+            errors.append(f"release cua_driver {label} is missing")
+        elif hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            errors.append(f"release cua_driver {label} digest mismatch")
+        if path.is_file() and label == "helper" and not os.access(path, os.X_OK):
+            errors.append("release cua_driver helper is not executable")
+        if path.is_file() and label == "contract":
+            try:
+                payload = _read_json(path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                errors.append(f"release cua_driver contract is invalid: {exc}")
+            else:
+                loaded[label] = payload
+    contract = loaded.get("contract")
+    if contract is not None:
+        contract_release = contract.get("release")
+        if not isinstance(contract_release, dict) or any(
+            contract_release.get(field) != driver.get(field)
+            for field in ("version", "tag", "source_commit")
+        ):
+            errors.append("release and packaged cua_driver contract disagree")
+
+
 def verify_public_source() -> tuple[dict[str, Any], list[str]]:
     release = _read_json(RELEASE_PATH)
     manifest = _read_json(SOURCE_MANIFEST_PATH)
@@ -95,6 +151,7 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
         "canonical_upstream_sha"
     ):
         errors.append("release upstream SHA does not match source manifest")
+    verify_cua_driver_contract(release, errors)
 
     components = manifest.get("components")
     if not isinstance(components, dict):
