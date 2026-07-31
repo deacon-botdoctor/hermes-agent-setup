@@ -3,7 +3,7 @@
   "release": "botdoctor-hermes-2026.07.31-semantic-control-v2",
   "status": "current",
   "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "ef8e7655848791a17591b6f065b185c896cae179",
+  "golden_sha": "d87a2c99fb17a6bcad5bbd550a38ca94addc473a",
   "canonical_upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
   "source_scope": "sanitized_runtime_payload_only",
   "runtime_payload_digest": "9e89725701fc14d31a382c73423f8bd118a0b7761ff77ffc102254a9f20e167c",
@@ -13,7 +13,7 @@
     "file_count": 41
   },
   "verification": {
-    "golden_suite": "1548 passed, 28 skipped",
+    "golden_suite": "1550 passed, 28 skipped",
     "clean_upstream_rehearsal": "18 applied, 0 breakage"
   },
   "update_contract": "maintenance-quiescence-v2"

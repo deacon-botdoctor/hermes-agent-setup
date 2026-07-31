@@ -5,7 +5,7 @@
 The current public release is `botdoctor-hermes-2026.07.31-semantic-control-v2`:
 
 - upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `ef8e7655848791a17591b6f065b185c896cae179`;
+- public Golden source: `d87a2c99fb17a6bcad5bbd550a38ca94addc473a`;
 - runtime payload: 86 files;
 - assembled runtime fingerprint:
   `4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd`.
