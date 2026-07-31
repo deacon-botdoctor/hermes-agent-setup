@@ -74,10 +74,11 @@ values only when they still exactly match the old defaults.
 - **Deferred-tool safety:** a model may defer an approved capability, but a
   bridge guard prevents an unresolved deferred tool from being misreported as
   completed work.
-- **Optional semantic computer control:** the guard and lazy skill are packaged
-  but disabled by default. An opted-in profile keeps control background-first,
-  rejects raw-coordinate and direct-script fallbacks, and requires a session,
-  task, or turn identity for every computer-use call.
+- **Capability-aware semantic computer control:** the lazy skill and native
+  tool are discoverable on CLI/Telegram by default. Hermes suppresses the tool
+  when no local driver exists, so native API/CLI/browser lanes remain the
+  fallback. The stricter guard is still a doctor-green host opt-in; when
+  enabled it keeps UI control background-first and semantic-only.
 - **Abandoned-stream cleanup:** LLM attempt receipts now close partially
   consumed provider streams across sync finalization, async loop shutdown, and
   context-manager failures without blocking receipt enrichment.

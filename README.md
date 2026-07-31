@@ -42,11 +42,12 @@ fingerprint. It does not stop or install a gateway.
 
 See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 
-### Optional semantic computer-control readiness
+### Semantic computer-control readiness
 
-The packaged capability remains disabled and off the hook hot path by default.
-An explicitly opted-in profile must pass the public, read-only wiring audit
-before any canary or activation:
+The lazy skill and native `computer_use` tool are discoverable on CLI and
+Telegram by default. Hermes omits the tool when a local driver is unavailable,
+so other automation remains usable. The stricter semantic-only guard stays off
+unless a local GUI host passes the public, read-only wiring audit:
 
 ```bash
 "$candidate/venv/bin/python" bin/check-semantic-computer-control.py \
