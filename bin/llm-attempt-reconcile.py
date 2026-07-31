@@ -8,54 +8,22 @@ import importlib.util
 import json
 import os
 import sys
-import types
 from pathlib import Path
 
 
-def _profile_runtime_source(home: Path) -> Path | None:
-    receipt_path = home / "state" / "public-setup-current.json"
-    try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if (
-        not isinstance(receipt, dict)
-        or receipt.get("kind") != "botdoctor_public_profile_install"
-        or receipt.get("status") != "completed"
-        or receipt.get("hermes_home") != str(home)
-    ):
-        return None
-    runtime_dir = receipt.get("runtime_dir")
-    if not isinstance(runtime_dir, str) or not Path(runtime_dir).is_absolute():
-        return None
-    source = Path(runtime_dir) / "agent" / "llm_attempt_receipts.py"
-    return source if source.is_file() else None
-
-
 def _load_runtime_module():
-    home = Path(
-        os.environ.get("HERMES_HOME", str(Path(__file__).resolve().parents[1]))
-    ).expanduser().resolve()
     candidates = [
-        _profile_runtime_source(home),
         Path(__file__).resolve().parents[1] / "agent/llm_attempt_receipts.py",
         Path(__file__).resolve().parents[1] / "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
-        home / "hermes-agent/agent/llm_attempt_receipts.py",
+        Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+        / "hermes-agent/agent/llm_attempt_receipts.py",
     ]
-    source = next((path for path in candidates if path is not None and path.exists()), None)
+    source = next((path for path in candidates if path.exists()), None)
     if source is None:
         raise RuntimeError("llm_attempt_receipts.py is not installed")
     runtime_root = source.parent.parent
     if str(runtime_root) not in sys.path:
         sys.path.insert(0, str(runtime_root))
-    if (
-        source == candidates[2]
-        and "hermes_constants" not in sys.modules
-        and importlib.util.find_spec("hermes_constants") is None
-    ):
-        fallback_constants = types.ModuleType("hermes_constants")
-        fallback_constants.get_hermes_home = lambda: home
-        sys.modules["hermes_constants"] = fallback_constants
     spec = importlib.util.spec_from_file_location("llm_attempt_receipts_runtime", source)
     module = importlib.util.module_from_spec(spec)
     assert spec and spec.loader

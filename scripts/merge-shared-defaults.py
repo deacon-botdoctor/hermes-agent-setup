@@ -73,7 +73,7 @@ _SENTINEL = object()
 # Primary client model-routing keys are owned by the client config, never by shared
 # defaults. merge-sd must NEVER overwrite these even if a (possibly stale)
 # defaults file declares them. Hard floor against the 2026-06-07 Codex->openrouter
-# clobber where a leftover client-routing default reverted multiple agents.
+# clobber where a leftover config-routing-client-enoch.yaml reverted 6 agents.
 #
 # Auxiliary lanes are different: they are fleet-owned routine tool routes. Drift
 # here breaks tools silently (for example Codex-mini vision on ChatGPT accounts).

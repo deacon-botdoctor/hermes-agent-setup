@@ -60,6 +60,38 @@ SCHEDULE_BLOCK = """            # Claim the session slot *before* spawning the t
                 tasks.append(task)
             scheduled += 1
 """
+SCHEDULE_BLOCK_SESSION_STATE = """            # Claim the session slot *before* spawning the task so that an
+            # inbound message arriving between task creation and the task's
+            # first await (where _process_message_background sets the real
+            # sentinel) sees the slot as occupied and queues behind it
+            # instead of spinning up a duplicate AIAgent (#45456).
+            _resume_state = self._session_state(entry.session_key)
+            _resume_state.turn.agent = _AGENT_PENDING_SENTINEL
+            _resume_state.turn.started_ts = time.time()
+            self._persist_active_agents()
+
+            # Empty-text internal event — the _is_resume_pending branch in
+            # _handle_message_with_agent prepends the proper reason-aware
+            # system note before the turn runs.
+            event = MessageEvent(
+                text="",
+                message_type=MessageType.TEXT,
+                source=source,
+                internal=True,
+            )
+            task = asyncio.create_task(
+                self._run_startup_resume_event(adapter, event, entry.session_key)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            if getattr(self, "_startup_restore_in_progress", False):
+                tasks = getattr(self, "_startup_restore_tasks", None)
+                if tasks is None:
+                    tasks = []
+                    self._startup_restore_tasks = tasks
+                tasks.append(task)
+            scheduled += 1
+"""
 CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3] Claim this check-in
             # in memory so reconnect/startup scans cannot schedule duplicates
             # in one process.  The durable resume marker is cleared only after
@@ -213,7 +245,7 @@ STALE_RETRY_SEND_TAIL = """        delay = 1.0
             logger.warning("Failed to commit restart recovery check-in for %s: %s", entry.session_key, exc)
 
 """
-RETRY_SEND_TAIL = """        delay = 1.0
+SYNC_RETRY_SEND_TAIL = """        delay = 1.0
         while entry.resume_pending:
             try:
                 current_adapter = self._adapter_for_source(source)
@@ -248,6 +280,56 @@ RETRY_SEND_TAIL = """        delay = 1.0
             logger.warning("Failed to commit restart recovery check-in for %s: %s", entry.session_key, exc)
 
 """
+RETRY_SEND_TAIL = """        delay = 1.0
+        while entry.resume_pending:
+            try:
+                current_adapter = self._adapter_for_source(source)
+                if current_adapter is None:
+                    logger.warning(
+                        "Restart recovery check-in adapter is unavailable for %s",
+                        entry.session_key,
+                    )
+                else:
+                    result = await current_adapter.send(
+                        source.chat_id,
+                        message,
+                        metadata=self._thread_metadata_for_source(source),
+                    )
+                    if result is None or getattr(result, "success", True):
+                        break
+                    logger.warning("Restart recovery check-in was not accepted for %s", entry.session_key)
+            except Exception as exc:
+                logger.warning("Restart recovery check-in failed for %s: %s", entry.session_key, exc)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 60.0)
+        if not entry.resume_pending:
+            return
+        try:
+            cleared = await self.async_session_store.clear_resume_pending(entry.session_key)
+            if cleared:
+                # Keep this scheduler's captured entry coherent with the
+                # durable store even when a test/double facade returns a
+                # successful clear without mutating the same object.
+                entry.resume_pending = False
+                entry.resume_reason = None
+                entry.last_resume_marked_at = None
+        except Exception as exc:
+            logger.warning("Failed to commit restart recovery check-in for %s: %s", entry.session_key, exc)
+
+"""
+FACADE_RETRY_SEND_TAIL = RETRY_SEND_TAIL.replace(
+    """            cleared = await self.async_session_store.clear_resume_pending(entry.session_key)
+            if cleared:
+                # Keep this scheduler's captured entry coherent with the
+                # durable store even when a test/double facade returns a
+                # successful clear without mutating the same object.
+                entry.resume_pending = False
+                entry.resume_reason = None
+                entry.last_resume_marked_at = None
+""",
+    """            await self.async_session_store.clear_resume_pending(entry.session_key)
+""",
+)
 HELPER = HELPER_PREFIX + RETRY_SEND_TAIL
 
 DURABLE_DRAIN_METHOD_ANCHOR = "    def _schedule_post_startup_drain(self) -> None:\n"
@@ -673,7 +755,7 @@ async def test_restart_checkin_retries_rejection_until_accepted():
     assert adapter.send.await_count == 2
     assert pending_entry.session_key not in runner._restart_interruption_checkins
     assert pending_entry.resume_pending is False
-    runner.session_store._save.assert_called_once()
+    runner.session_store.clear_resume_pending.assert_called_once_with(pending_entry.session_key)
 """,
     "test_auto_resume_runs_agent_exactly_once_through_full_path": """@pytest.mark.asyncio
 async def test_restart_checkin_never_runs_interrupted_agent():
@@ -705,7 +787,19 @@ async def test_restart_checkin_never_runs_interrupted_agent():
 """,
 }
 
-OPTIONAL_COMPOSITION_TESTS = frozenset({"test_startup_restore_waits_for_resume_before_final_durable_drain"})
+OPTIONAL_COMPOSITION_TESTS = frozenset(
+    {
+        # Upstream's v0.19.1 test-pruning pass removed these direct scheduler
+        # cases. Golden still proves the same policy through its patcher tests
+        # and the assembled durable-drain composition suite; runtime patching
+        # must not depend on upstream retaining our preferred test names.
+        "test_startup_auto_resume_schedules_fresh_pending_sessions",
+        "test_startup_auto_resume_includes_crash_recovery",
+        "test_reconnect_reschedules_pending_after_late_platform_connect",
+        "test_auto_resume_sentinel_cleaned_on_task_failure",
+        "test_startup_restore_waits_for_resume_before_final_durable_drain",
+    }
+)
 
 POLICY_TEST_ALTERNATIVES = {
     "test_startup_restore_waits_for_resume_before_draining_inbound": frozenset(
@@ -754,16 +848,23 @@ def _validate_behavior_tests(hermes_dir: Path) -> None:
 def _patch_behavior_tests(hermes_dir: Path) -> bool:
     path = Path(hermes_dir) / "tests" / "gateway" / "test_restart_resume_pending.py"
     original = path.read_text(encoding="utf-8")
-    patched = original
+    patched = original.replace(
+        "    runner.session_store._save.assert_called_once()\n",
+        "    runner.session_store.clear_resume_pending.assert_called_once_with(pending_entry.session_key)\n",
+        1,
+    )
     for old_name, replacement in TEST_REPLACEMENTS.items():
         new_name = ast.parse(replacement).body[0].name
         if f"async def {new_name}(" in patched:
             continue
+        alternatives = POLICY_TEST_ALTERNATIVES.get(old_name, ())
+        if alternatives and all(f"def {name}(" in patched for name in alternatives):
+            # Newer durable-runtime suites may retain a historical function
+            # name for a different composition invariant. Prefer their full
+            # policy proof over injecting Golden's older queue-based test.
+            continue
         if f"async def {old_name}(" not in patched:
             if old_name in OPTIONAL_COMPOSITION_TESTS:
-                continue
-            alternatives = POLICY_TEST_ALTERNATIVES.get(old_name, ())
-            if alternatives and all(f"def {name}(" in patched for name in alternatives):
                 continue
             raise RuntimeError(f"restart interruption check-in test anchor drifted: {old_name}")
         updated = _replace_async_test(patched, old_name, replacement)
@@ -802,6 +903,18 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
                 RETRY_SEND_TAIL,
                 1,
             )
+        elif SYNC_RETRY_SEND_TAIL in patched:
+            patched = patched.replace(
+                SYNC_RETRY_SEND_TAIL,
+                RETRY_SEND_TAIL,
+                1,
+            )
+        elif FACADE_RETRY_SEND_TAIL in patched:
+            patched = patched.replace(
+                FACADE_RETRY_SEND_TAIL,
+                RETRY_SEND_TAIL,
+                1,
+            )
         elif RETRY_SEND_TAIL not in patched:
             raise RuntimeError("current restart interruption check-in anchors drifted")
     else:
@@ -811,13 +924,30 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             if (
                 prior_checkin_block not in original
                 or prior_helper_prefix not in original
-                or (STALE_RETRY_SEND_TAIL not in original and RETRY_SEND_TAIL not in original)
+                or (
+                    STALE_RETRY_SEND_TAIL not in original
+                    and SYNC_RETRY_SEND_TAIL not in original
+                    and FACADE_RETRY_SEND_TAIL not in original
+                    and RETRY_SEND_TAIL not in original
+                )
             ):
                 raise RuntimeError("prior restart interruption check-in anchors drifted")
             patched = original.replace(PRIOR_MARKER, MARKER)
             if STALE_RETRY_SEND_TAIL in patched:
                 patched = patched.replace(
                     STALE_RETRY_SEND_TAIL,
+                    RETRY_SEND_TAIL,
+                    1,
+                )
+            elif SYNC_RETRY_SEND_TAIL in patched:
+                patched = patched.replace(
+                    SYNC_RETRY_SEND_TAIL,
+                    RETRY_SEND_TAIL,
+                    1,
+                )
+            elif FACADE_RETRY_SEND_TAIL in patched:
+                patched = patched.replace(
+                    FACADE_RETRY_SEND_TAIL,
                     RETRY_SEND_TAIL,
                     1,
                 )
@@ -832,12 +962,17 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
                 raise RuntimeError("legacy restart interruption check-in anchors drifted")
             patched = patched.replace(LEGACY_MARKER, MARKER)
         else:
-            if METHOD_ANCHOR not in original or SCHEDULE_BLOCK not in original:
+            schedule_blocks = [
+                block
+                for block in (SCHEDULE_BLOCK, SCHEDULE_BLOCK_SESSION_STATE)
+                if block in original
+            ]
+            if METHOD_ANCHOR not in original or len(schedule_blocks) != 1:
                 raise RuntimeError("restart interruption check-in anchors drifted")
             patched = original.replace(METHOD_ANCHOR, HELPER + METHOD_ANCHOR, 1)
             if SCHEDULER_DOC_OLD in patched:
                 patched = patched.replace(SCHEDULER_DOC_OLD, SCHEDULER_DOC_NEW, 1)
-            patched = patched.replace(SCHEDULE_BLOCK, CHECKIN_BLOCK, 1)
+            patched = patched.replace(schedule_blocks[0], CHECKIN_BLOCK, 1)
         if STARTUP_WAIT_BLOCK_NEW not in patched:
             if NATIVE_BOUNDED_STARTUP_WAIT in patched:
                 pass

@@ -14,7 +14,6 @@ import contextvars
 import hashlib
 import inspect
 import json
-import logging
 import os
 import socket
 import threading
@@ -24,7 +23,6 @@ import weakref
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable, Optional
 
 from hermes_constants import get_hermes_home
@@ -32,7 +30,6 @@ from hermes_constants import get_hermes_home
 SCHEMA_VERSION = "botdoctor.llm-attempt.v1"
 TERMINAL_OUTCOMES = frozenset({"success", "error", "cancelled"})
 _WRITE_LOCK = threading.Lock()
-_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -90,7 +87,7 @@ def _json_value(value: Any) -> Any:
     return None
 
 
-def _write_ledger_event(event: dict[str, Any]) -> None:
+def _append(event: dict[str, Any]) -> None:
     path = _journal_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = (json.dumps(_json_value(event), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
@@ -100,21 +97,6 @@ def _write_ledger_event(event: dict[str, Any]) -> None:
             os.write(fd, payload)
         finally:
             os.close(fd)
-
-
-def _record_ledger_failure(error: Exception) -> None:
-    _LOGGER.error(
-        "LLM attempt receipt ledger write failed: %s",
-        type(error).__name__,
-        exc_info=True,
-    )
-
-
-def _append(event: dict[str, Any]) -> None:
-    try:
-        _write_ledger_event(event)
-    except Exception as exc:
-        _record_ledger_failure(exc)
 
 
 def _key_fingerprint(api_key: Any) -> tuple[str, str]:
@@ -210,6 +192,70 @@ def classify_error(error: BaseException) -> str:
     return "provider_error"
 
 
+def _openrouter_generation_usage(api_key: Any, generation_id: str) -> Optional[dict[str, Any]]:
+    """Fetch content-free usage metadata when the SDK returns zeroed usage."""
+    if not isinstance(api_key, str) or not api_key:
+        return None
+    if not generation_id or generation_id == "id_unavailable":
+        return None
+    try:
+        import urllib.parse
+        import urllib.request
+
+        url = "https://openrouter.ai/api/v1/generation?" + urllib.parse.urlencode({"id": generation_id})
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "hermes-llm-attempt-receipts/1.0",
+            },
+        )
+        for delay in (0.0, 0.2, 0.5):
+            if delay:
+                time.sleep(delay)
+            try:
+                with urllib.request.urlopen(request, timeout=3) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                data = payload.get("data") if isinstance(payload, dict) else None
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                continue
+    except Exception:
+        return None
+    return None
+
+
+def _openrouter_usage_payload(metadata: dict[str, Any]) -> dict[str, Any]:
+    def number(name: str) -> int:
+        value = metadata.get(name)
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    input_tokens = number("tokens_prompt")
+    output_tokens = number("tokens_completion")
+    cache_read_tokens = number("native_tokens_cached")
+    reasoning_tokens = number("native_tokens_reasoning")
+    cost = metadata.get("total_cost")
+    if not isinstance(cost, (int, float, Decimal)) or isinstance(cost, bool):
+        cost = metadata.get("usage")
+    actual_cost = float(cost) if isinstance(cost, (int, float, Decimal)) and not isinstance(cost, bool) else None
+    return {
+        "input_tokens": max(0, input_tokens - cache_read_tokens),
+        "output_tokens": output_tokens,
+        "cache_read_tokens": cache_read_tokens,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": reasoning_tokens,
+        "total_tokens": input_tokens + output_tokens,
+        "usage_status": "provider_generation_metadata",
+        "cost_usd": actual_cost,
+        "cost_status": "actual" if actual_cost is not None else "unknown",
+        "cost_source": ("openrouter_generation" if actual_cost is not None else "none"),
+    }
+
+
 def _usage_payload(
     response: Any,
     *,
@@ -217,19 +263,49 @@ def _usage_payload(
     model: str,
     base_url: str,
     api_mode: str,
+    api_key: Any,
+    provider_request_id: str,
 ) -> dict[str, Any]:
     raw_usage = _obj_get(response, "usage")
-    actual = _actual_cost(response, raw_usage)
-    if raw_usage is None or (
-        _is_openrouter(provider, base_url) and _has_unreported_usage(raw_usage)
-    ):
-        return _unavailable_usage_payload(actual)
+    route_host = _base_url_host(base_url)
+    if (
+        str(provider or "").lower() == "openrouter" or route_host == "openrouter.ai"
+    ) and provider_request_id != "id_unavailable":
+        token_hint = 0
+        for name in (
+            "prompt_tokens",
+            "completion_tokens",
+            "input_tokens",
+            "output_tokens",
+            "total_tokens",
+        ):
+            try:
+                token_hint += int(_obj_get(raw_usage, name, 0) or 0)
+            except (TypeError, ValueError):
+                continue
+        if raw_usage is None or token_hint == 0:
+            metadata = _openrouter_generation_usage(api_key, provider_request_id)
+            if metadata is not None:
+                return _openrouter_usage_payload(metadata)
+    if raw_usage is None:
+        return {
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_tokens": None,
+            "cache_write_tokens": None,
+            "reasoning_tokens": None,
+            "total_tokens": None,
+            "usage_status": "unavailable",
+            "cost_usd": None,
+            "cost_status": "unknown",
+            "cost_source": "none",
+        }
 
     try:
         from agent.usage_pricing import estimate_usage_cost, normalize_usage
 
         usage = normalize_usage(
-            _usage_attribute_view(raw_usage),
+            raw_usage,
             provider=provider,
             api_mode=api_mode,
         )
@@ -243,9 +319,31 @@ def _usage_payload(
             "usage_status": "provider_reported",
         }
     except Exception:
-        result = _unavailable_usage_payload()
+        result = {
+            "input_tokens": None,
+            "output_tokens": None,
+            "cache_read_tokens": None,
+            "cache_write_tokens": None,
+            "reasoning_tokens": None,
+            "total_tokens": None,
+            "usage_status": "unavailable",
+        }
         usage = None
 
+    actual = None
+    raw = _json_value(raw_usage)
+    if isinstance(raw, dict):
+        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
+            value = raw.get(key)
+            if isinstance(value, (int, float, Decimal)):
+                actual = float(value)
+                break
+    if actual is None:
+        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
+            value = _obj_get(response, key)
+            if isinstance(value, (int, float, Decimal)):
+                actual = float(value)
+                break
     if actual is not None:
         result.update(
             cost_usd=actual,
@@ -272,69 +370,6 @@ def _usage_payload(
             pass
     result.update(cost_usd=None, cost_status="unknown", cost_source="none")
     return result
-
-
-def _is_openrouter(provider: str, base_url: str) -> bool:
-    return str(provider or "").lower() == "openrouter" or _base_url_host(
-        base_url
-    ) == "openrouter.ai"
-
-
-def _usage_attribute_view(value: Any) -> Any:
-    if isinstance(value, dict):
-        return SimpleNamespace(
-            **{
-                str(key): _usage_attribute_view(item)
-                for key, item in value.items()
-            }
-        )
-    if isinstance(value, list):
-        return [_usage_attribute_view(item) for item in value]
-    return value
-
-
-def _has_unreported_usage(raw_usage: Any) -> bool:
-    values = []
-    for name in (
-        "prompt_tokens",
-        "completion_tokens",
-        "input_tokens",
-        "output_tokens",
-        "total_tokens",
-    ):
-        value = _obj_get(raw_usage, name)
-        if value is None:
-            continue
-        try:
-            values.append(int(value))
-        except (TypeError, ValueError):
-            return True
-    return not values or not any(values)
-
-
-def _actual_cost(response: Any, raw_usage: Any) -> float | None:
-    for source in (raw_usage, response):
-        for key in ("cost", "cost_usd", "total_cost", "provider_cost"):
-            value = _obj_get(source, key)
-            if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
-                return float(value)
-    return None
-
-
-def _unavailable_usage_payload(actual_cost: float | None = None) -> dict[str, Any]:
-    payload = {
-        "input_tokens": None,
-        "output_tokens": None,
-        "cache_read_tokens": None,
-        "cache_write_tokens": None,
-        "reasoning_tokens": None,
-        "total_tokens": None,
-        "usage_status": "unavailable",
-        "cost_usd": actual_cost,
-        "cost_status": "actual" if actual_cost is not None else "unknown",
-        "cost_source": "provider_response" if actual_cost is not None else "none",
-    }
-    return payload
 
 
 @dataclass
@@ -433,6 +468,8 @@ class Attempt:
                 model=resolved_model,
                 base_url=self.base_url,
                 api_mode=self.api_mode,
+                api_key=self.api_key,
+                provider_request_id=request_id,
             )
         )
         _append(payload)

@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.28`:
+The current public release is `botdoctor-hermes-2026.07.31`:
 
-- upstream Hermes: `f228e145ba35cbbf785eded2021ae6682285b91b`;
-- public Golden source: `1e9cf546cdeff7be26109a2c2c407510a8f3726d`;
-- runtime payload: 79 files;
+- upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
+- public Golden source: `027f2126cae1b499f055961a85b4fddecbe1a463`;
+- runtime payload: 82 files;
 - assembled runtime fingerprint:
-  `7be0ac0aaf681d0e09e9357d227da5b78afb6a98294ebdcd708802b03954b03d`.
+  `0807790946c8b39f64090247dae8aaf2be8092038044e9f60f5293b681087681`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 Private fleet health probes, host routes, and service adapters are deliberately
@@ -49,6 +49,8 @@ values only when they still exactly match the old defaults.
   scoped to the exact chat/thread.
 - **Durable restart drain:** accepted messages, scheduled work, and restart
   recovery have one durable lifecycle.
+- **Quiet native compaction:** native Codex compaction stays authoritative while
+  its internal completion signal is kept out of the user transcript.
 - **Contextual interruption recovery:** after an interrupted restart, ask the
   originating user what to do next instead of silently repeating an uncertain
   action.
@@ -58,18 +60,23 @@ values only when they still exactly match the old defaults.
   with an older mutable checkout.
 - **Telegram transaction proof:** a local ledger can join exact ingress to final
   delivery for canaries and incident diagnosis.
+- **Version-aware media delivery:** replacing an attachment at the same path
+  sends the new bytes while an unchanged version remains deduplicated.
 - **Windows task identity:** named profiles stay bound to their explicitly owned
   Scheduled Task and state namespace.
 - **Codex 401 spend guard:** one bounded client-turn fallback may run while
   recursive/internal paid fallbacks remain blocked.
 - **LLM attempt receipts:** each observed main or auxiliary provider attempt
   writes a content-free local receipt with route, outcome, and usage evidence.
-  Receipt failures are logged but never block the model path; reconciliation
-  resolves the active installed runtime and treats missing, empty, or zero usage
-  as unavailable while retaining a provider-reported cost.
+  A missing start receipt fails closed before provider spend; reconciliation
+  treats missing, empty, or zero usage as unavailable while retaining a
+  provider-reported cost.
+- **Deferred-tool safety:** a model may defer an approved capability, but a
+  bridge guard prevents an unresolved deferred tool from being misreported as
+  completed work.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 17
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 18
 cohesive registry entries in this release.
 
 ## Profile additions
@@ -96,6 +103,10 @@ agents therefore switch only after admission is closed and every runtime-owned
 turn, tool call, delegated job, cron/API run, compaction lease, media task, and
 delivery transaction has finished or reached a durable replayable checkpoint.
 
+The live gateway must report the same positive PID and zero active operations
+twice across a stable interval. A stale counter is reconciled, never ignored.
 A client whose state cannot be proven safe stays on its old generation while
 independent clients continue. Startup restores checkpoints and queued messages
-exactly once before admission reopens.
+exactly once before admission reopens. Windows acceptance additionally proves
+that the named Scheduled Task, readiness task, launchers, profile, and live
+process all resolve the same immutable runtime.

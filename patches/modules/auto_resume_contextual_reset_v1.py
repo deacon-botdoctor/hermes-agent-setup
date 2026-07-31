@@ -9,15 +9,6 @@ from pathlib import Path
 
 MARKER = "HERMES_AUTO_RESUME_CONTEXTUAL_RESET_v1"
 
-SESSION_FIELD_ANCHOR = "    reset_had_activity: bool = False  # whether the expired session had any messages\n"
-SESSION_TO_DICT_ANCHOR = '            "reset_had_activity": self.reset_had_activity,\n'
-SESSION_FROM_DICT_ANCHOR = '            reset_had_activity=data.get("reset_had_activity", False),\n'
-SESSION_ID_LOCAL_ANCHOR = '        session_id = data["session_id"]\n'
-SESSION_ID_VALIDATION_ANCHOR = "        if _is_session_key_unsafe(session_key):\n"
-SESSION_LOCAL_ANCHOR = "        reset_had_activity = False\n"
-SESSION_CAPTURE_ANCHOR = "                        db_end_session_id = entry.session_id\n"
-SESSION_CANDIDATE_ANCHOR = "                reset_had_activity=reset_had_activity,\n"
-
 RUN_METHOD_ANCHOR = (
     "    async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):\n"
 )
@@ -101,20 +92,26 @@ RUN_DECIDE = """        _auto_reset_pending = getattr(
         )
         _auto_reset_reason = getattr(session_entry, "auto_reset_reason", None)
         _auto_reset_previous_session_id = getattr(
-            session_entry, "auto_reset_previous_session_id", None
+            session_entry, "prev_session_id", None
         )
         _contextual_auto_resume_enabled = (
             self._auto_resume_contextual_reset_enabled()
         )
-        if (
+        # Completion/watch events re-enter through ``handle_message`` as
+        # ``internal`` events. They still need their own cascading turn, but
+        # must not make (or consume) the user's contextual-resume decision.
+        # Returning here silently dropped those events.
+        _defer_contextual_reset_decision_for_internal_event = bool(
             _auto_reset_pending
             and _is_internal_event
             and _auto_reset_reason in {"idle", "daily"}
             and _auto_reset_previous_session_id
             and _contextual_auto_resume_enabled
-        ):
-            return ""
-        _was_auto_reset = _auto_reset_pending
+        )
+        _was_auto_reset = (
+            _auto_reset_pending
+            and not _defer_contextual_reset_decision_for_internal_event
+        )
         _auto_resumed_previous = False
         if _was_auto_reset:
             if (
@@ -162,80 +159,6 @@ def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str
     return source.replace(anchor, replacement, 1)
 
 
-def _replace_final(source: str, anchor: str, replacement: str, label: str) -> str:
-    """Replace the function-level initializer after any nested reset branches."""
-    before, found, after = source.rpartition(anchor)
-    if not found:
-        raise ValueError(f"{label} anchor is missing")
-    return before + replacement + after
-
-
-def _replace_capture(source: str) -> str:
-    """Capture every known auto-reset exit, and reject unknown drift."""
-    count = source.count(SESSION_CAPTURE_ANCHOR)
-    if count not in {1, 2}:
-        raise ValueError(f"previous session capture anchor count changed: {count}")
-    return source.replace(
-        SESSION_CAPTURE_ANCHOR,
-        SESSION_CAPTURE_ANCHOR
-        + "                        auto_reset_previous_session_id = entry.session_id\n",
-    )
-
-
-def patch_session_text(source: str) -> str:
-    if f"# [{MARKER}] session" in source:
-        return source
-    source = _replace_once(
-        source,
-        SESSION_FIELD_ANCHOR,
-        SESSION_FIELD_ANCHOR
-        + f"    # [{MARKER}] session\n"
-        + "    auto_reset_previous_session_id: Optional[str] = None\n",
-        "session field",
-    )
-    source = _replace_once(
-        source,
-        SESSION_TO_DICT_ANCHOR,
-        SESSION_TO_DICT_ANCHOR + '            "auto_reset_previous_session_id": self.auto_reset_previous_session_id,\n',
-        "session serialization",
-    )
-    source = _replace_once(
-        source,
-        SESSION_FROM_DICT_ANCHOR,
-        SESSION_FROM_DICT_ANCHOR + "            auto_reset_previous_session_id=auto_reset_previous_session_id,\n",
-        "session deserialization",
-    )
-    source = _replace_once(
-        source,
-        SESSION_ID_LOCAL_ANCHOR,
-        SESSION_ID_LOCAL_ANCHOR
-        + '        auto_reset_previous_session_id = data.get("auto_reset_previous_session_id")\n',
-        "previous session id local",
-    )
-    source = _replace_once(
-        source,
-        SESSION_ID_VALIDATION_ANCHOR,
-        "        if _is_path_unsafe(auto_reset_previous_session_id):\n"
-        "            raise ValueError(\n"
-        '                "Invalid auto_reset_previous_session_id: potential directory traversal detected"\n'
-        "            )\n" + SESSION_ID_VALIDATION_ANCHOR,
-        "previous session id validation",
-    )
-    source = _replace_final(
-        source,
-        SESSION_LOCAL_ANCHOR,
-        SESSION_LOCAL_ANCHOR + "        auto_reset_previous_session_id = None\n",
-        "reset local",
-    )
-    source = _replace_capture(source)
-    return _replace_once(
-        source,
-        SESSION_CANDIDATE_ANCHOR,
-        SESSION_CANDIDATE_ANCHOR + "                auto_reset_previous_session_id=auto_reset_previous_session_id,\n",
-        "candidate field",
-    )
-
-
 def patch_run_text(source: str) -> str:
     if f"# [{MARKER}] helpers" in source:
         return source
@@ -262,7 +185,7 @@ def patch_run_text(source: str) -> str:
         "                    bound_session_id\n"
         "                    and bound_session_id\n"
         "                    != getattr(\n"
-        '                        session_entry, "auto_reset_previous_session_id", None\n'
+        '                        session_entry, "prev_session_id", None\n'
         "                    )\n"
         "                    and bound_session_id != session_entry.session_id\n"
         "                ):\n",
@@ -277,14 +200,17 @@ def patch_run_text(source: str) -> str:
     return _replace_once(
         source,
         RUN_NEW_SESSION_ANCHOR,
-        RUN_NEW_SESSION_ANCHOR[:-1] + " and not _auto_resumed_previous\n",
+        RUN_NEW_SESSION_ANCHOR[:-1]
+        + " and not (\n"
+        + "            _auto_resumed_previous\n"
+        + "            or _defer_contextual_reset_decision_for_internal_event\n"
+        + "        )\n",
         "new-session classification",
     )
 
 
 def patch_auto_resume_contextual_reset_v1(hermes_dir: Path) -> bool:
     targets = {
-        hermes_dir / "gateway" / "session.py": patch_session_text,
         hermes_dir / "gateway" / "run.py": patch_run_text,
     }
     if not all(path.is_file() for path in targets):

@@ -3,16 +3,16 @@ patches:
   - name: llm_attempt_receipts_v1
     module: modules/llm_attempt_receipts_v1.py
     function: patch_llm_attempt_receipts_v1
-    target: agent/conversation_loop.py + agent/chat_completion_helpers.py + agent/auxiliary_client.py + agent/llm_attempt_receipts.py
+    target: agent/conversation_loop.py + agent/chat_completion_helpers.py + agent/turn_finalizer.py + agent/auxiliary_client.py + agent/llm_attempt_receipts.py + tests/run_agent/test_run_agent.py
     owner: engineering-lead
-    idempotency: HERMES_LLM_ATTEMPT_RECEIPTS_v1
+    idempotency: HERMES_LLM_ATTEMPT_RECEIPTS_v1 + HERMES_XAI_ITERATION_SUMMARY_TOOLLESS_v1
     test: python3 -m pytest -q bin/test/test_llm_attempt_receipts_v1.py
     rollback: restore the pre-apply snapshot and remove agent/llm_attempt_receipts.py plus state/llm-attempt-receipts.jsonl
     client_impact: restart_required
-    tags: [llm, openrouter, accounting, observability, receipts, fallback, streaming]
+    tags: [llm, openrouter, xai, accounting, observability, receipts, fallback, streaming, client-safety]
     status: extracted
     route: irreducible
-    reason: main hooks identify logical calls while retries and auxiliary provider calls need one content-free terminal receipt per physical attempt before OpenRouter spend can be attributed safely.
+    reason: main hooks identify logical calls while retries and auxiliary provider calls need one content-free terminal receipt per physical attempt before OpenRouter spend can be attributed safely; toolless iteration summaries must also remove tool_choice and parallel_tool_calls as one request contract and keep raw provider failures out of client chat.
     upstream_issue: null
     retirement_condition: remove when upstream emits terminal, content-free per-physical-attempt receipts for main and auxiliary calls with retry/fallback lineage and streaming coverage.
   - name: durable_drain_runtime_v1
@@ -30,6 +30,23 @@ patches:
     reason: current Hermes has shutdown flush but not durable maintenance admission/replay; the carrier supplies that missing lifecycle, steers concise maintenance context into active work, folds in cross-platform row/path safety, and adds the optional cron drain callback.
     upstream_issue: null
     retirement_condition: remove the full subsystem when upstream.lock contains equivalent durable recovery, cross-platform path/row handling, and drain-aware cron startup.
+
+  - name: compaction_completion_status_suppression_v1
+    module: modules/compaction_completion_status_suppression_v1.py
+    function: patch_compaction_completion_status_suppression_v1
+    target: agent/conversation_compression.py terminal compaction callback
+    owner: engineering-lead
+    idempotency: HERMES_SUPPRESS_COMPACTION_COMPLETION_STATUS_v1
+    test: bin/test/test_compaction_completion_status_suppression_v1.py
+    rollback: restore conversation_compression.py.bak-pre-compaction-completion-status-v1
+    client_impact: restart_required
+    tags: [client-safety, compaction, transcript]
+    status: extracted
+    route: irreducible
+    reason: the terminal compacted callback is rendered as a transcript message on managed clients and has no structured UI consumer.
+    upstream_issue: null
+    retirement_condition: upstream exposes a non-transcript completion signal for compaction status.
+
   - name: telegram_model_commentary_checkpoints_v1
     module: modules/telegram_organic_long_running_checkpoints_v1.py
     function: patch_telegram_organic_long_running_checkpoints_v1
@@ -110,26 +127,26 @@ patches:
   - name: telegram_transaction_canary_v1
     module: modules/telegram_transaction_canary_v1.py
     function: patch_telegram_transaction_canary_v1
-    target: gateway/platforms/base.py + plugins/platforms/telegram/adapter.py (legacy fallback gateway/platforms/telegram.py) + gateway/stream_consumer.py + gateway/telegram_transaction_ledger.py
+    target: gateway/platforms/base.py + plugins/platforms/telegram/adapter.py (legacy fallback gateway/platforms/telegram.py) + gateway/stream_consumer.py + gateway/telegram_transaction_ledger.py + gateway/run.py
     owner: engineering-lead
-    idempotency: HERMES_TELEGRAM_TRANSACTION_CANARY_v1
-    test: python3 -m pytest -q bin/test/test_telegram_transaction_canary_v1.py
-    rollback: restore the retained .bak-pre-telegram-transaction-canary-v1 backup for gateway/platforms/base.py, gateway/stream_consumer.py, and each unique Telegram adapter file identity (canonical or legacy alias), then remove gateway/telegram_transaction_ledger.py; apply-all also retains its pre-apply snapshot
+    idempotency: HERMES_TELEGRAM_TRANSACTION_CANARY_v1 + HERMES_MEDIA_SAME_PATH_RESEND_v1 + HERMES_MEDIA_SAME_PATH_DELIVERY_DEDUP_v1
+    test: python3 -m pytest -q bin/test/test_telegram_transaction_canary_v1.py bin/test/test_media_same_path_resend_v1.py
+    rollback: restore the retained .bak-pre-telegram-transaction-canary-v1 backups for gateway/platforms/base.py, gateway/stream_consumer.py, and each unique Telegram adapter file identity; restore gateway/run.py from .bak-pre-media-same-path-resend-v1 and gateway/platforms/base.py from .bak-pre-media-same-path-delivery-dedup-v1; then remove gateway/telegram_transaction_ledger.py; apply-all also retains its pre-apply snapshot
     client_impact: restart_required
-    tags: [telegram, observability, canary]
+    tags: [telegram, observability, canary, media, attachment, deduplication]
     status: extracted
     route: irreducible
-    reason: Telegram exposes inbound and accepted message IDs but no existing lifecycle joins exact ingress, command-bypass handling, and final delivery immutably.
+    reason: Telegram exposes inbound and accepted message IDs but no existing lifecycle joins exact ingress, command-bypass handling, and final delivery immutably; native historical media deduplication also keys only on a pathname and silently drops a revised artifact written back to that path.
     upstream_issue: null
-    retirement_condition: upstream provides an immutable receipt-to-final-delivery transaction ledger.
+    retirement_condition: upstream provides both an immutable receipt-to-final-delivery transaction ledger and attachment deduplication that suppresses an unchanged file version while allowing a file replaced at the same path to be delivered again.
   - name: auto_resume_contextual_reset_v1
     module: modules/auto_resume_contextual_reset_v1.py
     function: patch_auto_resume_contextual_reset_v1
-    target: gateway/session.py + gateway/run.py
+    target: gateway/run.py
     owner: engineering-lead
     idempotency: HERMES_AUTO_RESUME_CONTEXTUAL_RESET_v1
     test: python3 -m pytest -q bin/test/test_auto_resume_contextual_reset_v1.py
-    rollback: restore both files from their .bak-<timestamp>-pre-contextual-auto-resume siblings and set session_reset.auto_resume_previous_if_contextual false
+    rollback: restore gateway/run.py from its .bak-<timestamp>-pre-contextual-auto-resume sibling and set session_reset.auto_resume_previous_if_contextual false
     client_impact: restart_required
     tags: [gateway, context, session-reset, resume]
     status: extracted
@@ -198,20 +215,20 @@ patches:
     upstream_issue: null
     retirement_condition: remove when upstream refreshes the current agent tool snapshot after dynamic MCP registration at the post-tool boundary
   - name: mcp_legacy_alias_bridge_v1
-    module: modules/mcp_legacy_alias_dispatch_v1.py
+    module: modules/xai_deferred_tool_bridge_guard_v1.py
     function: patch_mcp_legacy_alias_bridge_v1
-    target: tools/tool_search.py + model_tools.py + agent/tool_executor.py + plugins/mcp-on-demand-control/control.py + tests/tools/test_tool_search.py
+    target: tools/tool_search.py + model_tools.py + agent/tool_executor.py + plugins/mcp-on-demand-control/control.py + tests/tools/test_tool_search.py + tests/run_agent/test_tool_call_guardrail_runtime.py
     owner: engineering-lead
-    idempotency: HERMES_MCP_LEGACY_ALIAS_DISPATCH_v1 + HERMES_MCP_LEGACY_COLD_ALIAS_ACTIVATION_v1
-    test: python3 -m pytest -q bin/test/test_mcp_legacy_alias_dispatch_v1.py bin/test/test_mcp_legacy_cold_alias_activation_v1.py tests/tools/test_tool_search.py
+    idempotency: HERMES_MCP_LEGACY_ALIAS_DISPATCH_v1 + HERMES_MCP_LEGACY_COLD_ALIAS_ACTIVATION_v1 + HERMES_XAI_DEFERRED_TOOL_BRIDGE_GUARD_v1
+    test: python3 -m pytest -q bin/test/test_mcp_legacy_alias_dispatch_v1.py bin/test/test_mcp_legacy_cold_alias_activation_v1.py bin/test/test_xai_deferred_tool_bridge_guard_v1.py tests/tools/test_tool_search.py tests/run_agent/test_tool_call_guardrail_runtime.py
     rollback: restore runtime files from the pre-apply snapshot recorded under state/apply-snapshots
     client_impact: restart_required
-    tags: [mcp, tools, lazy-loading, compatibility]
+    tags: [mcp, xai, tools, lazy-loading, compatibility, guardrail, client-safety]
     status: extracted
     route: upstream-pr-pending
-    reason: persisted sessions can replay the retired flattened mcp_server_tool name; resolve only a unique in-scope alias and activate only its uniquely policy-scoped cold backend
+    reason: persisted sessions can replay retired flattened MCP names, while provider-strict nested schemas and rejected bridge routes must not collapse distinct direct-tool mistakes into one executable wrapper failure counter
     upstream_issue: null
-    retirement_condition: remove after supported session history no longer contains flattened MCP action names
+    retirement_condition: remove after supported session history no longer contains flattened MCP action names and upstream excludes bridge-resolution rejects from execution guardrails with provider-strict schemas
   - name: skill_index_allowlist_v1
     module: apply-skill-index-allowlist.py
     function: patch_skill_index_allowlist_v1
@@ -230,11 +247,11 @@ patches:
   - name: windows_gateway_task_identity_v1
     module: modules/windows_gateway_task_identity_v1.py
     function: patch_windows_gateway_task_identity_v1
-    target: hermes_cli/gateway_windows.py
+    target: hermes_cli/gateway_windows.py + hermes_cli/config_defaults.py + cli-config.yaml.example
     owner: engineering-lead
     idempotency: HERMES_WINDOWS_GATEWAY_TASK_IDENTITY_v1
-    test: python3 -m pytest -q bin/test/test_windows_gateway_task_identity_v1.py tests/test_windows_safe_restart_contract.py
-    rollback: restore hermes_cli/gateway_windows.py from the pre-apply snapshot or .bak-pre-windows-gateway-task-identity-v1; restore the prior safe-restart settings file
+    test: python3 -m pytest -q bin/test/test_windows_gateway_task_identity_v1.py
+    rollback: restore hermes_cli/gateway_windows.py, hermes_cli/config_defaults.py, and cli-config.yaml.example from the pre-apply snapshot or their .bak-pre-windows-gateway-task-identity-v1 files; restore the prior safe-restart settings file
     client_impact: restart_required
     tags: [windows, gateway, profile, scheduled-task, restart]
     status: extracted
@@ -245,11 +262,11 @@ patches:
   - name: gateway_runtime_root_guard_v1
     module: modules/gateway_runtime_root_guard_v1.py
     function: patch_gateway_runtime_root_guard_v1
-    target: gateway/run.py
+    target: gateway/run.py + gateway/platforms/api_server.py
     owner: engineering-lead
     idempotency: HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1
     test: python3 -m pytest -q bin/test/test_gateway_runtime_root_guard_v1.py bin/test/test_assembled_runtime_contract.py
-    rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots
+    rollback: restore gateway/run.py and gateway/platforms/api_server.py from the pre-apply snapshot recorded under state/apply-snapshots
     client_impact: restart_required
     tags: [gateway, runtime, imports, coherence, incident]
     status: extracted

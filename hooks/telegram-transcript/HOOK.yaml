@@ -1,5 +1,5 @@
 name: telegram-transcript
-description: Bounded topic-local Telegram continuity index for current-topic rehydration
+description: Real-time Telegram message indexing into SQLite for chat history retrieval
 events:
   - agent:start
   - agent:end

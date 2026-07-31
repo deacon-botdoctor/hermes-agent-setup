@@ -185,13 +185,14 @@ def paid_fallback_allowed(
     state = _read()
     if state is None:
         return False
-    # A client turn that just hit primary Codex auth must have durable incident
-    # state before any paid provider may activate. Missing state is otherwise a
-    # normal no-incident condition and must not affect unrelated providers/tools.
+    # Paid routing is opt-in, never a generic failover.  The sole allowance is
+    # a matching client turn after a durable primary-Codex 401/403 incident.
+    # ``circuit_required`` remains in the signature for compatibility with
+    # existing call sites; it must not relax this invariant.
     if not state:
-        return not circuit_required
+        return False
     if state.get("state") not in _OPEN:
-        return True
+        return False
     matching_client_turn = (
         str(event_origin).lower() == "client"
         and state.get("event_origin") == "client"

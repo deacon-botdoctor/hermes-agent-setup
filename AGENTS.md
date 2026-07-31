@@ -186,8 +186,8 @@ if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "confi
   throw "Existing classification conflicts with the proven profile"
 }
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
-$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/f228e145ba35cbbf785eded2021ae6682285b91b/scripts/install.ps1"
-$ExpectedInstallerSha256 = "558456de6dc680cecd286018fa1a565a8b31454ed45e6d5b74bdada3142f6c3c"
+$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/cc4cab2f592e60a197e796506de9168f74baf3ea/scripts/install.ps1"
+$ExpectedInstallerSha256 = "7265f8ad1566bdeb2082f04b379d6794c9dd44b0c129eaa7f016b024d9a8f812"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
 $PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
@@ -353,9 +353,17 @@ messages by session/topic. Inspect every operation the runtime owns:
 - startup recovery and replay claims.
 
 Switch only when each item has finished or has an exact durable, replayable
-checkpoint. Require the same ready result twice across a stable interval. If
-state is stale, contradictory, unidentified, or not replayable, leave this
-client on the old runtime. Never kill uncertain work to keep an update moving.
+checkpoint. Sample the live gateway generation and active-operation count at
+least twice across a stable interval; both samples must name the same positive
+PID and report zero active operations. A missing process, changing generation,
+or nonzero active count is not ready.
+
+Treat a stale nonzero count as an incident to reconcile, not as permission to
+restart. Confirm the gateway is responsive, inspect its durable queues and
+leases, and use a harmless private no-tool turn only when that controlled probe
+is authorized. If state remains stale, contradictory, unidentified, or not
+replayable, leave this client on the old runtime. Never kill uncertain work to
+keep an update moving.
 
 ## Controlled cutover
 
@@ -371,7 +379,8 @@ At readiness:
    and source root, then use the helper's `--prove-kind` mode against the exact
    systemd unit, launchd plist, or Windows CMD/VBS launchers. For system scope,
    require its exact `User=` owner; for Windows require the scheduled-task
-   principal; launchd must belong to the current proven user.
+   principal and profile-scoped task name; launchd must belong to the current
+   proven user.
 5. Start the candidate and prove the old generation is absent.
 6. Restore durable checkpoints and replay accepted messages exactly once before
    reopening admission.
@@ -406,6 +415,8 @@ Fail and roll back on any failed required check:
 - `bin/verify-release.py --runtime-dir <candidate>` passes;
 - `hermes doctor` has no unaccepted required failure;
 - process imports resolve only inside the candidate root;
+- the service definition, launcher, process, profile, and imported root all
+  resolve to the same immutable candidate;
 - messaging identity and allowlist are unchanged;
 - a private inbound/outbound turn succeeds;
 - restart and continuation succeed without duplicates;
@@ -417,6 +428,11 @@ Fail and roll back on any failed required check:
 - retired duplicate memory/context daemons are absent;
 - rollback returns to the old healthy runtime and restore returns to the new
   healthy runtime.
+
+On Windows, acceptance also requires the configured task name, task action,
+CMD/VBS launchers, service owner, readiness task, and running process to resolve
+the same `HERMES_HOME` and candidate root. A green task state alone is not
+runtime-coherence proof.
 
 ## What not to carry forward
 
