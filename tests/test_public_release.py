@@ -49,11 +49,11 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 82
+    assert manifest["components"]["runtime_payload"]["file_count"] == 86
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "0807790946c8b39f64090247dae8aaf2be8092038044e9f60f5293b681087681",
+        "digest": "4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd",
         "file_count": 41,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
@@ -116,6 +116,8 @@ def test_profile_installer_maps_only_bounded_profile_files(tmp_path):
         for _source, destination, _mode in mappings
     }
     assert "plugins/botdoctor-immersion/plugin.yaml" in destinations
+    assert "plugins/semantic-computer-control-guard/plugin.yaml" in destinations
+    assert "skills/fleet/golden-computer-use-v2/SKILL.md" in destinations
     assert "hooks/telegram-transcript/handler.py" in destinations
     assert "mcp-servers/capability-router/registry.json" in destinations
     assert "bin/telegram-transaction-canary.py" in destinations
@@ -157,6 +159,7 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     ]
     assert "task-ledger" not in config["plugins"]["enabled"]
     assert "telegram-transcript" not in config["plugins"]["enabled"]
+    assert "semantic-computer-control-guard" not in config["plugins"]["enabled"]
     router = config["mcp_servers"]["capability-router"]
     assert router["command"] == str(python)
     assert router["args"] == ["-m", "capability_router.server"]

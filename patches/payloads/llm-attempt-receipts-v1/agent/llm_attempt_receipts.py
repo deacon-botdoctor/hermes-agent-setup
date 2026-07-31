@@ -578,14 +578,112 @@ def _is_stream(value: Any) -> bool:
     )
 
 
-def _finish_abandoned_attempt(attempt: Attempt) -> None:
+def _finish_abandoned_attempt(
+    attempt: Attempt,
+    close: Optional[Callable[[], Any]] = None,
+) -> None:
     if attempt._terminal:
         return
     try:
-        attempt.finish("cancelled")
+        if callable(close):
+            close()
     except BaseException:
-        # Finalizers must not surface during garbage collection or shutdown.
         pass
+    finally:
+        try:
+            attempt.finish("cancelled")
+        except BaseException:
+            # Finalizers must not surface during garbage collection or shutdown.
+            pass
+
+
+@dataclass
+class _AsyncCleanupState:
+    loop: asyncio.AbstractEventLoop
+    event: asyncio.Event
+    attempt: Attempt
+    close: Optional[Callable[[], Any]]
+    sync_close: Optional[Callable[[], Any]]
+    done: bool = False
+    task: Optional[asyncio.Task] = None
+
+
+async def _close_async_stream(close: Optional[Callable[[], Any]]) -> None:
+    try:
+        if callable(close):
+            result = close()
+            if inspect.isawaitable(result):
+                await result
+    except BaseException:
+        pass
+
+
+def _close_async_stream_after_loop(
+    close: Optional[Callable[[], Any]],
+    sync_close: Optional[Callable[[], Any]],
+) -> None:
+    try:
+        if callable(sync_close):
+            sync_close()
+    except BaseException:
+        pass
+    result = None
+    try:
+        if callable(close):
+            result = close()
+        if not inspect.isawaitable(result):
+            return
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if running_loop is not None:
+            running_loop.create_task(result)
+        else:
+            asyncio.run(result)
+    except BaseException:
+        if inspect.iscoroutine(result):
+            result.close()
+
+
+async def _monitor_async_stream(state: _AsyncCleanupState) -> None:
+    try:
+        await state.event.wait()
+    except asyncio.CancelledError:
+        # asyncio.run() waits for cancelled tasks to finish. Treat loop shutdown
+        # as cancellation of any stream that did not already terminalize.
+        pass
+    if state.done:
+        return
+    try:
+        await _close_async_stream(state.close)
+    finally:
+        if not state.attempt._terminal:
+            await asyncio.to_thread(state.attempt.finish, "cancelled")
+
+
+def _abandon_async_stream(state: _AsyncCleanupState) -> None:
+    if state.done:
+        return
+    try:
+        if state.loop.is_closed():
+            _close_async_stream_after_loop(state.close, state.sync_close)
+            _finish_abandoned_attempt(state.attempt)
+            return
+        if not state.loop.is_running():
+            state.loop.run_until_complete(_close_async_stream(state.close))
+            _finish_abandoned_attempt(state.attempt)
+            state.done = True
+            state.event.set()
+            if state.task is not None and not state.task.done():
+                state.loop.run_until_complete(state.task)
+            return
+        # The receipt is synchronous so collection during live-loop shutdown
+        # cannot strand a start event. The resident monitor owns async close.
+        _finish_abandoned_attempt(state.attempt)
+        state.loop.call_soon_threadsafe(state.event.set)
+    except BaseException:
+        _finish_abandoned_attempt(state.attempt)
 
 
 class _ObservedStream:
@@ -593,10 +691,14 @@ class _ObservedStream:
         self._stream = stream
         self._iterator = iter(stream)
         self._attempt = attempt
+        close = getattr(stream, "close", None)
+        if not callable(close):
+            close = getattr(self._iterator, "close", None)
         self._abandonment = weakref.finalize(
             self,
             _finish_abandoned_attempt,
             attempt,
+            close,
         )
 
     def __iter__(self):
@@ -633,6 +735,8 @@ class _ObservedStream:
 
     def close(self):
         close = getattr(self._stream, "close", None)
+        if not callable(close):
+            close = getattr(self._iterator, "close", None)
         try:
             if callable(close):
                 return close()
@@ -664,10 +768,27 @@ class _ObservedAsyncStream:
         self._stream = stream
         self._iterator = stream.__aiter__()
         self._attempt = attempt
+        self._loop = asyncio.get_running_loop()
+        close = getattr(stream, "aclose", None)
+        if not callable(close):
+            close = getattr(self._iterator, "aclose", None)
+        sync_close = getattr(stream, "close", None)
+        if not callable(sync_close):
+            sync_close = getattr(self._iterator, "close", None)
+        self._cleanup = _AsyncCleanupState(
+            loop=self._loop,
+            event=asyncio.Event(),
+            attempt=attempt,
+            close=close,
+            sync_close=sync_close,
+        )
+        self._cleanup.task = self._loop.create_task(
+            _monitor_async_stream(self._cleanup)
+        )
         self._abandonment = weakref.finalize(
             self,
-            _finish_abandoned_attempt,
-            attempt,
+            _abandon_async_stream,
+            self._cleanup,
         )
 
     def __aiter__(self):
@@ -696,14 +817,20 @@ class _ObservedAsyncStream:
             return item
         except StopAsyncIteration:
             await asyncio.to_thread(self._attempt.finish, "success")
+            self._cleanup.done = True
+            self._cleanup.event.set()
             raise
         except BaseException as exc:
             _note_aux_error(exc)
             await asyncio.to_thread(self._attempt.finish, "error", error=exc)
+            self._cleanup.done = True
+            self._cleanup.event.set()
             raise
 
     async def aclose(self):
         close = getattr(self._stream, "aclose", None)
+        if not callable(close):
+            close = getattr(self._iterator, "aclose", None)
         try:
             if callable(close):
                 return await close()
@@ -711,20 +838,62 @@ class _ObservedAsyncStream:
         finally:
             if not self._attempt._terminal:
                 await asyncio.to_thread(self._attempt.finish, "cancelled")
+            self._cleanup.done = True
+            self._cleanup.event.set()
 
     async def __aenter__(self):
         enter = getattr(self._stream, "__aenter__", None)
-        if callable(enter):
-            await enter()
+        try:
+            if callable(enter):
+                await enter()
+        except BaseException as enter_error:
+            _note_aux_error(enter_error)
+            await asyncio.to_thread(
+                self._attempt.finish,
+                "error",
+                error=enter_error,
+            )
+            self._cleanup.done = True
+            self._cleanup.event.set()
+            raise
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        if exc is not None:
-            _note_aux_error(exc)
-            await asyncio.to_thread(self._attempt.finish, "error", error=exc)
-        await self.aclose()
         exit_fn = getattr(self._stream, "__aexit__", None)
-        return await exit_fn(exc_type, exc, tb) if callable(exit_fn) else False
+        if not callable(exit_fn):
+            if exc is not None:
+                _note_aux_error(exc)
+                await asyncio.to_thread(
+                    self._attempt.finish,
+                    "error",
+                    error=exc,
+                )
+            await self.aclose()
+            return False
+        try:
+            result = await exit_fn(exc_type, exc, tb)
+        except BaseException as exit_error:
+            _note_aux_error(exit_error)
+            await asyncio.to_thread(
+                self._attempt.finish,
+                "error",
+                error=exit_error,
+            )
+            raise
+        else:
+            if exc is not None:
+                _note_aux_error(exc)
+                await asyncio.to_thread(
+                    self._attempt.finish,
+                    "error",
+                    error=exc,
+                )
+            elif not self._attempt._terminal:
+                await asyncio.to_thread(self._attempt.finish, "cancelled")
+            return result
+        finally:
+            self._cleanup.done = True
+            self._cleanup.event.set()
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._stream, name)

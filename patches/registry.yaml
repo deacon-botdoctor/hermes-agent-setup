@@ -6,13 +6,13 @@ patches:
     target: agent/conversation_loop.py + agent/chat_completion_helpers.py + agent/turn_finalizer.py + agent/auxiliary_client.py + agent/llm_attempt_receipts.py + tests/run_agent/test_run_agent.py
     owner: engineering-lead
     idempotency: HERMES_LLM_ATTEMPT_RECEIPTS_v1 + HERMES_XAI_ITERATION_SUMMARY_TOOLLESS_v1
-    test: python3 -m pytest -q bin/test/test_llm_attempt_receipts_v1.py
+    test: python3 -m pytest -q bin/test/test_llm_attempt_receipts_v1.py bin/test/test_llm_attempt_receipts_stream_cleanup_v1.py
     rollback: restore the pre-apply snapshot and remove agent/llm_attempt_receipts.py plus state/llm-attempt-receipts.jsonl
     client_impact: restart_required
     tags: [llm, openrouter, xai, accounting, observability, receipts, fallback, streaming, client-safety]
     status: extracted
     route: irreducible
-    reason: main hooks identify logical calls while retries and auxiliary provider calls need one content-free terminal receipt per physical attempt before OpenRouter spend can be attributed safely; toolless iteration summaries must also remove tool_choice and parallel_tool_calls as one request contract and keep raw provider failures out of client chat.
+    reason: main hooks identify logical calls while retries and auxiliary provider calls need one content-free terminal receipt per physical attempt before OpenRouter spend can be attributed safely; abandoned sync/async streams must close their provider resource and terminalize even during stopped or closed event-loop cleanup; toolless iteration summaries must also remove tool_choice and parallel_tool_calls as one request contract and keep raw provider failures out of client chat.
     upstream_issue: null
     retirement_condition: remove when upstream emits terminal, content-free per-physical-attempt receipts for main and auxiliary calls with retry/fallback lineage and streaming coverage.
   - name: durable_drain_runtime_v1

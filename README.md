@@ -42,6 +42,26 @@ fingerprint. It does not stop or install a gateway.
 
 See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 
+### Optional semantic computer-control readiness
+
+The packaged capability remains disabled and off the hook hot path by default.
+An explicitly opted-in profile must pass the public, read-only wiring audit
+before any canary or activation:
+
+```bash
+"$candidate/venv/bin/python" bin/check-semantic-computer-control.py \
+  --home "$HERMES_HOME" \
+  --runtime-root "$candidate" \
+  --required \
+  --semantic-probe \
+  --json
+```
+
+The audit checks the Golden guard plugin, lazy skill, explicit platform
+exposure, standard-mode upstream seam, and the real Hermes tool path using only
+`list_windows`. It never clicks, types, focuses, raises a window, writes config,
+installs a driver, restarts a service, or authorizes rollout.
+
 ## Choose your path
 
 ### Fresh headless agent
