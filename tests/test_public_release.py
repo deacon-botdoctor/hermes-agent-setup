@@ -134,6 +134,12 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
         yaml.safe_dump(
             {
                 "plugins": {"enabled": ["user-plugin"]},
+                "skills": {"index_allowlist": ["user-skill"]},
+                "platform_toolsets": {
+                    "cli": ["terminal"],
+                    "telegram": ["web"],
+                    "cron": ["todo"],
+                },
                 "mcp_servers": {
                     "capability-router": {
                         "command": "/old/runtime/python",
@@ -160,6 +166,13 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     assert "task-ledger" not in config["plugins"]["enabled"]
     assert "telegram-transcript" not in config["plugins"]["enabled"]
     assert "semantic-computer-control-guard" not in config["plugins"]["enabled"]
+    assert config["skills"]["index_allowlist"] == [
+        "user-skill",
+        "golden-computer-use-v2",
+    ]
+    assert config["platform_toolsets"]["cli"] == ["terminal", "computer_use"]
+    assert config["platform_toolsets"]["telegram"] == ["web", "computer_use"]
+    assert config["platform_toolsets"]["cron"] == ["todo"]
     router = config["mcp_servers"]["capability-router"]
     assert router["command"] == str(python)
     assert router["args"] == ["-m", "capability_router.server"]
@@ -168,6 +181,20 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     assert router["env"]["CUSTOM"] == "kept"
     assert router["timeout"] == 45
     assert "mcp_servers.capability-router" in changed
+
+
+def test_profile_semantic_awareness_does_not_create_restrictive_lists(tmp_path):
+    installer = load_script("public_install_semantic_minimal", "install-profile.py")
+    config_path = tmp_path / "config.yaml"
+    python = tmp_path / "runtime" / "venv" / "bin" / "python"
+    config_path.write_text("plugins: {}\n", encoding="utf-8")
+
+    installer.ensure_public_config(config_path, tmp_path, python)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert "skills" not in config
+    assert "platform_toolsets" not in config
+    assert "semantic-computer-control-guard" not in config["plugins"]["enabled"]
 
 
 def test_unknown_existing_plugin_selections_are_preserved(tmp_path):

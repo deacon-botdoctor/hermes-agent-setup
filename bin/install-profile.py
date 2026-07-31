@@ -31,6 +31,9 @@ REQUIRED_PLUGINS = (
     "botdoctor-immersion",
     "mcp-on-demand-control",
 )
+SEMANTIC_SKILL = "golden-computer-use-v2"
+SEMANTIC_TOOLSET = "computer_use"
+SEMANTIC_SURFACES = ("cli", "telegram")
 STAGING_LIVE_FILES = (
     "auth.json",
     "gateway.pid",
@@ -245,6 +248,26 @@ def ensure_public_config(
     if wanted_plugins != enabled:
         plugins["enabled"] = wanted_plugins
         changed.append("plugins.enabled")
+
+    # Keep semantic computer control discoverable without turning its optional
+    # fail-closed guard into a universal policy. An absent skill allowlist means
+    # all installed skills are already visible, so do not create one. Likewise,
+    # only extend explicit platform lists; creating a one-item list could hide
+    # Hermes' native defaults on a future blank-slate config.
+    skills = config.get("skills")
+    if isinstance(skills, dict) and isinstance(skills.get("index_allowlist"), list):
+        allowlist = list(skills["index_allowlist"])
+        if SEMANTIC_SKILL not in allowlist:
+            skills["index_allowlist"] = [*allowlist, SEMANTIC_SKILL]
+            changed.append("skills.index_allowlist")
+    platform_toolsets = config.get("platform_toolsets")
+    if isinstance(platform_toolsets, dict):
+        for surface in SEMANTIC_SURFACES:
+            current = platform_toolsets.get(surface)
+            if not isinstance(current, list) or SEMANTIC_TOOLSET in current:
+                continue
+            platform_toolsets[surface] = [*current, SEMANTIC_TOOLSET]
+            changed.append(f"platform_toolsets.{surface}")
 
     servers = config.setdefault("mcp_servers", {})
     if not isinstance(servers, dict):
