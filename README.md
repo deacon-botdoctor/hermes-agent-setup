@@ -45,9 +45,11 @@ See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 ### Semantic computer-control readiness
 
 The lazy skill and native `computer_use` tool are discoverable on CLI and
-Telegram by default. Hermes omits the tool when a local driver is unavailable,
-so other automation remains usable. The stricter semantic-only guard stays off
-unless a local GUI host passes the public, read-only wiring audit:
+Telegram by default. Profile installation now installs and verifies the exact
+Golden-pinned Cua Driver version through native Hermes. A headless host may
+record a degraded desktop doctor while retaining normal automation; the
+stricter semantic-only guard stays off unless a local GUI host passes the
+public, read-only wiring audit:
 
 ```bash
 "$candidate/venv/bin/python" bin/check-semantic-computer-control.py \
@@ -61,7 +63,10 @@ unless a local GUI host passes the public, read-only wiring audit:
 The audit checks the Golden guard plugin, lazy skill, explicit platform
 exposure, standard-mode upstream seam, and the real Hermes tool path using only
 `list_windows`. It never clicks, types, focuses, raises a window, writes config,
-installs a driver, restarts a service, or authorizes rollout.
+restarts a service, or authorizes rollout. On a GUI installation, pass
+`--require-computer-use-ready` to `bin/install-profile.py`; macOS may still
+require the user or managed-device policy to grant Accessibility and Screen
+Recording to the stable `CuaDriver.app` identity.
 
 ## Choose your path
 
@@ -74,8 +79,10 @@ Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 3. apply and fingerprint the public runtime;
 4. run native `hermes setup`;
 5. install only manifest-owned profile files with a local rollback;
-6. run native `hermes doctor`; and
-7. install the native gateway service only after verification.
+6. install and receipt the pinned native Cua Driver without restarting the
+   gateway;
+7. run native `hermes doctor`; and
+8. install the native gateway service only after verification.
 
 Browser automation, Composio, and additional MCP servers should be enabled only
 when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).

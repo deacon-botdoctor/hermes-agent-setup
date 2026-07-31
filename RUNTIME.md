@@ -2,15 +2,18 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.31-semantic-control-v2`:
+The current public release is `botdoctor-hermes-2026.07.31-semantic-control-v2-cua-driver-v1`:
 
 - upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `d87a2c99fb17a6bcad5bbd550a38ca94addc473a`;
+- public Golden source: `7354b56138ff377bba0c188ea0732e70be1e2440`;
 - runtime payload: 86 files;
 - assembled runtime fingerprint:
   `4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd`.
 
 Machines do not install “latest.” They build and verify these exact identities.
+The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
+required on macOS, Windows, and Linux, while GUI readiness remains a separate
+native doctor/session/permission gate.
 Private fleet health probes, host routes, and service adapters are deliberately
 not part of this public source manifest; native service tooling owns public
 installations.
@@ -75,10 +78,11 @@ values only when they still exactly match the old defaults.
   bridge guard prevents an unresolved deferred tool from being misreported as
   completed work.
 - **Capability-aware semantic computer control:** the lazy skill and native
-  tool are discoverable on CLI/Telegram by default. Hermes suppresses the tool
-  when no local driver exists, so native API/CLI/browser lanes remain the
-  fallback. The stricter guard is still a doctor-green host opt-in; when
-  enabled it keeps UI control background-first and semantic-only.
+  tool are discoverable on CLI/Telegram by default. The public installer uses
+  native Hermes to install the exact Golden-pinned Cua Driver and records its
+  native doctor result. Headless/session-limited hosts keep native
+  API/CLI/browser fallback; the stricter guard is still a doctor-green host
+  opt-in and keeps UI control background-first and semantic-only.
 - **Abandoned-stream cleanup:** LLM attempt receipts now close partially
   consumed provider streams across sync finalization, async loop shutdown, and
   context-manager failures without blocking receipt enrichment.
@@ -103,7 +107,9 @@ The bounded profile installer places only manifest-owned files:
   papercut helpers.
 
 It backs up every replaced destination, preserves unrelated local files, never
-reads `.env`, and does not switch or restart a service.
+reads `.env`, and does not switch or restart a service. Before profile mutation,
+it requires exact pinned-driver presence; GUI installs can additionally require
+doctor-green readiness with `--require-computer-use-ready`.
 
 ## Why the rollout contract matters
 

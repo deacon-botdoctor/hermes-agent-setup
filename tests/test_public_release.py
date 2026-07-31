@@ -73,6 +73,7 @@ def test_release_identity_matches_source_manifest():
         "deployment_digest",
         "assembled_runtime_fingerprint",
         "verification",
+        "cua_driver",
         "update_contract",
     }
     assert set(release["verification"]) == {
@@ -80,6 +81,31 @@ def test_release_identity_matches_source_manifest():
         "clean_upstream_rehearsal",
     }
 
+
+def test_release_pins_the_golden_cua_driver_contract():
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    driver = release["cua_driver"]
+    helper = ROOT / driver["helper"]["path"]
+    contract_path = ROOT / driver["contract"]["path"]
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+
+    assert driver["version"] == "0.14.2"
+    assert driver["tag"] == "cua-driver-rs-v0.14.2"
+    assert driver["baseline_acceptance"] == "exact_version_present"
+    assert driver["gui_acceptance"] == "doctor_ready_and_list_windows"
+    assert hashlib.sha256(helper.read_bytes()).hexdigest() == driver["helper"]["sha256"]
+    assert (
+        hashlib.sha256(contract_path.read_bytes()).hexdigest()
+        == driver["contract"]["sha256"]
+    )
+    assert contract["release"]["version"] == driver["version"]
+    assert contract["release"]["source_commit"] == driver["source_commit"]
+
+
+def test_release_payload_keeps_critical_blobs():
+    manifest = json.loads(
+        (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
+    )
     blobs = {
         entry["path"]: entry["blob"]
         for component in manifest["components"].values()
@@ -181,6 +207,67 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     assert router["env"]["CUSTOM"] == "kept"
     assert router["timeout"] == 45
     assert "mcp_servers.capability-router" in changed
+
+
+def test_profile_installer_requires_pinned_driver_before_profile_mutation(
+    tmp_path, monkeypatch
+):
+    installer = load_script("public_install_driver", "install-profile.py")
+    runtime_python = tmp_path / "candidate" / "venv" / "bin" / "python"
+    home = tmp_path / "profile"
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "status": "installed",
+                    "after": {"installed": True, "version": "0.14.2"},
+                    "doctor_ready": False,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    receipt = installer.ensure_cua_driver(runtime_python, home)
+
+    assert receipt["after"]["version"] == "0.14.2"
+    assert calls[0][0] == sys.executable
+    assert calls[0][1] == str(ROOT / "bin" / "ensure-cua-driver.py")
+    assert calls[0][calls[0].index("--hermes-python") + 1] == str(runtime_python)
+    assert calls[0][calls[0].index("--hermes-home") + 1] == str(home)
+    assert "--require-ready" not in calls[0]
+
+
+def test_profile_installer_can_require_gui_driver_readiness(tmp_path, monkeypatch):
+    installer = load_script("public_install_driver_ready", "install-profile.py")
+
+    def fake_run(command, **_kwargs):
+        assert "--require-ready" in command
+        return SimpleNamespace(
+            returncode=1,
+            stdout=json.dumps(
+                {
+                    "ok": False,
+                    "status": "blocked_not_ready",
+                    "after": {"installed": True, "version": "0.14.2"},
+                    "doctor_ready": False,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="blocked_not_ready"):
+        installer.ensure_cua_driver(
+            tmp_path / "python",
+            tmp_path / "profile",
+            require_ready=True,
+        )
 
 
 def test_profile_semantic_awareness_does_not_create_restrictive_lists(tmp_path):
@@ -1139,6 +1226,15 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
     monkeypatch.setattr(installer, "verify_runtime", lambda _runtime: None)
     monkeypatch.setattr(
         installer, "runtime_python", lambda _runtime, _explicit: Path(sys.executable)
+    )
+    monkeypatch.setattr(
+        installer,
+        "ensure_cua_driver",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "after": {"version": "0.14.2"},
+            "doctor_ready": False,
+        },
     )
     monkeypatch.setattr(
         installer,

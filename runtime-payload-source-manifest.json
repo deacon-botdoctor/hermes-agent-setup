@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "kind": "golden_runtime_payload_manifest",
-  "golden_sha": "d87a2c99fb17a6bcad5bbd550a38ca94addc473a",
+  "golden_sha": "7354b56138ff377bba0c188ea0732e70be1e2440",
   "canonical_upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
   "deployment_digest": "5d620b2d562422e5fa970b9b4cc13517d0e41dfea98a26b5acc6b0296060c2e3",
   "components": {
@@ -811,7 +811,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "d87a2c99fb17a6bcad5bbd550a38ca94addc473a",
+    "golden_sha": "7354b56138ff377bba0c188ea0732e70be1e2440",
     "upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
     "verified": true
   }
