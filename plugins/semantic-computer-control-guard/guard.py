@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import socket
 import threading
 from typing import Any
 
@@ -76,19 +77,74 @@ _DIRECT_UI_PATTERNS = (
 )
 
 
-def _plugin_settings() -> dict[str, Any]:
+def _runtime_config() -> dict[str, Any]:
     try:
         from hermes_cli.config import load_config
 
-        config = load_config() or {}
-        return (
-            ((config.get("plugins") or {}).get("entries") or {}).get(
-                "semantic-computer-control-guard"
-            )
-            or {}
-        )
+        return load_config() or {}
     except Exception:
         return {}
+
+
+def _plugin_settings(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = config if config is not None else _runtime_config()
+    return (
+        ((config.get("plugins") or {}).get("entries") or {}).get(
+            "semantic-computer-control-guard"
+        )
+        or {}
+    )
+
+
+def _device_posture(settings: dict[str, Any] | None = None) -> str:
+    settings = settings if settings is not None else _plugin_settings()
+    return str(settings.get("device_posture") or "standard").strip().lower()
+
+
+def _canonical_identity(value: Any, *, hostname: bool = False) -> str:
+    normalized = str(value or "").strip().casefold()
+    return normalized.rstrip(".") if hostname else normalized
+
+
+def _dedicated_binding_error(
+    config: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> str | None:
+    config = config if config is not None else _runtime_config()
+    settings = settings if settings is not None else _plugin_settings(config)
+    posture = _device_posture(settings)
+    if posture == "standard":
+        return None
+    if posture != "dedicated_principal":
+        return f"unsupported device_posture {posture!r}"
+
+    required = {
+        "principal_id": _canonical_identity(settings.get("principal_id")),
+        "agent_id": _canonical_identity(settings.get("agent_id")),
+        "device_id": _canonical_identity(settings.get("device_id"), hostname=True),
+    }
+    missing = sorted(name for name, value in required.items() if not value)
+    if missing:
+        return "dedicated-principal binding is missing " + ", ".join(missing)
+    if str(settings.get("tool_authority") or "").strip() != "outcome_scoped":
+        return "dedicated-principal tool_authority must be outcome_scoped"
+
+    observed_principal = _canonical_identity(config.get("client_identity"))
+    observed_agent = _canonical_identity(
+        os.getenv("HERMES_AGENT_ID") or os.getenv("HERMES_PROFILE")
+    )
+    observed_device = _canonical_identity(socket.gethostname(), hostname=True)
+    observed = {
+        "principal_id": observed_principal,
+        "agent_id": observed_agent,
+        "device_id": observed_device,
+    }
+    mismatched = sorted(
+        name for name in required if required[name] != observed[name]
+    )
+    if mismatched:
+        return "dedicated-principal binding mismatch: " + ", ".join(mismatched)
+    return None
 
 
 def _policy_enabled() -> bool:
@@ -99,7 +155,10 @@ def _policy_enabled() -> bool:
         "on",
     }:
         return True
-    return bool(_plugin_settings().get("semantic_control_only"))
+    settings = _plugin_settings()
+    return bool(settings.get("semantic_control_only")) or _device_posture(
+        settings
+    ) != "standard"
 
 
 def _foreground_escalation_allowed() -> bool:
@@ -167,19 +226,21 @@ def _block_computer_call(
     return _block(message)
 
 
-def _pin_standard_permission_mode() -> None:
+def _pin_permission_mode(mode: str) -> None:
+    if mode not in {"standard", "unrestricted"}:
+        raise ValueError(f"unsupported computer-use permission mode {mode!r}")
     from tools.computer_use import tool as computer_use_tool
 
     if not hasattr(computer_use_tool, "_cua_permission_mode"):
         raise RuntimeError(
             "Hermes computer_use permission resolver is unavailable; refusing "
-            "semantic control without a standard-mode pin"
+            "semantic control without a configured permission-mode pin"
         )
 
-    def _standard_mode(_session_id: str) -> str:
-        return "standard"
+    def _configured_mode(_session_id: str) -> str:
+        return mode
 
-    computer_use_tool._cua_permission_mode = _standard_mode
+    computer_use_tool._cua_permission_mode = _configured_mode
 
 
 def _on_pre_tool_call(tool_name: str = "", args: Any = None, **kwargs: Any):
@@ -203,16 +264,28 @@ def _on_pre_tool_call(tool_name: str = "", args: Any = None, **kwargs: Any):
     if not session:
         return deny("a session, task, or turn identity is required")
 
+    config = _runtime_config()
+    settings = _plugin_settings(config)
+    posture = _device_posture(settings)
+    binding_error = _dedicated_binding_error(config, settings)
+    if binding_error is not None:
+        return deny(binding_error)
+    permission_mode = (
+        "unrestricted" if posture == "dedicated_principal" else "standard"
+    )
     try:
-        _pin_standard_permission_mode()
+        _pin_permission_mode(permission_mode)
     except Exception as exc:
         logger.error(
-            "semantic-computer-control: standard-mode pin failed: %s", exc
+            "semantic-computer-control: permission-mode pin failed: %s", exc
         )
-        return deny("the standard-mode safety pin is unavailable")
+        return deny("the configured permission-mode pin is unavailable")
 
-    if call.get("permission_mode") == "unrestricted":
-        return deny("unrestricted desktop-control mode is forbidden")
+    requested_mode = call.get("permission_mode")
+    if requested_mode is not None and requested_mode != permission_mode:
+        return deny(
+            f"permission_mode is bound to {permission_mode!r} by device posture"
+        )
     foreground_requested = call.get("delivery_mode") == "foreground" or any(
         call.get(key) is True for key in ("raise_window", "bring_to_front")
     )

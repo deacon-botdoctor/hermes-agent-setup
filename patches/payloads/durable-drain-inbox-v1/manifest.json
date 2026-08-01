@@ -41,6 +41,11 @@
       "durable_ingress: bool = False",
       "def replaced(self, **changes: Any) -> \"MessageEvent\":"
     ],
+    "gateway/platforms/whatsapp_cloud.py": [
+      "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1",
+      "if count:\n                try:\n                    confirm_text = (",
+      "await self.send(str(raw_message.get(\"from\") or \"\"), confirm_text)"
+    ],
     "gateway/run.py": [
       "from gateway.drain_inbox import (",
       "self._startup_restore_barrier = asyncio.Lock()"
@@ -48,6 +53,11 @@
     "gateway/session.py": [
       "def replay_marker_status(",
       "def persist_replay_marker("
+    ],
+    "gateway/slash_commands.py": [
+      "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1",
+      "return None",
+      "return t(\"gateway.approve.no_pending\")"
     ],
     "tests/gateway/test_drain_inbox.py": [
       "def test_persisted_event_round_trips_exact_user_instruction(",

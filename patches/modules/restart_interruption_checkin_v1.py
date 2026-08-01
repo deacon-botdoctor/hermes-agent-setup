@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Replace synthetic restart auto-resume with one contextual check-in."""
+"""Keep side-effect-ambiguous interrupted turns pending without client noise."""
 
 from __future__ import annotations
 
@@ -8,9 +8,10 @@ import shutil
 from pathlib import Path
 
 LEGACY_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v1"
-PRIOR_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v2"
-MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v3"
-BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v3"
+OLDER_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v2"
+PRIOR_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v3"
+MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v4"
+BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v4"
 METHOD_ANCHOR = "    def _schedule_resume_pending_sessions(self, platform=None) -> int:\n"
 SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessions after startup.
 
@@ -22,11 +23,12 @@ SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessio
         injection path owns the wording and we never double up.
 
 '''
-SCHEDULER_DOC_NEW = '''        """Send one contextual check-in for fresh restart-interrupted sessions.
+SCHEDULER_DOC_NEW = '''        """Keep fresh restart-interrupted sessions pending without a notice.
 
-        The client, not a synthetic agent turn, decides whether any unfinished
-        work should continue.  This prevents an uncertain action from being
-        repeated after a gateway replacement.
+        Durable inbound replay is owned separately by the drain inbox. An
+        already-running turn may have uncertain external side effects, so it
+        stays ``resume_pending`` for the next real client turn instead of being
+        blindly repeated or narrated with control-plane vocabulary.
 
 '''
 SCHEDULE_BLOCK = """            # Claim the session slot *before* spawning the task so that an
@@ -92,7 +94,35 @@ SCHEDULE_BLOCK_SESSION_STATE = """            # Claim the session slot *before* 
                 tasks.append(task)
             scheduled += 1
 """
-CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3] Claim this check-in
+CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v4] Claim this silent
+            # recovery evaluation in memory so reconnect/startup scans cannot
+            # schedule duplicates in one process. The durable resume marker is
+            # intentionally retained for the next real client turn.
+            checkins = getattr(self, "_restart_interruption_checkins", None)
+            if checkins is None:
+                checkins = set()
+                self._restart_interruption_checkins = checkins
+            if entry.session_key in checkins:
+                continue
+            checkins.add(entry.session_key)
+
+            task = asyncio.create_task(
+                self._send_restart_interruption_checkin(adapter, source, entry)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            task.add_done_callback(
+                lambda _task, key=entry.session_key: checkins.discard(key)
+            )
+            if getattr(self, "_startup_restore_in_progress", False):
+                tasks = getattr(self, "_startup_restore_tasks", None)
+                if tasks is None:
+                    tasks = []
+                    self._startup_restore_tasks = tasks
+                tasks.append(task)
+            scheduled += 1
+"""
+V3_CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3] Claim this check-in
             # in memory so reconnect/startup scans cannot schedule duplicates
             # in one process.  The durable resume marker is cleared only after
             # accepted delivery; a send failure remains retryable.
@@ -120,7 +150,7 @@ CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3] Claim 
                 tasks.append(task)
             scheduled += 1
 """
-RETAINING_V1_CHECKIN_BLOCK = CHECKIN_BLOCK.replace(MARKER, LEGACY_MARKER)
+RETAINING_V1_CHECKIN_BLOCK = V3_CHECKIN_BLOCK.replace(PRIOR_MARKER, LEGACY_MARKER)
 LEGACY_CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v1] Clear the durable
             # marker before the send.  A crash during delivery can lose this
             # notice, but cannot create a second agent turn or duplicate an
@@ -181,6 +211,16 @@ HELPER_PREFIX = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3]
             f"I was working on {task_text} and got interrupted before I could "
             "confirm the last step. I didn’t repeat it. Do you still need me to finish it?"
         )
+'''
+SILENT_HELPER = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v4]
+    async def _send_restart_interruption_checkin(self, adapter, source, entry) -> None:
+        """Keep ambiguous interrupted work pending without a client notice."""
+        logger.info(
+            "Keeping restart-interrupted session %s pending without a client notice",
+            entry.session_key,
+        )
+        return
+
 '''
 LEGACY_SEND_TAIL = """        try:
             result = await adapter.send(
@@ -330,7 +370,7 @@ FACADE_RETRY_SEND_TAIL = RETRY_SEND_TAIL.replace(
     """            await self.async_session_store.clear_resume_pending(entry.session_key)
 """,
 )
-HELPER = HELPER_PREFIX + RETRY_SEND_TAIL
+HELPER = SILENT_HELPER
 
 DURABLE_DRAIN_METHOD_ANCHOR = "    def _schedule_post_startup_drain(self) -> None:\n"
 POST_STARTUP_DRAIN_BLOCK = """    def _schedule_post_startup_drain(self) -> None:
@@ -787,6 +827,43 @@ async def test_restart_checkin_never_runs_interrupted_agent():
 """,
 }
 
+
+def _silent_pending_runtime_test(name: str) -> str:
+    return f'''@pytest.mark.asyncio
+async def {name}():
+    runner, adapter = make_restart_runner()
+    source = make_restart_source(chat_id="silent-recovery-chat")
+    pending_entry = SessionEntry(
+        session_key="agent:main:telegram:dm:silent-recovery-chat",
+        session_id="sid",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        origin=source,
+        platform=Platform.TELEGRAM,
+        chat_type="dm",
+        resume_pending=True,
+        resume_reason="restart_interrupted",
+        last_resume_marked_at=datetime.now(),
+    )
+    runner.session_store._entries = {{pending_entry.session_key: pending_entry}}
+    adapter.handle_message = AsyncMock()
+
+    assert runner._schedule_resume_pending_sessions() == 1
+    await asyncio.gather(*list(runner._background_tasks))
+
+    assert adapter.sent == []
+    adapter.handle_message.assert_not_awaited()
+    assert pending_entry.resume_pending is True
+'''
+
+
+# Every native scheduler seam now proves the same client contract: durable
+# inbound replay remains elsewhere, while a side-effect-ambiguous active turn
+# neither emits a control-plane notice nor blindly re-runs.
+for _old_test_name, _replacement in list(TEST_REPLACEMENTS.items()):
+    _new_test_name = ast.parse(_replacement).body[0].name
+    TEST_REPLACEMENTS[_old_test_name] = _silent_pending_runtime_test(_new_test_name)
+
 OPTIONAL_COMPOSITION_TESTS = frozenset(
     {
         # Upstream's v0.19.1 test-pruning pass removed these direct scheduler
@@ -897,70 +974,52 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
     patched = original
     runtime_changed = False
     if MARKER in original:
-        if STALE_RETRY_SEND_TAIL in patched:
-            patched = patched.replace(
-                STALE_RETRY_SEND_TAIL,
-                RETRY_SEND_TAIL,
-                1,
-            )
-        elif SYNC_RETRY_SEND_TAIL in patched:
-            patched = patched.replace(
-                SYNC_RETRY_SEND_TAIL,
-                RETRY_SEND_TAIL,
-                1,
-            )
-        elif FACADE_RETRY_SEND_TAIL in patched:
-            patched = patched.replace(
-                FACADE_RETRY_SEND_TAIL,
-                RETRY_SEND_TAIL,
-                1,
-            )
-        elif RETRY_SEND_TAIL not in patched:
-            raise RuntimeError("current restart interruption check-in anchors drifted")
+        if SILENT_HELPER not in original or CHECKIN_BLOCK not in original:
+            raise RuntimeError("current silent restart recovery anchors drifted")
     else:
-        if PRIOR_MARKER in original:
-            prior_checkin_block = CHECKIN_BLOCK.replace(MARKER, PRIOR_MARKER)
-            prior_helper_prefix = HELPER_PREFIX.replace(MARKER, PRIOR_MARKER)
-            if (
-                prior_checkin_block not in original
-                or prior_helper_prefix not in original
-                or (
-                    STALE_RETRY_SEND_TAIL not in original
-                    and SYNC_RETRY_SEND_TAIL not in original
-                    and FACADE_RETRY_SEND_TAIL not in original
-                    and RETRY_SEND_TAIL not in original
-                )
-            ):
+        if PRIOR_MARKER in original or OLDER_MARKER in original:
+            prior_marker = PRIOR_MARKER if PRIOR_MARKER in original else OLDER_MARKER
+            prior_checkin_block = V3_CHECKIN_BLOCK.replace(PRIOR_MARKER, prior_marker)
+            prior_helper_prefix = HELPER_PREFIX.replace(PRIOR_MARKER, prior_marker)
+            prior_tail = next(
+                (
+                    tail
+                    for tail in (
+                        STALE_RETRY_SEND_TAIL,
+                        SYNC_RETRY_SEND_TAIL,
+                        FACADE_RETRY_SEND_TAIL,
+                        RETRY_SEND_TAIL,
+                    )
+                    if prior_helper_prefix + tail in original
+                ),
+                None,
+            )
+            if prior_checkin_block not in original or prior_tail is None:
                 raise RuntimeError("prior restart interruption check-in anchors drifted")
-            patched = original.replace(PRIOR_MARKER, MARKER)
-            if STALE_RETRY_SEND_TAIL in patched:
-                patched = patched.replace(
-                    STALE_RETRY_SEND_TAIL,
-                    RETRY_SEND_TAIL,
-                    1,
-                )
-            elif SYNC_RETRY_SEND_TAIL in patched:
-                patched = patched.replace(
-                    SYNC_RETRY_SEND_TAIL,
-                    RETRY_SEND_TAIL,
-                    1,
-                )
-            elif FACADE_RETRY_SEND_TAIL in patched:
-                patched = patched.replace(
-                    FACADE_RETRY_SEND_TAIL,
-                    RETRY_SEND_TAIL,
-                    1,
-                )
+            patched = original.replace(
+                prior_helper_prefix + prior_tail,
+                SILENT_HELPER,
+                1,
+            )
+            patched = patched.replace(prior_checkin_block, CHECKIN_BLOCK, 1)
         elif LEGACY_MARKER in original:
+            legacy_helper_prefix = HELPER_PREFIX.replace(PRIOR_MARKER, LEGACY_MARKER)
             if LEGACY_CHECKIN_BLOCK in original and LEGACY_SEND_TAIL in original:
                 patched = original.replace(LEGACY_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
-                patched = patched.replace(LEGACY_SEND_TAIL, RETRY_SEND_TAIL, 1)
+                patched = patched.replace(
+                    legacy_helper_prefix + LEGACY_SEND_TAIL,
+                    SILENT_HELPER,
+                    1,
+                )
             elif RETAINING_V1_CHECKIN_BLOCK in original and RETAINING_V1_SEND_TAIL in original:
                 patched = original.replace(RETAINING_V1_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
-                patched = patched.replace(RETAINING_V1_SEND_TAIL, RETRY_SEND_TAIL, 1)
+                patched = patched.replace(
+                    legacy_helper_prefix + RETAINING_V1_SEND_TAIL,
+                    SILENT_HELPER,
+                    1,
+                )
             else:
                 raise RuntimeError("legacy restart interruption check-in anchors drifted")
-            patched = patched.replace(LEGACY_MARKER, MARKER)
         else:
             schedule_blocks = [
                 block
