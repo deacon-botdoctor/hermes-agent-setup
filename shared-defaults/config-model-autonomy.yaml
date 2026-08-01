@@ -1,0 +1,8 @@
+# Memory and skill tools remain available to the model. Disable only the
+# automatic post-turn review forks: upstream shares the live session identity
+# with those forks, which can wedge the foreground Relay scope under overlap.
+memory:
+  nudge_interval: 0
+
+skills:
+  creation_nudge_interval: 0

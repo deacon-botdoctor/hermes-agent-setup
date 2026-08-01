@@ -1,0 +1,6 @@
+name: composio-onboarding
+kind: standalone
+version: 0.2.0
+description: Client-scoped Composio OAuth onboarding and verified connection routing
+provides_hooks:
+  - pre_gateway_dispatch

@@ -3,8 +3,23 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
 from pathlib import Path
+
+_CLARIFY_MODULE_PATH = Path(__file__).with_name("clarify_prose_deadlock_guard_v1.py")
+_CLARIFY_SPEC = importlib.util.spec_from_file_location(
+    "hermes_golden_clarify_prose_deadlock_guard_v1",
+    _CLARIFY_MODULE_PATH,
+)
+if _CLARIFY_SPEC is None or _CLARIFY_SPEC.loader is None:
+    raise RuntimeError(f"cannot load clarify guard module: {_CLARIFY_MODULE_PATH}")
+_CLARIFY_MODULE = importlib.util.module_from_spec(_CLARIFY_SPEC)
+_CLARIFY_SPEC.loader.exec_module(_CLARIFY_MODULE)
+patch_clarify_gateway_source = _CLARIFY_MODULE.patch_gateway_source
+patch_clarify_gateway_test_source = _CLARIFY_MODULE.patch_gateway_test_source
+patch_clarify_tools_source = _CLARIFY_MODULE.patch_tools_source
+patch_clarify_tools_test_source = _CLARIFY_MODULE.patch_tools_test_source
 
 MARKER = "HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1"
 PATH_ANCHOR = "sys.path.insert(0, str(Path(__file__).parent.parent))\n"
@@ -165,28 +180,32 @@ def patch_api_server_text(source: str) -> str:
 
 
 def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
+    root = Path(hermes_dir)
+    gateway_path = root / "gateway" / "run.py"
     targets = {
-        Path(hermes_dir) / "gateway" / "run.py": (
-            patch_gateway_runtime_root_guard_text
-        ),
-        Path(hermes_dir) / "gateway" / "platforms" / "api_server.py": (
-            patch_api_server_text
+        gateway_path: patch_gateway_runtime_root_guard_text,
+        root / "gateway" / "platforms" / "api_server.py": patch_api_server_text,
+    }
+    clarify_targets = {
+        root / "tools" / "clarify_gateway.py": patch_clarify_tools_source,
+        root / "tests" / "tools" / "test_clarify_gateway.py": (patch_clarify_tools_test_source),
+        root / "tests" / "gateway" / "test_clarify_thread_followup_not_swallowed.py": (
+            patch_clarify_gateway_test_source
         ),
     }
+    clarify_presence = [target.is_file() for target in clarify_targets]
+    if any(clarify_presence):
+        if not all(clarify_presence):
+            raise RuntimeError("clarify deadlock guard target set is incomplete")
+        targets[gateway_path] = lambda source: patch_clarify_gateway_source(
+            patch_gateway_runtime_root_guard_text(source)
+        )
+        targets.update(clarify_targets)
     if not all(target.is_file() for target in targets):
         return False
-    originals = {
-        target: target.read_text(encoding="utf-8")
-        for target in targets
-    }
-    patched = {
-        target: patcher(originals[target])
-        for target, patcher in targets.items()
-    }
-    changed = [
-        target for target in targets
-        if patched[target] != originals[target]
-    ]
+    originals = {target: target.read_text(encoding="utf-8") for target in targets}
+    patched = {target: patcher(originals[target]) for target, patcher in targets.items()}
+    changed = [target for target in targets if patched[target] != originals[target]]
     if not changed:
         return False
     for target in changed:

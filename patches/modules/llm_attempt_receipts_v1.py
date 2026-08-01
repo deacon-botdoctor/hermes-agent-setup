@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import runpy
 import shutil
 from pathlib import Path
 
@@ -801,4 +802,12 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
         if after != before:
             path.write_text(after, encoding="utf-8")
             changed = True
+
+    # This registry entry already owns the main LLM turn and finalization
+    # surfaces. Keep the language-neutral current-turn todo stop guard in the
+                                # same finalization owner instead of creating a competing stop-decision path.
+    open_todo_module = runpy.run_path(
+        str(PAYLOAD.parent.parent / "open_todo_stop_guard_v1.py")
+    )
+    changed = open_todo_module["patch_open_todo_stop_guard_v1"](target) or changed
     return changed

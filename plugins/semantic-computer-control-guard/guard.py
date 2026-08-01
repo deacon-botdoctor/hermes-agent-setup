@@ -76,6 +76,21 @@ _DIRECT_UI_PATTERNS = (
 )
 
 
+def _plugin_settings() -> dict[str, Any]:
+    try:
+        from hermes_cli.config import load_config
+
+        config = load_config() or {}
+        return (
+            ((config.get("plugins") or {}).get("entries") or {}).get(
+                "semantic-computer-control-guard"
+            )
+            or {}
+        )
+    except Exception:
+        return {}
+
+
 def _policy_enabled() -> bool:
     if os.getenv("HERMES_SEMANTIC_COMPUTER_CONTROL", "").strip().lower() in {
         "1",
@@ -84,22 +99,11 @@ def _policy_enabled() -> bool:
         "on",
     }:
         return True
-    try:
-        from hermes_cli.config import load_config
+    return bool(_plugin_settings().get("semantic_control_only"))
 
-        config = load_config() or {}
-        return bool(
-            (
-                (
-                    ((config.get("plugins") or {}).get("entries") or {}).get(
-                        "semantic-computer-control-guard"
-                    )
-                    or {}
-                ).get("semantic_control_only")
-            )
-        )
-    except Exception:
-        return False
+
+def _foreground_escalation_allowed() -> bool:
+    return bool(_plugin_settings().get("allow_foreground_escalation"))
 
 
 def _block(message: str) -> dict[str, str]:
@@ -107,8 +111,9 @@ def _block(message: str) -> dict[str, str]:
         "action": "block",
         "message": (
             f"Semantic computer-control policy blocked this call: {message}. "
-            "Use computer_use in background mode. If it is unavailable, stop "
-            "and report or repair that route; no direct UI fallback is permitted."
+            "Use computer_use with fresh semantic state. Background delivery is "
+            "preferred; foreground requires the profile's explicit escalation opt-in. "
+            "No direct UI fallback is permitted."
         ),
     }
 
@@ -208,10 +213,13 @@ def _on_pre_tool_call(tool_name: str = "", args: Any = None, **kwargs: Any):
 
     if call.get("permission_mode") == "unrestricted":
         return deny("unrestricted desktop-control mode is forbidden")
-    if call.get("delivery_mode") == "foreground":
-        return deny("foreground delivery is forbidden")
-    if call.get("raise_window") is True or call.get("bring_to_front") is True:
-        return deny("raising or bringing a window to the foreground is forbidden")
+    foreground_requested = call.get("delivery_mode") == "foreground" or any(
+        call.get(key) is True for key in ("raise_window", "bring_to_front")
+    )
+    if foreground_requested and not _foreground_escalation_allowed():
+        return deny(
+            "foreground delivery requires allow_foreground_escalation: true"
+        )
     if any(
         key in call
         for key in (

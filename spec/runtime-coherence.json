@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "hermes-runtime-coherence",
+  "cadence_seconds": 900,
+  "max_receipt_age_seconds": 1800,
+  "installer": "maintenance/bin/install-runtime-coherence.py",
+  "installer_actions": ["plan", "apply", "verify", "rollback"],
+  "required_receipt_fields": [
+    "agent_id",
+    "generated_at",
+    "hermes_home",
+    "runtime_root",
+    "runtime_python",
+    "origins",
+    "origin_mismatches",
+    "missing_init_params",
+    "ok",
+    "kind"
+  ],
+  "platform_schedulers": {
+    "macos": "launchd",
+    "linux": "systemd",
+    "windows": "task_scheduler"
+  },
+  "failure_conditions": [
+    "receipt_missing_or_stale",
+    "identity_mismatch",
+    "runtime_root_mismatch",
+    "origin_mismatch",
+    "missing_initializer_parameter",
+    "import_failure"
+  ]
+}

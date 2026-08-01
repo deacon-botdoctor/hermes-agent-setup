@@ -1,6 +1,7 @@
 plugins:
   enabled:
     - botdoctor-immersion
+    - composio-onboarding
     - mcp-on-demand-control
 platform_toolsets:
   cli:

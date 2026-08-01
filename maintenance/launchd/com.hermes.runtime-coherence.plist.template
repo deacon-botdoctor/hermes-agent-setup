@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>com.hermes.runtime-coherence.__AGENT_ID__</string>
+  <key>ProgramArguments</key><array>
+    <string>__BASELINE_PYTHON__</string><string>__CHECK_PATH__</string>
+    <string>--home</string><string>__HERMES_HOME__</string>
+    <string>--runtime-root</string><string>__RUNTIME_ROOT__</string>
+    <string>--runtime-python</string><string>__RUNTIME_PYTHON__</string>
+    <string>--agent-id</string><string>__AGENT_ID__</string>
+    <string>--receipt</string><string>__RECEIPT_PATH__</string>
+    <string>--json</string>
+  </array>
+  <key>StartInterval</key><integer>900</integer>
+  <key>RunAtLoad</key><true/>
+  <key>ProcessType</key><string>Background</string>
+</dict></plist>

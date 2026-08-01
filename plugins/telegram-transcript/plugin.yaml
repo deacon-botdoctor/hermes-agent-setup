@@ -1,4 +1,7 @@
-id: telegram-transcript
-name: Telegram Transcript
+name: telegram-transcript
 description: Real-time Telegram message indexing into SQLite for chat history retrieval
 version: 1.0.0
+provides_tools:
+  - telegram_history
+  - telegram_topics
+  - resolve_telegram_reply
