@@ -45,22 +45,25 @@ def test_release_identity_matches_source_manifest():
     assert release["golden_sha"] == manifest["golden_sha"]
     assert release["canonical_upstream_sha"] == manifest["canonical_upstream_sha"]
     assert release["deployment_digest"] == manifest["deployment_digest"]
+    assert release["golden_deployment_digest"] == (
+        manifest["golden_deployment_digest"]
+    )
     assert (
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 86
+    assert manifest["components"]["runtime_payload"]["file_count"] == 97
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd",
-        "file_count": 41,
+        "digest": "f6c9f54fe753495005610be20ae356510ceab0b0bfaff6244b5b2f1d574d5520",
+        "file_count": 47,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 41
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 41
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 47
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 47
     assert set(release) == {
         "schema_version",
         "release",
@@ -71,9 +74,11 @@ def test_release_identity_matches_source_manifest():
         "source_scope",
         "runtime_payload_digest",
         "deployment_digest",
+        "golden_deployment_digest",
         "assembled_runtime_fingerprint",
         "verification",
         "cua_driver",
+        "runtime_coherence",
         "update_contract",
     }
     assert set(release["verification"]) == {
@@ -102,6 +107,32 @@ def test_release_pins_the_golden_cua_driver_contract():
     assert contract["release"]["source_commit"] == driver["source_commit"]
 
 
+def test_release_pins_the_cross_platform_runtime_coherence_package():
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    contract = release["runtime_coherence"]
+    files = [
+        "maintenance/bin/install-runtime-coherence.py",
+        "maintenance/launchd/com.hermes.runtime-coherence.plist.template",
+        "maintenance/systemd/hermes-runtime-coherence@.service",
+        "maintenance/systemd/hermes-runtime-coherence@.timer",
+        "maintenance/windows/hermes-runtime-coherence-task.ps1.template",
+        "checks/agent-runtime-coherence.py",
+        "spec/runtime-coherence.json",
+    ]
+    canonical = ""
+    for relative in files:
+        digest = hashlib.sha256((ROOT / relative).read_bytes()).hexdigest()
+        canonical += f"{relative}\0{digest}\n"
+    assert contract["source_commit"] == (
+        "183de949ad32611e77a50b9de042c76e2044cd14"
+    )
+    assert contract["platforms"] == ["macos", "linux", "windows"]
+    assert contract["file_count"] == len(files)
+    assert hashlib.sha256(canonical.encode()).hexdigest() == (
+        contract["package_digest"]
+    )
+
+
 def test_release_payload_keeps_critical_blobs():
     manifest = json.loads(
         (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
@@ -126,7 +157,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 18
+    assert len(patches) == 19
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()

@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Resume the exact prior transcript for contextual post-expiry follow-ups."""
+"""Own the fleet session-reset policy overlays.
+
+The existing contextual-resume patch restores the exact prior session after an
+automatic idle/daily boundary. The clock extension makes the daily boundary use
+Hermes' canonical configured timezone instead of inheriting the host clock.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,65 @@ import time
 from pathlib import Path
 
 MARKER = "HERMES_AUTO_RESUME_CONTEXTUAL_RESET_v1"
+TIMEZONE_MARKER = "HERMES_SESSION_RESET_TIMEZONE_v1"
+
+SESSION_IMPORT_ANCHOR = "from datetime import datetime, timedelta\n"
+SESSION_NOW_ANCHOR = '''def _now() -> datetime:
+    """Return the current local time."""
+    return datetime.now()
+'''
+SESSION_DAILY_BLOCK_EXPIRED = '''        if policy.mode in {"daily", "both"}:
+            today_reset = now.replace(
+                hour=policy.at_hour,
+                minute=0, second=0, microsecond=0,
+            )
+            if now.hour < policy.at_hour:
+                today_reset -= timedelta(days=1)
+            if entry.updated_at < today_reset:
+                return True
+'''
+SESSION_DAILY_BLOCK_RESET = (
+    '        if policy.mode in {"daily", "both"}:\n'
+    "            today_reset = now.replace(\n"
+    "                hour=policy.at_hour, \n"
+    "                minute=0, \n"
+    "                second=0, \n"
+    "                microsecond=0\n"
+    "            )\n"
+    "            if now.hour < policy.at_hour:\n"
+    "                today_reset -= timedelta(days=1)\n"
+    "            \n"
+    "            if entry.updated_at < today_reset:\n"
+    '                return "daily"\n'
+)
+
+SESSION_TIMEZONE_HELPER = f'''
+
+# [{TIMEZONE_MARKER}] Resolve the daily boundary with Hermes' configured clock,
+# then convert it back to the host-local naive timestamp format used by
+# SessionEntry.  ``astimezone()`` performs the conversion for the boundary's
+# actual date, so daylight-saving transitions do not require offset upkeep.
+def _daily_reset_boundary(
+    policy: "SessionResetPolicy",
+    *,
+    policy_now=None,
+    host_timezone=None,
+) -> datetime:
+    current = policy_now or _hermes_now()
+    if current.tzinfo is None:
+        current = current.astimezone()
+    boundary = current.replace(
+        hour=policy.at_hour, minute=0, second=0, microsecond=0
+    )
+    if current < boundary:
+        boundary -= timedelta(days=1)
+    host_boundary = (
+        boundary.astimezone(host_timezone)
+        if host_timezone is not None
+        else boundary.astimezone()
+    )
+    return host_boundary.replace(tzinfo=None)
+'''
 
 RUN_METHOD_ANCHOR = (
     "    async def _handle_message_with_agent(self, event, source, _quick_key: str, run_generation: int):\n"
@@ -159,6 +223,41 @@ def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str
     return source.replace(anchor, replacement, 1)
 
 
+def patch_session_text(source: str) -> str:
+    if TIMEZONE_MARKER in source:
+        return source
+    source = _replace_once(
+        source,
+        SESSION_IMPORT_ANCHOR,
+        SESSION_IMPORT_ANCHOR + "from hermes_time import now as _hermes_now\n",
+        "session configured-clock import",
+    )
+    source = _replace_once(
+        source,
+        SESSION_NOW_ANCHOR,
+        SESSION_NOW_ANCHOR + SESSION_TIMEZONE_HELPER,
+        "session daily-boundary helper",
+    )
+    source = _replace_once(
+        source,
+        SESSION_DAILY_BLOCK_EXPIRED,
+        '''        if policy.mode in {"daily", "both"}:
+            if entry.updated_at < _daily_reset_boundary(policy):
+                return True
+''',
+        "session expiry daily block",
+    )
+    return _replace_once(
+        source,
+        SESSION_DAILY_BLOCK_RESET,
+        '''        if policy.mode in {"daily", "both"}:
+            if entry.updated_at < _daily_reset_boundary(policy):
+                return "daily"
+''',
+        "session reset daily block",
+    )
+
+
 def patch_run_text(source: str) -> str:
     if f"# [{MARKER}] helpers" in source:
         return source
@@ -211,6 +310,7 @@ def patch_run_text(source: str) -> str:
 
 def patch_auto_resume_contextual_reset_v1(hermes_dir: Path) -> bool:
     targets = {
+        hermes_dir / "gateway" / "session.py": patch_session_text,
         hermes_dir / "gateway" / "run.py": patch_run_text,
     }
     if not all(path.is_file() for path in targets):
@@ -222,6 +322,6 @@ def patch_auto_resume_contextual_reset_v1(hermes_dir: Path) -> bool:
         return False
     stamp = time.strftime("%Y%m%d-%H%M%S")
     for path in changed:
-        shutil.copy2(path, path.with_suffix(path.suffix + f".bak-{stamp}-pre-contextual-auto-resume"))
+        shutil.copy2(path, path.with_suffix(path.suffix + f".bak-{stamp}-pre-session-reset-policy"))
         path.write_text(patched[path], encoding="utf-8")
     return True

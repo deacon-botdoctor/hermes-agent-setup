@@ -17,6 +17,15 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_PATH = ROOT / "release.json"
 SOURCE_MANIFEST_PATH = ROOT / "runtime-payload-source-manifest.json"
+RUNTIME_COHERENCE_FILES = (
+    "maintenance/bin/install-runtime-coherence.py",
+    "maintenance/launchd/com.hermes.runtime-coherence.plist.template",
+    "maintenance/systemd/hermes-runtime-coherence@.service",
+    "maintenance/systemd/hermes-runtime-coherence@.timer",
+    "maintenance/windows/hermes-runtime-coherence-task.ps1.template",
+    "checks/agent-runtime-coherence.py",
+    "spec/runtime-coherence.json",
+)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -136,6 +145,57 @@ def verify_cua_driver_contract(
             errors.append("release and packaged cua_driver contract disagree")
 
 
+def verify_runtime_coherence_contract(
+    release: dict[str, Any], errors: list[str]
+) -> None:
+    contract = release.get("runtime_coherence")
+    if not isinstance(contract, dict):
+        errors.append("release runtime_coherence contract is missing")
+        return
+    if (
+        re.fullmatch(
+            r"[0-9a-f]{40}", str(contract.get("source_commit") or "")
+        )
+        is None
+        or contract.get("platforms") != ["macos", "linux", "windows"]
+        or contract.get("file_count") != len(RUNTIME_COHERENCE_FILES)
+    ):
+        errors.append("release runtime_coherence identity is invalid")
+        return
+
+    canonical = ""
+    actual: dict[str, str] = {}
+    for relative in RUNTIME_COHERENCE_FILES:
+        path = ROOT / relative
+        if not path.is_file() or path.is_symlink():
+            errors.append(f"release runtime_coherence file is missing: {relative}")
+            continue
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        actual[relative] = digest
+        canonical += f"{relative}\0{digest}\n"
+    package_digest = hashlib.sha256(canonical.encode()).hexdigest()
+    if package_digest != contract.get("package_digest"):
+        errors.append("release runtime_coherence package digest mismatch")
+
+    for label in ("installer", "probe"):
+        entry = contract.get(label)
+        if not isinstance(entry, dict):
+            errors.append(f"release runtime_coherence {label} is invalid")
+            continue
+        try:
+            relative = _safe_path(entry.get("path"))
+        except ValueError as exc:
+            errors.append(f"release runtime_coherence {label}: {exc}")
+            continue
+        if relative not in RUNTIME_COHERENCE_FILES:
+            errors.append(f"release runtime_coherence {label} is not packaged")
+        elif actual.get(relative) != entry.get("sha256"):
+            errors.append(f"release runtime_coherence {label} digest mismatch")
+        path = ROOT / relative
+        if label == "installer" and path.is_file() and not os.access(path, os.X_OK):
+            errors.append("release runtime_coherence installer is not executable")
+
+
 def verify_public_source() -> tuple[dict[str, Any], list[str]]:
     release = _read_json(RELEASE_PATH)
     manifest = _read_json(SOURCE_MANIFEST_PATH)
@@ -151,7 +211,12 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
         "canonical_upstream_sha"
     ):
         errors.append("release upstream SHA does not match source manifest")
+    if release.get("golden_deployment_digest") != manifest.get(
+        "golden_deployment_digest"
+    ):
+        errors.append("release Golden deployment digest does not match source manifest")
     verify_cua_driver_contract(release, errors)
+    verify_runtime_coherence_contract(release, errors)
 
     components = manifest.get("components")
     if not isinstance(components, dict):

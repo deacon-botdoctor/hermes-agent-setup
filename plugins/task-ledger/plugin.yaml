@@ -1,3 +1,9 @@
-name: Task Ledger
+name: task-ledger
 version: 1.0.0
 description: Persistent task tracking — open/update/done/block work items with artifact verification
+provides_tools:
+  - task_open
+  - task_update
+  - task_done
+  - task_block
+  - task_list

@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import sqlite3
 from collections import Counter
@@ -38,6 +39,25 @@ NEG_PAT = re.compile(
     r"still not|again\?|incorrect|bad|useless|wtf|why would|you said)\b",
     re.I,
 )
+BENIGN_FEEDBACK_PAT = re.compile(
+    r"\b(no worries|no problem|not bad|hell yeah|damn good|that(?:'s| is) great|all good)\b",
+    re.I,
+)
+SEVERE_FEEDBACK_PAT = re.compile(
+    r"\b(wtf|what the (?:hell|fuck)|dumbass|useless|this is bullshit|"
+    r"are you (?:kidding|serious)|why (?:the hell|the fuck)|taking so long|"
+    r"fucking (?:do|fix|stop|listen)|you (?:ignored|missed|broke) it again)\b",
+    re.I,
+)
+EXPLICIT_FEEDBACK_PAT = re.compile(
+    r"\b(do (?:it|this) better|redo(?: it| this)?|try again|not what i asked|"
+    r"that(?:'s| is) not what i asked|you missed|you ignored|why did you stop|"
+    r"why (?:didn'?t|did not) you|i already told you|still (?:wrong|broken|not)|"
+    r"this is wrong|incorrect|please just|stop asking|don'?t ask me again|"
+    r"you said you would|you (?:didn'?t|did not) (?:do|send|finish|fix))\b",
+    re.I,
+)
+WEAK_FEEDBACK_PAT = re.compile(r"^\s*(?:no|nope|nah|not quite|not really)[.!?\s]*$", re.I)
 HARD_LEAK_PAT = re.compile(
     r"Traceback|Exception|NoneType|tool call|mcp_|execute_code|send_path_degraded|api call failed|"
     r"no first byte|provider.*failed|Missing Authentication",
@@ -212,6 +232,196 @@ def load_messages(home: Path, since: datetime, limit: int) -> tuple[list[dict[st
         [since.isoformat().replace("+00:00", "+00:00"), limit],
     )
     return list(reversed(rows)), str(db)
+
+
+def _topic_hash(identity: str, chat_id: object, thread_id: object) -> str:
+    raw = f"{identity}:{chat_id or ''}:{thread_id or ''}".encode()
+    return "topic_" + hashlib.sha256(raw).hexdigest()[:16]
+
+
+def transcript_activity(
+    home: Path, start: datetime, end: datetime, identity: str
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return exact usage denominators and all in-window user rows.
+
+    The ordinary report sample remains bounded for outcome rendering. Friction
+    rates use an independent aggregate query so a busy topic cannot disappear
+    behind that sample limit.
+    """
+    db = transcript_db(home)
+    cols = table_columns(db, "telegram_messages")
+    if not cols:
+        return {
+            "user_messages": 0,
+            "assistant_messages": 0,
+            "actionable_user_messages": 0,
+            "active_topics": 0,
+            "user_messages_7d": 0,
+            "topics": [],
+        }, []
+    id_col = "id" if "id" in cols else ("rowid" if "rowid" in cols else "ROWID")
+    start_text = start.isoformat()
+    end_text = end.isoformat()
+    seven_day_text = (end - timedelta(days=7)).isoformat()
+    counts = query(
+        db,
+        """
+        SELECT role, COUNT(*) AS count
+        FROM telegram_messages
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY role
+        """,
+        [start_text, end_text],
+    )
+    role_counts = {str(row.get("role") or ""): int(row.get("count") or 0) for row in counts}
+    topic_rows = query(
+        db,
+        """
+        SELECT chat_id, COALESCE(thread_id, '') AS thread_id,
+               SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END) AS user_messages,
+               SUM(CASE WHEN role = 'assistant' THEN 1 ELSE 0 END) AS assistant_messages
+        FROM telegram_messages
+        WHERE timestamp >= ? AND timestamp < ?
+        GROUP BY chat_id, COALESCE(thread_id, '')
+        """,
+        [start_text, end_text],
+    )
+    user_rows = query(
+        db,
+        f"""
+        SELECT {id_col} AS id, chat_id, thread_id, message_id, timestamp, role, text
+        FROM telegram_messages
+        WHERE timestamp >= ? AND timestamp < ? AND role = 'user'
+        ORDER BY timestamp ASC, {id_col} ASC
+        """,
+        [start_text, end_text],
+    )
+    seven_day = query(
+        db,
+        """
+        SELECT COUNT(*) AS count
+        FROM telegram_messages
+        WHERE timestamp >= ? AND timestamp < ? AND role = 'user'
+        """,
+        [seven_day_text, end_text],
+    )
+    topics = [
+        {
+            "topic_hash": _topic_hash(identity, row.get("chat_id"), row.get("thread_id")),
+            "user_messages": int(row.get("user_messages") or 0),
+            "assistant_messages": int(row.get("assistant_messages") or 0),
+        }
+        for row in topic_rows
+    ]
+    return {
+        "user_messages": role_counts.get("user", 0),
+        "assistant_messages": role_counts.get("assistant", 0),
+        "actionable_user_messages": sum(
+            1 for row in user_rows if ACTION_PAT.search(str(row.get("text") or ""))
+        ),
+        "active_topics": sum(1 for row in topics if row["user_messages"]),
+        "user_messages_7d": int((seven_day[0] if seven_day else {}).get("count") or 0),
+        "topics": topics,
+    }, user_rows
+
+
+def _feedback_category(text: str) -> tuple[str, int] | None:
+    compact = " ".join(text.split())
+    if not compact or BENIGN_FEEDBACK_PAT.search(compact):
+        return None
+    if SEVERE_FEEDBACK_PAT.search(compact):
+        return "directed_anger", 3
+    if EXPLICIT_FEEDBACK_PAT.search(compact):
+        return "explicit_correction", 2
+    if WEAK_FEEDBACK_PAT.fullmatch(compact):
+        return "weak_correction", 1
+    return None
+
+
+def _max_burst(events: list[dict[str, Any]], seconds: int = 30 * 60) -> int:
+    stamps = sorted(stamp for event in events if (stamp := parse_ts(event.get("timestamp"))))
+    best = left = 0
+    for right, stamp in enumerate(stamps):
+        while (stamp - stamps[left]).total_seconds() > seconds:
+            left += 1
+        best = max(best, right - left + 1)
+    return best
+
+
+def _feedback_level(user_messages: int, events: list[dict[str, Any]]) -> tuple[str, int]:
+    points = sum(int(event["weight"]) for event in events)
+    severe = any(int(event["weight"]) >= 3 for event in events)
+    burst = _max_burst(events)
+    threshold = max(3, math.ceil(0.08 * user_messages))
+    if user_messages == 0:
+        return "insufficient_activity", threshold
+    if severe or burst >= 3 or points >= 8 or (user_messages > 4 and points >= threshold):
+        return "ticket", threshold
+    if points >= 2:
+        return "review", threshold
+    if points:
+        return "watch", threshold
+    return "clear", threshold
+
+
+def classify_feedback_signals(
+    user_rows: list[dict[str, Any]], activity: dict[str, Any], identity: str
+) -> dict[str, Any]:
+    """Classify feedback locally and return content-free score metadata."""
+    events: list[dict[str, Any]] = []
+    topic_events: dict[str, list[dict[str, Any]]] = {}
+    for row in user_rows:
+        matched = _feedback_category(str(row.get("text") or ""))
+        if matched is None:
+            continue
+        category, weight = matched
+        topic_hash = _topic_hash(identity, row.get("chat_id"), row.get("thread_id"))
+        signal_key = f"{identity}:{row.get('chat_id')}:{row.get('thread_id')}:{row.get('message_id') or row.get('id')}"
+        event = {
+            "signal_id": "sig_" + hashlib.sha256(signal_key.encode()).hexdigest()[:16],
+            "topic_hash": topic_hash,
+            "category": category,
+            "weight": weight,
+            "timestamp": str(row.get("timestamp") or ""),
+        }
+        events.append(event)
+        topic_events.setdefault(topic_hash, []).append(event)
+    counts = Counter(event["category"] for event in events)
+    user_messages = int(activity.get("user_messages") or 0)
+    level, threshold = _feedback_level(user_messages, events)
+    topic_denominators = {
+        str(row.get("topic_hash")): int(row.get("user_messages") or 0)
+        for row in activity.get("topics") or []
+    }
+    flagged_topics = []
+    for topic_hash, scoped_events in sorted(topic_events.items()):
+        scoped_users = topic_denominators.get(topic_hash, 0)
+        scoped_level, scoped_threshold = _feedback_level(scoped_users, scoped_events)
+        if scoped_level not in {"clear", "insufficient_activity"}:
+            flagged_topics.append(
+                {
+                    "topic_hash": topic_hash,
+                    "level": scoped_level,
+                    "user_messages": scoped_users,
+                    "event_count": len(scoped_events),
+                    "weighted_points": sum(int(event["weight"]) for event in scoped_events),
+                    "ticket_threshold": scoped_threshold,
+                }
+            )
+    points = sum(int(event["weight"]) for event in events)
+    return {
+        "schema_version": 1,
+        "level": level,
+        "user_messages": user_messages,
+        "event_count": len(events),
+        "weighted_points": points,
+        "ticket_threshold": threshold,
+        "weighted_rate_per_100_user_messages": round(100 * points / max(1, user_messages), 2),
+        "max_30m_burst": _max_burst(events),
+        "categories": dict(sorted(counts.items())),
+        "events": events[-20:],
+        "flagged_topics": flagged_topics,
+    }
 
 
 def scan_logs(home: Path, since: datetime) -> dict[str, list[dict[str, Any]]]:
@@ -1519,7 +1729,14 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
     end = now_utc()
     start = end - timedelta(hours=hours)
     messages, transcript_path = load_messages(home, start, limit)
-    outcomes, unanswered, negative = build_outcomes(messages, contract)
+    outcomes, unanswered, _legacy_negative = build_outcomes(messages, contract)
+    client = contract["client"]
+    identity = str(client.get("agent_id") or client.get("client_id") or "agent")
+    activity, user_rows = transcript_activity(home, start, end, identity)
+    feedback_signals = classify_feedback_signals(user_rows, activity, identity)
+    feedback_rows = [
+        row for row in user_rows if _feedback_category(str(row.get("text") or "")) is not None
+    ]
     log_hits = scan_logs(home, start)
     sends = load_jsonl_since(
         [home / "state/send-audit.jsonl", home / "state/telegram-delivery-proof/proofs.jsonl"], start
@@ -1551,6 +1768,18 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
             "examples": [
                 evidence("telegram", m.get("text") or "", m.get("timestamp"), message_id=m.get("message_id"))
                 for m in unanswered[-8:]
+            ],
+        },
+        "negative_client_feedback": {
+            "count": int(feedback_signals["event_count"]),
+            "examples": [
+                evidence(
+                    "telegram",
+                    row.get("text") or "",
+                    row.get("timestamp"),
+                    message_id=row.get("message_id"),
+                )
+                for row in feedback_rows[-8:]
             ],
         },
     }
@@ -1591,6 +1820,24 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
                 "recommended_action": "Follow up on unanswered asks and backfill promise tracking.",
                 "dedupe_key": "unanswered-client-asks",
                 "evidence": friction["unanswered_client_messages"]["examples"],
+            }
+        )
+    if feedback_signals["level"] in {"review", "ticket"}:
+        escalations.append(
+            {
+                "severity": "red" if feedback_signals["level"] == "ticket" else "yellow",
+                "category": "negative_client_feedback",
+                "summary": (
+                    f"Client feedback friction is {feedback_signals['level']}: "
+                    f"{feedback_signals['weighted_points']} weighted point(s) across "
+                    f"{feedback_signals['user_messages']} user message(s)."
+                ),
+                "recommended_action": (
+                    "Review the exact local topic evidence, identify the recurring failure family, "
+                    "and record a repair, monitor, or escalation disposition."
+                ),
+                "dedupe_key": "negative-client-feedback-threshold",
+                "evidence": friction["negative_client_feedback"]["examples"],
             }
         )
     if len(log_hits["codex"]) >= 3 or len(log_hits["api"]) >= 5:
@@ -1649,7 +1896,14 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
     cap_penalty = min(30, len(expected_broken) * 12)
     coverage_penalty = min(15, len(missing_required) * 3)
     overall = max(0, 100 - outcome_penalty - friction_penalty - leak_penalty - cap_penalty - coverage_penalty)
-    smoothness = max(0, 100 - len(negative) * 12 - len(unanswered) * 18 - smoothness_friction_penalty - leak_penalty)
+    smoothness = max(
+        0,
+        100
+        - min(36, int(feedback_signals["weighted_points"]) * 6)
+        - len(unanswered) * 18
+        - smoothness_friction_penalty
+        - leak_penalty,
+    )
     completion = max(0, 100 - outcome_penalty - len(unanswered) * 25)
     ops_health = max(0, 100 - friction_penalty - min(20, len(log_hits["restart"])))
     cap_fit = max(0, 100 - cap_penalty - coverage_penalty)
@@ -1698,7 +1952,6 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
     cleanup_plan = build_cleanup_plan(scores, friction, expected_broken, missing_required)
 
     contract_bytes = json.dumps(contract, sort_keys=True).encode()
-    client = contract["client"]
     report_id = f"{client['client_id']}-{end.strftime('%Y%m%dT%H%M%SZ')}"
     report_path = home / "workspace/ops/reports/client-day-review" / f"{report_id}.json"
     doc_review_packet = build_doc_review_packet(
@@ -1724,6 +1977,8 @@ def build_report(contract: dict[str, Any], home: Path, hours: int, limit: int) -
             "telegram_topics": [],
         },
         "review_window": {"start_at": iso(start), "end_at": iso(end), "hours": hours},
+        "activity": activity,
+        "feedback_signals": feedback_signals,
         "contract_snapshot": {
             "contract_id": contract["contract_id"],
             "contract_version": contract["contract_version"],

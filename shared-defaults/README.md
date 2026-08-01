@@ -12,10 +12,17 @@ in favor of pinned-upstream defaults and client-local configuration.
 
 - `config-mcp-on-demand-control.yaml` enables the policy-gated MCP activation
   tools while the cold-backend compatibility path remains necessary.
+- `config-native-tool-search.yaml` turns on native tool-search deferral.
+- `config-telegram-surface.yaml` sets Telegram reply-to off.
+- `config-client-quiet-display.yaml` is the fleet client quiet surface:
+  `busy_input_mode: steer`, all busy/steer acks off, no interim/long-running
+  status nags, no timestamps/gateway status noise. Every client gets this on
+  merge; kit template + provision-client match it for new installs.
 - `retired-policy-defaults-v1.yaml` is a one-release unapply manifest. It
   removes only leaves that still exactly match Golden's former values and
   preserves client-modified or exempted values. Remove it after fleet receipts
-  prove the retired values are absent.
+  prove the retired values are absent. Active quiet-display defaults re-apply
+  after retirement so clients keep the silence suite.
 
 ## How merges work
 

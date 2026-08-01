@@ -1,9 +1,8 @@
 id: semantic-computer-control-guard
 name: semantic-computer-control-guard
-version: 2.0.0
-description: Fail-closed semantic desktop-control sequencing and direct UI-fallback prevention for opted-in runtimes.
+version: 2.1.0
+description: Semantic desktop sequencing with explicit focus escalation.
 provides_hooks:
   - pre_tool_call
   - post_tool_call
   - on_session_end
-

@@ -7,6 +7,8 @@ read tools over HERMES_HOME/data/telegram-transcript.db:
 telegram_history, telegram_topics, resolve_telegram_reply.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os

@@ -52,6 +52,7 @@ except Exception:
     _ANTHROPIC_RE = re.compile(r"\bsk-ant-(?:api|oat|admin)[0-9]+-[A-Za-z0-9_-]{60,}\b")
     _OPENAI_PROJ_RE = re.compile(r"\bsk-proj-[A-Za-z0-9_-]{80,}\b")
     _GENERIC_SK_RE = re.compile(r"\bsk-[A-Za-z0-9_-]{30,}\b")
+    _COMPOSIO_RE = re.compile(r"\bak_[A-Za-z0-9_-]{10,}\b")
 
     def _redact(text):
         if not isinstance(text, str):
@@ -61,6 +62,7 @@ except Exception:
         text = _ANTHROPIC_RE.sub("[REDACTED_ANTHROPIC_KEY]", text)
         text = _OPENAI_PROJ_RE.sub("[REDACTED_OPENAI_KEY]", text)
         text = _GENERIC_SK_RE.sub("[REDACTED_SECRET]", text)
+        text = _COMPOSIO_RE.sub("[REDACTED_COMPOSIO_KEY]", text)
         return text
 
 

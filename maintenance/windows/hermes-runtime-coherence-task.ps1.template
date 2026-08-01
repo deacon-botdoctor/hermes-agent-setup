@@ -1,0 +1,17 @@
+$ErrorActionPreference = "Stop"
+$TaskName = 'Hermes Runtime Coherence - __AGENT_ID__'
+$Arguments = @(
+  '"__CHECK_PATH__"', '--home', '"__HERMES_HOME__"',
+  '--runtime-root', '"__RUNTIME_ROOT__"',
+  '--runtime-python', '"__RUNTIME_PYTHON__"',
+  '--agent-id', '"__AGENT_ID__"',
+  '--receipt', '"__RECEIPT_PATH__"', '--json'
+) -join ' '
+$Action = New-ScheduledTaskAction -Execute '__BASELINE_PYTHON__' -Argument $Arguments
+$Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
+  -RepetitionInterval (New-TimeSpan -Minutes 15)
+$Settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
+$Principal = New-ScheduledTaskPrincipal -UserId '__RUNTIME_USER__' `
+  -LogonType S4U -RunLevel Limited
+Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger `
+  -Settings $Settings -Principal $Principal -Force

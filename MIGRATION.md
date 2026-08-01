@@ -56,9 +56,12 @@ After the final consistent database snapshot:
 3. bind the same service scope and profile to the candidate;
 4. start exactly one new generation;
 5. restore checkpoints and replay queued messages once; and
-6. reopen admission only after health and continuation proof.
+6. reopen admission only after health and continuation proof; and
+7. install the release-pinned runtime-coherence check against the active root.
 
 The two generations never open the same database concurrently.
+The coherence check uses the host's native scheduler, runs read-only, and never
+restarts the gateway. Its first receipt must be green before the upgrade closes.
 
 ## 6. Verify and rehearse rollback
 

@@ -5,7 +5,7 @@
       "kind": "operating_pattern",
       "category": "search-web",
       "label": "Firecrawl-First Web Routing",
-      "summary": "Route public reading and extraction to local Firecrawl; reserve the isolated per-client browser harness for interactive UI work.",
+      "summary": "Route public reading and extraction to local Firecrawl; reserve an authorized per-client browser lane for interactive UI work.",
       "inputs": {
         "intent": "read|extract|research|interact|authenticated-action",
         "target": "URL, domain, or research query"
@@ -26,9 +26,11 @@
       ],
       "routing_policy": {
         "public_read": "Use web_extract backed by FIRECRAWL_API_URL; local Firecrawl is the default.",
-        "interactive": "Use the existing per-client browser harness for clicks, typing, authentication, uploads, downloads, and UI screenshots.",
+        "interactive": "Use the existing per-client browser harness for clicks, typing, authentication, uploads, downloads, and UI screenshots. The lane may use a dedicated profile or a personal profile authorized by its principal.",
+        "authorization": "A clear client instruction to use their browser, existing login, or saved-password autofill is sufficient for the requested scope. If a suitable signed-in personal profile is discovered without clear authorization, identify it without exposing credentials and ask once whether to use it.",
+        "credential_use": "Within the authorized scope, existing sessions, saved-password autofill, and ordinary login submission are allowed. Never reveal, export, transcribe, log, or move a credential to another surface; human-present factors and consequential-action controls remain in force.",
         "specialized": "Prefer an existing tested domain harness for a known brittle workflow; do not create a generic Playwright wrapper.",
-        "isolation": "Browser profiles, cookies, tabs, and CDP endpoints are per-client and must never be shared.",
+        "isolation": "Per-client is the ownership boundary: browser profiles, credentials, cookies, tabs, and CDP endpoints must never be shared across principals.",
         "failure_budget": "After two failed attempts on the selected lane, stop and return a diagnostic; do not spawn another browser, profile, or daemon.",
         "closeout": "Reuse tabs where possible and close task-created tabs when the task ends."
       }

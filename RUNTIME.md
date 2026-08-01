@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.07.31-semantic-control-v2-cua-driver-v1`:
+The current public release is `botdoctor-hermes-2026.08.01-golden-22bebd69`:
 
 - upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `7354b56138ff377bba0c188ea0732e70be1e2440`;
-- runtime payload: 86 files;
+- public Golden source: `22bebd69f921bfd3c22299a1f9fe9a943d372ebb`;
+- runtime payload: 97 files;
 - assembled runtime fingerprint:
-  `4eabe33da88bce2b0b415bcee8e0b5e814787ea4c70cca78336c75176a4e8ebd`.
+  `f6c9f54fe753495005610be20ae356510ceab0b0bfaff6244b5b2f1d574d5520`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -52,8 +52,11 @@ values only when they still exactly match the old defaults.
   scoped to the exact chat/thread.
 - **Durable restart drain:** accepted messages, scheduled work, and restart
   recovery have one durable lifecycle.
-- **Quiet native compaction:** native Codex compaction stays authoritative while
-  its internal completion signal is kept out of the user transcript.
+- **Quiet native context lifecycle:** native Codex compaction stays
+  authoritative. Automatic compaction uses an 85% threshold with a 240K-token
+  cap, retains the most recent 20 messages, and keeps automatic compression,
+  reset, and blocked-context notices out of human chats. Manual operator
+  diagnostics remain visible.
 - **Contextual interruption recovery:** after an interrupted restart, ask the
   originating user what to do next instead of silently repeating an uncertain
   action.
@@ -61,10 +64,15 @@ values only when they still exactly match the old defaults.
   activate it, refresh schemas, and continue in the same turn.
 - **Runtime-root coherence:** lazy imports cannot combine the active gateway
   with an older mutable checkout.
+- **Recurring coherence receipt:** a release-pinned host scheduler rechecks the
+  exact runtime root, Python, and assembled initializer contract without
+  restarting Hermes or reading conversations.
 - **Telegram transaction proof:** a local ledger can join exact ingress to final
   delivery for canaries and incident diagnosis.
 - **Version-aware media delivery:** replacing an attachment at the same path
   sends the new bytes while an unchanged version remains deduplicated.
+- **Telegram media retry:** transient attachment-download failures retry within
+  a bounded window instead of silently losing the accepted message.
 - **Windows task identity:** named profiles stay bound to their explicitly owned
   Scheduled Task and state namespace.
 - **Codex 401 spend guard:** one bounded client-turn fallback may run while
@@ -86,9 +94,12 @@ values only when they still exactly match the old defaults.
 - **Abandoned-stream cleanup:** LLM attempt receipts now close partially
   consumed provider streams across sync finalization, async loop shutdown, and
   context-manager failures without blocking receipt enrichment.
+- **Client friction review:** the daily review emits a content-safe scored
+  papercut summary so repeated routing, update, tool, auth, and dependency
+  friction can be fixed before the user has to report it manually.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 18
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 19
 cohesive registry entries in this release.
 
 ## Profile additions

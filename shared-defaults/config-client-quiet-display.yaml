@@ -1,0 +1,52 @@
+# Fleet client quiet surface — silent mid-turn steering, no busy/status nags.
+# Applied by merge-shared-defaults on every overlay/patch pass.
+display:
+  busy_input_mode: steer
+  busy_text_mode: steer
+  busy_ack: false
+  busy_ack_enabled: false
+  busy_ack_detail: false
+  busy_steer_ack_enabled: false
+  interim_assistant_messages: false
+  long_running_notifications: false
+  cleanup_progress: false
+  tool_progress: false
+  tool_progress_command: false
+  tool_preview_length: 0
+  timestamps: false
+  gateway_status_messages: false
+  background_process_notifications: false
+  gateway_restart_notifications: false
+  session_reset_events: false
+  context_pressure_notifications: false
+  streaming: false
+  show_cost: false
+  show_reasoning: false
+  bell_on_complete: false
+  platforms:
+    telegram:
+      busy_ack_enabled: false
+      busy_ack_detail: false
+      busy_steer_ack_enabled: false
+      tool_progress: false
+      interim_assistant_messages: false
+      long_running_notifications: false
+
+session_reset:
+  notify: false
+
+# Fleet context lifecycle: use most of the active model window while retaining
+# an absolute safety ceiling. Automatic lifecycle chatter is handled internally
+# and never delegated to the client.
+compression:
+  threshold: 0.85
+  threshold_tokens: 240000
+  progress_notices: false
+
+notifications:
+  compression_events: false
+  session_reset_events: false
+
+platforms:
+  telegram:
+    gateway_restart_notification: false

@@ -297,6 +297,70 @@ the live cutover. Do not run `install-profile.py` against `$LiveHome` until the
 controlled-cutover step after preservation and quiescence. Never let staging
 change the currently resolved `hermes` command.
 
+## Install the recurring runtime-coherence check
+
+Run this only after a fresh gateway is active or after an existing gateway has
+completed the controlled cutover. It installs one native scheduler entry and
+runs the read-only probe immediately. It never restarts the gateway.
+
+On macOS or Linux, bind it to the exact active candidate:
+
+```bash
+runtime_agent_id="${HERMES_AGENT_ID:-main}"
+case "$(uname -s)" in
+  Darwin) runtime_platform="macos" ;;
+  Linux) runtime_platform="linux" ;;
+  *) echo "unsupported platform" >&2; exit 1 ;;
+esac
+"$candidate/venv/bin/python" maintenance/bin/install-runtime-coherence.py apply \
+  --agent-id "$runtime_agent_id" \
+  --home "$HERMES_HOME" \
+  --runtime-root "$candidate" \
+  --runtime-python "$candidate/venv/bin/python" \
+  --scheduler-python "$candidate/venv/bin/python" \
+  --runtime-user "$(id -un)" \
+  --user-home "$HOME" \
+  --platform "$runtime_platform" \
+  --json
+"$candidate/venv/bin/python" maintenance/bin/install-runtime-coherence.py verify \
+  --agent-id "$runtime_agent_id" \
+  --home "$HERMES_HOME" \
+  --runtime-root "$candidate" \
+  --runtime-python "$candidate/venv/bin/python" \
+  --scheduler-python "$candidate/venv/bin/python" \
+  --runtime-user "$(id -un)" \
+  --user-home "$HOME" \
+  --platform "$runtime_platform" \
+  --json
+```
+
+On Windows, use the actual service account identity, not a profile-directory
+label. `$env:USERNAME` must map to a real SID on the machine:
+
+```powershell
+$RuntimeAgentId = if ($env:HERMES_AGENT_ID) { $env:HERMES_AGENT_ID } else { "main" }
+$RuntimePython = Join-Path $Candidate "venv\Scripts\python.exe"
+$CoherenceInstaller = Join-Path $PWD "maintenance\bin\install-runtime-coherence.py"
+$CoherenceArgs = @(
+  "--agent-id", $RuntimeAgentId,
+  "--home", $LiveHome,
+  "--runtime-root", $Candidate,
+  "--runtime-python", $RuntimePython,
+  "--scheduler-python", $RuntimePython,
+  "--runtime-user", $env:USERNAME,
+  "--user-home", $env:USERPROFILE,
+  "--platform", "windows",
+  "--json"
+)
+& $RuntimePython $CoherenceInstaller apply @CoherenceArgs
+if ($LASTEXITCODE -ne 0) { throw "runtime-coherence installation failed" }
+& $RuntimePython $CoherenceInstaller verify @CoherenceArgs
+if ($LASTEXITCODE -ne 0) { throw "runtime-coherence verification failed" }
+```
+
+The receipt is `$HERMES_HOME/state/health/runtime-coherence.json`. Roll back
+only this scheduler with the same arguments and the `rollback` action.
+
 ## Existing installation: preserve before changing
 
 Before any live write, create an immutable local rollback outside the code
@@ -390,6 +454,8 @@ At readiness:
 5. Start the candidate and prove the old generation is absent.
 6. Restore durable checkpoints and replay accepted messages exactly once before
    reopening admission.
+7. Install and verify the recurring runtime-coherence check against the new
+   active root.
 
 Do not open the same database from two generations.
 

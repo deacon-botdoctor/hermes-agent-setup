@@ -81,8 +81,10 @@ Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 5. install only manifest-owned profile files with a local rollback;
 6. install and receipt the pinned native Cua Driver without restarting the
    gateway;
-7. run native `hermes doctor`; and
-8. install the native gateway service only after verification.
+7. run native `hermes doctor`;
+8. install the native gateway service only after verification; and
+9. install the release-pinned recurring runtime-coherence check for the host's
+   native scheduler.
 
 Browser automation, Composio, and additional MCP servers should be enabled only
 when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
@@ -110,6 +112,18 @@ waits for active work to finish or checkpoint, switches one runtime generation,
 then proves continuation and rollback.
 
 The human-readable gate summary is in [MIGRATION.md](MIGRATION.md).
+
+### Recurring runtime-coherence check
+
+The release includes one small host-side check for macOS, Linux, and Windows.
+It periodically proves that the service-owned runtime root, Python, and
+assembled `AIAgent`/`init_agent` contract still agree. It writes a local 0600
+receipt, does not restart Hermes, and does not inspect conversation content.
+
+The installer and exact baseline source commit are pinned in `release.json`.
+Fresh installs run it after native service activation; upgrades run it after
+the controlled cutover succeeds. Exact commands and rollback behavior are in
+[AGENTS.md](AGENTS.md#install-the-recurring-runtime-coherence-check).
 
 ## What changed from the old public setup
 
