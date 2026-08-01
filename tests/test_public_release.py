@@ -56,14 +56,14 @@ def test_release_identity_matches_source_manifest():
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "f6c9f54fe753495005610be20ae356510ceab0b0bfaff6244b5b2f1d574d5520",
-        "file_count": 47,
+        "digest": "b0e356ee3ad026ecc5c2af215f23a53accbfd8013b8aec902021f2119f7d9ee7",
+        "file_count": 58,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 47
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 47
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 58
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 58
     assert set(release) == {
         "schema_version",
         "release",

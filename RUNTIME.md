@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.01-golden-22bebd69`:
+The current public release is `botdoctor-hermes-2026.08.01-golden-d761b57c`:
 
 - upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `22bebd69f921bfd3c22299a1f9fe9a943d372ebb`;
+- public Golden source: `d761b57c3de7600ca10b52546926318257cb2c3c`;
 - runtime payload: 97 files;
 - assembled runtime fingerprint:
-  `f6c9f54fe753495005610be20ae356510ceab0b0bfaff6244b5b2f1d574d5520`.
+  `b0e356ee3ad026ecc5c2af215f23a53accbfd8013b8aec902021f2119f7d9ee7`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -17,6 +17,19 @@ native doctor/session/permission gate.
 Private fleet health probes, host routes, and service adapters are deliberately
 not part of this public source manifest; native service tooling owns public
 installations.
+
+## What changed in this release
+
+- Restart and delivery recovery remain durable, but automatic control-plane
+  notices, expired approvals, and ambiguous interrupted actions stay out of
+  human chats. Preserved inbound messages replay normally after restart.
+- The semantic computer-control guard now recognizes an exact
+  dedicated-principal device posture. Scoped desktop work can proceed without
+  redundant approval ceremony; unscoped or mismatched environments retain the
+  existing guarded fallback behavior.
+- The Cua Driver remains pinned and verified on every install. GUI readiness is
+  still a separate host/session permission check, so a headless machine
+  degrades to other automation instead of pretending desktop control is ready.
 
 ## Native first
 

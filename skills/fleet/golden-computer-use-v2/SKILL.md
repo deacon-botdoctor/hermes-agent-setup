@@ -8,8 +8,13 @@ status: active
 # Golden Computer Use v2 Skill
 
 Use the existing `computer_use` tool to operate eligible desktops from fresh
-semantic state. It does not authorize raw coordinates, direct input scripts,
-or unrestricted desktop control.
+semantic state. Raw coordinates and direct input scripts remain unavailable.
+The driver posture is selected by runtime configuration, never by a model turn:
+
+- `standard` uses normal CUA approval handling.
+- `dedicated_principal` uses unrestricted CUA only when the configured
+  principal, agent, device, and `outcome_scoped` authority exactly match the
+  live runtime.
 
 ## When to Use
 
@@ -27,6 +32,11 @@ the exact runtime candidate before claiming desktop control is ready.
 - `blocked` means repair the named prerequisite; never substitute direct UI
   scripting or injected input.
 
+For `dedicated_principal`, readiness must additionally prove the exact
+`client_identity`, `HERMES_AGENT_ID`/`HERMES_PROFILE`, and host name binding.
+Any missing or mismatched field blocks computer input without disabling the
+agent's non-UI tools.
+
 ## Procedure
 
 1. Capture the named app using semantic mode.
@@ -39,11 +49,18 @@ the exact runtime candidate before claiming desktop control is ready.
 5. After two unverified attempts at the same transition, do not repeat it a
    third time. Recapture, change delivery mode or semantic route, and continue
    from verified state.
+6. A clear instruction to use the principal's browser authorizes the relevant
+   browser/computer tools for that task. Do not add a second attachment or
+   driver-consent ceremony. Preserve outcome gates for purchases, destructive
+   deletion, final legal/financial submission, public/client messages,
+   account-security changes, credential export, and human-present MFA.
 
 ## Pitfalls
 
-- Raw coordinates, unrestricted mode, direct driver calls, and generated UI
-  scripts remain forbidden even when foreground escalation is enabled.
+- Raw coordinates, direct driver calls, and generated UI scripts remain
+  forbidden. Unrestricted driver mode is valid only through an exact
+  `dedicated_principal` runtime binding; a tool call cannot broaden its own
+  permission posture.
 - Do not replace a failed semantic action with AppleScript, injected input, or
   a legacy desktop-control tool.
 - End the session when work finishes. Native API/CLI/file lanes remain valid

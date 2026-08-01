@@ -1,7 +1,7 @@
 id: semantic-computer-control-guard
 name: semantic-computer-control-guard
-version: 2.1.0
-description: Semantic desktop sequencing with explicit focus escalation.
+version: 3.0.0
+description: Semantic desktop sequencing with an exact dedicated-principal posture.
 provides_hooks:
   - pre_tool_call
   - post_tool_call
