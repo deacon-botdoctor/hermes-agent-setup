@@ -600,6 +600,8 @@ def main():
         hermes_dir / "gateway" / "run.py",
         hermes_dir / "gateway" / "platforms" / "base.py",
         hermes_dir / "gateway" / "platforms" / "telegram.py",
+        hermes_dir / "hermes_cli" / "gateway.py",
+        hermes_dir / "hermes_cli" / "gateway_windows.py",
         hermes_dir / "plugins" / "platforms" / "telegram" / "adapter.py",
     ]
     compile_failures = []

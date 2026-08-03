@@ -14,6 +14,7 @@ import contextvars
 import hashlib
 import inspect
 import json
+import logging
 import os
 import socket
 import threading
@@ -30,6 +31,9 @@ from hermes_constants import get_hermes_home
 SCHEMA_VERSION = "botdoctor.llm-attempt.v1"
 TERMINAL_OUTCOMES = frozenset({"success", "error", "cancelled"})
 _WRITE_LOCK = threading.Lock()
+_DEFERRED_TERMINALS: list[dict[str, Any]] = []
+_MAX_DEFERRED_TERMINALS = 256
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,16 +91,46 @@ def _json_value(value: Any) -> Any:
     return None
 
 
+def _write_event(path: Path, event: dict[str, Any]) -> None:
+    payload = (json.dumps(_json_value(event), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    try:
+        os.write(fd, payload)
+    finally:
+        os.close(fd)
+
+
 def _append(event: dict[str, Any]) -> None:
+    """Persist one event, flushing any terminal events deferred after I/O failure.
+
+    Started events stay fail-closed: if the journal cannot record intent before
+    network I/O, the provider call must not begin. Terminal events are different:
+    the provider has already answered, so a local receipt failure must never turn
+    a successful paid response into another provider attempt.
+    """
     path = _journal_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(_json_value(event), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     with _WRITE_LOCK:
-        fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
-        try:
-            os.write(fd, payload)
-        finally:
-            os.close(fd)
+        while _DEFERRED_TERMINALS:
+            _write_event(path, _DEFERRED_TERMINALS[0])
+            _DEFERRED_TERMINALS.pop(0)
+        _write_event(path, event)
+
+
+def _append_terminal(event: dict[str, Any]) -> None:
+    """Persist a post-provider event without invalidating the provider result."""
+    try:
+        _append(event)
+    except OSError as exc:
+        with _WRITE_LOCK:
+            if len(_DEFERRED_TERMINALS) >= _MAX_DEFERRED_TERMINALS:
+                _DEFERRED_TERMINALS.pop(0)
+            _DEFERRED_TERMINALS.append(event)
+        _LOGGER.error(
+            "LLM terminal receipt deferred after local journal I/O failure; "
+            "provider response remains valid: %s",
+            exc,
+        )
 
 
 def _key_fingerprint(api_key: Any) -> tuple[str, str]:
@@ -472,7 +506,7 @@ class Attempt:
                 provider_request_id=request_id,
             )
         )
-        _append(payload)
+        _append_terminal(payload)
 
 
 def _base_url_host(base_url: str) -> str:

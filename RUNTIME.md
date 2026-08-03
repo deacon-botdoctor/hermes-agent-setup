@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.01-golden-d761b57c`:
+The current public release is `botdoctor-hermes-2026.08.03-golden-ee9188ad`:
 
-- upstream Hermes `0.19.1`: `cc4cab2f592e60a197e796506de9168f74baf3ea`;
-- public Golden source: `d761b57c3de7600ca10b52546926318257cb2c3c`;
-- runtime payload: 97 files;
+- upstream Hermes `0.19.1+main.694.a6defd4f`: `a6defd4f1549da3fe1d08d6f746fc645c64543f0`;
+- public Golden source: `ee9188adb742006215fa407e3fab7c048c883f4d`;
+- runtime payload: 101 files;
 - assembled runtime fingerprint:
-  `b0e356ee3ad026ecc5c2af215f23a53accbfd8013b8aec902021f2119f7d9ee7`.
+  `68ae2c6e18b47ce4a8bed2d8a4a4e02c41ea6cdde7d635a14f4e16e93df00f2a`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -20,16 +20,18 @@ installations.
 
 ## What changed in this release
 
-- Restart and delivery recovery remain durable, but automatic control-plane
-  notices, expired approvals, and ambiguous interrupted actions stay out of
-  human chats. Preserved inbound messages replay normally after restart.
-- The semantic computer-control guard now recognizes an exact
-  dedicated-principal device posture. Scoped desktop work can proceed without
-  redundant approval ceremony; unscoped or mismatched environments retain the
-  existing guarded fallback behavior.
-- The Cua Driver remains pinned and verified on every install. GUI readiness is
-  still a separate host/session permission check, so a headless machine
-  degrades to other automation instead of pretending desktop control is ready.
+- Native Hermes advances to the exact rehearsed `a6defd4f` commit while the
+  public overlays retain only the compatibility gaps that are still required.
+- Gateway install/start operations preserve a valid runtime-service binding and
+  fail closed when a foreign checkout or stale service definition would swap
+  the active runtime.
+- Context compaction now proves its postconditions, model-attempt receipts close
+  their database handles, and local descriptor exhaustion is classified as a
+  local runtime failure instead of a model-provider failure.
+- Telegram voice memos have one delivery owner, and shared file-delivery rules
+  keep media fallback paths from producing duplicate sends.
+- Semantic computer control keeps normal automation fallbacks available when a
+  host or request is not eligible for semantic desktop control.
 
 ## Native first
 

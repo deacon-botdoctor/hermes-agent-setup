@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
-  "release": "botdoctor-hermes-2026.08.01-golden-d761b57c",
+  "release": "botdoctor-hermes-2026.08.03-golden-ee9188ad",
   "status": "current",
   "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "d761b57c3de7600ca10b52546926318257cb2c3c",
-  "canonical_upstream_sha": "cc4cab2f592e60a197e796506de9168f74baf3ea",
+  "golden_sha": "ee9188adb742006215fa407e3fab7c048c883f4d",
+  "canonical_upstream_sha": "a6defd4f1549da3fe1d08d6f746fc645c64543f0",
   "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "a55b894aa7f3efc02bbfafdd75834997bb684f4294ccacf3ea9d2a7bc231a373",
-  "deployment_digest": "31e1123620be38b463f075407a18e19daccef79502913e164603ab7873df2d01",
-  "golden_deployment_digest": "74289d83886c8da5788226a8f2ec6cd1332411568855f3dc330f45bac5982a34",
+  "runtime_payload_digest": "cf9a63729c66bfc78391f308e5a2cb99906fd3d49a7960435ab07ff0f071cfac",
+  "deployment_digest": "5c71a0a0f37c36be37ac8b099c9d7ed1ccec849cc0cc78b9843410e8064210ae",
+  "golden_deployment_digest": "456fe7d859dedecec345c50e31e78068185aa233278b86c13867091c5c84f7c0",
   "assembled_runtime_fingerprint": {
-    "digest": "b0e356ee3ad026ecc5c2af215f23a53accbfd8013b8aec902021f2119f7d9ee7",
-    "file_count": 58
+    "digest": "68ae2c6e18b47ce4a8bed2d8a4a4e02c41ea6cdde7d635a14f4e16e93df00f2a",
+    "file_count": 61
   },
   "verification": {
     "golden_suite": "full Golden preflight passed",
-    "clean_upstream_rehearsal": "19/19 patches applied on pinned upstream; no anchor miss, failure, or not-run"
+    "clean_upstream_rehearsal": "23/23 patches applied on pinned upstream; no anchor miss, failure, or not-run"
   },
   "cua_driver": {
     "version": "0.14.2",
