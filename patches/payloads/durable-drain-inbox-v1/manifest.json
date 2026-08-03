@@ -1,29 +1,29 @@
 {
   "schema_version": 1,
   "name": "durable-drain-inbox-v1",
-  "base_commit": "cc4cab2f592e60a197e796506de9168f74baf3ea",
-  "source_seed_head": "06b0c0b9d6e9200e0cf4220d2d53613e2448e14a",
-  "payload_finalized_in_golden_commit": "08e98b2c64043889b1c02ab1efe20214a6dae33a",
-  "patch": "hermes-agent-cc4cab2f-durable-drain-v5.patch",
-  "patch_sha256": "b39cc202a2f231f29ff20db6940dadafefbf9722c8de35bd5fe9f63fe05c5d23",
+  "base_commit": "a6defd4f1549da3fe1d08d6f746fc645c64543f0",
+  "source_seed_head": "4a91ea855dd4f43a1275a86830f32b0509173689",
+  "payload_finalized_in_golden_commit": "0fc8e25b064709f94cbb4b62df2e3a0741c0793b",
+  "patch": "hermes-agent-a6defd4f-durable-drain-v1.patch",
+  "patch_sha256": "7b749cb9ac3a9a6ef026f68d304c9ea9d001dfd6cbd681b426a0f9cd43c0e6fe",
   "impact": {
     "commits": 1,
     "files": 15,
-    "insertions": 6319,
-    "deletions": 276
+    "insertions": 6316,
+    "deletions": 265
   },
   "postimage_git_blobs": {
     "gateway/drain_inbox.py": "301ed6669497df05ac0225801b1fe9487fea040c",
-    "gateway/platforms/base.py": "b735aeb5bc24c0dedfa5c6a535ab4a60b9f90916",
-    "gateway/platforms/bluebubbles.py": "455fcd2c9646fbdace439decbea5c1da46af89e8",
+    "gateway/platforms/base.py": "604de05118bdc535251a6162db77d11ce6d2b170",
+    "gateway/platforms/bluebubbles.py": "7ae4fe2f7be331cebbbe25b846803bd432710b5e",
     "gateway/platforms/msgraph_webhook.py": "0b7fbe17ff37a5369933ae5f626b449e82a0416b",
-    "gateway/platforms/qqbot/adapter.py": "013a2d91da287fc51f38e36705613ff84a50e6bb",
+    "gateway/platforms/qqbot/adapter.py": "c9aa3b100c574e4237e818da20cf91e990794b61",
     "gateway/platforms/webhook.py": "0b398e8522331e499930ac7826bd2e819e5fe395",
-    "gateway/platforms/whatsapp_cloud.py": "78f9d0e97d3012125b8994cb7d2d22d4d56f1229",
-    "gateway/run.py": "83bdb45d4282c566fff5fa38c881d2771563718a",
-    "gateway/session.py": "cd4b3ea54aed2e558e3050bceb1e4220a91156f3",
-    "gateway/slash_commands.py": "322d95c4fc6a7a9c9c4e4dec5dbc62195049efc3",
-    "hermes_state.py": "a5a961ff10fb1f21b249794ac93e052ba2d2efca",
+    "gateway/platforms/whatsapp_cloud.py": "655cf4a6fa99898fa95ef832d79b374fbdb1ed0d",
+    "gateway/run.py": "134b60ddfcdf7e1b5feccd3959e67dd57d134e1f",
+    "gateway/session.py": "63bef2a70ff0f914e2e34aaaad7debc4da5bfe97",
+    "gateway/slash_commands.py": "b095ffc3ae4ce8b6d1448a412a67bc8503eebab5",
+    "hermes_state.py": "cf25943c9f6dd74c510d237ec31e434e89a8a46c",
     "tests/gateway/restart_test_helpers.py": "334591dc429dca24bc5184f642bc451169f70da8",
     "tests/gateway/test_drain_inbox.py": "3e88b5e9ce9af9013cc69d07ea906d4fc7dba6e8",
     "tests/gateway/test_external_drain_control.py": "a58d50de2d308d23c5a846e285bd42793f76a8ee",
@@ -58,6 +58,11 @@
       "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1",
       "return None",
       "return t(\"gateway.approve.no_pending\")"
+    ],
+    "hermes_state.py": [
+      "content: Optional[str] = None,",
+      "def has_platform_message_id_for_session_key(",
+      "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1"
     ],
     "tests/gateway/test_drain_inbox.py": [
       "def test_persisted_event_round_trips_exact_user_instruction(",

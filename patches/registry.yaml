@@ -47,6 +47,22 @@ patches:
     upstream_issue: null
     retirement_condition: retire when the pinned runtime keeps automatic lifecycle, restart admission, recovered-delivery ambiguity, and expired approval diagnostics off human chat surfaces while preserving their internal state and operator observability.
 
+  - name: context_compaction_postconditions_v1
+    module: modules/context_compaction_postconditions_v1.py
+    function: patch_context_compaction_postconditions_v1
+    target: agent/context_compressor.py
+    owner: engineering-lead
+    idempotency: HERMES_CONTEXT_COMPACTION_POSTCONDITIONS_v1
+    test: python3 -m pytest -q bin/test/test_context_compaction_postconditions_v1.py
+    rollback: restore agent/context_compressor.py from the pre-apply snapshot or its .bak-*-context-postconditions sibling
+    client_impact: restart_required
+    tags: [context, compaction, summary, budget, deduplication, fallback, anti-thrash, client-safety]
+    status: extracted
+    route: irreducible
+    reason: pinned Hermes calculates a bounded summary target but stores unchecked model output and recursively reuses persisted handoffs; this patch makes non-empty, budget, repetition, and existing provenance checks mandatory at that storage boundary and replaces defective fossils with the existing deterministic fallback.
+    upstream_issue: null
+    retirement_condition: remove when upstream rejects empty, over-budget, repetitive, or provenance-invalid generated and rehydrated summaries before recursive reuse, guarantees the final stored handoff fits its calculated budget, and cleanly replaces a defective fossil without depending on the summary provider.
+
   - name: telegram_model_commentary_checkpoints_v1
     module: modules/telegram_organic_long_running_checkpoints_v1.py
     function: patch_telegram_organic_long_running_checkpoints_v1
@@ -139,6 +155,21 @@ patches:
     reason: inbound Telegram media reads currently surface a transient getFile/CDN timeout immediately even though refreshing the read-only file descriptor and download is safe and does not replay message handling
     upstream_issue: null
     retirement_condition: remove when upstream retries transient inbound Telegram file descriptor and CDN reads with bounded attempts and config-backed timeout control
+  - name: voice_memo_single_delivery_v1
+    module: modules/voice_memo_single_delivery_v1.py
+    function: patch_voice_memo_single_delivery_v1
+    target: gateway/platforms/base.py + gateway/run.py + tools/tts_tool.py
+    owner: engineering-lead
+    idempotency: HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
+    test: python3 -m pytest -q bin/test/test_voice_memo_single_delivery_v1.py
+    rollback: restore gateway/platforms/base.py, gateway/run.py, and tools/tts_tool.py from the pre-apply snapshot or their .bak-voice-memo-single-delivery-v1 siblings
+    client_impact: restart_required
+    tags: [gateway, telegram, voice, tts, stt, delivery, client-experience]
+    status: extracted
+    route: upstream-pr-pending
+    reason: successful auto-TTS currently captions Telegram audio or follows voice delivery with the full body, while streaming can publish that body before the adapter gets a chance to synthesize; voice-only needs one audio delivery with fail-closed text fallback, and agent-authored TTS needs an explicit no-duplicate schema contract.
+    upstream_issue: null
+    retirement_condition: remove when upstream suppresses final-body streaming for auto-TTS voice inputs, treats confirmed voice delivery as satisfying the response obligation without captions or a second body message, retains text on every synthesis/send failure, and exposes the same no-duplicate contract in the TTS tool schema.
   - name: telegram_transaction_canary_v1
     module: modules/telegram_transaction_canary_v1.py
     function: patch_telegram_transaction_canary_v1
@@ -289,3 +320,33 @@ patches:
     reason: gateway runtime safety has two fail-closed gaps at the same late-loaded boundary—lazy AIAgent imports can cross runtime roots, while rejected native-choice prose can redirect to steer before the blocking clarify returns and a late cancellation can overwrite a button result; the shared atomic unit preserves coherent rollback while both behaviors mutate that boundary
     upstream_issue: https://github.com/NousResearch/hermes-agent/pull/75732
     retirement_condition: remove the clarify component when upstream.lock contains NousResearch/hermes-agent#75732 or equivalent behavior; remove the full unit when upstream also pins lazy agent imports to the active gateway source root and rejects mixed-root modules
+  - name: gateway_service_binding_guard_v1
+    module: modules/gateway_service_binding_guard_v1.py
+    function: patch_gateway_service_binding_guard_v1
+    target: hermes_cli/gateway.py + hermes_cli/gateway_windows.py
+    owner: engineering-lead
+    idempotency: HERMES_GATEWAY_SERVICE_BINDING_GUARD_v1
+    test: python3 -m pytest -q bin/test/test_gateway_service_binding_guard_v1.py
+    rollback: restore hermes_cli/gateway.py and hermes_cli/gateway_windows.py from the pre-apply snapshot; keep the active runtime binding receipt until the prior service definition is restored or a new activation is proven
+    client_impact: restart_required
+    tags: [gateway, runtime, service, launchd, systemd, windows, activation, rollback, client-safety]
+    status: extracted
+    route: upstream-pr-pending
+    reason: native gateway start/install reconciles service definitions against whichever checkout invoked the command, so an older checkout can silently overwrite a verified Golden runtime binding; Windows direct start can likewise launch the invoking checkout instead of the bound runtime
+    upstream_issue: null
+    retirement_condition: remove when upstream persists and validates an exact active runtime/service binding, refuses foreign-checkout fallback, and runs service reconciliation only through an explicit activation transaction on launchd, systemd, and Windows
+  - name: state_db_descriptor_lifecycle_v1
+    module: modules/state_db_descriptor_lifecycle_v1.py
+    function: patch_state_db_descriptor_lifecycle_v1
+    target: hermes_state.py + gateway/run.py + agent/conversation_loop.py
+    owner: engineering-lead
+    idempotency: HERMES_STATE_DB_DESCRIPTOR_LIFECYCLE_v1
+    test: python3 -m pytest -q bin/test/test_state_db_descriptor_lifecycle_v1.py bin/test/test_llm_attempt_receipts_v1.py
+    rollback: restore hermes_state.py, gateway/run.py, and agent/conversation_loop.py from the pre-apply snapshot or their .bak-*-state-db-descriptor-lifecycle-v1 siblings
+    client_impact: restart_required
+    tags: [gateway, sqlite, state-db, file-descriptors, emfile, reliability, client-safety]
+    status: extracted
+    route: upstream-pr-pending
+    reason: pinned Hermes retains one read-only state.db connection for every thread identity ever used by long-lived SessionDB instances, including short-lived worker pools, and the gateway opens two independent SessionDB owners; on low-RLIMIT macOS this grows until EMFILE disables tools, Telegram, cron, and local receipt writes, while the provider retry loop misclassifies the local failure as a model-provider outage.
+    upstream_issue: null
+    retirement_condition: remove when upstream bounds or reaps per-thread state.db readers, reuses one gateway SessionDB owner, closes cached readers deterministically across threads, and treats EMFILE/ENFILE as non-provider local runtime failures without retrying a paid model call.

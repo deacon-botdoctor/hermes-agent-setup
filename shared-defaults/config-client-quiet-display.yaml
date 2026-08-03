@@ -34,6 +34,10 @@ display:
 
 session_reset:
   notify: false
+  mode: both
+  idle_minutes: 240
+  at_hour: 4
+  auto_resume_previous_if_contextual: false
 
 # Fleet context lifecycle: use most of the active model window while retaining
 # an absolute safety ceiling. Automatic lifecycle chatter is handled internally
@@ -41,6 +45,9 @@ session_reset:
 compression:
   threshold: 0.85
   threshold_tokens: 240000
+  target_ratio: 0.2
+  protect_last_n: 12
+  proactive_prune_tokens: 48000
   progress_notices: false
 
 notifications:

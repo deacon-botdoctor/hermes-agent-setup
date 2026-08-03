@@ -12,6 +12,11 @@ Before sending:
    `[[audio_as_voice]]`.
 4. Verify the attachment actually arrived before claiming delivery.
 
+For a voice memo produced with `text_to_speech`, the audio is the reply. Return
+the generated `MEDIA:` directive without repeating the spoken prose as ordinary
+chat text. Use no companion text by default; one short context line is the
+maximum when the audio needs a label or qualification.
+
 Do not use an external upload service when the current platform can attach the
 file. If the source artifact is outside an allowed root, copy the finished
 artifact into `~/.hermes/media/` first.

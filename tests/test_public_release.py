@@ -61,18 +61,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 97
+    assert manifest["components"]["runtime_payload"]["file_count"] == 101
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "b0e356ee3ad026ecc5c2af215f23a53accbfd8013b8aec902021f2119f7d9ee7",
-        "file_count": 58,
+        "digest": "68ae2c6e18b47ce4a8bed2d8a4a4e02c41ea6cdde7d635a14f4e16e93df00f2a",
+        "file_count": 61,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 58
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 58
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 61
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 61
     assert set(release) == {
         "schema_version",
         "release",
@@ -387,7 +387,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 19
+    assert len(patches) == 23
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -1611,11 +1611,11 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert (
         "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "cc4cab2f592e60a197e796506de9168f74baf3ea/scripts/install.ps1"
+        "a6defd4f1549da3fe1d08d6f746fc645c64543f0/scripts/install.ps1"
         in instructions
     )
     assert (
-        "7265f8ad1566bdeb2082f04b379d6794c9dd44b0c129eaa7f016b024d9a8f812"
+        "4dcbf2b665750cb578f69a6efa40770659e21821a463746f86da68af0d2bb31c"
         in instructions
     )
     assert "-m hermes_cli.main setup" in instructions
