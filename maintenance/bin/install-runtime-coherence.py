@@ -109,6 +109,14 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     ):
         if not path.is_file():
             raise ValueError(f"{label} is missing")
+    try:
+        scheduler_python.relative_to(runtime_root)
+    except ValueError:
+        pass
+    else:
+        raise ValueError(
+            "scheduler Python must be outside the monitored runtime root"
+        )
     receipt = (
         args.receipt.expanduser().resolve()
         if args.receipt
@@ -385,7 +393,11 @@ def main() -> int:
     parser.add_argument("--home", required=True, type=Path)
     parser.add_argument("--runtime-root", required=True, type=Path)
     parser.add_argument("--runtime-python", required=True, type=Path)
-    parser.add_argument("--scheduler-python", type=Path, default=Path(sys.executable))
+    parser.add_argument(
+        "--scheduler-python",
+        type=Path,
+        default=Path(getattr(sys, "_base_executable", sys.executable)),
+    )
     parser.add_argument("--runtime-user")
     parser.add_argument("--user-home", type=Path, default=Path.home())
     parser.add_argument("--receipt", type=Path)

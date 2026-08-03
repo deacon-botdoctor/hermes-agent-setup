@@ -312,12 +312,14 @@ case "$(uname -s)" in
   Linux) runtime_platform="linux" ;;
   *) echo "unsupported platform" >&2; exit 1 ;;
 esac
+scheduler_python="$("$candidate/venv/bin/python" -c 'import sys; print(sys._base_executable)')"
+test -x "$scheduler_python"
 "$candidate/venv/bin/python" maintenance/bin/install-runtime-coherence.py apply \
   --agent-id "$runtime_agent_id" \
   --home "$HERMES_HOME" \
   --runtime-root "$candidate" \
   --runtime-python "$candidate/venv/bin/python" \
-  --scheduler-python "$candidate/venv/bin/python" \
+  --scheduler-python "$scheduler_python" \
   --runtime-user "$(id -un)" \
   --user-home "$HOME" \
   --platform "$runtime_platform" \
@@ -327,7 +329,7 @@ esac
   --home "$HERMES_HOME" \
   --runtime-root "$candidate" \
   --runtime-python "$candidate/venv/bin/python" \
-  --scheduler-python "$candidate/venv/bin/python" \
+  --scheduler-python "$scheduler_python" \
   --runtime-user "$(id -un)" \
   --user-home "$HOME" \
   --platform "$runtime_platform" \
@@ -340,13 +342,15 @@ label. `$env:USERNAME` must map to a real SID on the machine:
 ```powershell
 $RuntimeAgentId = if ($env:HERMES_AGENT_ID) { $env:HERMES_AGENT_ID } else { "main" }
 $RuntimePython = Join-Path $Candidate "venv\Scripts\python.exe"
+$SchedulerPython = (& $RuntimePython -c "import sys; print(sys._base_executable)").Trim()
+if (-not (Test-Path $SchedulerPython)) { throw "stable scheduler Python is missing" }
 $CoherenceInstaller = Join-Path $PWD "maintenance\bin\install-runtime-coherence.py"
 $CoherenceArgs = @(
   "--agent-id", $RuntimeAgentId,
   "--home", $LiveHome,
   "--runtime-root", $Candidate,
   "--runtime-python", $RuntimePython,
-  "--scheduler-python", $RuntimePython,
+  "--scheduler-python", $SchedulerPython,
   "--runtime-user", $env:USERNAME,
   "--user-home", $env:USERPROFILE,
   "--platform", "windows",
@@ -469,6 +473,17 @@ python3 bin/install-profile.py \
 
 This restores only files and configuration owned by that profile-install run;
 service and database rollback remain the separately captured cutover rollback.
+The service proof also prints `runtime_binding_rollback`; after restoring the
+prior service definition, restore that exact binding receipt with:
+
+```bash
+python3 bin/bind-service-circuit.py \
+  --hermes-home "$HERMES_HOME" \
+  --restore-runtime-binding /exact/runtime_binding_rollback/path
+```
+
+The restore refuses an incomplete backup or any binding changed after the
+activation, so the service and receipt cannot silently diverge during rollback.
 The profile-environment helper prints its own backup path when `.env` changes.
 Restore it with:
 

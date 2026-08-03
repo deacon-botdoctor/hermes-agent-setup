@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -18,6 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_script(name: str, filename: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / "bin" / filename)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_path(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -131,6 +140,227 @@ def test_release_pins_the_cross_platform_runtime_coherence_package():
     assert hashlib.sha256(canonical.encode()).hexdigest() == (
         contract["package_digest"]
     )
+
+
+def test_service_proof_writes_exact_runtime_binding_receipt(tmp_path: Path):
+    binder = load_script("public_runtime_binding", "bind-service-circuit.py")
+    home = tmp_path / "home/.hermes"
+    runtime = home / "state/runtime-candidates/release"
+    python = runtime / "venv/bin/python"
+    definition = tmp_path / "Library/LaunchAgents/ai.hermes.gateway.plist"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+    definition.parent.mkdir(parents=True)
+    definition.write_bytes(b"plist-v1")
+
+    receipt_path, rollback = binder._write_runtime_binding(
+        home,
+        runtime,
+        service_kind="launchd-user",
+        service_owner="agent",
+        definition_path=definition,
+        definition_bytes=definition.read_bytes(),
+    )
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["schema_version"] == 1
+    assert receipt["kind"] == "botdoctor_runtime_binding"
+    assert receipt["status"] == "active"
+    assert receipt["hermes_home"] == str(home)
+    assert receipt["runtime_root"] == str(runtime)
+    assert receipt["runtime_python"] == str(python)
+    assert receipt["service"] == {
+        "kind": "launchd-user",
+        "owner": "agent",
+        "definition_path": str(definition),
+        "definition_sha256": hashlib.sha256(b"plist-v1").hexdigest(),
+        "launchers": [],
+    }
+    assert receipt_path.stat().st_mode & 0o777 == 0o600
+    assert rollback.is_dir()
+    binder._restore_runtime_binding(home, rollback)
+    assert not receipt_path.exists()
+
+
+def test_runtime_binding_rollback_restores_prior_receipt_exactly(tmp_path: Path):
+    binder = load_script("public_runtime_binding_rollback", "bind-service-circuit.py")
+    home = tmp_path / "home/.hermes"
+    first_runtime = home / "state/runtime-candidates/first"
+    second_runtime = home / "state/runtime-candidates/second"
+    definition = tmp_path / "Library/LaunchAgents/ai.hermes.gateway.plist"
+    for runtime in (first_runtime, second_runtime):
+        python = runtime / "venv/bin/python"
+        python.parent.mkdir(parents=True)
+        python.write_bytes(b"python")
+    definition.parent.mkdir(parents=True)
+    definition.write_bytes(b"plist")
+    receipt_path, _ = binder._write_runtime_binding(
+        home,
+        first_runtime,
+        service_kind="launchd-user",
+        service_owner="agent",
+        definition_path=definition,
+        definition_bytes=definition.read_bytes(),
+    )
+    before = receipt_path.read_bytes()
+
+    _, rollback = binder._write_runtime_binding(
+        home,
+        second_runtime,
+        service_kind="launchd-user",
+        service_owner="agent",
+        definition_path=definition,
+        definition_bytes=definition.read_bytes(),
+    )
+    binder._restore_runtime_binding(home, rollback)
+
+    assert receipt_path.read_bytes() == before
+
+
+def test_runtime_coherence_scheduler_rejects_monitored_candidate_python(
+    tmp_path: Path,
+):
+    home = tmp_path / "home/.hermes"
+    runtime = home / "state/runtime-candidates/release"
+    python = runtime / "venv/bin/python"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "maintenance/bin/install-runtime-coherence.py"),
+            "plan",
+            "--agent-id",
+            "test",
+            "--home",
+            str(home),
+            "--runtime-root",
+            str(runtime),
+            "--runtime-python",
+            str(python),
+            "--scheduler-python",
+            str(python),
+            "--runtime-user",
+            "agent",
+            "--user-home",
+            str(tmp_path / "home"),
+            "--platform",
+            "macos",
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 1
+    assert "scheduler Python must be outside the monitored runtime root" in proc.stdout
+
+
+def test_stable_coherence_scheduler_reports_removed_candidate(tmp_path: Path):
+    home = tmp_path / "home/.hermes"
+    runtime = home / "state/runtime-candidates/release"
+    runtime_python = runtime / "venv/bin/python"
+    definition = tmp_path / "Library/LaunchAgents/ai.hermes.gateway.plist"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_bytes(b"python")
+    definition.parent.mkdir(parents=True)
+    definition.write_bytes(b"plist")
+    binder = load_script("removed_candidate_binding", "bind-service-circuit.py")
+    binder._write_runtime_binding(
+        home,
+        runtime,
+        service_kind="launchd-user",
+        service_owner="agent",
+        definition_path=definition,
+        definition_bytes=definition.read_bytes(),
+    )
+    receipt = home / "state/health/runtime-coherence.json"
+    shutil.rmtree(runtime)
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "checks/agent-runtime-coherence.py"),
+            "--home",
+            str(home),
+            "--runtime-root",
+            str(runtime),
+            "--runtime-python",
+            str(runtime_python),
+            "--agent-id",
+            "test",
+            "--receipt",
+            str(receipt),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert proc.returncode == 1
+    assert json.loads(proc.stdout)["kind"] == "binding_missing"
+    assert json.loads(receipt.read_text(encoding="utf-8"))["kind"] == "binding_missing"
+
+
+def test_runtime_coherence_fails_closed_on_service_definition_drift(tmp_path: Path):
+    check = load_path(
+        "public_runtime_coherence",
+        ROOT / "checks/agent-runtime-coherence.py",
+    )
+    home = tmp_path / "home/.hermes"
+    runtime = home / "state/runtime-candidates/release"
+    python = runtime / "venv/bin/python"
+    definition = tmp_path / "Library/LaunchAgents/ai.hermes.gateway.plist"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"python")
+    definition.parent.mkdir(parents=True)
+    definition.write_bytes(b"expected")
+    binding = home / "state/runtime-binding.json"
+    binding.parent.mkdir(parents=True, exist_ok=True)
+    binding.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "kind": "botdoctor_runtime_binding",
+                "status": "active",
+                "hermes_home": str(home.resolve()),
+                "runtime_root": str(runtime.resolve()),
+                "runtime_python": str(python.absolute()),
+                "service": {
+                    "kind": "launchd-user",
+                    "owner": "agent",
+                    "definition_path": str(definition),
+                    "definition_sha256": hashlib.sha256(b"expected").hexdigest(),
+                    "launchers": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    valid = check.validate_runtime_binding(
+        binding_path=binding,
+        runtime_root=runtime,
+        runtime_python=python,
+        hermes_home=home,
+    )
+    definition.write_bytes(b"overwritten")
+    drift = check.validate_runtime_binding(
+        binding_path=binding,
+        runtime_root=runtime,
+        runtime_python=python,
+        hermes_home=home,
+    )
+
+    assert valid["ok"] is True
+    assert drift == {
+        "path": str(binding),
+        "ok": False,
+        "reason": "binding_definition_drift",
+    }
 
 
 def test_release_payload_keeps_critical_blobs():

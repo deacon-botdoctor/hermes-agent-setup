@@ -35,6 +35,7 @@ except ImportError:
 
 KEY = "HERMES_CODEX_401_CIRCUIT_STATE"
 RELEVANT_SERVICE_ENV = ("HERMES_HOME", "VIRTUAL_ENV", "PYTHONPATH")
+RUNTIME_BINDING_KIND = "botdoctor_runtime_binding"
 
 
 def _sha256(data: bytes) -> str:
@@ -110,6 +111,164 @@ def _atomic_bytes(
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _write_runtime_binding(
+    home: Path,
+    runtime: Path,
+    *,
+    service_kind: str,
+    service_owner: str,
+    definition_path: Path | None = None,
+    definition_bytes: bytes,
+    launcher_paths: tuple[Path, ...] = (),
+) -> tuple[Path, Path]:
+    """Persist the exact service/runtime tuple after live proof succeeds."""
+    runtime_python = _runtime_python(runtime).absolute()
+    launchers = []
+    for launcher in launcher_paths:
+        _validate_path(launcher)
+        if not launcher.is_file() or launcher.is_symlink() or _is_reparse_point(launcher):
+            raise RuntimeError(f"runtime launcher is missing or unsafe: {launcher}")
+        launchers.append(
+            {
+                "path": str(launcher),
+                "sha256": _sha256(launcher.read_bytes()),
+            }
+        )
+    payload = {
+        "schema_version": 1,
+        "kind": RUNTIME_BINDING_KIND,
+        "status": "active",
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "hermes_home": str(home),
+        "runtime_root": str(runtime),
+        "runtime_python": str(runtime_python),
+        "service": {
+            "kind": service_kind,
+            "owner": service_owner,
+            "definition_path": str(definition_path) if definition_path else None,
+            "definition_sha256": _sha256(definition_bytes),
+            "launchers": launchers,
+        },
+    }
+    path = home / "state/runtime-binding.json"
+    after = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+    backup = _snapshot_runtime_binding(home, path, after)
+    try:
+        _atomic_bytes(path, after, 0o600, _path_owner(home))
+    except BaseException:
+        _restore_runtime_binding(home, backup, allow_pending=True)
+        raise
+    _complete_runtime_binding_backup(home, backup)
+    return path, backup
+
+
+def _runtime_binding_backup_receipt(home: Path, backup: Path) -> dict:
+    root = home / "state/runtime-binding-backups"
+    if not backup.is_relative_to(root):
+        raise ValueError("runtime binding backup is outside HERMES_HOME")
+    _validate_path(backup)
+    receipt_path = backup / "receipt.json"
+    _validate_path(receipt_path)
+    if (
+        not receipt_path.is_file()
+        or receipt_path.is_symlink()
+        or _is_reparse_point(receipt_path)
+    ):
+        raise ValueError("runtime binding backup receipt is missing or unsafe")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("schema_version") != 1
+        or receipt.get("kind") != "botdoctor_runtime_binding_backup"
+        or receipt.get("status") not in {"pending", "completed"}
+        or receipt.get("hermes_home") != str(home)
+        or receipt.get("rollback") != str(backup)
+        or not isinstance(receipt.get("existed"), bool)
+    ):
+        raise ValueError("runtime binding backup receipt is invalid")
+    return receipt
+
+
+def _snapshot_runtime_binding(home: Path, path: Path, after: bytes) -> Path:
+    _validate_path(path)
+    if path.exists() and (
+        not path.is_file() or path.is_symlink() or _is_reparse_point(path)
+    ):
+        raise RuntimeError("active runtime binding is unsafe")
+    before = path.read_bytes() if path.is_file() else None
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+    backup = home / "state/runtime-binding-backups" / stamp
+    _validate_path(backup)
+    if backup.exists():
+        raise RuntimeError("runtime binding backup path collision")
+    backup.mkdir(parents=True, mode=0o700)
+    if before is not None:
+        _atomic_bytes(backup / "runtime-binding.before", before, 0o600)
+    receipt = {
+        "schema_version": 1,
+        "kind": "botdoctor_runtime_binding_backup",
+        "status": "pending",
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "hermes_home": str(home),
+        "existed": before is not None,
+        "before_sha256": _sha256(before) if before is not None else None,
+        "after_sha256": _sha256(after),
+        "rollback": str(backup),
+    }
+    _atomic_bytes(
+        backup / "receipt.json",
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+        0o600,
+    )
+    return backup
+
+
+def _complete_runtime_binding_backup(home: Path, backup: Path) -> None:
+    receipt = _runtime_binding_backup_receipt(home, backup)
+    receipt["status"] = "completed"
+    _atomic_bytes(
+        backup / "receipt.json",
+        (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+        0o600,
+    )
+
+
+def _restore_runtime_binding(
+    home: Path, backup: Path, *, allow_pending: bool = False
+) -> None:
+    receipt = _runtime_binding_backup_receipt(home, backup)
+    if receipt["status"] == "pending" and not allow_pending:
+        raise ValueError("runtime binding backup is incomplete")
+    path = home / "state/runtime-binding.json"
+    _validate_path(path)
+    current = path.read_bytes() if path.is_file() else None
+    before_path = backup / "runtime-binding.before"
+    existed = receipt["existed"]
+    before = before_path.read_bytes() if existed and before_path.is_file() else None
+    if existed and (
+        before is None
+        or before_path.is_symlink()
+        or _is_reparse_point(before_path)
+        or _sha256(before) != receipt.get("before_sha256")
+    ):
+        raise RuntimeError("runtime binding rollback payload is missing or invalid")
+    if not existed and (before_path.exists() or receipt.get("before_sha256") is not None):
+        raise ValueError("runtime binding backup has unexpected prior data")
+    expected_current = receipt.get("after_sha256")
+    current_matches_after = current is not None and _sha256(current) == expected_current
+    current_matches_before = (before is None and current is None) or (
+        before is not None and current is not None and _sha256(current) == _sha256(before)
+    )
+    if not current_matches_after and not (
+        allow_pending and receipt["status"] == "pending" and current_matches_before
+    ):
+        raise RuntimeError("active runtime binding changed after activation")
+    if before is None:
+        path.unlink(missing_ok=True)
+    else:
+        _atomic_bytes(path, before, 0o600, _path_owner(home))
 
 
 def _parse_assignment_value(raw: bytes) -> str:
@@ -1474,6 +1633,7 @@ def main() -> int:
     parser.add_argument("--hermes-home", type=Path, required=True)
     parser.add_argument("--runtime-dir", type=Path)
     parser.add_argument("--restore-backup", type=Path)
+    parser.add_argument("--restore-runtime-binding", type=Path)
     parser.add_argument(
         "--prove-kind", choices=("systemd", "launchd", "windows")
     )
@@ -1489,9 +1649,15 @@ def main() -> int:
     _validate_path(home)
     if not home.is_dir():
         raise ValueError("HERMES_HOME does not exist")
+    if args.restore_backup and args.restore_runtime_binding:
+        parser.error("choose one rollback operation")
     if args.restore_backup:
         _restore_backup(home, _lexical(args.restore_backup))
         print(json.dumps({"ok": True, "restored": True}, indent=2))
+        return 0
+    if args.restore_runtime_binding:
+        _restore_runtime_binding(home, _lexical(args.restore_runtime_binding))
+        print(json.dumps({"ok": True, "runtime_binding_restored": True}, indent=2))
         return 0
     if args.runtime_dir is None:
         parser.error("--runtime-dir is required")
@@ -1515,6 +1681,8 @@ def main() -> int:
         return 0
     if not args.service_owner:
         parser.error("service proof requires --service-owner")
+    binding_path: Path
+    binding_backup: Path
     if args.prove_kind in {"systemd", "launchd"}:
         if not args.definition:
             parser.error("POSIX service proof requires --definition")
@@ -1572,6 +1740,14 @@ def main() -> int:
                 expected_environment,
                 manager_environment=manager_environment,
             )
+            binding_path, binding_backup = _write_runtime_binding(
+                home,
+                runtime,
+                service_kind=f"systemd-{args.scope}",
+                service_owner=args.service_owner,
+                definition_path=definition,
+                definition_bytes=definition.read_bytes(),
+            )
         else:
             expected = _lexical(
                 Path(
@@ -1612,6 +1788,14 @@ def main() -> int:
                 expected_argv,
                 expected_environment,
                 label,
+            )
+            binding_path, binding_backup = _write_runtime_binding(
+                home,
+                runtime,
+                service_kind="launchd-user",
+                service_owner=args.service_owner,
+                definition_path=definition,
+                definition_bytes=definition.read_bytes(),
             )
     else:
         if not args.cmd_launcher or not args.vbs_launcher or not args.task_name:
@@ -1663,9 +1847,22 @@ def main() -> int:
             inherited_pythonpaths=inherited_pythonpaths,
             service_owner=args.service_owner,
         )
+        binding_path, binding_backup = _write_runtime_binding(
+            home,
+            runtime,
+            service_kind="windows-scheduled-task",
+            service_owner=args.service_owner,
+            definition_bytes=task_xml.encode("utf-8"),
+            launcher_paths=(cmd, vbs),
+        )
     print(
         json.dumps(
-            {"ok": True, "service_proven": args.prove_kind},
+            {
+                "ok": True,
+                "service_proven": args.prove_kind,
+                "runtime_binding": str(binding_path),
+                "runtime_binding_rollback": str(binding_backup),
+            },
             indent=2,
             sort_keys=True,
         )
