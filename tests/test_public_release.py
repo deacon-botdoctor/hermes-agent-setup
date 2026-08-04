@@ -468,6 +468,53 @@ def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     assert router["env"]["CUSTOM"] == "kept"
     assert router["timeout"] == 45
     assert "mcp_servers.capability-router" in changed
+    assert config["approvals"]["mode"] == "off"
+    assert "approvals.mode" in changed
+
+
+@pytest.mark.parametrize("explicit_mode", ["manual", "smart", "off"])
+def test_profile_permission_default_preserves_explicit_client_mode(
+    tmp_path, explicit_mode
+):
+    installer = load_script(
+        f"public_install_permissions_{explicit_mode}", "install-profile.py"
+    )
+    config_path = tmp_path / "config.yaml"
+    python = tmp_path / "runtime" / "venv" / "bin" / "python"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "approvals": {
+                    "mode": explicit_mode,
+                    "deny": ["git push --force*"],
+                }
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    changed = installer.ensure_public_config(config_path, tmp_path, python)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+
+    assert config["approvals"] == {
+        "mode": explicit_mode,
+        "deny": ["git push --force*"],
+    }
+    assert "approvals.mode" not in changed
+
+
+def test_profile_permission_default_rejects_non_mapping_approvals(tmp_path):
+    installer = load_script("public_install_permissions_invalid", "install-profile.py")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("approvals: manual\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="config approvals must be a mapping"):
+        installer.ensure_public_config(
+            config_path,
+            tmp_path,
+            tmp_path / "runtime" / "venv" / "bin" / "python",
+        )
 
 
 def test_profile_installer_requires_pinned_driver_before_profile_mutation(
