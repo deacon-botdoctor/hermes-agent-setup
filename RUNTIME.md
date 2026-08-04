@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.03-golden-6e6be0e1`:
+The current public release is `botdoctor-hermes-2026.08.04-golden-b8f90b14`:
 
 - upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `6e6be0e1b7ba76374090cee2884db4ea6fa4c9ad`;
+- public Golden source: `b8f90b14f9267af63ea067c1fde07786af9b294a`;
 - runtime payload: 103 files;
 - assembled runtime fingerprint:
-  `f338c28d0a5869b1e1d1a60879c74d319b5756ea66e109af76942d82f199a22b`.
+  `1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -20,8 +20,13 @@ installations.
 
 ## What changed in this release
 
-- Native Hermes advances to the immutable `v0.20.0` release while the
-  public overlays retain only the compatibility gaps that are still required.
+- The immutable Hermes `v0.20.0` base remains pinned while the public
+  overlays repair the fleet-discovered compatibility gaps.
+- Native compaction owns summary acceptance again; the retired custom
+  postcondition patch no longer rejects valid Codex summaries.
+- Task completion now falls back to a profile-local append-only record when
+  the optional operator changelog backend is absent.
+- Malformed lifecycle script references fail closed without crashing the turn.
 - Durable task-ledger transitions and the open-loop detector now ship together,
   so accepted work cannot silently disappear between model turns or restarts.
 - Silent drain recovery remains durable without leaking internal lifecycle text

@@ -21,7 +21,11 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path.home() / ".hermes" / "data" / "task-ledger.db"
+HERMES_HOME = Path(
+    os.environ.get("HERMES_HOME") or Path.home() / ".hermes"
+).expanduser()
+DB_PATH = HERMES_HOME / "data" / "task-ledger.db"
+CHANGE_RECORDS_PATH = HERMES_HOME / "state" / "task-ledger-change-records.jsonl"
 AGENT_NAME = os.environ.get("HERMES_AGENT_NAME") or os.environ.get("AGENT_NAME") or "agent"
 CHANGELOG_DIR = Path.home() / ".shared-agent-memory"
 
@@ -445,6 +449,49 @@ def _after_llm_call(*, turn_id: str = "", **_) -> None:
     return None
 
 
+def _fallback_reflection_entry(**kwargs) -> dict:
+    """Build the portable subset of an optional operator reflection."""
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _fallback_record_change(**kwargs) -> dict[str, str]:
+    """Persist a required record without an operator-only Python module.
+
+    The task ledger is fleet-wide; ``~/.shared-agent-memory/changelog.py`` is
+    not. A client runtime must therefore retain its completion evidence in its
+    own Hermes state when that optional richer backend is absent.
+    """
+    record = {
+        "schema_version": 1,
+        "recorded_at": _now_iso(),
+        **{
+            key: value
+            for key, value in kwargs.items()
+            if value not in (None, "", [], {})
+        },
+    }
+    payload = (json.dumps(record, ensure_ascii=False, sort_keys=True, default=str) + "\n").encode(
+        "utf-8"
+    )
+    CHANGE_RECORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _db_lock:
+        descriptor = os.open(
+            CHANGE_RECORDS_PATH,
+            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
+            0o600,
+        )
+        try:
+            os.write(descriptor, payload)
+        finally:
+            os.close(descriptor)
+    key = "client_changelog" if kwargs.get("client_slug") else "stack_changelog"
+    return {key: str(CHANGE_RECORDS_PATH), "local_task_ledger_changelog": str(CHANGE_RECORDS_PATH)}
+
+
 def _load_changelog_backend():
     global _record_change, _new_reflection_entry, _changelog_load_attempted
     if _changelog_load_attempted:
@@ -456,8 +503,17 @@ def _load_changelog_backend():
 
         _record_change = record_change
         _new_reflection_entry = new_reflection_entry
-    except Exception:
-        logger.exception("task-ledger: failed to load changelog backend")
+    except Exception as exc:
+        # The central changelog helper is an optional operator-control
+        # enrichment, not a fleet runtime dependency. Fall back to the
+        # profile-local append-only record so task completion never deadlocks.
+        if not isinstance(exc, ModuleNotFoundError) or exc.name != "changelog":
+            logger.warning(
+                "task-ledger: optional changelog backend unavailable; using local record: %s",
+                type(exc).__name__,
+            )
+        _record_change = _fallback_record_change
+        _new_reflection_entry = _fallback_reflection_entry
     return _record_change, _new_reflection_entry
 
 
