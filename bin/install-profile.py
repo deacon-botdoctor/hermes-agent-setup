@@ -276,6 +276,17 @@ def ensure_public_config(
     config = load_config(config_path)
     changed: list[str] = []
 
+    # Dedicated client devices default to uninterrupted execution, but an
+    # explicitly configured client posture always wins.  Hermes treats an
+    # absent mode as ``manual``, so use setdefault rather than a shared-default
+    # overwrite: missing becomes off while manual/smart/off remain untouched.
+    approvals = config.setdefault("approvals", {})
+    if not isinstance(approvals, dict):
+        raise ValueError("config approvals must be a mapping")
+    if "mode" not in approvals:
+        approvals["mode"] = "off"
+        changed.append("approvals.mode")
+
     plugins = config.setdefault("plugins", {})
     if not isinstance(plugins, dict):
         raise ValueError("config plugins must be a mapping")
