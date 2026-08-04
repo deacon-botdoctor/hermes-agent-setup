@@ -61,18 +61,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 101
+    assert manifest["components"]["runtime_payload"]["file_count"] == 103
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "68ae2c6e18b47ce4a8bed2d8a4a4e02c41ea6cdde7d635a14f4e16e93df00f2a",
-        "file_count": 61,
+        "digest": "f338c28d0a5869b1e1d1a60879c74d319b5756ea66e109af76942d82f199a22b",
+        "file_count": 77,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 61
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 61
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 77
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 77
     assert set(release) == {
         "schema_version",
         "release",
@@ -378,7 +378,7 @@ def test_release_payload_keeps_critical_blobs():
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "21ed4f1f7fb3e70897edeca36b700b8fe45fd9e2"
+        == "ba7fde1f94ae40f3ed3eb219826f369b5c646279"
     )
 
 
@@ -1611,7 +1611,7 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert (
         "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "a6defd4f1549da3fe1d08d6f746fc645c64543f0/scripts/install.ps1"
+        "3c27eb6234bf91b8ceee9e9071591b31e9b148cb/scripts/install.ps1"
         in instructions
     )
     assert (

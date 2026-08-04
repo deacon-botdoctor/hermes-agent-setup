@@ -61,6 +61,41 @@ API_IMPORT_BLOCK_REPLACEMENT = '''        from gateway.run import (
         )
         AIAgent = _load_runtime_ai_agent_class()
 '''
+FAKE_RUNTIME_TEST_MARKER = "HERMES_TEST_FAKE_RUNTIME_ORIGIN_v1"
+FAKE_RUNTIME_TEST_RE = re.compile(
+    r'^(?P<indent>[ \t]*)fake_run_agent = types\.ModuleType\("run_agent"\)[ \t]*$',
+    re.MULTILINE,
+)
+SIMPLE_RUNTIME_TEST_ANCHOR = (
+    '    monkeypatch.setitem(sys.modules, "run_agent", '
+    "types.SimpleNamespace(AIAgent=_PendingVoiceAgent))\n"
+)
+SIMPLE_RUNTIME_TEST_REPLACEMENT = '''    # HERMES_TEST_FAKE_RUNTIME_ORIGIN_v1 — keep the synthetic module
+    # inside the assembled candidate root while the production guard stays strict.
+    monkeypatch.setitem(
+        sys.modules,
+        "run_agent",
+        types.SimpleNamespace(
+            AIAgent=_PendingVoiceAgent,
+            __file__=str(ROOT / "run_agent.py"),
+        ),
+    )
+'''
+FAKE_RUNTIME_TEST_FILES = (
+    "test_clarify_progress_leak.py",
+    "test_compression_failure_session_sync.py",
+    "test_discord_channel_prompts.py",
+    "test_fast_command.py",
+    "test_queued_native_image_session_key.py",
+    "test_reasoning_command.py",
+    "test_run_cleanup_progress.py",
+    "test_run_progress_interrupt.py",
+    "test_run_progress_topics.py",
+    "test_session_hygiene.py",
+    "test_stale_finalize_suppression.py",
+    "test_streaming_tts_gateway_regression.py",
+    "test_telegram_voice_v0_regressions.py",
+)
 HELPER = f'''
 
 def _load_runtime_ai_agent_class():
@@ -179,6 +214,39 @@ def patch_api_server_text(source: str) -> str:
     )
 
 
+def patch_fake_runtime_test_text(source: str) -> str:
+    """Give deliberate test doubles the exact candidate runtime origin."""
+    if FAKE_RUNTIME_TEST_MARKER in source:
+        return source
+    if SIMPLE_RUNTIME_TEST_ANCHOR in source:
+        return source.replace(
+            SIMPLE_RUNTIME_TEST_ANCHOR,
+            SIMPLE_RUNTIME_TEST_REPLACEMENT,
+            1,
+        )
+    if not FAKE_RUNTIME_TEST_RE.search(source):
+        return source
+
+    def replacement(match: re.Match[str]) -> str:
+        indent = match.group("indent")
+        return (
+            f'{indent}fake_run_agent = types.ModuleType("run_agent")\n'
+            f"{indent}# HERMES_TEST_FAKE_RUNTIME_ORIGIN_v1 — the coherence "
+            "guard still runs\n"
+            f"{indent}# in focused tests, so bind the synthetic module to this "
+            "candidate root.\n"
+            f"{indent}fake_run_agent.__file__ = str(\n"
+            f'{indent}    __import__("pathlib").Path(__file__).resolve().parents[2] '
+            '/ "run_agent.py"\n'
+            f"{indent})"
+        )
+
+    return FAKE_RUNTIME_TEST_RE.sub(
+        replacement,
+        source,
+    )
+
+
 def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
     root = Path(hermes_dir)
     gateway_path = root / "gateway" / "run.py"
@@ -186,6 +254,11 @@ def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
         gateway_path: patch_gateway_runtime_root_guard_text,
         root / "gateway" / "platforms" / "api_server.py": patch_api_server_text,
     }
+    gateway_tests = root / "tests" / "gateway"
+    for name in FAKE_RUNTIME_TEST_FILES:
+        path = gateway_tests / name
+        if path.is_file():
+            targets[path] = patch_fake_runtime_test_text
     clarify_targets = {
         root / "tools" / "clarify_gateway.py": patch_clarify_tools_source,
         root / "tests" / "tools" / "test_clarify_gateway.py": (patch_clarify_tools_test_source),

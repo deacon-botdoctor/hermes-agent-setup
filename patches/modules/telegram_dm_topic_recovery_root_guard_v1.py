@@ -9,7 +9,8 @@ only run for stripped replies with reply_to_message_id.
 
 Idempotent via marker: HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1
 Target: gateway/platforms/base.py, tests/gateway/test_base_topic_sessions.py,
-        tests/gateway/test_telegram_text_batching.py
+        tests/gateway/test_telegram_text_batching.py,
+        tests/gateway/test_active_session_text_merge.py
 
 Usage:
   python3 -m patches.modules.telegram_dm_topic_recovery_root_guard_v1 --hermes-dir /path/to/hermes-agent
@@ -23,6 +24,20 @@ import sys
 from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_DM_TOPIC_RECOVERY_ROOT_GUARD_v1"
+EXECUTOR_MARKER = "HERMES_TELEGRAM_TOPIC_RECOVERY_EXECUTOR_SCOPE_v1"
+
+PREFLIGHT_RECOVERY_OLD = '''    async def _preflight_startup_gate(self, event: MessageEvent) -> bool:
+        coerce_plaintext_gateway_command(event)
+        await asyncio.to_thread(self._apply_topic_recovery, event)
+        session_key = build_session_key(
+'''
+PREFLIGHT_RECOVERY_NEW = '''    async def _preflight_startup_gate(self, event: MessageEvent) -> bool:
+        coerce_plaintext_gateway_command(event)
+        # HERMES_TELEGRAM_TOPIC_RECOVERY_EXECUTOR_SCOPE_v1 — handle_message
+        # already performs the DM-only recovery before this preflight. Do not
+        # duplicate it here or enqueue group traffic on the shared executor.
+        session_key = build_session_key(
+'''
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
@@ -63,6 +78,26 @@ def patch_base_source(content: str) -> str | None:
     return patched
 
 
+def patch_executor_scope_source(content: str) -> str | None:
+    """Remove the durable-gate duplicate of native DM-only recovery."""
+    if EXECUTOR_MARKER in content:
+        return content
+    if "    async def _preflight_startup_gate(" not in content:
+        return content
+    if content.count(PREFLIGHT_RECOVERY_OLD) != 1:
+        return None
+    patched = content.replace(
+        PREFLIGHT_RECOVERY_OLD,
+        PREFLIGHT_RECOVERY_NEW,
+        1,
+    )
+    try:
+        ast.parse(patched)
+    except SyntaxError:
+        return None
+    return patched
+
+
 def _patch_base_adapter(hermes_dir: Path) -> bool:
     path = hermes_dir / "gateway" / "platforms" / "base.py"
     if not path.exists():
@@ -73,6 +108,10 @@ def _patch_base_adapter(hermes_dir: Path) -> bool:
     patched = patch_base_source(content)
     if patched is None:
         print("[telegram_dm_topic_recovery_root_guard_v1] _apply_topic_recovery anchor missing")
+        return False
+    patched = patch_executor_scope_source(patched)
+    if patched is None:
+        print("[telegram_dm_topic_recovery_root_guard_v1] startup preflight anchor missing")
         return False
     if patched == content:
         print("[telegram_dm_topic_recovery_root_guard_v1] base adapter already patched")
@@ -148,11 +187,55 @@ def _patch_text_batching_test(hermes_dir: Path) -> bool:
     return changed
 
 
+def _patch_active_session_test(hermes_dir: Path) -> bool:
+    path = hermes_dir / "tests" / "gateway" / "test_active_session_text_merge.py"
+    if not path.exists():
+        print(
+            "[telegram_dm_topic_recovery_root_guard_v1] "
+            "test_active_session_text_merge.py not found, skip"
+        )
+        return False
+    content = path.read_text(encoding="utf-8")
+    old = '''    event = _make_event("hello", chat_type="dm", thread_id="1")
+    original_source = event.source
+'''
+    new = '''    event = _make_event("hello", chat_type="dm", thread_id="1")
+    event.reply_to_message_id = "prior-message"
+    original_source = event.source
+'''
+    if new in content:
+        print(
+            "[telegram_dm_topic_recovery_root_guard_v1] "
+            "active-session recovery test already patched"
+        )
+        return False
+    if content.count(old) != 1:
+        print(
+            "[telegram_dm_topic_recovery_root_guard_v1] "
+            "active-session recovery test anchor missing"
+        )
+        return False
+    patched = content.replace(old, new, 1)
+    try:
+        ast.parse(patched)
+    except SyntaxError as exc:
+        print(
+            "[telegram_dm_topic_recovery_root_guard_v1] ABORT: "
+            f"test_active_session_text_merge.py parse failed: {exc}"
+        )
+        return False
+    changed = _write_if_changed(path, patched)
+    if changed:
+        print(f"[telegram_dm_topic_recovery_root_guard_v1] PATCHED {path}")
+    return changed
+
+
 def patch_telegram_dm_topic_recovery_root_guard_v1(hermes_dir: Path) -> bool:
     changed = False
     changed |= _patch_base_adapter(hermes_dir)
     changed |= _patch_base_topic_tests(hermes_dir)
     changed |= _patch_text_batching_test(hermes_dir)
+    changed |= _patch_active_session_test(hermes_dir)
     return changed
 
 

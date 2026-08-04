@@ -15,6 +15,35 @@ PAYLOAD_DIR = Path(__file__).resolve().parents[1] / "payloads" / "durable-drain-
 MANIFEST_PATH = PAYLOAD_DIR / "manifest.json"
 MARKER_RELATIVE = Path(".golden-runtime-carriers/durable-drain-inbox-v1.json")
 IDEMPOTENCY = "HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1"
+MULTIPLEX_TEST_MARKER = "HERMES_DURABLE_DRAIN_MULTIPLEX_TEST_COMPAT_v1"
+MULTIPLEX_TEST_ANCHOR = '''    def set_topic_recovery_fn(self, handler):
+        self.topic_recovery_fn = handler
+
+    def set_authorization_check(self, handler):
+'''
+MULTIPLEX_TEST_REPLACEMENT = f'''    def set_topic_recovery_fn(self, handler):
+        self.topic_recovery_fn = handler
+
+    def set_startup_gate_handler(self, handler):
+        # {MULTIPLEX_TEST_MARKER}
+        self.startup_gate_handler = handler
+
+    def set_authorization_check(self, handler):
+'''
+PLATFORM_RECONNECT_TEST_MARKER = "HERMES_DURABLE_DRAIN_CREATE_TASK_TEST_COMPAT_v1"
+PLATFORM_RECONNECT_TEST_ANCHOR = '''        def fake_create_task(coro):
+            coro.close()
+            return MagicMock()
+'''
+PLATFORM_RECONNECT_TEST_REPLACEMENT = f'''        real_create_task = asyncio.create_task
+
+        def fake_create_task(coro):
+            # {PLATFORM_RECONNECT_TEST_MARKER}
+            if getattr(getattr(coro, "cr_code", None), "co_name", None) == "to_thread":
+                return real_create_task(coro)
+            coro.close()
+            return MagicMock()
+'''
 
 
 def _sha256(path: Path) -> str:
@@ -170,6 +199,46 @@ def patch_durable_drain_inbox_carrier_v1(root: Path) -> bool:
     return True
 
 
+def _patch_multiplex_test_fixture(root: Path) -> bool:
+    """Keep the upstream fake adapter aligned with the assembled base contract."""
+    path = root / "tests/gateway/test_multiplex_adapter_registry.py"
+    if not path.is_file():
+        return False
+    source = path.read_text(encoding="utf-8")
+    if MULTIPLEX_TEST_MARKER in source:
+        return False
+    if MULTIPLEX_TEST_ANCHOR not in source:
+        raise RuntimeError("durable-drain multiplex test fixture anchor missing")
+    path.write_text(
+        source.replace(MULTIPLEX_TEST_ANCHOR, MULTIPLEX_TEST_REPLACEMENT, 1),
+        encoding="utf-8",
+    )
+    return True
+
+
+def _patch_platform_reconnect_test_fixture(root: Path) -> bool:
+    """Let durable lease acquisition run through broad create-task test mocks."""
+    path = root / "tests/gateway/test_platform_reconnect.py"
+    if not path.is_file():
+        return False
+    source = path.read_text(encoding="utf-8")
+    if PLATFORM_RECONNECT_TEST_MARKER in source:
+        return False
+    count = source.count(PLATFORM_RECONNECT_TEST_ANCHOR)
+    if count != 2:
+        raise RuntimeError(
+            f"durable-drain platform reconnect test anchor count is {count}, expected 2"
+        )
+    path.write_text(
+        source.replace(
+            PLATFORM_RECONNECT_TEST_ANCHOR,
+            PLATFORM_RECONNECT_TEST_REPLACEMENT,
+        ),
+        encoding="utf-8",
+    )
+    return True
+
+
 def _load_sibling(name: str):
     path = Path(__file__).with_name(f"{name}.py")
     spec = importlib.util.spec_from_file_location(name, path)
@@ -185,4 +254,6 @@ def patch_durable_drain_runtime_v1(root: Path) -> bool:
     changed = patch_durable_drain_inbox_carrier_v1(root)
     cron = _load_sibling("cron_scheduler_can_dispatch_compat_v1")
     changed = cron.patch_cron_scheduler_can_dispatch_compat_v1(root) or changed
+    changed = _patch_multiplex_test_fixture(root) or changed
+    changed = _patch_platform_reconnect_test_fixture(root) or changed
     return changed

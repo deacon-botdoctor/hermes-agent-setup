@@ -1,6 +1,6 @@
 diff --git a/gateway/drain_inbox.py b/gateway/drain_inbox.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..301ed6669497df05ac0225801b1fe9487fea040c
+index 000000000..301ed6669
 --- /dev/null
 +++ b/gateway/drain_inbox.py
 @@ -0,0 +1,1234 @@
@@ -1239,10 +1239,10 @@ index 0000000000000000000000000000000000000000..301ed6669497df05ac0225801b1fe948
 +        return False
 +    return True
 diff --git a/gateway/platforms/base.py b/gateway/platforms/base.py
-index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11ce6d2b170 100644
+index c42b91607..238314cf8 100644
 --- a/gateway/platforms/base.py
 +++ b/gateway/platforms/base.py
-@@ -2113,6 +2113,7 @@ class MessageEvent:
+@@ -2116,6 +2116,7 @@ class MessageEvent:
      # Internal flag — set for synthetic events (e.g. background process
      # completion notifications) that must bypass user authorization checks.
      internal: bool = False
@@ -1250,7 +1250,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
  
      # Free-form per-event metadata.  Adapters may set platform-specific
      # signals here (e.g. WhatsApp sets ``whatsapp_from_owner=True`` when
-@@ -2123,6 +2124,14 @@ class MessageEvent:
+@@ -2126,6 +2127,14 @@ class MessageEvent:
  
      # Timestamps
      timestamp: datetime = field(default_factory=datetime.now)
@@ -1265,7 +1265,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
      
      def is_command(self) -> bool:
          """Check if this is a command message (e.g., /new, /reset)."""
-@@ -2721,17 +2730,8 @@ class BasePlatformAdapter(ABC):
+@@ -2724,17 +2733,8 @@ class BasePlatformAdapter(ABC):
      # generic seam; Slack is merely the first consumer).
      supports_inchannel_continuable: bool = False
  
@@ -1285,7 +1285,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
      interactive_resume: bool = True
  
      # Back-reference to the running ``GatewayRunner``, injected by
-@@ -2807,6 +2807,9 @@ class BasePlatformAdapter(ABC):
+@@ -2810,6 +2810,9 @@ class BasePlatformAdapter(ABC):
          self._post_delivery_callbacks: Dict[str, Any] = {}
          self._expected_cancelled_tasks: set[asyncio.Task] = set()
          self._busy_session_handler: Optional[Callable[[MessageEvent, str], Awaitable[bool]]] = None
@@ -1295,7 +1295,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
          # Optional authorization check, registered by GatewayRunner. Used by
          # adapters that fetch external context (e.g. Slack thread history) to
          # mark senders not on the allowlist as unverified in LLM context,
-@@ -3346,6 +3349,12 @@ class BasePlatformAdapter(ABC):
+@@ -3365,6 +3368,12 @@ class BasePlatformAdapter(ABC):
          # in tests never run ``BasePlatformAdapter.__init__``.
          self._reaction_handler = handler  # type: ignore[attr-defined]
  
@@ -1308,7 +1308,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
      def set_authorization_check(
          self,
          callback: Optional[Callable[[str, Optional[str], Optional[str]], bool]],
-@@ -5360,12 +5369,12 @@ class BasePlatformAdapter(ABC):
+@@ -5379,12 +5388,12 @@ class BasePlatformAdapter(ABC):
          session_key: str,
          *,
          interrupt_event: Optional[asyncio.Event] = None,
@@ -1324,7 +1324,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
          session lock.
          """
          guard = interrupt_event or asyncio.Event()
-@@ -5380,11 +5389,11 @@ class BasePlatformAdapter(ABC):
+@@ -5399,11 +5408,11 @@ class BasePlatformAdapter(ABC):
              # hashable and do not support lifecycle callbacks.
              self._session_tasks.pop(session_key, None)
              self._release_session_guard(session_key, guard=guard)
@@ -1338,7 +1338,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
  
      async def cancel_session_processing(
          self,
-@@ -5532,7 +5541,31 @@ class BasePlatformAdapter(ABC):
+@@ -5551,7 +5560,31 @@ class BasePlatformAdapter(ABC):
  
          await self._drain_pending_after_session_command(session_key, command_guard)
  
@@ -1371,7 +1371,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
          """
          Process an incoming message.
          
-@@ -5556,6 +5589,10 @@ class BasePlatformAdapter(ABC):
+@@ -5575,6 +5608,10 @@ class BasePlatformAdapter(ABC):
          if needs_topic_recovery:
              await asyncio.to_thread(self._apply_topic_recovery, event)
  
@@ -1382,7 +1382,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
          session_key = build_session_key(
              event.source,
              group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
-@@ -5735,7 +5772,7 @@ class BasePlatformAdapter(ABC):
+@@ -5754,7 +5791,7 @@ class BasePlatformAdapter(ABC):
          # pattern — set the guard synchronously, not inside the task.)
          # _start_session_processing installs the guard AND the owner-task
          # mapping atomically so stale-lock detection works.
@@ -1391,7 +1391,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
      
      @staticmethod
      def _get_human_delay() -> float:
-@@ -5811,12 +5848,17 @@ class BasePlatformAdapter(ABC):
+@@ -5830,12 +5867,17 @@ class BasePlatformAdapter(ABC):
                  typing_task,
                  metadata=_thread_metadata,
              )
@@ -1411,7 +1411,7 @@ index de60322718bb4f8f5d3e2106000967be1699f6b9..604de05118bdc535251a6162db77d11c
  
              # Slash-command handlers may return an EphemeralReply sentinel to
 diff --git a/gateway/platforms/bluebubbles.py b/gateway/platforms/bluebubbles.py
-index ecc6baf45e01ea6b58f015b87dea3dec54206ed1..7ae4fe2f7be331cebbbe25b846803bd432710b5e 100644
+index ecc6baf45..7ae4fe2f7 100644
 --- a/gateway/platforms/bluebubbles.py
 +++ b/gateway/platforms/bluebubbles.py
 @@ -1060,12 +1060,20 @@ class BlueBubblesAdapter(BasePlatformAdapter):
@@ -1440,7 +1440,7 @@ index ecc6baf45e01ea6b58f015b87dea3dec54206ed1..7ae4fe2f7be331cebbbe25b846803bd4
 +
          return web.Response(text="ok")
 diff --git a/gateway/platforms/msgraph_webhook.py b/gateway/platforms/msgraph_webhook.py
-index 3fea2ca13a8cfba29cbd5c44991c1e947299d89e..0b7fbe17ff37a5369933ae5f626b449e82a0416b 100644
+index 3fea2ca13..0b7fbe17f 100644
 --- a/gateway/platforms/msgraph_webhook.py
 +++ b/gateway/platforms/msgraph_webhook.py
 @@ -293,12 +293,23 @@ class MSGraphWebhookAdapter(BasePlatformAdapter):
@@ -1480,7 +1480,7 @@ index 3fea2ca13a8cfba29cbd5c44991c1e947299d89e..0b7fbe17ff37a5369933ae5f626b449e
  
      def _render_prompt(self, notification: Dict[str, Any]) -> str:
 diff --git a/gateway/platforms/qqbot/adapter.py b/gateway/platforms/qqbot/adapter.py
-index d540692c095f7537283692a96b63698d4deb0eb6..c9aa3b100c574e4237e818da20cf91e990794b61 100644
+index d540692c0..c9aa3b100 100644
 --- a/gateway/platforms/qqbot/adapter.py
 +++ b/gateway/platforms/qqbot/adapter.py
 @@ -952,11 +952,11 @@ class QQAdapter(BasePlatformAdapter):
@@ -1498,7 +1498,7 @@ index d540692c095f7537283692a96b63698d4deb0eb6..c9aa3b100c574e4237e818da20cf91e9
      async def _on_message(self, event_type: str, d: Any) -> None:
          """Process an inbound QQ Bot message event."""
 diff --git a/gateway/platforms/webhook.py b/gateway/platforms/webhook.py
-index da5eddbe94b7965999f7f7f39bc9517ea1b65b59..0b398e8522331e499930ac7826bd2e819e5fe395 100644
+index da5eddbe9..0b398e852 100644
 --- a/gateway/platforms/webhook.py
 +++ b/gateway/platforms/webhook.py
 @@ -100,6 +100,7 @@ def _is_webhook_silence_response(content: Any) -> bool:
@@ -1648,7 +1648,7 @@ index da5eddbe94b7965999f7f7f39bc9517ea1b65b59..0b398e8522331e499930ac7826bd2e81
          self._background_tasks.add(task)
          task.add_done_callback(self._background_tasks.discard)
 diff --git a/gateway/platforms/whatsapp_cloud.py b/gateway/platforms/whatsapp_cloud.py
-index baec4a5b69c34ba4fd867a216bd0470579c247c4..655cf4a6fa99898fa95ef832d79b374fbdb1ed0d 100644
+index baec4a5b6..655cf4a6f 100644
 --- a/gateway/platforms/whatsapp_cloud.py
 +++ b/gateway/platforms/whatsapp_cloud.py
 @@ -1518,7 +1518,8 @@ class WhatsAppCloudAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
@@ -1754,7 +1754,7 @@ index baec4a5b69c34ba4fd867a216bd0470579c247c4..655cf4a6fa99898fa95ef832d79b374f
      async def _dispatch_interactive_reply(
          self,
 diff --git a/gateway/run.py b/gateway/run.py
-index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd57d134e1f 100644
+index 24d501b5b..3a5b21153 100644
 --- a/gateway/run.py
 +++ b/gateway/run.py
 @@ -40,7 +40,10 @@ import sys
@@ -1868,7 +1868,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
      MessageEvent,
      MessageType,
      _prefix_within_utf16_limit,
-@@ -5784,6 +5815,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -5813,6 +5844,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          # Sync helpers keep using ``session_store`` directly; async gateway
          # handlers call this facade and await every operation.
          self._async_session_store = AsyncSessionStore(self.session_store)
@@ -1880,7 +1880,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          self.delivery_router = DeliveryRouter(self.config)
          self._running = False
          self._gateway_loop: Optional[asyncio.AbstractEventLoop] = None
-@@ -5886,16 +5922,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -5915,16 +5951,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          # / conversation boundary). See gateway.session_stall.
          self._session_stall_notified: Dict[str, bool] = {}
          # Startup restore gate: while restart-interrupted sessions are being
@@ -1902,7 +1902,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          # LRU cache of live SessionSources keyed by session_key. Used by
          # fallback routing paths (shutdown notifications, synthetic
          # background-process events) when the persisted origin is missing
-@@ -7523,11 +7560,141 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -7552,11 +7589,141 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
      def _status_action_gerund(self) -> str:
          return "restarting" if self._restart_requested else "shutting down"
  
@@ -2049,7 +2049,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
      # -------- /queue FIFO helpers --------------------------------------
      # /queue must produce one full agent turn per invocation, in FIFO
-@@ -7687,20 +7854,40 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -7716,20 +7883,40 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
      # and the gateway re-accepts turns.
      # ------------------------------------------------------------------
      def _enter_external_drain(self) -> None:
@@ -2094,7 +2094,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          # Flip the persisted lifecycle state so /api/status.gateway_busy /
          # gateway_drainable track the drain. Preserve active_agents (the
          # read-merge keeps the live count); only the state changes.
-@@ -8492,6 +8679,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -8544,6 +8731,13 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
      # still small enough to never threaten memory.
      _BUSY_QUEUE_MAX_PENDING = 32
  
@@ -2108,7 +2108,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
      def _queue_or_replace_pending_event(self, session_key: str, event: MessageEvent) -> None:
          adapter = self._adapter_for_source(event.source)
          if not adapter:
-@@ -8531,6 +8725,517 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -8583,6 +8777,517 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
  
          self._enqueue_fifo(session_key, event, adapter)
  
@@ -2626,7 +2626,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
      async def _prepare_busy_steer_text(self, event: MessageEvent) -> str:
          """Return steerable text for a busy follow-up, transcribing voice first.
  
-@@ -8585,17 +9290,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -8637,17 +9342,27 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              )
              return True  # handled (silently dropped); do not fall through
  
@@ -2657,7 +2657,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              else:
                  message = f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
  
-@@ -9092,9 +9807,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -9144,9 +9859,12 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          action = "restarting" if self._restart_requested else "shutting down"
          hint = (
              "Your current task will be interrupted. "
@@ -2672,7 +2672,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          )
          msg = f"⚠️ Gateway {action} — {hint}"
  
-@@ -9943,6 +10661,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10076,6 +10794,14 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
      _AUTO_RESUME_REASONS = frozenset(
          {"restart_timeout", "shutdown_timeout", "restart_interrupted"}
      )
@@ -2687,7 +2687,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
      async def _run_startup_resume_event(
          self,
-@@ -9960,11 +10686,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10093,11 +10819,15 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          returns.
          """
          try:
@@ -2708,7 +2708,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          finally:
              # _schedule_resume_pending_sessions pre-claims the runner slot
              # before spawning this task.  If adapter.handle_message raises
-@@ -9974,61 +10704,442 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10107,61 +10837,442 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              if (_pre_state.turn.agent if _pre_state else None) is _AGENT_PENDING_SENTINEL:
                  self._release_running_agent_state(session_key)
  
@@ -3192,7 +3192,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          tasks = list(getattr(self, "_startup_restore_tasks", []) or [])
          if tasks:
              timeout = _startup_restore_drain_timeout_secs()
-@@ -10069,10 +11180,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10202,10 +11313,17 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          exc_info=(type(exc), exc, exc.__traceback__),
                      )
          self._startup_restore_tasks = []
@@ -3214,7 +3214,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
      @staticmethod
      def _log_background_resume_result(task: "asyncio.Task") -> None:
-@@ -10781,10 +11899,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10915,10 +12033,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          # Serialize startup restore against inbound dispatch.  Platform
          # adapters can begin receiving messages as soon as they connect, but
          # restart-interrupted sessions are not auto-resumed until all startup
@@ -3226,7 +3226,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          self._startup_restore_tasks = []
  
          connected_count = 0
-@@ -10837,7 +11954,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -10971,7 +12088,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # default profile needs the same whole-handler runtime scope as a
              # secondary profile: authorization and prompt rendering both run
              # before the narrower agent-turn scope is installed.
@@ -3239,7 +3239,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
              adapter.set_session_store(self.session_store)
              adapter.set_busy_session_handler(self._handle_active_session_busy_message)
-@@ -11181,18 +12302,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11315,18 +12436,9 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              finally:
                  _clear_planned_restart_notification()
  
@@ -3260,7 +3260,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          await self._finish_startup_restore()
  
          # Drain any recovered process watchers (from crash recovery checkpoint)
-@@ -11642,7 +12754,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -11776,7 +12888,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          # adapter.handle_message would spawn a background task and we'd
          # lose synchronous error visibility; calling _handle_message inline
          # keeps the success/failure path observable for the watcher.
@@ -3269,7 +3269,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          if not response_text:
              # Streaming may have already delivered the response inline.
              # Either way, agent ran without raising — count as success.
-@@ -12209,7 +13321,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -12343,7 +13455,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          del self._failed_platforms[platform]
                          continue
  
@@ -3282,7 +3282,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
                      adapter.set_fatal_error_handler(self._handle_adapter_fatal_error)
                      adapter.set_session_store(self.session_store)
                      adapter.set_busy_session_handler(self._handle_active_session_busy_message)
-@@ -13149,7 +14265,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -13283,7 +14399,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          platform: Platform,
      ) -> None:
          """Install the profile-scoped handlers shared by startup and reconnect."""
@@ -3295,7 +3295,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          adapter.set_fatal_error_handler(
              self._make_profile_fatal_error_handler(profile_name, platform)
          )
-@@ -14069,7 +15189,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14203,7 +15323,10 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              return await self._handle_goal_command(event)
          return "Agent is running — use /goal status / pause / clear / wait mid-run, or /stop before setting a new goal."
  
@@ -3307,7 +3307,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          """
          Handle an incoming message from any platform.
          
-@@ -14083,6 +15206,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14217,6 +15340,20 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          7. Return response
          """
          source = event.source
@@ -3328,7 +3328,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
          # 🔴 Cross-session leak guard. This handler runs inside a per-message
          # asyncio task created via create_task(), which snapshots the spawning
-@@ -14123,15 +15260,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14257,15 +15394,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  getattr(source, "chat_id", None),
              )
              return None
@@ -3344,7 +3344,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          # scale-to-zero (Phase 0, 0.B/F13): stamp the gateway-scoped last-inbound
          # clock for real (user-originated) inbound only. Internal/system events
          # (background-process completions, startup-restore replays) are NOT
-@@ -14147,7 +15275,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14281,7 +15409,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          #   {"action": "allow"}   /   None          -> normal dispatch
          # Hook runs BEFORE auth so plugins can handle unauthorized senders
          # (e.g. customer handover ingest) without triggering the pairing flow.
@@ -3364,7 +3364,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              try:
                  from hermes_cli.lifecycle import invoke_hook as _invoke_hook
                  _hook_results = _invoke_hook(
-@@ -14162,6 +15301,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14296,6 +15435,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              except Exception as _hook_exc:
                  logger.warning("pre_gateway_dispatch invocation failed: %s", _hook_exc)
                  _hook_results = []
@@ -3376,7 +3376,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
              for _result in _hook_results:
                  if not isinstance(_result, dict):
-@@ -14174,16 +15318,57 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14308,16 +15452,57 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          source.platform.value if source.platform else "unknown",
                          source.chat_id or "unknown",
                      )
@@ -3435,7 +3435,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          if is_internal:
              pass
          elif source.user_id is None:
-@@ -14195,9 +15380,42 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14329,9 +15514,42 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
              # sender). Defer to _is_user_authorized so that path runs.
              if not self._is_user_authorized(source):
                  logger.debug("Ignoring message with no user_id from %s", source.platform.value)
@@ -3478,7 +3478,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              # In DMs: offer pairing code. In groups: silently ignore.
              if (
                  source.chat_type == "dm"
-@@ -14219,7 +15437,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14353,7 +15571,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  # prevent spamming the user with repeated messages when
                  # multiple DMs arrive in quick succession.
                  if pairing_store._is_rate_limited(platform_name, source.user_id):
@@ -3487,7 +3487,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
                  code = pairing_store.generate_code(
                      platform_name, source.user_id, source.user_name or ""
                  )
-@@ -14252,7 +15470,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14386,7 +15604,24 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          )
                      # Record rate limit so subsequent messages are silently ignored
                      pairing_store._record_rate_limit(platform_name, source.user_id)
@@ -3513,7 +3513,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          
          # Intercept messages that are responses to a pending /update prompt.
          # The update process (detached) wrote .update_prompt.json; the watcher
-@@ -14592,14 +15827,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -14726,14 +15961,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                          merge_text=True,
                      )
                  return None
@@ -3539,7 +3539,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              if self._busy_input_mode == "queue":
                  logger.debug("PRIORITY queue follow-up for session %s", _quick_key)
                  self._queue_or_replace_pending_event(_quick_key, event)
-@@ -15138,7 +16377,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -15272,7 +16511,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
          if canonical == "voice":
              return await self._handle_voice_command(event)
  
@@ -3557,7 +3557,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
              return f"⏳ Gateway is {self._status_action_gerund()} and is not accepting new work right now."
  
          # User-defined quick commands (bypass agent loop, no LLM call)
-@@ -15380,27 +16628,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -15514,27 +16762,6 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                  return self._telegram_topic_root_lobby_message()
              return None
  
@@ -3585,7 +3585,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
          # ── Claim this session before any await ───────────────────────
          # Between here and _run_agent registering the real AIAgent, there
          # are numerous await points (hooks, vision enrichment, STT,
-@@ -25120,16 +26347,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
+@@ -25295,16 +26522,18 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                      except Exception:
                          pass
  
@@ -3613,7 +3613,7 @@ index fd1d62feb1028e41f1a96e5d7ab6f8d3b33f8c9a..134b60ddfcdf7e1b5feccd3959e67dd5
  
                  # Clear the adapter's interrupt event so the next _run_agent call
 diff --git a/gateway/session.py b/gateway/session.py
-index 92e2a5ae099dd2ba18a426caed3d6f201bf86a5c..63bef2a70ff0f914e2e34aaaad7debc4da5bfe97 100644
+index e8221bf6b..7eb0afcc5 100644
 --- a/gateway/session.py
 +++ b/gateway/session.py
 @@ -3354,6 +3354,54 @@ class SessionStore:
@@ -3672,7 +3672,7 @@ index 92e2a5ae099dd2ba18a426caed3d6f201bf86a5c..63bef2a70ff0f914e2e34aaaad7debc4
          """Replace the entire transcript for a session with new messages.
  
 diff --git a/gateway/slash_commands.py b/gateway/slash_commands.py
-index fb3cec080accc4b54abcbaddcd48736f604a14f9..b095ffc3ae4ce8b6d1448a412a67bc8503eebab5 100644
+index e719eb2ac..db75464f3 100644
 --- a/gateway/slash_commands.py
 +++ b/gateway/slash_commands.py
 @@ -4527,7 +4527,7 @@ class GatewaySlashCommandsMixin:
@@ -3685,10 +3685,10 @@ index fb3cec080accc4b54abcbaddcd48736f604a14f9..b095ffc3ae4ce8b6d1448a412a67bc85
  
          source = await asyncio.to_thread(
 diff --git a/hermes_state.py b/hermes_state.py
-index e7fc109980aaf182dbc516caa44c8ab02d1a18a6..cf25943c9f6dd74c510d237ec31e434e89a8a46c 100644
+index 0396567c8..a65ce5672 100644
 --- a/hermes_state.py
 +++ b/hermes_state.py
-@@ -5837,7 +5837,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
+@@ -6061,7 +6061,7 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
          self,
          session_id: str,
          role: str,
@@ -3697,7 +3697,7 @@ index e7fc109980aaf182dbc516caa44c8ab02d1a18a6..cf25943c9f6dd74c510d237ec31e434e
          tool_name: str = None,
          tool_calls: Any = None,
          tool_call_id: str = None,
-@@ -7349,6 +7349,20 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
+@@ -7646,6 +7646,20 @@ class SessionDB(SessionSearchMixin, SessionSchemaMixin, SessionPortabilityMixin)
              )
              return cursor.fetchone() is not None
  
@@ -3719,10 +3719,10 @@ index e7fc109980aaf182dbc516caa44c8ab02d1a18a6..cf25943c9f6dd74c510d237ec31e434e
      # Export and cleanup
      # =========================================================================
 diff --git a/tests/gateway/restart_test_helpers.py b/tests/gateway/restart_test_helpers.py
-index c0466838bc8ca3861aa0dd85c80acba737952a4f..334591dc429dca24bc5184f642bc451169f70da8 100644
+index 7de82a65b..54cff48f9 100644
 --- a/tests/gateway/restart_test_helpers.py
 +++ b/tests/gateway/restart_test_helpers.py
-@@ -64,6 +64,7 @@ def make_restart_runner(
+@@ -67,6 +67,7 @@ def make_restart_runner(
      runner._pending_approvals = {}
      runner._pending_model_notes = {}
      runner._background_tasks = set()
@@ -3730,7 +3730,7 @@ index c0466838bc8ca3861aa0dd85c80acba737952a4f..334591dc429dca24bc5184f642bc4511
      runner._draining = False
      runner._restart_requested = False
      runner._signal_initiated_shutdown = False
-@@ -109,9 +110,6 @@ def make_restart_runner(
+@@ -113,9 +114,6 @@ def make_restart_runner(
      runner._status_action_gerund = GatewayRunner._status_action_gerund.__get__(
          runner, GatewayRunner
      )
@@ -3740,7 +3740,7 @@ index c0466838bc8ca3861aa0dd85c80acba737952a4f..334591dc429dca24bc5184f642bc4511
      runner._running_agent_count = GatewayRunner._running_agent_count.__get__(
          runner, GatewayRunner
      )
-@@ -149,10 +147,14 @@ def make_restart_runner(
+@@ -156,10 +154,14 @@ def make_restart_runner(
      runner.pairing_store = MagicMock()
      runner.session_store = MagicMock()
      runner.session_store._entries = {}
@@ -3757,7 +3757,7 @@ index c0466838bc8ca3861aa0dd85c80acba737952a4f..334591dc429dca24bc5184f642bc4511
      return runner, platform_adapter
 diff --git a/tests/gateway/test_drain_inbox.py b/tests/gateway/test_drain_inbox.py
 new file mode 100644
-index 0000000000000000000000000000000000000000..3e88b5e9ce9af9013cc69d07ea906d4fc7dba6e8
+index 000000000..3e88b5e9c
 --- /dev/null
 +++ b/tests/gateway/test_drain_inbox.py
 @@ -0,0 +1,2405 @@
@@ -6167,7 +6167,7 @@ index 0000000000000000000000000000000000000000..3e88b5e9ce9af9013cc69d07ea906d4f
 +    assert row["text"] == event.text
 +    assert row["queue_id"]
 diff --git a/tests/gateway/test_external_drain_control.py b/tests/gateway/test_external_drain_control.py
-index df3e1689405f0690f8a11984ea7d492cb2a18939..a58d50de2d308d23c5a846e285bd42793f76a8ee 100644
+index df3e16894..a58d50de2 100644
 --- a/tests/gateway/test_external_drain_control.py
 +++ b/tests/gateway/test_external_drain_control.py
 @@ -13,7 +13,7 @@ from __future__ import annotations
@@ -6220,7 +6220,7 @@ index df3e1689405f0690f8a11984ea7d492cb2a18939..a58d50de2d308d23c5a846e285bd4279
 +        runner._persist_drain_event.assert_awaited_once()
  
 diff --git a/tests/gateway/test_restart_resume_pending.py b/tests/gateway/test_restart_resume_pending.py
-index 1acc357e16f7d739ed5934156d2db34ec1940e7a..6d8e1ba29a1e6fd073d5f68eb3577b45cc2fe9be 100644
+index 1acc357e1..6d8e1ba29 100644
 --- a/tests/gateway/test_restart_resume_pending.py
 +++ b/tests/gateway/test_restart_resume_pending.py
 @@ -32,8 +32,14 @@ from unittest.mock import AsyncMock, MagicMock, patch

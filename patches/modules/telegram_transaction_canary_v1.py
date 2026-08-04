@@ -11,6 +11,7 @@ from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_TRANSACTION_CANARY_v1"
 BYPASS_MARKER = "HERMES_TELEGRAM_COMMAND_BYPASS_TRANSACTION_v1"
+BYPASS_RECEIPT_MARKER = "HERMES_TELEGRAM_COMMAND_SEND_RECEIPT_COMPAT_v1"
 CONFIRM_MARKER = "HERMES_TELEGRAM_SLASH_CONFIRM_ACCEPTANCE_v1"
 CONFIRM_RESOLVE_MARKER = "HERMES_TELEGRAM_SLASH_CONFIRM_RESOLUTION_v1"
 BACKUP_SUFFIX = ".bak-pre-telegram-transaction-canary-v1"
@@ -124,11 +125,19 @@ BYPASS_RESET_RESPONSE = "            _text, _eph_ttl = self._unwrap_ephemeral(re
 BYPASS_RESET_RESPONSE_BLOCK = BYPASS_RESET_RESPONSE + (
     '            if _telegram_tx.is_error_envelope(_text):\n                _tx_error = "agent error envelope"\n'
 )
-BYPASS_RESET_ACCEPT_BLOCK = (
+BYPASS_RESET_ACCEPT_BLOCK_V1 = (
     "                if _r.success:\n"
     '                    _telegram_tx.accepted(getattr(_r, "message_id", None))\n'
     "                else:\n"
     '                    _tx_error = getattr(_r, "error", None) or "delivery failed"\n' + BYPASS_RESET_ACCEPT
+)
+BYPASS_RESET_ACCEPT_BLOCK = (
+    f"                # {BYPASS_RECEIPT_MARKER}\n"
+    '                if _r is None or getattr(_r, "success", True):\n'
+    '                    _telegram_tx.accepted(getattr(_r, "message_id", None))\n'
+    "                else:\n"
+    '                    _tx_error = getattr(_r, "error", None) or "delivery failed"\n'
+    '                if _eph_ttl > 0 and _r is not None and getattr(_r, "success", True) and getattr(_r, "message_id", None):\n'
 )
 BYPASS_RESET_EXCEPT = (
     "        except Exception:\n"
@@ -202,11 +211,19 @@ BYPASS_DIRECT_RESPONSE_BLOCK = BYPASS_DIRECT_RESPONSE + (
     "                    if _telegram_tx.is_error_envelope(_text):\n"
     '                        _tx_error = "agent error envelope"\n'
 )
-BYPASS_DIRECT_ACCEPT_BLOCK = (
+BYPASS_DIRECT_ACCEPT_BLOCK_V1 = (
     "                        if _r.success:\n"
     '                            _telegram_tx.accepted(getattr(_r, "message_id", None))\n'
     "                        else:\n"
     '                            _tx_error = getattr(_r, "error", None) or "delivery failed"\n' + BYPASS_DIRECT_ACCEPT
+)
+BYPASS_DIRECT_ACCEPT_BLOCK = (
+    f"                        # {BYPASS_RECEIPT_MARKER}\n"
+    '                        if _r is None or getattr(_r, "success", True):\n'
+    '                            _telegram_tx.accepted(getattr(_r, "message_id", None))\n'
+    "                        else:\n"
+    '                            _tx_error = getattr(_r, "error", None) or "delivery failed"\n'
+    '                        if _eph_ttl > 0 and _r is not None and getattr(_r, "success", True) and getattr(_r, "message_id", None):\n'
 )
 BYPASS_DIRECT_EXCEPT = (
     "                except Exception as e:\n"
@@ -442,6 +459,8 @@ def _bypass_hooks_current(text: str) -> bool:
 
 
 def _with_reset_hooks(text: str) -> str:
+    if BYPASS_RESET_ACCEPT_BLOCK_V1 in text:
+        text = text.replace(BYPASS_RESET_ACCEPT_BLOCK_V1, BYPASS_RESET_ACCEPT_BLOCK, 1)
     text = _ensure(
         text,
         BYPASS_RESET_BEGIN,
@@ -488,6 +507,8 @@ def _with_reset_hooks(text: str) -> str:
 
 
 def _with_direct_hooks(text: str) -> str:
+    if BYPASS_DIRECT_ACCEPT_BLOCK_V1 in text:
+        text = text.replace(BYPASS_DIRECT_ACCEPT_BLOCK_V1, BYPASS_DIRECT_ACCEPT_BLOCK, 1)
     text = _ensure(
         text,
         BYPASS_DIRECT_BEGIN,
@@ -1133,9 +1154,13 @@ def _media_resend_plan(root: Path):
     return module, target, original, patched, backup
 
 
-def _with_media_delivery_dedup(module, source: str) -> str:
-    patched = module.patch_base_source(source)
-    return source if patched is None else patched
+def _with_media_delivery_dedup(_module, source: str) -> str:
+    """Retain native explicit resend behavior.
+
+    Golden's media overlay now limits version-aware deduplication to automatic
+    history collection. Explicit MEDIA directives remain model-controlled.
+    """
+    return source
 
 
 def _apply_media_resend_plan(plan) -> bool:

@@ -156,9 +156,12 @@ def _policy_enabled() -> bool:
     }:
         return True
     settings = _plugin_settings()
-    return bool(settings.get("semantic_control_only")) or _device_posture(
-        settings
-    ) != "standard"
+    # The former fleet-wide semantic_control_only flag turned a tool preference
+    # into a hard deny on standard devices.  Keep enforcement only for an
+    # explicit non-standard device posture (or the operator env opt-in above);
+    # ordinary agents remain free to use the best available fallback. Unknown
+    # non-standard postures still enter the guard and fail closed below.
+    return _device_posture(settings) != "standard"
 
 
 def _foreground_escalation_allowed() -> bool:

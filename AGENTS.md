@@ -192,7 +192,7 @@ if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "confi
   throw "Existing classification conflicts with the proven profile"
 }
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
-$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/a6defd4f1549da3fe1d08d6f746fc645c64543f0/scripts/install.ps1"
+$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/3c27eb6234bf91b8ceee9e9071591b31e9b148cb/scripts/install.ps1"
 $ExpectedInstallerSha256 = "4dcbf2b665750cb578f69a6efa40770659e21821a463746f86da68af0d2bb31c"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
