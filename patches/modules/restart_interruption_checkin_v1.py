@@ -11,6 +11,7 @@ LEGACY_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v1"
 OLDER_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v2"
 PRIOR_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v3"
 MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v4"
+SHUTDOWN_NOTICE_MARKER = "HERMES_RESTART_NOTICE_NO_FALSE_CHECKIN_v1"
 BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v4"
 METHOD_ANCHOR = "    def _schedule_resume_pending_sessions(self, platform=None) -> int:\n"
 SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessions after startup.
@@ -484,6 +485,19 @@ STARTUP_WAIT_BLOCK_NEW = """        if tasks:
                 results = []
 """
 NATIVE_BOUNDED_STARTUP_WAIT = "                done, pending = await asyncio.wait(tasks, timeout=timeout)\n"
+SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN = '''        hint = (
+            "Your current task will be interrupted. "
+            "I'll check in when the gateway is back."
+            if self._restart_requested
+            else (
+                "Your current task will be interrupted. "
+                "I'll check in the next time the gateway starts."
+            )
+        )
+'''
+SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN = f'''        # {SHUTDOWN_NOTICE_MARKER}
+        hint = "Your current task will be interrupted."
+'''
 
 TEST_REPLACEMENTS = {
     "test_startup_auto_resume_schedules_fresh_pending_sessions": """@pytest.mark.asyncio
@@ -888,6 +902,49 @@ POLICY_TEST_ALTERNATIVES = {
     ),
 }
 
+NOTICE_TEST_REPLACEMENTS = {
+    "test_restart_banner_promises_a_checkin": '''@pytest.mark.asyncio
+async def test_restart_banner_reports_interruption_without_false_checkin():
+    runner, adapter = make_restart_runner()
+    runner._restart_requested = True
+    runner._running_agents["agent:main:telegram:dm:999"] = MagicMock()
+
+    await runner._notify_active_sessions_of_shutdown()
+
+    assert adapter.sent == [
+        "⚠️ Gateway restarting — Your current task will be interrupted."
+    ]
+''',
+    "test_restart_notifies_home_channel_even_without_active_sessions": '''@pytest.mark.asyncio
+async def test_restart_home_channel_notice_has_no_false_checkin():
+    runner, adapter = make_restart_runner()
+    runner._restart_requested = True
+    runner.config.platforms[Platform.TELEGRAM].home_channel = HomeChannel(
+        platform=Platform.TELEGRAM,
+        chat_id="home-42",
+        name="Ops Home",
+    )
+
+    await runner._notify_active_sessions_of_shutdown()
+
+    assert adapter.sent == [
+        "⚠️ Gateway restarting — Your current task will be interrupted."
+    ]
+''',
+    "test_shutdown_banner_promises_a_checkin_on_next_start": '''@pytest.mark.asyncio
+async def test_shutdown_banner_reports_interruption_without_false_checkin():
+    runner, adapter = make_restart_runner()
+    runner._restart_requested = False
+    runner._running_agents["agent:main:telegram:dm:999"] = MagicMock()
+
+    await runner._notify_active_sessions_of_shutdown()
+
+    assert adapter.sent == [
+        "⚠️ Gateway shutting down — Your current task will be interrupted."
+    ]
+''',
+}
+
 
 def _replace_async_test(content: str, name: str, replacement: str) -> str | None:
     tree = ast.parse(content)
@@ -901,6 +958,19 @@ def _replace_async_test(content: str, name: str, replacement: str) -> str | None
     lines = content.splitlines(keepends=True)
     replacement_text = replacement.rstrip() + "\n\n"
     return "".join(lines[: start_lineno - 1]) + replacement_text + "".join(lines[node.end_lineno :])
+
+
+def patch_shutdown_notice_text(content: str) -> str:
+    """Do not promise a proactive check-in when recovery is user-turn driven."""
+    if SHUTDOWN_NOTICE_MARKER in content:
+        return content
+    if SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN not in content:
+        return content
+    return content.replace(
+        SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN,
+        SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN,
+        1,
+    )
 
 
 def _validate_behavior_tests(hermes_dir: Path) -> None:
@@ -948,6 +1018,16 @@ def _patch_behavior_tests(hermes_dir: Path) -> bool:
         if updated is None:
             raise RuntimeError(f"restart interruption check-in test anchor drifted: {old_name}")
         patched = updated
+    for old_name, replacement in NOTICE_TEST_REPLACEMENTS.items():
+        new_name = ast.parse(replacement).body[0].name
+        if f"async def {new_name}(" in patched:
+            continue
+        if f"async def {old_name}(" not in patched:
+            raise RuntimeError(f"restart notice test anchor drifted: {old_name}")
+        updated = _replace_async_test(patched, old_name, replacement)
+        if updated is None:
+            raise RuntimeError(f"restart notice test anchor drifted: {old_name}")
+        patched = updated
     if patched == original:
         return False
     ast.parse(patched)
@@ -971,7 +1051,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
     _validate_behavior_tests(Path(hermes_dir))
     run_py = Path(hermes_dir) / "gateway" / "run.py"
     original = run_py.read_text(encoding="utf-8")
-    patched = original
+    patched = patch_shutdown_notice_text(original)
     runtime_changed = False
     if MARKER in original:
         if SILENT_HELPER not in original or CHECKIN_BLOCK not in original:

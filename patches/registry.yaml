@@ -18,9 +18,9 @@ patches:
   - name: durable_drain_runtime_v1
     module: modules/durable_drain_inbox_carrier_v1.py
     function: patch_durable_drain_runtime_v1
-    target: gateway/drain_inbox.py + gateway/platforms/base.py + gateway/platforms/bluebubbles.py + gateway/platforms/msgraph_webhook.py + gateway/platforms/qqbot/adapter.py + gateway/platforms/webhook.py + gateway/platforms/whatsapp_cloud.py + gateway/run.py + gateway/session.py + gateway/shutdown_flush.py + gateway/slash_commands.py + hermes_state.py + tests/gateway/restart_test_helpers.py + tests/gateway/test_drain_inbox.py + tests/gateway/test_external_drain_control.py + tests/gateway/test_restart_drain.py + tests/gateway/test_restart_notification.py + tests/gateway/test_restart_resume_pending.py + tests/gateway/test_shutdown_flush.py
+    target: gateway/drain_inbox.py + gateway/platforms/base.py + gateway/platforms/bluebubbles.py + gateway/platforms/msgraph_webhook.py + gateway/platforms/qqbot/adapter.py + gateway/platforms/webhook.py + gateway/platforms/whatsapp_cloud.py + gateway/run.py + gateway/session.py + gateway/shutdown_flush.py + gateway/slash_commands.py + hermes_state.py + tests/gateway/restart_test_helpers.py + tests/gateway/test_drain_inbox.py + tests/gateway/test_external_drain_control.py + tests/gateway/test_multiplex_adapter_registry.py + tests/gateway/test_platform_reconnect.py + tests/gateway/test_restart_drain.py + tests/gateway/test_restart_notification.py + tests/gateway/test_restart_resume_pending.py + tests/gateway/test_shutdown_flush.py
     owner: engineering-lead
-    idempotency: HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1 + HERMES_CRON_SCHEDULER_CAN_DISPATCH_COMPAT_v1
+    idempotency: HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1 + HERMES_CRON_SCHEDULER_CAN_DISPATCH_COMPAT_v1 + HERMES_DURABLE_DRAIN_MULTIPLEX_TEST_COMPAT_v1 + HERMES_DURABLE_DRAIN_CREATE_TASK_TEST_COMPAT_v1
     test: python3 -m pytest -q bin/test/test_durable_drain_inbox_carrier_v1.py bin/test/test_cron_scheduler_can_dispatch_compat_v1.py
     rollback: restore the pre-apply snapshot and remove .golden-runtime-carriers/durable-drain-inbox-v1.json
     client_impact: restart_required
@@ -158,7 +158,7 @@ patches:
   - name: voice_memo_single_delivery_v1
     module: modules/voice_memo_single_delivery_v1.py
     function: patch_voice_memo_single_delivery_v1
-    target: gateway/platforms/base.py + gateway/run.py + tools/tts_tool.py
+    target: gateway/platforms/base.py + gateway/run.py + tools/tts_tool.py + tests/gateway/test_base_topic_sessions.py
     owner: engineering-lead
     idempotency: HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
     test: python3 -m pytest -q bin/test/test_voice_memo_single_delivery_v1.py
@@ -175,7 +175,7 @@ patches:
     function: patch_telegram_transaction_canary_v1
     target: gateway/platforms/base.py + plugins/platforms/telegram/adapter.py (legacy fallback gateway/platforms/telegram.py) + gateway/stream_consumer.py + gateway/telegram_transaction_ledger.py + gateway/run.py
     owner: engineering-lead
-    idempotency: HERMES_TELEGRAM_TRANSACTION_CANARY_v1 + HERMES_MEDIA_SAME_PATH_RESEND_v1 + HERMES_MEDIA_SAME_PATH_DELIVERY_DEDUP_v1
+    idempotency: HERMES_TELEGRAM_TRANSACTION_CANARY_v1 + HERMES_TELEGRAM_COMMAND_SEND_RECEIPT_COMPAT_v1 + HERMES_MEDIA_SAME_PATH_RESEND_v1 + HERMES_MEDIA_SAME_PATH_DELIVERY_DEDUP_v1
     test: python3 -m pytest -q bin/test/test_telegram_transaction_canary_v1.py bin/test/test_media_same_path_resend_v1.py
     rollback: restore the retained .bak-pre-telegram-transaction-canary-v1 backups for gateway/platforms/base.py, gateway/stream_consumer.py, and each unique Telegram adapter file identity; restore gateway/run.py from .bak-pre-media-same-path-resend-v1 and gateway/platforms/base.py from .bak-pre-media-same-path-delivery-dedup-v1; then remove gateway/telegram_transaction_ledger.py; apply-all also retains its pre-apply snapshot
     client_impact: restart_required
@@ -220,7 +220,7 @@ patches:
     function: patch_restart_interruption_checkin_v1
     target: gateway/run.py + tests/gateway/test_restart_resume_pending.py
     owner: engineering-lead
-    idempotency: HERMES_RESTART_INTERRUPTION_CHECKIN_v4
+    idempotency: HERMES_RESTART_INTERRUPTION_CHECKIN_v4 + HERMES_RESTART_NOTICE_NO_FALSE_CHECKIN_v1
     test: python3 -m pytest -q bin/test/test_restart_interruption_checkin_v1.py
     rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots; direct module runs may use the .bak-pre-restart-interruption-checkin-v4 sibling
     client_impact: restart_required
@@ -308,9 +308,9 @@ patches:
   - name: gateway_runtime_root_guard_v1
     module: modules/gateway_runtime_root_guard_v1.py
     function: patch_gateway_runtime_root_guard_v1
-    target: gateway/run.py + gateway/platforms/api_server.py + tools/clarify_gateway.py + focused tests
+    target: gateway/run.py + gateway/platforms/api_server.py + tools/clarify_gateway.py + runtime-coherent focused tests
     owner: engineering-lead
-    idempotency: HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1 + HERMES_CLARIFY_PROSE_DEADLOCK_GUARD_v1
+    idempotency: HERMES_GATEWAY_RUNTIME_ROOT_GUARD_v1 + HERMES_CLARIFY_PROSE_DEADLOCK_GUARD_v1 + HERMES_TEST_FAKE_RUNTIME_ORIGIN_v1
     test: python3 -m pytest -q bin/test/test_gateway_runtime_root_guard_v1.py bin/test/test_clarify_prose_deadlock_guard_v1.py bin/test/test_assembled_runtime_contract.py
     rollback: restore gateway/run.py, gateway/platforms/api_server.py, tools/clarify_gateway.py, and the focused tests from the pre-apply snapshot recorded under state/apply-snapshots
     client_impact: restart_required

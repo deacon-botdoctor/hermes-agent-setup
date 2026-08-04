@@ -4,15 +4,20 @@ task-ledger tools
 
 from __future__ import annotations
 
+import contextvars
+import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
+import threading
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +29,37 @@ _db_conn: Optional[sqlite3.Connection] = None
 _record_change = None
 _new_reflection_entry = None
 _changelog_load_attempted = False
+_db_lock = threading.RLock()
+
+_GATEWAY_SOURCE: contextvars.ContextVar[dict[str, str]] = contextvars.ContextVar(
+    "task_ledger_gateway_source",
+    default={},
+)
+_turn_lock = threading.RLock()
+_MAX_TURN_CONTEXTS = 256
+_TURN_CONTEXT_TTL_SECONDS = 4 * 60 * 60
+_LEDGER_TOOLS = {"task_open", "task_update", "task_done", "task_block", "task_list"}
+_HOUSEKEEPING_TOOLS = {"todo", "memory", "session_search"}
+_TASK_ID_RE = re.compile(r"\bTask opened:\s*(t_[A-Za-z0-9_-]+)\b")
+
+
+@dataclass
+class _TurnContext:
+    turn_id: str
+    session_id: str
+    ask: str
+    platform: str
+    requested_by: str
+    source: dict[str, str] = field(default_factory=dict)
+    created_monotonic: float = field(default_factory=time.monotonic)
+    substantive_successes: int = 0
+    task_id: str = ""
+    auto_captured: bool = False
+    receipt_pending: bool = False
+
+
+_turn_contexts: dict[str, _TurnContext] = {}
+_session_sources: dict[str, tuple[float, dict[str, str]]] = {}
 
 
 def _ensure_task_columns(conn: sqlite3.Connection) -> None:
@@ -35,6 +71,7 @@ def _ensure_task_columns(conn: sqlite3.Connection) -> None:
         "change_record_status": "TEXT DEFAULT 'not_required'",
         "change_record_ref": "TEXT",
         "change_record_error": "TEXT",
+        "capture_key": "TEXT",
     }
     for column, ddl in wanted.items():
         if column not in existing:
@@ -49,46 +86,51 @@ def _ensure_task_columns(conn: sqlite3.Connection) -> None:
 
 def get_db() -> sqlite3.Connection:
     global _db_conn
-    if _db_conn is not None:
-        return _db_conn
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id TEXT PRIMARY KEY,
-            agent TEXT NOT NULL,
-            chat_id TEXT,
-            thread_id TEXT,
-            platform TEXT,
-            requested_by TEXT,
-            ask TEXT NOT NULL,
-            expected_artifact TEXT,
-            status TEXT NOT NULL DEFAULT 'open',
-            status_note TEXT,
-            artifact_path TEXT,
-            artifact_verified INTEGER DEFAULT 0,
-            blocker_reason TEXT,
-            opened_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            closed_at TEXT,
-            session_id TEXT
+    with _db_lock:
+        if _db_conn is not None:
+            return _db_conn
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                agent TEXT NOT NULL,
+                chat_id TEXT,
+                thread_id TEXT,
+                platform TEXT,
+                requested_by TEXT,
+                ask TEXT NOT NULL,
+                expected_artifact TEXT,
+                status TEXT NOT NULL DEFAULT 'open',
+                status_note TEXT,
+                artifact_path TEXT,
+                artifact_verified INTEGER DEFAULT 0,
+                blocker_reason TEXT,
+                opened_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                closed_at TEXT,
+                session_id TEXT
+            )
+            """
         )
-        """
-    )
-    _ensure_task_columns(conn)
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON tasks(status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_chat ON tasks(chat_id, thread_id)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_agent ON tasks(agent, status)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_client_slug ON tasks(client_slug)")
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_change_record_status "
-        "ON tasks(change_record_required, change_recorded, status)"
-    )
-    conn.commit()
-    _db_conn = conn
-    return conn
+        _ensure_task_columns(conn)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON tasks(status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_chat ON tasks(chat_id, thread_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_agent ON tasks(agent, status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_client_slug ON tasks(client_slug)")
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_change_record_status "
+            "ON tasks(change_record_required, change_recorded, status)"
+        )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_capture_key "
+            "ON tasks(capture_key) WHERE capture_key IS NOT NULL"
+        )
+        conn.commit()
+        _db_conn = conn
+        return conn
 
 
 def _now_iso() -> str:
@@ -149,6 +191,260 @@ def _extract_chat_context(session_id: str, platform: str) -> dict:
     return ctx
 
 
+def _platform_name(value: Any) -> str:
+    return str(getattr(value, "value", value) or "").strip().lower()
+
+
+def _capture_gateway_context(*, event=None, **_) -> None:
+    """Hold routing only; this hook runs before gateway authorization."""
+    source = getattr(event, "source", None)
+    _GATEWAY_SOURCE.set(
+        {
+            "platform": _platform_name(getattr(source, "platform", "")),
+            "chat_id": _clean_text(getattr(source, "chat_id", "")),
+            "thread_id": _clean_text(getattr(source, "thread_id", "")),
+            "user_id": _clean_text(getattr(source, "user_id", "")),
+            "user_name": _clean_text(getattr(source, "user_name", "")),
+        }
+    )
+    return None
+
+
+def _prune_turn_contexts(now: float) -> None:
+    expired = [
+        key
+        for key, state in _turn_contexts.items()
+        if now - state.created_monotonic > _TURN_CONTEXT_TTL_SECONDS
+    ]
+    for key in expired:
+        _turn_contexts.pop(key, None)
+    expired_sessions = [
+        key
+        for key, (created, _) in _session_sources.items()
+        if now - created > _TURN_CONTEXT_TTL_SECONDS
+    ]
+    for key in expired_sessions:
+        _session_sources.pop(key, None)
+    if len(_turn_contexts) > _MAX_TURN_CONTEXTS:
+        oldest = sorted(_turn_contexts.values(), key=lambda item: item.created_monotonic)
+        for state in oldest[: len(_turn_contexts) - _MAX_TURN_CONTEXTS]:
+            _turn_contexts.pop(state.turn_id, None)
+    if len(_session_sources) > _MAX_TURN_CONTEXTS:
+        oldest_sessions = sorted(_session_sources.items(), key=lambda item: item[1][0])
+        for key, _ in oldest_sessions[: len(_session_sources) - _MAX_TURN_CONTEXTS]:
+            _session_sources.pop(key, None)
+
+
+def _source_for_session(session_id: str, platform: str = "") -> dict[str, str]:
+    with _turn_lock:
+        cached = _session_sources.get(_clean_text(session_id))
+        if cached:
+            return dict(cached[1])
+    parsed = _extract_chat_context(session_id, platform)
+    return {key: _clean_text(value) for key, value in parsed.items() if value is not None}
+
+
+def _turn_capture_key(session_id: str, turn_id: str) -> str:
+    raw = f"{session_id}\0{turn_id}".encode("utf-8", errors="replace")
+    return "turn:" + hashlib.sha256(raw).hexdigest()
+
+
+def _is_user_turn(user_message: str, source: dict[str, str], parent_session_id: str) -> bool:
+    text = _clean_text(user_message)
+    if not text or text.startswith("[SYSTEM") or parent_session_id:
+        return False
+    return bool(source.get("chat_id") and source.get("platform"))
+
+
+def _before_llm_call(
+    *,
+    session_id: str = "",
+    turn_id: str = "",
+    user_message: str = "",
+    platform: str = "",
+    parent_session_id: str = "",
+    sender_id: str = "",
+    **_,
+) -> dict[str, str] | None:
+    """Start authenticated per-turn tracking after gateway auth has passed."""
+    source = dict(_GATEWAY_SOURCE.get() or {})
+    _GATEWAY_SOURCE.set({})
+    source["platform"] = source.get("platform") or _platform_name(platform)
+    if not _is_user_turn(user_message, source, _clean_text(parent_session_id)):
+        return None
+
+    clean_turn_id = _clean_text(turn_id)
+    clean_session_id = _clean_text(session_id)
+    if not clean_turn_id or not clean_session_id:
+        return None
+
+    requested_by = source.get("user_name") or source.get("user_id") or _clean_text(sender_id) or "operator"
+    state = _TurnContext(
+        turn_id=clean_turn_id,
+        session_id=clean_session_id,
+        ask=_clean_text(user_message)[:4000],
+        platform=source.get("platform", ""),
+        requested_by=requested_by,
+        source=source,
+    )
+    now = time.monotonic()
+    with _turn_lock:
+        _prune_turn_contexts(now)
+        _turn_contexts[clean_turn_id] = state
+        _session_sources[clean_session_id] = (now, dict(source))
+
+    return {
+        "context": (
+            "Task lifecycle enforcement is active for this authenticated turn. "
+            "For work requiring multiple tools or turns, call task_open before work and "
+            "task_done or task_block before claiming completion. If you omit task_open, "
+            "the runtime will auto-capture after the second substantive successful tool; "
+            "its task ID will appear in that tool result."
+        )
+    }
+
+
+def _insert_auto_captured_task(state: _TurnContext) -> str:
+    db = get_db()
+    capture_key = _turn_capture_key(state.session_id, state.turn_id)
+    now = _now_iso()
+    task_id = f"t_{uuid.uuid4().hex[:12]}"
+    source = state.source
+    client_slug = _clean_text(os.environ.get("HERMES_CLIENT_SLUG"))
+    change_required = 1 if client_slug else 0
+    change_status = "pending" if client_slug else "not_required"
+    with _db_lock:
+        try:
+            db.execute(
+                """
+                INSERT INTO tasks
+                    (id, agent, chat_id, thread_id, platform, requested_by, ask,
+                     expected_artifact, status, opened_at, updated_at, session_id,
+                     client_slug, change_record_required, change_recorded,
+                     change_record_status, capture_key)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?, 0,
+                        ?, ?)
+                """,
+                (
+                    task_id,
+                    AGENT_NAME,
+                    source.get("chat_id") or None,
+                    source.get("thread_id") or None,
+                    state.platform or None,
+                    state.requested_by,
+                    state.ask,
+                    "Verified completion receipt or artifact for this request",
+                    now,
+                    now,
+                    state.session_id,
+                    client_slug or None,
+                    change_required,
+                    change_status,
+                    capture_key,
+                ),
+            )
+            db.commit()
+            return task_id
+        except sqlite3.IntegrityError:
+            row = db.execute(
+                "SELECT id FROM tasks WHERE capture_key=?",
+                (capture_key,),
+            ).fetchone()
+            if row:
+                return str(row["id"])
+            raise
+
+
+def _after_tool_call(
+    *,
+    tool_name: str = "",
+    result: Any = "",
+    status: str = "",
+    turn_id: str = "",
+    **_,
+) -> None:
+    clean_turn_id = _clean_text(turn_id)
+    clean_tool_name = _clean_text(tool_name)
+    if not clean_turn_id:
+        return None
+    with _turn_lock:
+        state = _turn_contexts.get(clean_turn_id)
+        if state is None:
+            return None
+
+        if clean_tool_name == "task_open":
+            match = _TASK_ID_RE.search(str(result or ""))
+            if match:
+                state.task_id = match.group(1)
+            return None
+
+        if clean_tool_name in _LEDGER_TOOLS or clean_tool_name in _HOUSEKEEPING_TOOLS:
+            return None
+        if _clean_text(status).lower() != "ok":
+            return None
+
+        state.substantive_successes += 1
+        if state.task_id or state.substantive_successes < 2:
+            return None
+        state.task_id = _insert_auto_captured_task(state)
+        state.auto_captured = True
+        state.receipt_pending = True
+    return None
+
+
+def _before_tool_call(*, tool_name: str = "", turn_id: str = "", **_) -> dict[str, str] | None:
+    """Prevent an explicit open from duplicating this turn's automatic row."""
+    if _clean_text(tool_name) != "task_open":
+        return None
+    with _turn_lock:
+        state = _turn_contexts.get(_clean_text(turn_id))
+        if state is None or not state.auto_captured or not state.task_id:
+            return None
+        return {
+            "action": "block",
+            "message": (
+                f"Task already auto-captured: {state.task_id}. "
+                "Use task_update, task_done, or task_block on that task."
+            ),
+        }
+
+
+def _attach_task_receipt(*, result: Any = "", turn_id: str = "", **_) -> str | None:
+    clean_turn_id = _clean_text(turn_id)
+    with _turn_lock:
+        state = _turn_contexts.get(clean_turn_id)
+        if state is None or not state.receipt_pending or not state.task_id:
+            return None
+        state.receipt_pending = False
+        task_id = state.task_id
+
+    receipt = {
+        "task_id": task_id,
+        "capture": "runtime_auto",
+        "required_next_action": "Call task_done or task_block before claiming completion.",
+    }
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            parsed["_task_ledger"] = receipt
+            return json.dumps(parsed, ensure_ascii=False)
+        return f"{result}\n\n[TASK LEDGER] {json.dumps(receipt, ensure_ascii=False)}"
+    if isinstance(result, dict):
+        transformed = dict(result)
+        transformed["_task_ledger"] = receipt
+        return json.dumps(transformed, ensure_ascii=False)
+    return f"{result}\n\n[TASK LEDGER] {json.dumps(receipt, ensure_ascii=False)}"
+
+
+def _after_llm_call(*, turn_id: str = "", **_) -> None:
+    with _turn_lock:
+        _turn_contexts.pop(_clean_text(turn_id), None)
+    return None
+
+
 def _load_changelog_backend():
     global _record_change, _new_reflection_entry, _changelog_load_attempted
     if _changelog_load_attempted:
@@ -185,7 +481,10 @@ TASK_OPEN_SCHEMA = {
             },
             "client_slug": {
                 "type": "string",
-                "description": "Client slug when this task changes a client system. If set, a change record is required by default.",
+                "description": (
+                    "Client slug when this task changes a client system. "
+                    "If set, a change record is required by default."
+                ),
             },
             "change_record_required": {
                 "type": "boolean",
@@ -209,8 +508,14 @@ def task_open_handler(
         task_id = f"t_{uuid.uuid4().hex[:12]}"
         session_id = kwargs.get("session_id", "") or os.environ.get("HERMES_SESSION_ID", "")
         platform = kwargs.get("platform", "") or os.environ.get("HERMES_SESSION_PLATFORM", "")
-        ctx = _extract_chat_context(session_id, platform)
-        requested_by = kwargs.get("sender_name") or kwargs.get("sender_id") or "Deacon"
+        ctx = _source_for_session(session_id, platform)
+        requested_by = (
+            kwargs.get("sender_name")
+            or ctx.get("user_name")
+            or kwargs.get("sender_id")
+            or ctx.get("user_id")
+            or "operator"
+        )
         ask = _clean_text(ask)
         expected_artifact = _clean_text(expected_artifact)
         client_slug = _clean_text(client_slug)
@@ -222,32 +527,33 @@ def task_open_handler(
         change_status = "pending" if required else "not_required"
         now = _now_iso()
 
-        db.execute(
-            """
-            INSERT INTO tasks
-                (id, agent, chat_id, thread_id, platform, requested_by, ask, expected_artifact,
-                 status, opened_at, updated_at, session_id, client_slug, change_record_required,
-                 change_recorded, change_record_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 0, ?)
-            """,
-            (
-                task_id,
-                AGENT_NAME,
-                ctx.get("chat_id"),
-                ctx.get("thread_id"),
-                ctx.get("platform"),
-                requested_by,
-                ask,
-                expected_artifact,
-                now,
-                now,
-                session_id,
-                client_slug or None,
-                1 if required else 0,
-                change_status,
-            ),
-        )
-        db.commit()
+        with _db_lock:
+            db.execute(
+                """
+                INSERT INTO tasks
+                    (id, agent, chat_id, thread_id, platform, requested_by, ask, expected_artifact,
+                     status, opened_at, updated_at, session_id, client_slug, change_record_required,
+                     change_recorded, change_record_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 0, ?)
+                """,
+                (
+                    task_id,
+                    AGENT_NAME,
+                    ctx.get("chat_id"),
+                    ctx.get("thread_id"),
+                    ctx.get("platform") or _platform_name(platform) or None,
+                    requested_by,
+                    ask,
+                    expected_artifact,
+                    now,
+                    now,
+                    session_id,
+                    client_slug or None,
+                    1 if required else 0,
+                    change_status,
+                ),
+            )
+            db.commit()
         suffix = "\nChange record: required" if required else ""
         return (
             f"Task opened: {task_id}\n"
@@ -276,12 +582,13 @@ TASK_UPDATE_SCHEMA = {
 def task_update_handler(task_id: str, note: str, **kwargs) -> str:
     try:
         db = get_db()
-        cur = db.execute(
-            "UPDATE tasks SET status='in_progress', status_note=?, updated_at=? "
-            "WHERE id=? AND status NOT IN ('done','abandoned')",
-            (note, _now_iso(), task_id),
-        )
-        db.commit()
+        with _db_lock:
+            cur = db.execute(
+                "UPDATE tasks SET status='in_progress', status_note=?, updated_at=? "
+                "WHERE id=? AND status NOT IN ('done','abandoned')",
+                (note, _now_iso(), task_id),
+            )
+            db.commit()
         if cur.rowcount == 0:
             return f"Task {task_id} not found or already closed."
         return f"Task {task_id} updated: {note}"
@@ -409,15 +716,21 @@ def _build_reflection(kwargs: dict) -> dict | None:
 def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) -> str:
     try:
         db = get_db()
-        task_row = db.execute(
-            "SELECT id, ask, client_slug, change_record_required FROM tasks WHERE id=?",
-            (task_id,),
-        ).fetchone()
+        with _db_lock:
+            task_row = db.execute(
+                "SELECT id, ask, client_slug, change_record_required FROM tasks WHERE id=?",
+                (task_id,),
+            ).fetchone()
         if task_row is None:
             return f"Task {task_id} not found or already closed."
 
         artifact_path = _clean_text(artifact_path)
         summary = _clean_text(summary)
+        if not _verify_artifact(artifact_path):
+            return (
+                f"Error closing task: artifact verification failed for {task_id}. "
+                "Provide an existing non-empty file, an http(s) URL, or a telegram receipt."
+            )
         final_client_slug = _clean_text(kwargs.get("client_slug")) or _clean_text(task_row["client_slug"])
         required = (
             _truthy(task_row["change_record_required"])
@@ -495,44 +808,45 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
                 if required:
                     return f"Error closing task: required change record failed for {task_id}: {exc}"
 
-        verified = 1 if _verify_artifact(artifact_path) else 0
+        verified = 1
         now = _now_iso()
-        cur = db.execute(
-            """
-            UPDATE tasks
-               SET status='done',
-                   artifact_path=?,
-                   artifact_verified=?,
-                   status_note=?,
-                   updated_at=?,
-                   closed_at=?,
-                   client_slug=?,
-                   change_record_required=?,
-                   change_recorded=?,
-                   change_record_status=?,
-                   change_record_ref=?,
-                   change_record_error=?
-             WHERE id=? AND status NOT IN ('done','abandoned')
-            """,
-            (
-                artifact_path,
-                verified,
-                summary,
-                now,
-                now,
-                final_client_slug or None,
-                1 if required else 0,
-                1 if change_status == "recorded" else 0,
-                change_status,
-                json.dumps(written, sort_keys=True) if written else None,
-                change_error,
-                task_id,
-            ),
-        )
-        db.commit()
+        with _db_lock:
+            cur = db.execute(
+                """
+                UPDATE tasks
+                   SET status='done',
+                       artifact_path=?,
+                       artifact_verified=?,
+                       status_note=?,
+                       updated_at=?,
+                       closed_at=?,
+                       client_slug=?,
+                       change_record_required=?,
+                       change_recorded=?,
+                       change_record_status=?,
+                       change_record_ref=?,
+                       change_record_error=?
+                 WHERE id=? AND status NOT IN ('done','abandoned')
+                """,
+                (
+                    artifact_path,
+                    verified,
+                    summary,
+                    now,
+                    now,
+                    final_client_slug or None,
+                    1 if required else 0,
+                    1 if change_status == "recorded" else 0,
+                    change_status,
+                    json.dumps(written, sort_keys=True) if written else None,
+                    change_error,
+                    task_id,
+                ),
+            )
+            db.commit()
         if cur.rowcount == 0:
             return f"Task {task_id} not found or already closed."
-        verify_msg = "artifact verified" if verified else "artifact NOT VERIFIED (file missing or bad path)"
+        verify_msg = "artifact verified"
         record_msg = f"change record: {change_status}"
         if change_error:
             record_msg += f" ({change_error})"
@@ -564,12 +878,13 @@ TASK_BLOCK_SCHEMA = {
 def task_block_handler(task_id: str, blocker_reason: str, **kwargs) -> str:
     try:
         db = get_db()
-        cur = db.execute(
-            "UPDATE tasks SET status='blocked', blocker_reason=?, updated_at=? "
-            "WHERE id=? AND status NOT IN ('done','abandoned')",
-            (blocker_reason, _now_iso(), task_id),
-        )
-        db.commit()
+        with _db_lock:
+            cur = db.execute(
+                "UPDATE tasks SET status='blocked', blocker_reason=?, updated_at=? "
+                "WHERE id=? AND status NOT IN ('done','abandoned')",
+                (blocker_reason, _now_iso(), task_id),
+            )
+            db.commit()
         if cur.rowcount == 0:
             return f"Task {task_id} not found or already closed."
         return f"Task {task_id} blocked: {blocker_reason}"
@@ -615,7 +930,7 @@ def task_list_handler(status: str = None, chat_scope: bool = False, limit: int =
         if chat_scope:
             session_id = kwargs.get("session_id", "") or os.environ.get("HERMES_SESSION_ID", "")
             platform = kwargs.get("platform", "") or os.environ.get("HERMES_SESSION_PLATFORM", "")
-            ctx = _extract_chat_context(session_id, platform)
+            ctx = _source_for_session(session_id, platform)
             if ctx.get("chat_id"):
                 where_clauses.append("chat_id = ?")
                 params.append(ctx["chat_id"])
@@ -624,16 +939,17 @@ def task_list_handler(status: str = None, chat_scope: bool = False, limit: int =
                     params.append(ctx["thread_id"])
 
         where_sql = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
-        rows = db.execute(
-            f"""
-            SELECT id, agent, ask, status, expected_artifact, artifact_path,
-                   artifact_verified, blocker_reason, opened_at, updated_at,
-                   change_record_required, change_recorded, change_record_status
-              FROM tasks{where_sql}
-             ORDER BY opened_at DESC LIMIT ?
-            """,
-            (*params, limit),
-        ).fetchall()
+        with _db_lock:
+            rows = db.execute(
+                f"""
+                SELECT id, agent, ask, status, expected_artifact, artifact_path,
+                       artifact_verified, blocker_reason, opened_at, updated_at,
+                       change_record_required, change_recorded, change_record_status
+                  FROM tasks{where_sql}
+                 ORDER BY opened_at DESC LIMIT ?
+                """,
+                (*params, limit),
+            ).fetchall()
 
         if not rows:
             return "No tasks found."
@@ -735,4 +1051,12 @@ def register(ctx):
             **_clean_kwargs(kwargs),
         ),
     )
+    register_hook = getattr(ctx, "register_hook", None)
+    if callable(register_hook):
+        register_hook("pre_gateway_dispatch", _capture_gateway_context)
+        register_hook("pre_llm_call", _before_llm_call)
+        register_hook("pre_tool_call", _before_tool_call)
+        register_hook("post_tool_call", _after_tool_call)
+        register_hook("transform_tool_result", _attach_task_receipt)
+        register_hook("post_llm_call", _after_llm_call)
     logger.info("task-ledger: plugin registered")

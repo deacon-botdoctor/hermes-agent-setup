@@ -17,6 +17,7 @@ from pathlib import Path
 COMPLETION_MARKER = "HERMES_SUPPRESS_COMPACTION_COMPLETION_STATUS_v1"
 CHAT_MARKER = "HERMES_SILENT_AUTO_CONTEXT_LIFECYCLE_v1"
 CONTINUITY_MARKER = "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1"
+DRAIN_SILENT_DELIVERY_MARKER = "HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2"
 
 HELPER_OLD = '''def _emit_compaction_done(agent: Any) -> None:
     """Emit the structured terminal edge for a started compaction."""
@@ -175,6 +176,61 @@ DRAIN_NOTICE_REPLACEMENTS = {
 ''',
 }
 
+DRAIN_NOTICE_DELIVERY_OLD = '''    async def _deliver_uncertain_drain_notice(
+        self,
+        adapter: BasePlatformAdapter,
+        source: SessionSource,
+    ) -> bool:
+        try:
+            result = await adapter._send_with_retry(
+                chat_id=source.chat_id,
+                content=self._DRAIN_UNCERTAIN_NOTICE,
+                metadata=self._thread_metadata_for_source(source),
+            )
+        except Exception:
+            logger.exception("Failed to deliver uncertain drain-inbox notice")
+            return False
+        return bool(getattr(result, "success", False))
+'''
+DRAIN_NOTICE_DELIVERY_NEW = '''    async def _deliver_uncertain_drain_notice(
+        self,
+        adapter: BasePlatformAdapter,
+        source: SessionSource,
+    ) -> bool:
+        # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — an intentionally silent
+        # notice is already delivered. Never ask a transport to send an empty
+        # message or let that synthetic send block durable ambiguity cleanup.
+        if not self._DRAIN_UNCERTAIN_NOTICE:
+            return True
+        try:
+            result = await adapter._send_with_retry(
+                chat_id=source.chat_id,
+                content=self._DRAIN_UNCERTAIN_NOTICE,
+                metadata=self._thread_metadata_for_source(source),
+            )
+        except Exception:
+            logger.exception("Failed to deliver uncertain drain-inbox notice")
+            return False
+        return bool(getattr(result, "success", False))
+'''
+
+STARTUP_FAILED_SILENT_GUARD_OLD = '''        if decision is not None and decision.response:
+            adapter = self._adapter_for_source(event.source)
+'''
+STARTUP_FAILED_SILENT_GUARD_NEW = '''        if (
+            decision is not None
+            and not decision.durable_accepted
+            and not decision.response
+        ):
+            # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — silence must never
+            # convert failed durable admission into a consumed message.
+            raise RuntimeError(
+                "startup-gate admission failed; transport retry required"
+            )
+        if decision is not None and decision.response:
+            adapter = self._adapter_for_source(event.source)
+'''
+
 STARTUP_RESPONSE_GUARD = '''        if decision is not None and decision.response:
 '''
 
@@ -215,6 +271,254 @@ DRAIN_CONSUMER_TEST_NEW = '''    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1: exe
             False,
         )
         assert adapter.sent == []  # ty:ignore[unresolved-attribute]
+'''
+
+DRAIN_FAILURE_TEST_OLD = (
+    '    warning = adapter._send_with_retry.await_args.kwargs["content"]'
+    "  # ty:ignore[unresolved-attribute]\n"
+    '    assert "could not confirm completion" in warning\n'
+    '    assert "did not retry" in warning\n'
+    "    assert event.text not in warning\n"
+    "    runner._async_session_store.persist_replay_marker.assert_awaited_once()\n"
+)
+DRAIN_FAILURE_TEST_NEW = '''    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — ambiguity is recorded and
+    # retired without emitting an empty or control-plane client message.
+    adapter._send_with_retry.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    runner._async_session_store.persist_replay_marker.assert_awaited_once()
+'''
+
+DRAIN_REDELIVERY_TEST_OLD = '''    assert "already processing" in response  # ty:ignore[unsupported-operator]
+    assert "resend" not in response.lower()  # ty:ignore[unresolved-attribute]
+'''
+DRAIN_REDELIVERY_TEST_NEW = '''    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+    assert response == ""
+'''
+
+DRAIN_CRASH_CLAIM_ASSERT_OLD = '''    assert await runner._drain_persisted_drain_inbox() == 0
+    runner._run_startup_resume_event.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    runner._async_session_store.persist_replay_marker.assert_not_awaited()
+    assert pending_records()[0]["state"] == "claimed"
+'''
+DRAIN_CRASH_CLAIM_ASSERT_NEW = '''    assert await runner._drain_persisted_drain_inbox() == 1
+    runner._run_startup_resume_event.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    runner._async_session_store.persist_replay_marker.assert_awaited_once()
+    adapter._send_with_retry.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    assert pending_records() == []
+'''
+
+DRAIN_CRASH_CLAIM_RETRY_OLD = '''
+    next_runner, next_adapter = make_restart_runner()
+    next_runner._async_session_store = SimpleNamespace(
+        _store=next_runner.session_store,
+        get_or_create_session=AsyncMock(
+            return_value=SimpleNamespace(session_id="session-1")
+        ),
+        replay_marker_status=AsyncMock(return_value=False),
+        persist_replay_marker=AsyncMock(return_value=False),
+    )
+    next_runner._run_startup_resume_event = AsyncMock()  # ty:ignore[invalid-assignment]
+    next_adapter._send_with_retry = AsyncMock(  # ty:ignore[invalid-assignment]
+        return_value=SendResult(success=True, message_id="warning-2")
+    )
+
+    assert await next_runner._drain_persisted_drain_inbox() == 0
+    next_runner._run_startup_resume_event.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    assert pending_records()[0]["state"] == "claimed"
+
+    final_runner, final_adapter = make_restart_runner()
+    final_runner._async_session_store = SimpleNamespace(
+        _store=final_runner.session_store,
+        get_or_create_session=AsyncMock(
+            return_value=SimpleNamespace(session_id="session-1")
+        ),
+        replay_marker_status=AsyncMock(return_value=False),
+        persist_replay_marker=AsyncMock(return_value=True),
+    )
+    final_runner._run_startup_resume_event = AsyncMock()  # ty:ignore[invalid-assignment]
+    final_adapter._send_with_retry = AsyncMock(  # ty:ignore[invalid-assignment]
+        return_value=SendResult(success=True, message_id="warning-3")
+    )
+
+    assert await final_runner._drain_persisted_drain_inbox() == 1
+    final_runner._run_startup_resume_event.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    assert pending_records() == []
+'''
+
+RESTART_UNSTABLE_IDENTITY_OLD = '''    result = await adapter.handle_message(inbound)
+
+    assert result is None
+    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+    assert adapter.sent == []  # ty:ignore[unresolved-attribute]
+'''
+RESTART_UNSTABLE_IDENTITY_NEW = '''    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — an inbound message that cannot
+    # be durably identified must be retried by the transport, never swallowed.
+    with pytest.raises(RuntimeError, match="transport retry required"):
+        await adapter.handle_message(inbound)
+
+    assert adapter.sent == []  # ty:ignore[unresolved-attribute]
+'''
+
+RESTART_SAVED_ASSERT_OLD = (
+    '    assert any("saved" in message for message in adapter.sent)'
+    '  # ty:ignore[unresolved-attribute]\n'
+)
+RESTART_SAVED_ASSERT_NEW = '''    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2
+    assert adapter.sent == []  # ty:ignore[unresolved-attribute]
+'''
+
+RESTART_PERSIST_RESULT_OLD = (
+    '    assert "saved" in await persist_task  # ty:ignore[unsupported-operator]\n'
+)
+RESTART_PERSIST_RESULT_NEW = '''    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+    assert await persist_task == ""
+'''
+
+RESTART_STATE_WORDING_OLD = '''@pytest.mark.parametrize(
+    ("state", "expected", "unexpected"),
+    [
+        ("queued", "saved and will run next", None),
+        ("claimed", "did not retry", None),
+        ("completed", "already completed", "resend"),
+        ("failed", "could not safely save", None),
+    ],
+)
+async def test_startup_gate_uses_existing_row_state_wording(
+    state,
+    expected,
+    unexpected,
+):
+'''
+RESTART_STATE_WORDING_NEW = '''@pytest.mark.parametrize("state", ["queued", "claimed", "completed", "failed"])
+async def test_startup_gate_keeps_existing_row_state_internal(state):
+'''
+
+RESTART_STATE_ASSERT_OLD = '''    assert expected in response  # ty:ignore[unsupported-operator]
+    if unexpected is not None:
+        assert unexpected not in response.lower()  # ty:ignore[unresolved-attribute]
+'''
+RESTART_STATE_ASSERT_NEW = '''    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+    assert response == ""
+'''
+
+RESTART_LOCAL_OUTCOME_OLD = '''@pytest.mark.parametrize(
+    ("local_outcome", "expected"),
+    [
+        ("running", "already processing"),
+        ("completed", "already completed"),
+    ],
+)
+async def test_startup_gate_prefers_local_replay_outcome(
+    local_outcome,
+    expected,
+):
+'''
+RESTART_LOCAL_OUTCOME_NEW = '''@pytest.mark.parametrize("local_outcome", ["running", "completed"])
+async def test_startup_gate_keeps_local_replay_outcome_internal(local_outcome):
+'''
+
+RESTART_LOCAL_ASSERT_OLD = '''    assert expected in response  # ty:ignore[unsupported-operator]
+    assert "resend" not in response.lower()  # ty:ignore[unresolved-attribute]
+    runner._persist_drain_event_result.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+'''
+RESTART_LOCAL_ASSERT_NEW = '''    # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+    assert response == ""
+    runner._persist_drain_event_result.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+'''
+
+RESTART_BARRIER_TEST_OLD = '''@pytest.mark.asyncio
+async def test_startup_gate_releases_barrier_before_delivery():
+    runner, adapter = make_restart_runner()
+    runner._startup_restore_in_progress = True
+    runner._persist_drain_event_result = AsyncMock(  # ty:ignore[invalid-assignment]
+        return_value=("queue-id", "queued")
+    )
+    delivery_entered = asyncio.Event()
+    allow_delivery = asyncio.Event()
+
+    async def hold_delivery(**_kwargs):
+        delivery_entered.set()
+        await allow_delivery.wait()
+        return SendResult(success=True, message_id="saved-notice")
+
+    adapter._send_with_retry = AsyncMock(side_effect=hold_delivery)  # ty:ignore[invalid-assignment]
+    inbound = MessageEvent(
+        text="save without blocking closure",
+        message_type=MessageType.TEXT,
+        source=make_restart_source(chat_id="restore-chat"),
+        message_id="startup-delivery",
+    )
+    session_key = runner._session_key_for_source(inbound.source)
+    gate_task = asyncio.create_task(
+        runner._handle_startup_gate_message(
+            inbound,
+            session_key,
+            AsyncMock(),
+            True,
+        )
+    )
+    await delivery_entered.wait()
+
+    barrier = runner._get_startup_restore_barrier()
+    await asyncio.wait_for(barrier.acquire(), timeout=0.1)
+    barrier.release()
+
+    allow_delivery.set()
+    assert await gate_task is True
+'''
+RESTART_BARRIER_TEST_NEW = '''@pytest.mark.asyncio
+async def test_startup_gate_silent_acceptance_releases_barrier_without_delivery():
+    runner, adapter = make_restart_runner()
+    runner._startup_restore_in_progress = True
+    runner._persist_drain_event_result = AsyncMock(  # ty:ignore[invalid-assignment]
+        return_value=("queue-id", "queued")
+    )
+    adapter._send_with_retry = AsyncMock()  # ty:ignore[invalid-assignment]
+    inbound = MessageEvent(
+        text="save without blocking closure",
+        message_type=MessageType.TEXT,
+        source=make_restart_source(chat_id="restore-chat"),
+        message_id="startup-delivery",
+    )
+    session_key = runner._session_key_for_source(inbound.source)
+
+    assert await runner._handle_startup_gate_message(
+        inbound,
+        session_key,
+        AsyncMock(),
+        True,
+    ) is True
+
+    barrier = runner._get_startup_restore_barrier()
+    await asyncio.wait_for(barrier.acquire(), timeout=0.1)
+    barrier.release()
+    adapter._send_with_retry.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+'''
+
+RESTART_FAILED_DELIVERY_EXPECTATION_OLD = '''    with pytest.raises(RuntimeError, match="delivery was not accepted"):
+        await adapter.handle_message(inbound)
+
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
+'''
+RESTART_FAILED_DELIVERY_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="transport retry required"):
+        await adapter.handle_message(inbound)
+
+    adapter._send_with_retry.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
+'''
+
+RESTART_MISSING_ADAPTER_EXPECTATION_OLD = '''    with pytest.raises(RuntimeError, match="adapter is unavailable"):
+        await adapter.handle_message(inbound)
+
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
+'''
+RESTART_MISSING_ADAPTER_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="transport retry required"):
+        await adapter.handle_message(inbound)
+
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
 '''
 
 SLASH_SENDER_TEST_OLD = '''    @pytest.mark.asyncio
@@ -721,14 +1025,26 @@ def patch_delivery_ledger_test_text(source: str) -> str:
 
 
 def patch_continuity_gateway_text(source: str) -> str:
-    if CONTINUITY_MARKER in source:
-        return source
     patched = source
-    for old, new in DRAIN_NOTICE_REPLACEMENTS.items():
-        found = patched.count(old)
-        if found < 1:
-            raise RuntimeError("startup recovery notice anchor missing")
-        patched = patched.replace(old, new)
+    if CONTINUITY_MARKER not in patched:
+        for old, new in DRAIN_NOTICE_REPLACEMENTS.items():
+            found = patched.count(old)
+            if found < 1:
+                raise RuntimeError("startup recovery notice anchor missing")
+            patched = patched.replace(old, new)
+    if DRAIN_SILENT_DELIVERY_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            DRAIN_NOTICE_DELIVERY_OLD,
+            DRAIN_NOTICE_DELIVERY_NEW,
+            label="silent uncertain drain delivery",
+        )
+        patched = _replace_exact(
+            patched,
+            STARTUP_FAILED_SILENT_GUARD_OLD,
+            STARTUP_FAILED_SILENT_GUARD_NEW,
+            label="silent failed startup admission",
+        )
     forbidden = (
         "Gateway startup recovery is still finishing",
         "Hermes is already processing this saved instruction",
@@ -749,27 +1065,114 @@ def patch_continuity_gateway_text(source: str) -> str:
 
 
 def patch_restart_test_text(source: str) -> str:
-    if CONTINUITY_MARKER in source:
-        return source
-    patched = _replace_exact(
-        source,
-        STARTUP_CLAIM_TEST_OLD,
-        STARTUP_CLAIM_TEST_NEW,
-        label="startup claim silence test",
-    )
+    patched = source
+    if CONTINUITY_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            STARTUP_CLAIM_TEST_OLD,
+            STARTUP_CLAIM_TEST_NEW,
+            label="startup claim silence test",
+        )
+    if DRAIN_SILENT_DELIVERY_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            RESTART_SAVED_ASSERT_OLD,
+            RESTART_SAVED_ASSERT_NEW,
+            label="silent startup saved assertions",
+            count=4,
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_PERSIST_RESULT_OLD,
+            RESTART_PERSIST_RESULT_NEW,
+            label="silent startup persistence result",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_STATE_WORDING_OLD,
+            RESTART_STATE_WORDING_NEW,
+            label="startup row-state silence parametrization",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_STATE_ASSERT_OLD,
+            RESTART_STATE_ASSERT_NEW,
+            label="startup row-state silence assertion",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_LOCAL_OUTCOME_OLD,
+            RESTART_LOCAL_OUTCOME_NEW,
+            label="startup local-outcome silence parametrization",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_LOCAL_ASSERT_OLD,
+            RESTART_LOCAL_ASSERT_NEW,
+            label="startup local-outcome silence assertion",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_BARRIER_TEST_OLD,
+            RESTART_BARRIER_TEST_NEW,
+            label="silent startup barrier test",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_FAILED_DELIVERY_EXPECTATION_OLD,
+            RESTART_FAILED_DELIVERY_EXPECTATION_NEW,
+            label="failed admission transport retry test",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_MISSING_ADAPTER_EXPECTATION_OLD,
+            RESTART_MISSING_ADAPTER_EXPECTATION_NEW,
+            label="missing adapter transport retry test",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_UNSTABLE_IDENTITY_OLD,
+            RESTART_UNSTABLE_IDENTITY_NEW,
+            label="unstable identity transport retry test",
+        )
     ast.parse(patched)
     return patched
 
 
 def patch_drain_consumer_test_text(source: str) -> str:
-    if CONTINUITY_MARKER in source:
-        return source
-    patched = _replace_exact(
-        source,
-        DRAIN_CONSUMER_TEST_OLD,
-        DRAIN_CONSUMER_TEST_NEW,
-        label="startup decision consumer test",
-    )
+    patched = source
+    if CONTINUITY_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            DRAIN_CONSUMER_TEST_OLD,
+            DRAIN_CONSUMER_TEST_NEW,
+            label="startup decision consumer test",
+        )
+    if DRAIN_SILENT_DELIVERY_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            DRAIN_FAILURE_TEST_OLD,
+            DRAIN_FAILURE_TEST_NEW,
+            label="silent ambiguous drain completion test",
+        )
+        patched = _replace_exact(
+            patched,
+            DRAIN_REDELIVERY_TEST_OLD,
+            DRAIN_REDELIVERY_TEST_NEW,
+            label="silent live-claim redelivery test",
+        )
+        patched = _replace_exact(
+            patched,
+            DRAIN_CRASH_CLAIM_ASSERT_OLD,
+            DRAIN_CRASH_CLAIM_ASSERT_NEW,
+            label="silent claimed-crash retirement test",
+        )
+        patched = _replace_exact(
+            patched,
+            DRAIN_CRASH_CLAIM_RETRY_OLD,
+            "",
+            label="obsolete claimed-crash notice retries",
+        )
     ast.parse(patched)
     return patched
 

@@ -2,13 +2,13 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.03-golden-ee9188ad`:
+The current public release is `botdoctor-hermes-2026.08.03-golden-6e6be0e1`:
 
-- upstream Hermes `0.19.1+main.694.a6defd4f`: `a6defd4f1549da3fe1d08d6f746fc645c64543f0`;
-- public Golden source: `ee9188adb742006215fa407e3fab7c048c883f4d`;
-- runtime payload: 101 files;
+- upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
+- public Golden source: `6e6be0e1b7ba76374090cee2884db4ea6fa4c9ad`;
+- runtime payload: 103 files;
 - assembled runtime fingerprint:
-  `68ae2c6e18b47ce4a8bed2d8a4a4e02c41ea6cdde7d635a14f4e16e93df00f2a`.
+  `f338c28d0a5869b1e1d1a60879c74d319b5756ea66e109af76942d82f199a22b`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -20,18 +20,15 @@ installations.
 
 ## What changed in this release
 
-- Native Hermes advances to the exact rehearsed `a6defd4f` commit while the
+- Native Hermes advances to the immutable `v0.20.0` release while the
   public overlays retain only the compatibility gaps that are still required.
-- Gateway install/start operations preserve a valid runtime-service binding and
-  fail closed when a foreign checkout or stale service definition would swap
-  the active runtime.
-- Context compaction now proves its postconditions, model-attempt receipts close
-  their database handles, and local descriptor exhaustion is classified as a
-  local runtime failure instead of a model-provider failure.
-- Telegram voice memos have one delivery owner, and shared file-delivery rules
-  keep media fallback paths from producing duplicate sends.
-- Semantic computer control keeps normal automation fallbacks available when a
-  host or request is not eligible for semantic desktop control.
+- Durable task-ledger transitions and the open-loop detector now ship together,
+  so accepted work cannot silently disappear between model turns or restarts.
+- Silent drain recovery remains durable without leaking internal lifecycle text
+  into client chats, and Telegram group ingress stays out of the recovery
+  executor that owns replayed work.
+- Explicit attachment resends, voice-memo delivery, contextual reset, and
+  runtime-root checks are aligned with the v0.20.0 assembled contracts.
 
 ## Native first
 

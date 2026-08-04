@@ -23,6 +23,20 @@ from pathlib import Path
 
 MARKER = "HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1"
 
+LONG_TTS_TEST_OLD = '''        assert adapter.sent == [
+            {
+                "chat_id": "-1001",
+                "content": long_reply,
+                "reply_to": None,
+                "metadata": {"thread_id": "17585", "notify": True},
+            }
+        ]
+'''
+LONG_TTS_TEST_NEW = '''        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1 — a confirmed voice send is
+        # the one client-visible delivery even when the source prose is long.
+        assert adapter.sent == []
+'''
+
 
 def _write_if_changed(path: Path, content: str) -> bool:
     original = path.read_text(encoding="utf-8")
@@ -94,6 +108,11 @@ def patch_base_source(content: str) -> str | None:
         indent,
     )
     patched = content[:start] + replacement + content[end:]
+    postcondition_old = "delivery_attempted or _tts_caption_delivered"
+    postcondition_new = "delivery_attempted or _tts_voice_delivered"
+    if patched.count(postcondition_old) != 1:
+        return None
+    patched = patched.replace(postcondition_old, postcondition_new, 1)
     try:
         ast.parse(patched)
     except SyntaxError:
@@ -281,6 +300,20 @@ def patch_tts_source(content: str) -> str | None:
     return patched
 
 
+def patch_base_topic_test_source(content: str) -> str | None:
+    """Align native caption expectations with Golden's voice-only contract."""
+    if MARKER in content:
+        return content
+    if content.count(LONG_TTS_TEST_OLD) != 1:
+        return None
+    patched = content.replace(LONG_TTS_TEST_OLD, LONG_TTS_TEST_NEW, 1)
+    try:
+        ast.parse(patched)
+    except SyntaxError:
+        return None
+    return patched
+
+
 def _patch_file(path: Path, patcher, label: str) -> bool:
     if not path.exists():
         print(f"[voice_memo_single_delivery_v1] {label} not found: {path}")
@@ -312,6 +345,11 @@ def patch_voice_memo_single_delivery_v1(hermes_dir: Path) -> bool:
         hermes_dir / "tools" / "tts_tool.py",
         patch_tts_source,
         "TTS tool",
+    )
+    changed |= _patch_file(
+        hermes_dir / "tests" / "gateway" / "test_base_topic_sessions.py",
+        patch_base_topic_test_source,
+        "base topic tests",
     )
     return changed
 
