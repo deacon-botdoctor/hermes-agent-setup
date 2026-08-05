@@ -61,18 +61,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 103
+    assert manifest["components"]["runtime_payload"]["file_count"] == 277
     assert set(manifest["components"]) == {"runtime_payload"}
     assert release["source_scope"] == "sanitized_runtime_payload_only"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66",
-        "file_count": 77,
+        "digest": "580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826",
+        "file_count": 82,
     }
     assert manifest["assembled_runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 77
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 77
+    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 82
+    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 82
     assert set(release) == {
         "schema_version",
         "release",
@@ -387,7 +387,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 23
+    assert len(patches) == 26
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()

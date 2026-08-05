@@ -1,728 +1,27 @@
 {
-  "schema_version": 1,
-  "kind": "golden_runtime_payload_manifest",
-  "golden_sha": "b8f90b14f9267af63ea067c1fde07786af9b294a",
-  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-  "deployment_digest": "d18838348dba5482b66a0e8b7e955544a68a2ec61e5ff432190c465029b521d4",
-  "golden_deployment_digest": "284219a6e349b6dc13ffcbbf9704d0ed55693064b597986f2c3bf5449dd4e75b",
-  "components": {
-    "runtime_payload": {
-      "component": "runtime_payload",
-      "digest": "211cf16fa7b997c2e509cbced79835433560e34b14bf2bd1971413d52d27f612",
-      "excluded_paths": [],
-      "file_count": 103,
-      "files": [
-        {
-          "blob": "07f58440e5dae380f25cb6461b9a479827a0f8e9",
-          "mode": "100755",
-          "path": "bin/client-local-evidence-query.py",
-          "type": "blob"
-        },
-        {
-          "blob": "afc2ca82f35784c02355a743240834ca31b2b3c7",
-          "mode": "100755",
-          "path": "bin/hermes-client-day-review",
-          "type": "blob"
-        },
-        {
-          "blob": "8ef2d573d9b5a5782aac0711ce52ed2e34cb3064",
-          "mode": "100755",
-          "path": "bin/hermes-local-selfcheck.py",
-          "type": "blob"
-        },
-        {
-          "blob": "109e257f0a50f458031f0f5dbe84cb58f9db6347",
-          "mode": "100755",
-          "path": "bin/hermes-reflect-candidates-to-drafts.py",
-          "type": "blob"
-        },
-        {
-          "blob": "604f36dffda9624ed503716a48ecc444ee7c7cc9",
-          "mode": "100755",
-          "path": "bin/hermes-self-reflect.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7231dded555e6855b3c62f0bcd17b7f9258645c2",
-          "mode": "100755",
-          "path": "bin/hermes-skillify-autopromote.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5ca056258638b8299118c138c6125bd8f5e58b25",
-          "mode": "100755",
-          "path": "bin/llm-attempt-reconcile.py",
-          "type": "blob"
-        },
-        {
-          "blob": "daf679e8c53698423f481d79c7d24aeaa5cb1852",
-          "mode": "100755",
-          "path": "bin/papercut_inbox.py",
-          "type": "blob"
-        },
-        {
-          "blob": "4a21dc98824ba36e84b91bc123141c465bf836b0",
-          "mode": "100755",
-          "path": "bin/registry-sync.py",
-          "type": "blob"
-        },
-        {
-          "blob": "757fe2e95eedc57ea7f8aa176e8c6cd2a7d3e439",
-          "mode": "100755",
-          "path": "bin/self-improvement-trigger.py",
-          "type": "blob"
-        },
-        {
-          "blob": "d312f45bea93d1dad0f4e94e710c8c129dfc4d60",
-          "mode": "100644",
-          "path": "bin/telegram-transaction-canary.py",
-          "type": "blob"
-        },
-        {
-          "blob": "79a1170d78830509006db2304b98cb5f1bbd60f2",
-          "mode": "100644",
-          "path": "hooks/gbrain-capture/HOOK.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "ee87732ffab9138f1cf677b23077875e3e648879",
-          "mode": "100644",
-          "path": "hooks/gbrain-capture/handler.py",
-          "type": "blob"
-        },
-        {
-          "blob": "989f299f52503734c1cfaef0402683c5723f0e3c",
-          "mode": "100644",
-          "path": "hooks/open-loop-detector/HOOK.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "a663e085681a3e8a28cd26fc9fca0e750a10e221",
-          "mode": "100644",
-          "path": "hooks/open-loop-detector/handler.py",
-          "type": "blob"
-        },
-        {
-          "blob": "de838f2d200bff3845ecc36a439f4f8bc02e580c",
-          "mode": "100644",
-          "path": "hooks/telegram-transcript/HOOK.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "d3606dead2cc2d9679e231596b6ba414cb01e0cf",
-          "mode": "100644",
-          "path": "hooks/telegram-transcript/handler.py",
-          "type": "blob"
-        },
-        {
-          "blob": "e2fbcd833f8d0d4df64cdf6643b6126c83c4c095",
-          "mode": "100755",
-          "path": "kit/bin/papercut.py",
-          "type": "blob"
-        },
-        {
-          "blob": "051d3dbb025f7a2e12026c8199a5aa9f103cb235",
-          "mode": "100644",
-          "path": "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
-          "type": "blob"
-        },
-        {
-          "blob": "df54ea8c4ace929666fe61f86e58c69ab925014c",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/browser-routing.capability-entry.json",
-          "type": "blob"
-        },
-        {
-          "blob": "83eddee0074ac534707057359cac9ac6bb89cb9b",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/operating-patterns.capability-entry.json",
-          "type": "blob"
-        },
-        {
-          "blob": "2b8af52eb3e0ff9106a91d778caef31ede8924ea",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/public-floor-registry.json",
-          "type": "blob"
-        },
-        {
-          "blob": "14d36e6ca6994d27944e12ef4dcad1e06c1fbc62",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/pyproject.toml",
-          "type": "blob"
-        },
-        {
-          "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/src/capability_router/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "950ab806120ba50f166a6c3c4bf94a818ac5fa5d",
-          "mode": "100644",
-          "path": "mcp-servers/capability-router/src/capability_router/server.py",
-          "type": "blob"
-        },
-        {
-          "blob": "88f66291330d16e75c698a43d29310256494a581",
-          "mode": "100644",
-          "path": "patches/apply-all-patches.py",
-          "type": "blob"
-        },
-        {
-          "blob": "2bb08e04e3b7054c7fb796d93e330037ae29966d",
-          "mode": "100755",
-          "path": "patches/apply-session-search-current-topic.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c6f88987ed8b248659387266b42ca5719a06251e",
-          "mode": "100755",
-          "path": "patches/apply-skill-index-allowlist.py",
-          "type": "blob"
-        },
-        {
-          "blob": "ff78d487a9363ca2ec2e01a0f830222c0c282360",
-          "mode": "100644",
-          "path": "patches/apply-telegram-immediate-typing-receipt.py",
-          "type": "blob"
-        },
-        {
-          "blob": "99702281799afe0a133741fbae0f7731e6ab4c8f",
-          "mode": "100644",
-          "path": "patches/modules/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "20990b93cf9d278ac4269637ed82dc346fec26a7",
-          "mode": "100644",
-          "path": "patches/modules/assembled_runtime_contract.py",
-          "type": "blob"
-        },
-        {
-          "blob": "93ccf9768bb7d9a3a33c3ad6bf94bf1c45507d90",
-          "mode": "100644",
-          "path": "patches/modules/auto_resume_contextual_reset_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "58221366e4c5dba810c21592fc9d89feb791d677",
-          "mode": "100644",
-          "path": "patches/modules/clarify_prose_deadlock_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "47a67853f523b7af13aecc2188086ff0eedb7d44",
-          "mode": "100644",
-          "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "facc4a72e202e0e1ef50016f84aba7d7c2cd902a",
-          "mode": "100644",
-          "path": "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c87e0aa9afe478ddf01f51388c3708af96339c46",
-          "mode": "100644",
-          "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1365cc52598b4eb01a05997318496142b6034e7c",
-          "mode": "100644",
-          "path": "patches/modules/gateway_runtime_root_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0090f165c6a408fba1c6720010bb43d22a3c4136",
-          "mode": "100644",
-          "path": "patches/modules/gateway_service_binding_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c4be15895d92a4b038ddbe650ef8ae58891dfddf",
-          "mode": "100644",
-          "path": "patches/modules/lifecycle_guard_invalid_path_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1333f16ec985410a85ea8c5fe90a4b07e18b1201",
-          "mode": "100755",
-          "path": "patches/modules/llm_attempt_receipts_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "114091f15da281b9f0c5620a80b8d93615ab3302",
-          "mode": "100644",
-          "path": "patches/modules/mcp_in_turn_refresh_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0621c735967d62d8ba7b210d21cd5682c15bdc5e",
-          "mode": "100644",
-          "path": "patches/modules/mcp_legacy_alias_dispatch_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "b25e9607355a9cc71ed1a5f270e356478d84046c",
-          "mode": "100644",
-          "path": "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "633813b2008ae3ba2ebbd43f9335c5a0c677c02f",
-          "mode": "100644",
-          "path": "patches/modules/media_same_path_resend_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "30a9b43e562c63113e5383c7722c2f0077943d86",
-          "mode": "100644",
-          "path": "patches/modules/registry_loader.py",
-          "type": "blob"
-        },
-        {
-          "blob": "ffa03389be653aa420d9e2b728d96538b754096d",
-          "mode": "100644",
-          "path": "patches/modules/restart_interruption_checkin_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "2978d4745355d6191ded90accfedd019c0b27ced",
-          "mode": "100644",
-          "path": "patches/modules/silent_context_lifecycle_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "4c85f96e74f5e3f5b23f6f9837d64d7104663b6a",
-          "mode": "100644",
-          "path": "patches/modules/state_db_descriptor_lifecycle_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "ba7fde1f94ae40f3ed3eb219826f369b5c646279",
-          "mode": "100755",
-          "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "9eb6d1f2c72c59445d85bf2b83c9a3b989e2a083",
-          "mode": "100644",
-          "path": "patches/modules/telegram_fresh_topic_continuity_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "a4832baa671d9ce8a75390ac52075e604a460d8e",
-          "mode": "100644",
-          "path": "patches/modules/telegram_media_download_retry_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "da8ef7c5a5e3634174bc3e9283c9c5927b1cf504",
-          "mode": "100644",
-          "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1a30b6d6672989fcdb2c525621574d3349c66bda",
-          "mode": "100644",
-          "path": "patches/modules/telegram_poll_liveness_writer_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7c4167c46147001e445bdc4e9b83e0cbe45e8c3c",
-          "mode": "100644",
-          "path": "patches/modules/telegram_transaction_canary_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "25c77194c675fe8e29e9afa900a304d5f1384be0",
-          "mode": "100644",
-          "path": "patches/modules/voice_memo_single_delivery_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5205e6c59d40e48bcf0c8d10e7a3535c9b0337c2",
-          "mode": "100644",
-          "path": "patches/modules/windows_gateway_task_identity_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1ae8c8515c8f8f5f00e1cd98d69a83fbfa47e8a1",
-          "mode": "100644",
-          "path": "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "05fc903b325782ea68f3a5916da0d9650030872d",
-          "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-3c27eb62-durable-drain-v1.patch",
-          "type": "blob"
-        },
-        {
-          "blob": "14ff6d461bf065f63c850af3f76c378b1f2465e7",
-          "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-v1/manifest.json",
-          "type": "blob"
-        },
-        {
-          "blob": "8bc58945e074e766c4c8d95dd351c0a8f1ebb422",
-          "mode": "100644",
-          "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5f5b366ad81e6b23b282bcaaae5d21a7047328ba",
-          "mode": "100644",
-          "path": "patches/payloads/llm-attempt-receipts-v1/open_todo_stop_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7aa407fb949fbfa75c21e4816293bd0cc3a9c483",
-          "mode": "100644",
-          "path": "patches/payloads/session-search-current-topic-v2/golden_topic_recall.py",
-          "type": "blob"
-        },
-        {
-          "blob": "85cca07387fc655de4dce9298f37a509e71f9a9a",
-          "mode": "100644",
-          "path": "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
-          "type": "blob"
-        },
-        {
-          "blob": "db31f80f0fcff5042ebfce0f9a655353fef4278e",
-          "mode": "100644",
-          "path": "patches/registry.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "cc63043af3fbc53fe1a224fa79fcb458d25412aa",
-          "mode": "100644",
-          "path": "plugins/botdoctor-immersion/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1d34a366a4a1dea17bde4b9c2105fa4583991516",
-          "mode": "100644",
-          "path": "plugins/botdoctor-immersion/middleware.py",
-          "type": "blob"
-        },
-        {
-          "blob": "70cf7038fcd81c7e099511a70566f07f35ab225f",
-          "mode": "100644",
-          "path": "plugins/botdoctor-immersion/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "68c46d08356976a368377a5fa8c3e0a1f0c55e6a",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "e88025eaf92c8d2aec6f5e653b492b244c4d91e5",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/command.py",
-          "type": "blob"
-        },
-        {
-          "blob": "00989447afb7e3200f6ed356e3e206fcc7849939",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/core.py",
-          "type": "blob"
-        },
-        {
-          "blob": "08dbec5364a97cad72b3d63e5ed2e1bf9d86352c",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "de7ecdded6df94e7eae60ebb5fb54ad7e215567c",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/redaction.py",
-          "type": "blob"
-        },
-        {
-          "blob": "8999c29c9ac7a75bb2d2d038b482e61ec7005f96",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/README.md",
-          "type": "blob"
-        },
-        {
-          "blob": "a27ab9f9d081427584b374a316aacb1ea37c3e48",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5c51baa0d05a32745023a054eb60bfa8d6704297",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/control.py",
-          "type": "blob"
-        },
-        {
-          "blob": "2bf610e13c4075727d8d42c16b1931390fbcc27d",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "7f073061d11884e6df4bc40daa799f088c09425f",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/registration.py",
-          "type": "blob"
-        },
-        {
-          "blob": "29321e8e8d68d5970a51c5284956e01a375c370a",
-          "mode": "100644",
-          "path": "plugins/semantic-computer-control-guard/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "609df6e3f93b9e06fdb6eb7d7e19e1cbc8d9d082",
-          "mode": "100644",
-          "path": "plugins/semantic-computer-control-guard/guard.py",
-          "type": "blob"
-        },
-        {
-          "blob": "807bf15ff01568ae714676f309ceccfd72280ba3",
-          "mode": "100644",
-          "path": "plugins/semantic-computer-control-guard/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "9b7b3a1a12eef34a5e050d5f95eb6fa569bce600",
-          "mode": "100644",
-          "path": "plugins/task-ledger/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5a03f3b8dbafd3314ecd032a4693e3348fe2033a",
-          "mode": "100644",
-          "path": "plugins/task-ledger/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "1453c94ec698eceee32f8de05f7ce046524147dd",
-          "mode": "100644",
-          "path": "plugins/task-ledger/tools.py",
-          "type": "blob"
-        },
-        {
-          "blob": "2c94577240494e5be1f20576dd4648702a21d724",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7ceb2f2078f25b39f45359799bf8857204f6f264",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "3383edd528873f587ff54aaa06900ba54832f29b",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/tools.py",
-          "type": "blob"
-        },
-        {
-          "blob": "d8f9db6d6b8113d6da195fd168e7882c16a6e76f",
-          "mode": "100644",
-          "path": "scripts/merge-shared-defaults.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c7b83136d5bf8956d20cbda5aa500ee862cec0ae",
-          "mode": "100644",
-          "path": "shared-defaults/README.md",
-          "type": "blob"
-        },
-        {
-          "blob": "ceccfc8416d7ed5277783ed72f83040e336f7ebe",
-          "mode": "100644",
-          "path": "shared-defaults/config-client-quiet-display.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "1e4299b2b4e5185e79a80eb59f5bed435b3fac9c",
-          "mode": "100644",
-          "path": "shared-defaults/config-mcp-on-demand-control.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "bf0558061a1265830d50fe1bbe8158d2cdf7088a",
-          "mode": "100644",
-          "path": "shared-defaults/config-model-autonomy.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "55a738adb67f88c135ef2b7adeb44f1848312b6d",
-          "mode": "100644",
-          "path": "shared-defaults/config-native-tool-search.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "68445885e58b776a8f9a4a7c2d0a239d401bdf2f",
-          "mode": "100644",
-          "path": "shared-defaults/config-telegram-surface.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "49320fbe8b3e8249116dde2bae551e011f8678c6",
-          "mode": "100644",
-          "path": "shared-defaults/retired-policy-defaults-v1.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "b44c7da237c366d912036a9be2d5583f9c035fda",
-          "mode": "100644",
-          "path": "shared-rules/client-isolation.md",
-          "type": "blob"
-        },
-        {
-          "blob": "0ab4c5344a5aa387288d504e082da20304523dc1",
-          "mode": "100644",
-          "path": "shared-rules/content-policy.md",
-          "type": "blob"
-        },
-        {
-          "blob": "44bad2c8fa3c27bce83c76def629252136483d23",
-          "mode": "100644",
-          "path": "shared-rules/file-delivery.md",
-          "type": "blob"
-        },
-        {
-          "blob": "b5c4d31640f14339133750c28ee4b886234532d2",
-          "mode": "100644",
-          "path": "shared-rules/truth-over-comfort.md",
-          "type": "blob"
-        },
-        {
-          "blob": "d5359f1bd042e83c2d26d35f9dedbf9f2b74feec",
-          "mode": "100644",
-          "path": "shared-rules/westminster-marque.md",
-          "type": "blob"
-        },
-        {
-          "blob": "f5e5b8c1781c8c89437a63258c71a944c64ad1a0",
-          "mode": "100644",
-          "path": "skills/fleet/golden-computer-use-v2/SKILL.md",
-          "type": "blob"
-        },
-        {
-          "blob": "904ecd870bec022ec3d6424a873a02ec13bea8f1",
-          "mode": "100644",
-          "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
-          "type": "blob"
-        },
-        {
-          "blob": "5fe35e5f6ff635f3933b57fe3c24dee0c191504f",
-          "mode": "100644",
-          "path": "skills/fleet/papercuts/SKILL.md",
-          "type": "blob"
-        },
-        {
-          "blob": "416010dd6cb1b4bfdffb0dc8584ddad4fd6a3588",
-          "mode": "100644",
-          "path": "upstream.lock",
-          "type": "blob"
-        }
-      ],
-      "paths": [
-        "bin/hermes-client-day-review",
-        "bin/hermes-local-selfcheck.py",
-        "bin/hermes-reflect-candidates-to-drafts.py",
-        "bin/hermes-self-reflect.py",
-        "bin/hermes-skillify-autopromote.py",
-        "bin/llm-attempt-reconcile.py",
-        "bin/client-local-evidence-query.py",
-        "bin/papercut_inbox.py",
-        "bin/registry-sync.py",
-        "bin/self-improvement-trigger.py",
-        "bin/telegram-transaction-canary.py",
-        "hooks/gbrain-capture",
-        "hooks/open-loop-detector",
-        "hooks/telegram-transcript",
-        "kit/bin/papercut.py",
-        "mcp-servers/capability-router",
-        "patches/apply-all-patches.py",
-        "patches/apply-session-search-current-topic.py",
-        "patches/apply-skill-index-allowlist.py",
-        "patches/apply-telegram-immediate-typing-receipt.py",
-        "patches/modules/__init__.py",
-        "patches/modules/assembled_runtime_contract.py",
-        "patches/modules/auto_resume_contextual_reset_v1.py",
-        "patches/modules/codex_401_paid_fallback_circuit_v1.py",
-        "patches/modules/clarify_prose_deadlock_guard_v1.py",
-        "patches/modules/context_compaction_postconditions_v1.py",
-        "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
-        "patches/modules/silent_context_lifecycle_v1.py",
-        "patches/modules/state_db_descriptor_lifecycle_v1.py",
-        "patches/modules/voice_memo_single_delivery_v1.py",
-        "patches/modules/compaction_completion_status_suppression_v1.py",
-        "patches/modules/durable_drain_compatibility_v1.py",
-        "patches/modules/durable_drain_inbox_carrier_v1.py",
-        "patches/modules/gateway_runtime_root_guard_v1.py",
-        "patches/modules/gateway_service_binding_guard_v1.py",
-        "patches/modules/lifecycle_guard_invalid_path_v1.py",
-        "patches/modules/llm_attempt_receipts_v1.py",
-        "patches/modules/media_same_path_resend_v1.py",
-        "patches/modules/mcp_in_turn_refresh_v1.py",
-        "patches/modules/mcp_legacy_alias_dispatch_v1.py",
-        "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
-        "patches/modules/registry_loader.py",
-        "patches/modules/restart_interruption_checkin_v1.py",
-        "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
-        "patches/modules/telegram_fresh_topic_continuity_v1.py",
-        "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
-        "patches/modules/telegram_media_download_retry_v1.py",
-        "patches/modules/telegram_poll_liveness_writer_v1.py",
-        "patches/modules/telegram_transaction_canary_v1.py",
-        "patches/modules/windows_gateway_task_identity_v1.py",
-        "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
-        "patches/payloads/durable-drain-inbox-v1",
-        "patches/payloads/llm-attempt-receipts-v1",
-        "patches/payloads/session-search-current-topic-v2",
-        "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
-        "patches/registry.yaml",
-        "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
-        "plugins/botdoctor-immersion",
-        "plugins/composio-onboarding",
-        "plugins/mcp-on-demand-control",
-        "plugins/semantic-computer-control-guard",
-        "plugins/task-ledger",
-        "plugins/telegram-transcript",
-        "scripts/merge-shared-defaults.py",
-        "shared-defaults",
-        "shared-rules/client-isolation.md",
-        "shared-rules/content-policy.md",
-        "shared-rules/file-delivery.md",
-        "shared-rules/westminster-marque.md",
-        "shared-rules/truth-over-comfort.md",
-        "skills/fleet/nightly-client-reflection-default",
-        "skills/fleet/papercuts",
-        "skills/fleet/golden-computer-use-v2",
-        "upstream.lock"
-      ]
-    }
-  },
   "assembled_runtime_fingerprint": {
-    "digest": "1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66",
+    "digest": "580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826",
     "excluded_state_or_artifacts": [
       "gateway/platforms/base.py.bak-pre-telegram-transaction-canary-v1",
       "gateway/stream_consumer.py.bak-pre-telegram-transaction-canary-v1",
-      "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1",
-      "tests/gateway/test_drain_inbox.py.bak-20260804-014637-pre-silent-context-lifecycle-v1"
+      "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1"
     ],
     "expected_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-    "file_count": 77,
+    "file_count": 82,
     "files": {
       ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
         "mode": "100644",
         "sha256": "085236cd7b1d1055f70d7c93b374918fcade8b7607e7890b6e7d664576b00891",
+        "type": "blob"
+      },
+      "agent/agent_init.py": {
+        "mode": "100644",
+        "sha256": "48f51f9cf62f2a1019f5bfd108830defa6f8b3af407be1974b8940cddf1b83d4",
+        "type": "blob"
+      },
+      "agent/agent_runtime_helpers.py": {
+        "mode": "100644",
+        "sha256": "3d454dba310bb8ecb035badad71451e21a11f29fbc134ba8e8f1adcfd77e2346",
         "type": "blob"
       },
       "agent/auxiliary_client.py": {
@@ -747,7 +46,7 @@
       },
       "agent/conversation_loop.py": {
         "mode": "100644",
-        "sha256": "4e9616dd7a7169f57743a53739169dc2421059e626e5cd6c4cbe3ded57fdd75f",
+        "sha256": "448f0ec249a897ca1ee2af3b36ef74eac94b99c935af5afcba4235c7bbdb6ad2",
         "type": "blob"
       },
       "agent/llm_attempt_receipts.py": {
@@ -763,6 +62,11 @@
       "agent/prompt_builder.py": {
         "mode": "100644",
         "sha256": "0c73bde064ac3b47b89ee3b45c4ed067062e6912250246031aafd593c8ff9452",
+        "type": "blob"
+      },
+      "agent/tool_dispatch_helpers.py": {
+        "mode": "100644",
+        "sha256": "000187df49c48965cdde05961b8ecaf4262c98615402bde41bdcbbe167648d4a",
         "type": "blob"
       },
       "agent/tool_executor.py": {
@@ -782,7 +86,7 @@
       },
       "cron/lifecycle_guard.py": {
         "mode": "100644",
-        "sha256": "6ba85efcf517b4c7c45a8e297b87bcd5dc1a8da90588e5732e60087961b93fdf",
+        "sha256": "5360ac60feab05304a27173ebe25e3a7a1abb869a5070981972d661388462ad8",
         "type": "blob"
       },
       "gateway/delivery_ledger.py": {
@@ -837,7 +141,7 @@
       },
       "gateway/run.py": {
         "mode": "100644",
-        "sha256": "5644710330a936a2c4830f2aa8cf1dcf8ac7a1d3d9c26c758cf22ca6d76eb81c",
+        "sha256": "1d6ce02b44522d9eabc847ed425269b208e0f8ce443adbce9ef817828cb4523b",
         "type": "blob"
       },
       "gateway/session.py": {
@@ -862,7 +166,7 @@
       },
       "hermes_cli/config_defaults.py": {
         "mode": "100644",
-        "sha256": "5a406c218ded615b9b73f762a3adcee77c6e2c298e715f64cab6d28bd93e9eed",
+        "sha256": "15663c035cbc7bd7e704f8b7849a457cf632344bfe5a0a9a51f3571d6e463cdf",
         "type": "blob"
       },
       "hermes_cli/gateway.py": {
@@ -917,7 +221,12 @@
       },
       "run_agent.py": {
         "mode": "100644",
-        "sha256": "d09f5939d403261ded750fc936e99fa08927cf1f7f66410f35f64097372d78bb",
+        "sha256": "07ff44df9bebac63eff7e83f95e9f5557c199e1bda7ad13beaca3ad532bc79cb",
+        "type": "blob"
+      },
+      "tests/agent/test_intent_ack_continuation.py": {
+        "mode": "100644",
+        "sha256": "e77a25684bc8c45cce4805b86adc18248ffe882354d19457865aa66e34d58e79",
         "type": "blob"
       },
       "tests/gateway/restart_test_helpers.py": {
@@ -1002,7 +311,7 @@
       },
       "tests/gateway/test_restart_resume_pending.py": {
         "mode": "100644",
-        "sha256": "4a729bdd09556c8ac2aa0e46a5ba97f58a168e47c35bd45c8191d42206b26248",
+        "sha256": "5d28b66f9ad148661c2a0ce3289ab6da67c5f03e690c611773fd4c76b5fd474e",
         "type": "blob"
       },
       "tests/gateway/test_run_cleanup_progress.py": {
@@ -1062,7 +371,12 @@
       },
       "tests/run_agent/test_run_agent.py": {
         "mode": "100644",
-        "sha256": "37fe49f09bde4780bf484aceea6f8671101fd823b6082b954955540572f0604c",
+        "sha256": "a465a1a7605575abc352ae6bc784fa4c8c90a5c0f50f5e35ac608a6b9980cc4d",
+        "type": "blob"
+      },
+      "tests/run_agent/test_tool_batch_segmentation.py": {
+        "mode": "100644",
+        "sha256": "56f311a1893e05cecf3aa52fb1ab8f5bbb74f16b5f7b76d6c98b58642f2e5e29",
         "type": "blob"
       },
       "tests/run_agent/test_tool_call_guardrail_runtime.py": {
@@ -1106,8 +420,1778 @@
         "type": "blob"
       }
     },
-    "golden_sha": "b8f90b14f9267af63ea067c1fde07786af9b294a",
+    "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
     "upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
     "verified": true
-  }
+  },
+  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+  "components": {
+    "runtime_payload": {
+      "component": "runtime_payload",
+      "digest": "284a2f15c8af36a54ffccd87f061cf54a2660c9bcfd14dac891668db459ae536",
+      "excluded_paths": [
+        "kit/agent/SOUL.template.md",
+        "shared-rules/capability-discovery.md",
+        "shared-rules/knowledge-routing.md"
+      ],
+      "file_count": 277,
+      "files": [
+        {
+          "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
+          "mode": "100755",
+          "path": "bin/client-doc-artifact-qa",
+          "type": "blob"
+        },
+        {
+          "blob": "07f58440e5dae380f25cb6461b9a479827a0f8e9",
+          "mode": "100755",
+          "path": "bin/client-local-evidence-query.py",
+          "type": "blob"
+        },
+        {
+          "blob": "afc2ca82f35784c02355a743240834ca31b2b3c7",
+          "mode": "100755",
+          "path": "bin/hermes-client-day-review",
+          "type": "blob"
+        },
+        {
+          "blob": "42728da4be8de4054273952a11a0413a43c7856e",
+          "mode": "100755",
+          "path": "bin/hermes-local-selfcheck.py",
+          "type": "blob"
+        },
+        {
+          "blob": "109e257f0a50f458031f0f5dbe84cb58f9db6347",
+          "mode": "100755",
+          "path": "bin/hermes-reflect-candidates-to-drafts.py",
+          "type": "blob"
+        },
+        {
+          "blob": "604f36dffda9624ed503716a48ecc444ee7c7cc9",
+          "mode": "100755",
+          "path": "bin/hermes-self-reflect.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7231dded555e6855b3c62f0bcd17b7f9258645c2",
+          "mode": "100755",
+          "path": "bin/hermes-skillify-autopromote.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5ca056258638b8299118c138c6125bd8f5e58b25",
+          "mode": "100755",
+          "path": "bin/llm-attempt-reconcile.py",
+          "type": "blob"
+        },
+        {
+          "blob": "daf679e8c53698423f481d79c7d24aeaa5cb1852",
+          "mode": "100755",
+          "path": "bin/papercut_inbox.py",
+          "type": "blob"
+        },
+        {
+          "blob": "4a21dc98824ba36e84b91bc123141c465bf836b0",
+          "mode": "100755",
+          "path": "bin/registry-sync.py",
+          "type": "blob"
+        },
+        {
+          "blob": "757fe2e95eedc57ea7f8aa176e8c6cd2a7d3e439",
+          "mode": "100755",
+          "path": "bin/self-improvement-trigger.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d312f45bea93d1dad0f4e94e710c8c129dfc4d60",
+          "mode": "100644",
+          "path": "bin/telegram-transaction-canary.py",
+          "type": "blob"
+        },
+        {
+          "blob": "79a1170d78830509006db2304b98cb5f1bbd60f2",
+          "mode": "100644",
+          "path": "hooks/gbrain-capture/HOOK.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "ee87732ffab9138f1cf677b23077875e3e648879",
+          "mode": "100644",
+          "path": "hooks/gbrain-capture/handler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "de838f2d200bff3845ecc36a439f4f8bc02e580c",
+          "mode": "100644",
+          "path": "hooks/telegram-transcript/HOOK.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "d3606dead2cc2d9679e231596b6ba414cb01e0cf",
+          "mode": "100644",
+          "path": "hooks/telegram-transcript/handler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e2fbcd833f8d0d4df64cdf6643b6126c83c4c095",
+          "mode": "100755",
+          "path": "kit/bin/papercut.py",
+          "type": "blob"
+        },
+        {
+          "blob": "051d3dbb025f7a2e12026c8199a5aa9f103cb235",
+          "mode": "100644",
+          "path": "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
+          "type": "blob"
+        },
+        {
+          "blob": "df54ea8c4ace929666fe61f86e58c69ab925014c",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/browser-routing.capability-entry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "d8a6e0007f10dc338c4d7b93f1a7771efcd3630b",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/operating-patterns.capability-entry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "4415f74fdf6da09ea30a27cdadf9b151b1a8a752",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/public-floor-registry.json",
+          "type": "blob"
+        },
+        {
+          "blob": "14d36e6ca6994d27944e12ef4dcad1e06c1fbc62",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/pyproject.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/src/capability_router/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "950ab806120ba50f166a6c3c4bf94a818ac5fa5d",
+          "mode": "100644",
+          "path": "mcp-servers/capability-router/src/capability_router/server.py",
+          "type": "blob"
+        },
+        {
+          "blob": "748c8a3ff9e59ad89115a0a78ae8618d46720e36",
+          "mode": "100644",
+          "path": "patches/apply-all-patches.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2bb08e04e3b7054c7fb796d93e330037ae29966d",
+          "mode": "100755",
+          "path": "patches/apply-session-search-current-topic.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c6f88987ed8b248659387266b42ca5719a06251e",
+          "mode": "100755",
+          "path": "patches/apply-skill-index-allowlist.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ff78d487a9363ca2ec2e01a0f830222c0c282360",
+          "mode": "100644",
+          "path": "patches/apply-telegram-immediate-typing-receipt.py",
+          "type": "blob"
+        },
+        {
+          "blob": "99702281799afe0a133741fbae0f7731e6ab4c8f",
+          "mode": "100644",
+          "path": "patches/modules/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d52c5b6f753dec3aeab85c930c5533fca63b8564",
+          "mode": "100644",
+          "path": "patches/modules/assembled_runtime_contract.py",
+          "type": "blob"
+        },
+        {
+          "blob": "93ccf9768bb7d9a3a33c3ad6bf94bf1c45507d90",
+          "mode": "100644",
+          "path": "patches/modules/auto_resume_contextual_reset_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "58221366e4c5dba810c21592fc9d89feb791d677",
+          "mode": "100644",
+          "path": "patches/modules/clarify_prose_deadlock_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "47a67853f523b7af13aecc2188086ff0eedb7d44",
+          "mode": "100644",
+          "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "facc4a72e202e0e1ef50016f84aba7d7c2cd902a",
+          "mode": "100644",
+          "path": "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c87e0aa9afe478ddf01f51388c3708af96339c46",
+          "mode": "100644",
+          "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1365cc52598b4eb01a05997318496142b6034e7c",
+          "mode": "100644",
+          "path": "patches/modules/gateway_runtime_root_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "0090f165c6a408fba1c6720010bb43d22a3c4136",
+          "mode": "100644",
+          "path": "patches/modules/gateway_service_binding_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "fa46edac1a5996e1ab49d067807422a107cc7fa4",
+          "mode": "100644",
+          "path": "patches/modules/lean_agent_loop_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "14d4f1dcd26d082cc464af72b57efd7ca2ac6d94",
+          "mode": "100644",
+          "path": "patches/modules/lifecycle_guard_invalid_path_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1333f16ec985410a85ea8c5fe90a4b07e18b1201",
+          "mode": "100755",
+          "path": "patches/modules/llm_attempt_receipts_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "114091f15da281b9f0c5620a80b8d93615ab3302",
+          "mode": "100644",
+          "path": "patches/modules/mcp_in_turn_refresh_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "0621c735967d62d8ba7b210d21cd5682c15bdc5e",
+          "mode": "100644",
+          "path": "patches/modules/mcp_legacy_alias_dispatch_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "b25e9607355a9cc71ed1a5f270e356478d84046c",
+          "mode": "100644",
+          "path": "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "633813b2008ae3ba2ebbd43f9335c5a0c677c02f",
+          "mode": "100644",
+          "path": "patches/modules/media_same_path_resend_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "30a9b43e562c63113e5383c7722c2f0077943d86",
+          "mode": "100644",
+          "path": "patches/modules/registry_loader.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5fd83ad1a829937228655503316afbb8874f467b",
+          "mode": "100644",
+          "path": "patches/modules/restart_interruption_checkin_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "64c7d9017a897485b739ad0f13c4a7a479523d44",
+          "mode": "100644",
+          "path": "patches/modules/runtime_env_config_authority_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2978d4745355d6191ded90accfedd019c0b27ced",
+          "mode": "100644",
+          "path": "patches/modules/silent_context_lifecycle_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "4c85f96e74f5e3f5b23f6f9837d64d7104663b6a",
+          "mode": "100644",
+          "path": "patches/modules/state_db_descriptor_lifecycle_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ba7fde1f94ae40f3ed3eb219826f369b5c646279",
+          "mode": "100755",
+          "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "9eb6d1f2c72c59445d85bf2b83c9a3b989e2a083",
+          "mode": "100644",
+          "path": "patches/modules/telegram_fresh_topic_continuity_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "a4832baa671d9ce8a75390ac52075e604a460d8e",
+          "mode": "100644",
+          "path": "patches/modules/telegram_media_download_retry_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7ef2145dfd2677ce0e10dbe2a2a67d72f44b2ad6",
+          "mode": "100644",
+          "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e2363f43895b9be12acd058dd85adf0bea0e3b16",
+          "mode": "100644",
+          "path": "patches/modules/telegram_organic_long_running_checkpoints_v2.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1a30b6d6672989fcdb2c525621574d3349c66bda",
+          "mode": "100644",
+          "path": "patches/modules/telegram_poll_liveness_writer_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7c4167c46147001e445bdc4e9b83e0cbe45e8c3c",
+          "mode": "100644",
+          "path": "patches/modules/telegram_transaction_canary_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "25c77194c675fe8e29e9afa900a304d5f1384be0",
+          "mode": "100644",
+          "path": "patches/modules/voice_memo_single_delivery_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5205e6c59d40e48bcf0c8d10e7a3535c9b0337c2",
+          "mode": "100644",
+          "path": "patches/modules/windows_gateway_task_identity_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1ae8c8515c8f8f5f00e1cd98d69a83fbfa47e8a1",
+          "mode": "100644",
+          "path": "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "05fc903b325782ea68f3a5916da0d9650030872d",
+          "mode": "100644",
+          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-3c27eb62-durable-drain-v1.patch",
+          "type": "blob"
+        },
+        {
+          "blob": "14ff6d461bf065f63c850af3f76c378b1f2465e7",
+          "mode": "100644",
+          "path": "patches/payloads/durable-drain-inbox-v1/manifest.json",
+          "type": "blob"
+        },
+        {
+          "blob": "8bc58945e074e766c4c8d95dd351c0a8f1ebb422",
+          "mode": "100644",
+          "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5f5b366ad81e6b23b282bcaaae5d21a7047328ba",
+          "mode": "100644",
+          "path": "patches/payloads/llm-attempt-receipts-v1/open_todo_stop_guard_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7aa407fb949fbfa75c21e4816293bd0cc3a9c483",
+          "mode": "100644",
+          "path": "patches/payloads/session-search-current-topic-v2/golden_topic_recall.py",
+          "type": "blob"
+        },
+        {
+          "blob": "85cca07387fc655de4dce9298f37a509e71f9a9a",
+          "mode": "100644",
+          "path": "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
+          "type": "blob"
+        },
+        {
+          "blob": "b5c6d89d184983e33e4105dfe196c3a7d11b5090",
+          "mode": "100644",
+          "path": "patches/registry.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "cc63043af3fbc53fe1a224fa79fcb458d25412aa",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1d34a366a4a1dea17bde4b9c2105fa4583991516",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/middleware.py",
+          "type": "blob"
+        },
+        {
+          "blob": "70cf7038fcd81c7e099511a70566f07f35ab225f",
+          "mode": "100644",
+          "path": "plugins/botdoctor-immersion/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "68c46d08356976a368377a5fa8c3e0a1f0c55e6a",
+          "mode": "100644",
+          "path": "plugins/composio-onboarding/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e88025eaf92c8d2aec6f5e653b492b244c4d91e5",
+          "mode": "100644",
+          "path": "plugins/composio-onboarding/command.py",
+          "type": "blob"
+        },
+        {
+          "blob": "00989447afb7e3200f6ed356e3e206fcc7849939",
+          "mode": "100644",
+          "path": "plugins/composio-onboarding/core.py",
+          "type": "blob"
+        },
+        {
+          "blob": "08dbec5364a97cad72b3d63e5ed2e1bf9d86352c",
+          "mode": "100644",
+          "path": "plugins/composio-onboarding/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "de7ecdded6df94e7eae60ebb5fb54ad7e215567c",
+          "mode": "100644",
+          "path": "plugins/composio-onboarding/redaction.py",
+          "type": "blob"
+        },
+        {
+          "blob": "8999c29c9ac7a75bb2d2d038b482e61ec7005f96",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/README.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a27ab9f9d081427584b374a316aacb1ea37c3e48",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "420bbb4edbd3bf34c09e82017d5745830ca8744f",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/control.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d47a6c0ed7a5cd8fe78dc596a2ba77faa0f83b8c",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "725362e06e84c63fb446f00e7207185997567bb3",
+          "mode": "100644",
+          "path": "plugins/mcp-on-demand-control/registration.py",
+          "type": "blob"
+        },
+        {
+          "blob": "29321e8e8d68d5970a51c5284956e01a375c370a",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "609df6e3f93b9e06fdb6eb7d7e19e1cbc8d9d082",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/guard.py",
+          "type": "blob"
+        },
+        {
+          "blob": "807bf15ff01568ae714676f309ceccfd72280ba3",
+          "mode": "100644",
+          "path": "plugins/semantic-computer-control-guard/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "9b7b3a1a12eef34a5e050d5f95eb6fa569bce600",
+          "mode": "100644",
+          "path": "plugins/task-ledger/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "5a03f3b8dbafd3314ecd032a4693e3348fe2033a",
+          "mode": "100644",
+          "path": "plugins/task-ledger/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "2abd75407d976221e4e7b911c0bc8eebcb64f7fb",
+          "mode": "100644",
+          "path": "plugins/task-ledger/tools.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2c94577240494e5be1f20576dd4648702a21d724",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "7ceb2f2078f25b39f45359799bf8857204f6f264",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "3383edd528873f587ff54aaa06900ba54832f29b",
+          "mode": "100644",
+          "path": "plugins/telegram-transcript/tools.py",
+          "type": "blob"
+        },
+        {
+          "blob": "d8f9db6d6b8113d6da195fd168e7882c16a6e76f",
+          "mode": "100644",
+          "path": "scripts/merge-shared-defaults.py",
+          "type": "blob"
+        },
+        {
+          "blob": "79a2bfbd9db2604a69f52e92105a66d7f474044f",
+          "mode": "100644",
+          "path": "shared-defaults/README.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ce9189673ac42a5fd56318625608f338b1276e25",
+          "mode": "100644",
+          "path": "shared-defaults/config-client-quiet-display.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "1e4299b2b4e5185e79a80eb59f5bed435b3fac9c",
+          "mode": "100644",
+          "path": "shared-defaults/config-mcp-on-demand-control.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "444fbb4aaf4df43a27e97f81f21c8e6772fa45b8",
+          "mode": "100644",
+          "path": "shared-defaults/config-model-autonomy.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "55a738adb67f88c135ef2b7adeb44f1848312b6d",
+          "mode": "100644",
+          "path": "shared-defaults/config-native-tool-search.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "41c4ee44135a507e93cbd49cd62c7ec79ebb0f68",
+          "mode": "100644",
+          "path": "shared-defaults/config-telegram-organic-checkpoints.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "68445885e58b776a8f9a4a7c2d0a239d401bdf2f",
+          "mode": "100644",
+          "path": "shared-defaults/config-telegram-surface.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "49320fbe8b3e8249116dde2bae551e011f8678c6",
+          "mode": "100644",
+          "path": "shared-defaults/retired-policy-defaults-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "b44c7da237c366d912036a9be2d5583f9c035fda",
+          "mode": "100644",
+          "path": "shared-rules/client-isolation.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0ab4c5344a5aa387288d504e082da20304523dc1",
+          "mode": "100644",
+          "path": "shared-rules/content-policy.md",
+          "type": "blob"
+        },
+        {
+          "blob": "164e7823dbf27c636a9617386c456bf0cdcf6481",
+          "mode": "100644",
+          "path": "shared-rules/file-delivery.md",
+          "type": "blob"
+        },
+        {
+          "blob": "42f1ce96a55087c74175c16f331ac4f88b444e24",
+          "mode": "100644",
+          "path": "shared-rules/knowledge-store-policy.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b5c4d31640f14339133750c28ee4b886234532d2",
+          "mode": "100644",
+          "path": "shared-rules/truth-over-comfort.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d5359f1bd042e83c2d26d35f9dedbf9f2b74feec",
+          "mode": "100644",
+          "path": "shared-rules/westminster-marque.md",
+          "type": "blob"
+        },
+        {
+          "blob": "14fac913ccf80234b1848540089a3bbcb6e5283d",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-code/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "45ab8b0c6192531dd302a58705d84570532a1b22",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-code/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "93b50482bbd831b19b05141b01bd0b773ef14184",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-code/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "64f6c843c3da85b0598c1b0343675f7a2e27a2ba",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-code/examples.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ba085658185575f1233bf43560c8b921add562fa",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-code/references/research-sources.md",
+          "type": "blob"
+        },
+        {
+          "blob": "14fac913ccf80234b1848540089a3bbcb6e5283d",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-content/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "8e5ea7591df46a9ef3d933eb0b2683ba1fa3a46c",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-content/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "531e8d61146a3c52e0e6bd7136285dc5ab8666a2",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-content/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "7877b133d13cfa2f0fc25fac72500417354c29ed",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-content/examples.md",
+          "type": "blob"
+        },
+        {
+          "blob": "debe6fac6140c3d37520e63ffc1d48167fd1c882",
+          "mode": "100644",
+          "path": "skills/creative/human-taste-content/references/research-sources.md",
+          "type": "blob"
+        },
+        {
+          "blob": "14fac913ccf80234b1848540089a3bbcb6e5283d",
+          "mode": "100644",
+          "path": "skills/creative/human-taste/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "0c3a917070893c10f4e6c434a5fd722bc5432d52",
+          "mode": "100644",
+          "path": "skills/creative/human-taste/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "308a563287e910fe703c2e9676d8d51fcbf7fecd",
+          "mode": "100644",
+          "path": "skills/creative/human-taste/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "9c5a7aaf9e82d97ad94f154433e378ad96da5bca",
+          "mode": "100644",
+          "path": "skills/creative/human-taste/examples.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d4fc6cf11140b1f6f4448c56d6c8d46cd33e3805",
+          "mode": "100644",
+          "path": "skills/creative/human-taste/references/research-sources.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bb3f6d23b1f8025514a62a12b51b47d73e3c9aa9",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "0468271c904ae334cfaf27da6f8df3d5f419a1f0",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/NOTICE.md",
+          "type": "blob"
+        },
+        {
+          "blob": "de54a3ae215d187ed53e57b158e585998e5ce06a",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "badef53a6eb0b3a9bf3c47cf9f0a4d598ef239d6",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "073236d42a95ea7f566b337ace96128e38ad301a",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/agents/impeccable_asset_producer.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "245a30ed7e3d0f1791e3b63eb30db551d1d21e8d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/agents/impeccable_documenter.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "f55c3d77a70595f9f9276a098c82bbab27e83d5d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/agents/impeccable_finish_reviewer.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "a69ecb4056bd31279c72f1fc0544251581684ffe",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/agents/impeccable_manual_edit_applier.toml",
+          "type": "blob"
+        },
+        {
+          "blob": "ee6cae7726ef85d3744c1b978608668a07aefeef",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/agents/openai.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "314d11f1c4070c7a4bce7bcee2b906ef60cb84d8",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/adapt.md",
+          "type": "blob"
+        },
+        {
+          "blob": "88975b36f38bc6b709eec052d398ce8996d55d19",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/adapt.native.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6337b90181067c9871f900f06c448f35d874f513",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/android.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6d74d1841e5725a5cb0eae2f44dbce3a1f22ac0b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/animate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b6a0bb358520c9016c58cb2a11081abb20d6863e",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/audit.md",
+          "type": "blob"
+        },
+        {
+          "blob": "21bc5586f5d7e6aa317b45d55f79ae5471a367b2",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/audit.native.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9fe39ca59495f9fb7ffdc2981c74d31d3d42475b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/bolder.md",
+          "type": "blob"
+        },
+        {
+          "blob": "4506a31c95e02b2ad918367a0ef4461643d51532",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/clarify.md",
+          "type": "blob"
+        },
+        {
+          "blob": "02fa661efac9229d6e869a20ef8ee928d4b986a0",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/colorize.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d9ced54e2768c1251add34d35197c19290c852e7",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/craft-floor.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dbbc9402c07cdab21f2b6eb69279b8435fecfd7f",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/craft.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7f4450f44299941e34800e0b2cd0d4ba03374397",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/critique.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fe9f7b183493bebea7eb2d2edbf23f709e5d1f76",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/degraded/asset-producer.md",
+          "type": "blob"
+        },
+        {
+          "blob": "26b9773a8cb946894bac6833a2a3732d7570914b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/degraded/documenter.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cf505418c1e34a38a814f18515d5662b425b3806",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/degraded/finish-reviewer.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dd177a6cb2002503087532b5dbd5cbaf3bf9f293",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/degraded/manual-edit-applier.md",
+          "type": "blob"
+        },
+        {
+          "blob": "60a8e83ee48d50901acfa886d3ec4bc72b40ec6f",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/delight.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9c832266974452550a31d1b290d4b73d8fb574de",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/distill.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e08df6ce7e989dfc7ea88ca256aaf473823f1986",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/doctor.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c44ed24ba4836a8c838e391eb3c8c2484d238ce2",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/document.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f8d863ce13651a5613c70d11baf13ccb0162b4b1",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/extract.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0bbb16499bc5d4445e952f8d6caa22735cb9cb33",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/harden.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f0321a2ccb9d1707620ba728f43b1546e13e243d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/hooks.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a8cd9775da3005ec5834e95c69cb3bcd321905a4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/init.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ccef5d2c41c40889da0b054923a914e8c676fac9",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/ios.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7875fe45ddc2c089848a71b074ae11ca3cea9698",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/layout.md",
+          "type": "blob"
+        },
+        {
+          "blob": "950d1346fdfbced3cd1d30ee91b38785ab7cbde4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/live-setup.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dd221ce17adb147c2180246b8b8eea3a297e9a02",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/live.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c088bd2fde3d4fa218bb7810c542f41b8086b882",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/new-work.md",
+          "type": "blob"
+        },
+        {
+          "blob": "90e33916ef348f050681d400a67e5745bfdb6d41",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/onboard.md",
+          "type": "blob"
+        },
+        {
+          "blob": "524f2c3ae9fa497284e9699f3ca5320cce5d05cf",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/operate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fc56c22376854d77e8099b925232bba25001e5e6",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/optimize.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bbee3f48ac3702bf78a3c93fb044fa8995dd5bdd",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/overdrive.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b18014fe5feff6c886fd4224420f15dedd0c489a",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/polish.md",
+          "type": "blob"
+        },
+        {
+          "blob": "50d1102291047461493362ed8cc449d8f9acb8f1",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/quieter.md",
+          "type": "blob"
+        },
+        {
+          "blob": "405bfc6295c32465f2b2d5cd425e4ad1bc586557",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/routing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "90a74ae813331cbce8fff6beb498ced77970fadf",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/shape.md",
+          "type": "blob"
+        },
+        {
+          "blob": "47dfd452e86d594cb9b73ae20abaae2b9fdbada0",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/typeset.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7e0e1dd0ac7f1ae5ba26f25f62daa8f5ac7a3be3",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/reference/visualize.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dad8ef2e0ca304f6a0fe48c0c6b90880df93e01b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/command-metadata.json",
+          "type": "blob"
+        },
+        {
+          "blob": "78c13ebc98d2e06d2c6e7017e326c54eb6a8ba97",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/concept-seed.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "743bb220aaaaeb4fabb1ee9030db6b88fb40cd4b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/context-signals.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b8413e074fa6789e1483a45c156ea33a6a08181d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/context.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a8b36b025c758ace78787580c4ff799dc2b88b24",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/critique-storage.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a13505d23ba3adf679090ce6cd9e20d68bcb12eb",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detect-csp.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "cbc0469549d4a0c7efea5a67a0fdb9b52289a621",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detect.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "dfc725a8e36ff22e3c2dee48cfd430284f8d64dc",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/browser/injected/index.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "9f0b671050b7815e19ec5ce6c07190077880f40a",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/cli/main.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c4d31eade216ad509353af1775296e0adcaa615f",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/design-system.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "400c9294be7401569976ac97dcac61af5c57f5f6",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/detect-antipatterns-browser.js",
+          "type": "blob"
+        },
+        {
+          "blob": "c5bcf064cb9cb7a382463b4cdd2da09e84dac931",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/detect-antipatterns.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5e3d5446b3ef7c3e2d0b7f632a1bea288eee0cfe",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/engines/browser/detect-url.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b88ebf0b85e6f103c4d299b7da4891d5c712292e",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/engines/regex/detect-text.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "60e10342c28431673f0ce620c278ad11ac9d7472",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/engines/static-html/css-cascade.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "482ba0cc363262d08a37ad90a39c7cf07410cf2d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/engines/static-html/detect-html.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c9668dbd7a35922bc898873cb9edc2eb748cddf4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/engines/visual/screenshot-contrast.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "fa98dd9351e866c321379d535733e8c3b148bda4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/findings.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "eee17ea4f42965be06247905c796934a01e82775",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/node/file-system.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b05fbf3ef1fe255d8f15068deeb6c8a94f4ad7aa",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/profile/profiler.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0036147862a862ad00a6967aa8aca3a22449a710",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/registry/antipatterns.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "aee24a947be6f54e35b9bcfc88a6f05dacf50ded",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/rules/checks.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "3d9a126bfb06e54866172b54da85b1de466c2e95",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/shared/color.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b9152939a8af2500fc7659982349afb934e21390",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/shared/constants.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4c4d7fc4528a8dafdd759a0ed6e3f7392758d71b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/shared/fonts.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e5d64b18a825e571c22acb5e5865e93dbaaad912",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/shared/inline-ignores.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b0f6e1ab532c2019a05ab4f8a46ee31c80522d81",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/detector/shared/page.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b39446b23fef6860c1e3868666f6ab5ccc1c2853",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/doctor.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "72a03b1cab5fbd076ded378491efb66f94a9e22e",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/embed-prompt.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ab03ef7686d198154e1610bd694a1deed9067b81",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/generate-image.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "fd3ef637d83e37015fb3d7d0bec602942e4b6a80",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/hook-admin.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "54e789e8b4e283d69af531770859ceebf9443c95",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/hook-before-edit.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "65931f9e6e02ff4f91739e93891bd545588ec901",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/hook-lib.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5813ea4f2fa363a084f4a0c0dea3abf9a4705709",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/hook.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c1f5978b1365af19225354142266edb61a71bd50",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/artifact-schema.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "16378187eb2a434c61808d9911215af77af4b5ad",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/composition-catalog.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "fc5b66a46030c767b1f1f9987872f2d0dbd20341",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/concept-catalog.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a4b9e9483fc8c3aaf723fe361464eb0bce92a805",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/design-parser.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0c052d264c8b8db5e52dd2650940ff194458fe20",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/impeccable-config.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ee68358be045862f6d6e2f78e902507376f2241c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/impeccable-paths.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "165e1ca8075cdb23512a025da1d8b87ab40523b7",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/is-generated.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5397c4bcaca07b9fdcbd927f2f743d318b542fef",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e3c9efbb8a4173e2324f0d386c999a65c77fb912",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/roll-selection.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "bae03bc98cd0a5fc4dbe3d929d1f1d1c5d4bbf11",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/staleness-deep.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b7b68d1e0a99e5d7860dac1eaba4065edeb780e3",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/staleness-notice.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5a401804d4181141e9d11e3edaa22eb916426403",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/staleness.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f83416f696bbe23b730d7f38cd0ef10dbfa3f646",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/surface-briefs.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "967925a42ee0cee6dbf5aa5282c92f4cfe6efde8",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/target-args.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "025915ad50e94847da48ff9537168e98caa96992",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/target-slug.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6a115bd7d4dd15fc2528a1e28c9be862cc10ebe9",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/lib/template-extensions.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "507418ea32979063fd0cc04981d8214e33c0c1d3",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-accept.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ad6a794b38bbc3f75babfd0bdb983ac3e637d059",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-browser-dom.js",
+          "type": "blob"
+        },
+        {
+          "blob": "0e362d6be1885c302261031128baac8537ca5afe",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-browser-session.js",
+          "type": "blob"
+        },
+        {
+          "blob": "9788c211c4e7f4a23d78dd71796c6a71a04aced7",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-browser.js",
+          "type": "blob"
+        },
+        {
+          "blob": "89572e7592dd587f250d498605dd405ae972a17b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-commit-manual-edits.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "cfd1bb77788c95097dd26367ece13e14da5f1dcb",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-complete.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "313ed7f1061278c5ac273dc0036a122115f2b983",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-copy-edit-agent.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "aa669fd202b91e34c6d7bdb4b4fe1ba9fba80b60",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-discard-manual-edits.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "81848010b4156c6f92a045d75667d8136e430ab5",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-inject.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8d5829ea4a8772c41f518ab3f8dcafaa7933d6b3",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-insert.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ee8e2b778c63c1788006a2fe6c5fed82ec3ae83d",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-manual-edit-evidence.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "3b2f08c9fc37de35315e1a8e6226c7e900c3c109",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-poll.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b9459a8d456dbe3499e16be3f858aa3483c5e352",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-resume.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "bfad7a24595ab3a692a66cb73d85d3943ebb3d5c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-server.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6ed2b890a52b23985544d98ac8a2ad6ab7d007f3",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-status.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "498bc55196aeaefd2c9a980e0482b3aef7ca44fe",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-target.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "87d4c41f2c451f1c9377a0f790c7ce04c7b303a4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live-wrap.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b04d98f50de926dc555a1d80ce1ec6d34abc8d91",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e7c241190911b3938a5040e5ca3ec8c91adec358",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/accept-css.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c1261a62bd8bfa48dbeea9d4c263aa552346b0f2",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/accept-verify.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5925136fba2aca11c5501315bc8c20580b5fb6d8",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/browser-script-parts.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6f539336d8ac07ffe1d0860dcc1c094159133b51",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/completion.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "18d3291d5daba23e3563035aabd5e9eef011c632",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/event-validation.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c3937512e81290447e7219fd6f788c784b76d869",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/astro.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d513e5c0df3f14cc08cd58b1cad0f6138a5b17eb",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/detect-utils.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0efaa1f6d13b8beb645e120ec42e638c9778f020",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/index.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c06fc58cb219660e6c1b1a16b819276bd5ebbbe2",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/journal.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "74e2861c420daadd86c039ef24770ca3be3ea528",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/nextjs.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a15ee2a65280d362c5fd72813576cc30eea42a37",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/nuxt.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "76c6617138d7e563c7dc8fc70bc8ede092768d2c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/script-src.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "89cc82daad17cbc91188020373bf2804d9e0394b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/static-html.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "cf8b4b5634e1ed263befb8c3c043d7e6c2eb2ceb",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/sveltekit.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "be67611369b8583e98ae39de11a5d9e42ddcc544",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/tag-strategy.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "9bfb3db4af2b07dd683ff3718d8c1f12fb695b66",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/tanstack-start.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4713670f4f5c84f68097da94ef212fe9f3297a5c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/frameworks/vite-generic.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "bfe81b32fbb4882b3c761a116baa23442e7fb01c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/generation-preflight.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ae54f6f938828d7d08e357adabfadc90cc860e22",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/insert-ui.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "19f6a1ae3a66f443fd2eec554fe5fbd8d6be36a6",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/instructions.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "376958d7db355f8b313873d8aad799f7264035e9",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/manual-apply.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "acd250ec493791c985fe49699b4f8c4d2ba242c8",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/manual-edit-routes.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d96ebbe342f8f44c671942284a0f0b3965da3d6e",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/manual-edits-buffer.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "65f20a87a7e8385eb5328f85e854f5f08ccabf8c",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/poll-lanes.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "1e27d9a6c215343dbb79b1788102df2c69fc81ee",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/roots.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a017cb157cb2e136ed0ad2ad0414da32afd87230",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/session-store.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "9ccc557be85222d57e7a3eecceec7848e0b6cd0e",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/source-lock.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0b7d26b5def1809341d4e4b8a9df0709461ae012",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/source-search.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "06e18b62e760cb4abe0fb346c5bb289fa717b3d5",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/svelte-ast.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4993453a70569731b89d6efd3c502ac59b46d4b0",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/svelte-component.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e94c54f1e834d468d2d01738034394c1f4edcf4b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/sveltekit-adapter.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4a1c81a97ce94ab1fbdea4cad58352119d5d3975",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/tanstack-adapter.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "bbb2c5c35e534ba5ec7a418946a1c95244e56872",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/ui-core.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ce4e0927a84a43e14a040d3f2322f6e03f29c50b",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/live/vocabulary.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a9c5208f6b141d3bafdb8eb843d6fcbdcf23e370",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/modern-screenshot.umd.js",
+          "type": "blob"
+        },
+        {
+          "blob": "ea692cd0fe33cf57a229caf74be62a7ffb90b3ba",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/palette.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a3d1a1244c660f7b440179b829f9eb52f93f75de",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/pin.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8dc30822e769d0039c9eb5eba463d22722c1a041",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/serve-question.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "723f7c1b4c7edcc66da88b644648a13e9eb7c4f4",
+          "mode": "100644",
+          "path": "skills/creative/impeccable/scripts/surface-brief.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f5e5b8c1781c8c89437a63258c71a944c64ad1a0",
+          "mode": "100644",
+          "path": "skills/fleet/golden-computer-use-v2/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "904ecd870bec022ec3d6424a873a02ec13bea8f1",
+          "mode": "100644",
+          "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5fe35e5f6ff635f3933b57fe3c24dee0c191504f",
+          "mode": "100644",
+          "path": "skills/fleet/papercuts/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "416010dd6cb1b4bfdffb0dc8584ddad4fd6a3588",
+          "mode": "100644",
+          "path": "upstream.lock",
+          "type": "blob"
+        }
+      ],
+      "paths": [
+        "bin/client-doc-artifact-qa",
+        "bin/hermes-client-day-review",
+        "bin/hermes-local-selfcheck.py",
+        "bin/hermes-reflect-candidates-to-drafts.py",
+        "bin/hermes-self-reflect.py",
+        "bin/hermes-skillify-autopromote.py",
+        "bin/llm-attempt-reconcile.py",
+        "bin/client-local-evidence-query.py",
+        "bin/open-loop-detector.sh",
+        "bin/papercut_inbox.py",
+        "bin/registry-sync.py",
+        "bin/self-improvement-trigger.py",
+        "bin/telegram-transaction-canary.py",
+        "hooks/gbrain-capture",
+        "hooks/open-loop-detector",
+        "hooks/telegram-transcript",
+        "kit/agent/SOUL.template.md",
+        "kit/bin/papercut.py",
+        "kit/scripts/task-follow-up-scanner.py",
+        "mcp-servers/capability-router",
+        "patches/apply-all-patches.py",
+        "patches/apply-session-search-current-topic.py",
+        "patches/apply-skill-index-allowlist.py",
+        "patches/apply-telegram-immediate-typing-receipt.py",
+        "patches/modules/__init__.py",
+        "patches/modules/assembled_runtime_contract.py",
+        "patches/modules/auto_resume_contextual_reset_v1.py",
+        "patches/modules/codex_401_paid_fallback_circuit_v1.py",
+        "patches/modules/clarify_prose_deadlock_guard_v1.py",
+        "patches/modules/context_compaction_postconditions_v1.py",
+        "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+        "patches/modules/silent_context_lifecycle_v1.py",
+        "patches/modules/state_db_descriptor_lifecycle_v1.py",
+        "patches/modules/voice_memo_single_delivery_v1.py",
+        "patches/modules/compaction_completion_status_suppression_v1.py",
+        "patches/modules/durable_drain_compatibility_v1.py",
+        "patches/modules/durable_drain_inbox_carrier_v1.py",
+        "patches/modules/gateway_runtime_root_guard_v1.py",
+        "patches/modules/gateway_service_binding_guard_v1.py",
+        "patches/modules/lifecycle_guard_invalid_path_v1.py",
+        "patches/modules/llm_attempt_receipts_v1.py",
+        "patches/modules/media_same_path_resend_v1.py",
+        "patches/modules/mcp_in_turn_refresh_v1.py",
+        "patches/modules/mcp_legacy_alias_dispatch_v1.py",
+        "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
+        "patches/modules/intent_ack_progressive_v1.py",
+        "patches/modules/lean_agent_loop_v1.py",
+        "patches/modules/registry_loader.py",
+        "patches/modules/restart_interruption_checkin_v1.py",
+        "patches/modules/runtime_env_config_authority_v1.py",
+        "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
+        "patches/modules/telegram_fresh_topic_continuity_v1.py",
+        "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
+        "patches/modules/telegram_organic_long_running_checkpoints_v2.py",
+        "patches/modules/telegram_media_download_retry_v1.py",
+        "patches/modules/telegram_poll_liveness_writer_v1.py",
+        "patches/modules/telegram_transaction_canary_v1.py",
+        "patches/modules/windows_gateway_task_identity_v1.py",
+        "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
+        "patches/payloads/durable-drain-inbox-v1",
+        "patches/payloads/llm-attempt-receipts-v1",
+        "patches/payloads/session-search-current-topic-v2",
+        "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
+        "patches/registry.yaml",
+        "kit/systemd/hermes-gateway.service.d/30-media-allow-dirs.conf",
+        "plugins/botdoctor-immersion",
+        "plugins/composio-onboarding",
+        "plugins/mcp-on-demand-control",
+        "plugins/semantic-computer-control-guard",
+        "plugins/task-ledger",
+        "plugins/telegram-transcript",
+        "scripts/merge-shared-defaults.py",
+        "shared-defaults",
+        "shared-rules/client-isolation.md",
+        "shared-rules/content-policy.md",
+        "shared-rules/capability-discovery.md",
+        "shared-rules/file-delivery.md",
+        "shared-rules/knowledge-store-policy.md",
+        "shared-rules/knowledge-routing.md",
+        "shared-rules/westminster-marque.md",
+        "shared-rules/truth-over-comfort.md",
+        "skills/fleet/nightly-client-reflection-default",
+        "skills/fleet/papercuts",
+        "skills/fleet/golden-computer-use-v2",
+        "skills/creative",
+        "upstream.lock"
+      ]
+    }
+  },
+  "deployment_digest": "15359ff3d9edad62beb5db916dd22fd4415667aab217671ec71fb3077da48e56",
+  "golden_deployment_digest": "0634bce4c6dfa993eb9573c53593720d9e5744b760195e37c358395ebded3b3d",
+  "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
+  "kind": "golden_runtime_payload_manifest",
+  "schema_version": 1
 }

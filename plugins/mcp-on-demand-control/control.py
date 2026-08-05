@@ -24,6 +24,7 @@ _STATE_DIR = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).e
 _HEARTBEAT_INTERVAL_S = 5.0
 _CLEANUP_REGISTERED = False
 _HEARTBEAT_THREAD: threading.Thread | None = None
+_NATIVE_RESEARCH_TOOLS = {"web_search", "web_extract"}
 
 
 def _state_path() -> Path:
@@ -149,7 +150,7 @@ def _launch_identity(config: dict[str, Any]) -> tuple[Any, ...]:
     env = config.get("env") if isinstance(config.get("env"), dict) else {}
     env_identity = tuple(
         (key, str(env.get(key, "")))
-        for key in ("HERMES_HOME", "PYTHONPATH", "VIRTUAL_ENV", "ANAMNESIS_DB", "PATH")
+        for key in ("HERMES_HOME", "PYTHONPATH", "VIRTUAL_ENV", "PATH")
         if key in env
     )
     args = config.get("args")
@@ -207,6 +208,73 @@ def _configured_servers(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 def _status_index() -> dict[str, dict[str, Any]]:
     return {str(row.get("name")): row for row in _get_status() if isinstance(row, dict) and row.get("name")}
+
+
+def _preferred_research_backend(config: dict[str, Any]) -> str:
+    raw = config.get("mcp_policy") or {}
+    if not isinstance(raw, dict):
+        return ""
+    preferred = str(raw.get("preferred_research_backend") or "").strip()
+    if not preferred:
+        return ""
+    allowed, _ = _policy(config)
+    if preferred not in allowed or preferred not in _configured_servers(config):
+        return ""
+    return preferred
+
+
+def _preferred_research_ready() -> tuple[str, bool]:
+    """Resolve an opt-in preferred backend, allowing native fallback on failure."""
+    try:
+        config = _load_config()
+        preferred = _preferred_research_backend(config)
+        if not preferred:
+            return "", False
+        row = _status_index().get(preferred) or {}
+        ready = (
+            str(row.get("status")) == "connected"
+            and row.get("connected") is True
+            and int(row.get("tools") or 0) > 0
+        )
+        return preferred, ready
+    except Exception:
+        return "", False
+
+
+def preferred_research_context(**_: Any) -> dict[str, str] | None:
+    preferred, ready = _preferred_research_ready()
+    if not ready:
+        return None
+    return {
+        "context": (
+            f"Research routing policy: use the connected free MCP backend {preferred!r} first. "
+            f"Invoke mcp__{preferred}__search (mode=free) for web discovery. Native web_search/web_extract "
+            "remain fallback-only and are available automatically if the preferred backend disconnects."
+        )
+    }
+
+
+def guard_native_research(tool_name: str = "", args: Any = None, **_: Any) -> dict[str, str] | None:
+    name = str(tool_name or "").strip()
+    native_research = name in _NATIVE_RESEARCH_TOOLS
+    execute_code_bypass = name == "execute_code" and any(
+        marker in json.dumps(args, ensure_ascii=False, default=str)
+        for marker in ("web_search", "web_extract")
+    )
+    if not native_research and not execute_code_bypass:
+        return None
+
+    preferred, ready = _preferred_research_ready()
+    if not ready:
+        return None
+    return {
+        "action": "block",
+        "message": (
+            f"Research policy routed this call to the connected free backend {preferred!r}. "
+            f"Use mcp__{preferred}__search with mode='free'. If that backend becomes unavailable, "
+            "this guard fails open so the native research fallback can run."
+        ),
+    }
 
 
 def _public_state(

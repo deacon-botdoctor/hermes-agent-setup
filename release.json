@@ -1,55 +1,55 @@
 {
-  "schema_version": 1,
-  "release": "botdoctor-hermes-2026.08.04-golden-b8f90b14",
-  "status": "current",
-  "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "b8f90b14f9267af63ea067c1fde07786af9b294a",
-  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-  "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "211cf16fa7b997c2e509cbced79835433560e34b14bf2bd1971413d52d27f612",
-  "deployment_digest": "d18838348dba5482b66a0e8b7e955544a68a2ec61e5ff432190c465029b521d4",
-  "golden_deployment_digest": "284219a6e349b6dc13ffcbbf9704d0ed55693064b597986f2c3bf5449dd4e75b",
   "assembled_runtime_fingerprint": {
-    "digest": "1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66",
-    "file_count": 77
+    "digest": "580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826",
+    "file_count": 82
   },
-  "verification": {
-    "golden_suite": "full Golden preflight passed",
-    "clean_upstream_rehearsal": "23/23 patches applied on pinned upstream; no anchor miss, failure, or not-run"
-  },
+  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
   "cua_driver": {
-    "version": "0.14.2",
-    "tag": "cua-driver-rs-v0.14.2",
-    "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
-    "helper": {
-      "path": "bin/ensure-cua-driver.py",
-      "sha256": "2ed10b597aafc7e82c220cc1c9369164ef17c1c31ea0d87261533dc710c96b09"
-    },
+    "baseline_acceptance": "exact_version_present",
     "contract": {
       "path": "contracts/cua-driver-release-v1.json",
       "sha256": "3b1b184d270724326f7b17c302b3627eb322f091b697406eaf525918a9b61c38"
     },
-    "baseline_acceptance": "exact_version_present",
-    "gui_acceptance": "doctor_ready_and_list_windows"
+    "gui_acceptance": "doctor_ready_and_list_windows",
+    "helper": {
+      "path": "bin/ensure-cua-driver.py",
+      "sha256": "2ed10b597aafc7e82c220cc1c9369164ef17c1c31ea0d87261533dc710c96b09"
+    },
+    "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
+    "tag": "cua-driver-rs-v0.14.2",
+    "version": "0.14.2"
   },
+  "deployment_digest": "15359ff3d9edad62beb5db916dd22fd4415667aab217671ec71fb3077da48e56",
+  "golden_deployment_digest": "0634bce4c6dfa993eb9573c53593720d9e5744b760195e37c358395ebded3b3d",
+  "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
+  "release": "botdoctor-hermes-2026.08.05-golden-46fef7af",
   "runtime_coherence": {
-    "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git",
-    "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
-    "package_digest": "67b4ce39a95a46ff724eb185e5b1ce1f84fa74fd18c2cff54b5e4ffcb2d3af06",
     "file_count": 7,
     "installer": {
       "path": "maintenance/bin/install-runtime-coherence.py",
       "sha256": "e66926be076e13e695d4da8ca391b6974ef8e7f56116ae486f2c93692503a537"
     },
-    "probe": {
-      "path": "checks/agent-runtime-coherence.py",
-      "sha256": "53a7555a90269571c0bb907acd273225fc18016609645b427a0b73c8134d54bc"
-    },
+    "package_digest": "67b4ce39a95a46ff724eb185e5b1ce1f84fa74fd18c2cff54b5e4ffcb2d3af06",
     "platforms": [
       "macos",
       "linux",
       "windows"
-    ]
+    ],
+    "probe": {
+      "path": "checks/agent-runtime-coherence.py",
+      "sha256": "53a7555a90269571c0bb907acd273225fc18016609645b427a0b73c8134d54bc"
+    },
+    "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
+    "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "update_contract": "maintenance-quiescence-v2"
+  "runtime_payload_digest": "284a2f15c8af36a54ffccd87f061cf54a2660c9bcfd14dac891668db459ae536",
+  "schema_version": 1,
+  "source_manifest": "runtime-payload-source-manifest.json",
+  "source_scope": "sanitized_runtime_payload_only",
+  "status": "current",
+  "update_contract": "maintenance-quiescence-v2",
+  "verification": {
+    "clean_upstream_rehearsal": "26/26 patches applied on pinned upstream; no anchor miss, failure, or not-run",
+    "golden_suite": "full Golden preflight passed"
+  }
 }

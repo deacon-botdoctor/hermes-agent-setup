@@ -13,6 +13,9 @@ in favor of pinned-upstream defaults and client-local configuration.
 - `config-mcp-on-demand-control.yaml` enables the policy-gated MCP activation
   tools while the cold-backend compatibility path remains necessary.
 - `config-native-tool-search.yaml` turns on native tool-search deferral.
+- `config-model-autonomy.yaml` enables Hermes' bounded intent-continuation
+  seam for every provider while disabling only automatic post-turn review
+  forks that can overlap the live session.
 - `config-telegram-surface.yaml` sets Telegram reply-to off.
 - `config-client-quiet-display.yaml` is the fleet client quiet surface:
   `busy_input_mode: steer`, all busy/steer acks off, no interim/long-running

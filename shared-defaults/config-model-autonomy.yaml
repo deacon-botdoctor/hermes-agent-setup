@@ -1,6 +1,11 @@
 # Memory and skill tools remain available to the model. Disable only the
 # automatic post-turn review forks: upstream shares the live session identity
 # with those forks, which can wedge the foreground Relay scope under overlap.
+agent:
+  # Use Hermes' native bounded continuation seam for every provider. The lean
+  # runtime patch scopes evidence to the current turn and permits one retry.
+  intent_ack_continuation: true
+
 memory:
   nudge_interval: 0
 

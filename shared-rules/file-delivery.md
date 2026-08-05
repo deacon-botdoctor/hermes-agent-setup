@@ -20,3 +20,19 @@ maximum when the audio needs a label or qualification.
 Do not use an external upload service when the current platform can attach the
 file. If the source artifact is outside an allowed root, copy the finished
 artifact into `~/.hermes/media/` first.
+
+## Client-presentable document release modes
+
+For PDFs, slide exports, one-pagers, brochures, proposals, reports, and their
+preview images, distinguish owner review from final release:
+
+- An owner-review draft may be delivered after basic artifact and render checks
+  without semantic visual PASS. Label it exactly `Layout draft only — not
+  production-ready`; do not describe or record it as passing final QA.
+- A final release requires visual inspection with `vision_analyze` and a receipt
+  bound to the SHA-256 of both the artifact and the inspected preview. A naked
+  Boolean or an unbound statement that visual QA passed is not evidence.
+
+Use `~/.hermes/bin/client-doc-artifact-qa` for this release decision when it is
+installed. Artifact creation, QA, and Telegram delivery proof remain separate
+facts.

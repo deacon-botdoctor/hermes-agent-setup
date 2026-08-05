@@ -234,6 +234,48 @@
       }
     },
     {
+      "id": "ops-pattern.resource-lifecycle",
+      "kind": "operating_pattern",
+      "category": "monitoring-obs",
+      "label": "Resource Lifecycle",
+      "summary": "Bound CPU/GPU-heavy and detached work, checkpoint it, and release task-owned browser and process resources at closeout.",
+      "inputs": {
+        "work": "Heavy, long-running, detached, browser, or local-compute task",
+        "bounds": "Finite item, batch, runtime, and concurrency limits",
+        "checkpoint": "Durable progress location and safe stop boundary",
+        "owned_resources": "Task-created tabs, browser sessions, child processes, locks, and temporary files"
+      },
+      "outputs": "A bounded execution unit with an owner, progress receipt, stop condition, and verified resource cleanup.",
+      "cost_per_call": "host resource dependent",
+      "rate_limit": "host capacity and explicit task bounds",
+      "requires_creds": [],
+      "preferred_for": [
+        "cpu heavy work",
+        "gpu heavy work",
+        "long running process",
+        "detached process",
+        "headless browser",
+        "browser tabs",
+        "batch processing",
+        "transcription worker",
+        "system running hot",
+        "resource pressure"
+      ],
+      "deprioritize_for": [
+        "short foreground command",
+        "read only lookup",
+        "direct conversational answer"
+      ],
+      "routing_policy": {
+        "bounds": "Use explicit finite item, batch, runtime, and concurrency limits. A default such as 0=all is not an acceptable background bound unless the principal explicitly requested the complete set and host capacity was checked.",
+        "registration": "Anything that outlives the foreground turn must have an owner, durable id or PID, checkpoint, liveness signal, stop condition, and restart/cleanup path; never leave a raw detached process behind.",
+        "browser_closeout": "Reuse tabs when possible. Close task-created tabs and task-owned browser sessions when they are no longer needed; never close the principal's unrelated tabs or normal browser profile.",
+        "process_closeout": "On success, failure, cancellation, or timeout, terminate task-owned children and release locks and temporary resources after persisting the next safe action.",
+        "pressure_response": "Under sustained host pressure, stop or pause nonessential task-owned work at a durable checkpoint. Unknown, user-owned, gateway, and interactive processes are audit-only unless separately authorized.",
+        "verification": "Closeout is incomplete until the process/session is gone or intentionally registered, the checkpoint is durable, and host pressure is rechecked."
+      }
+    },
+    {
       "id": "ops-pattern.artifact-first-research",
       "kind": "operating_pattern",
       "category": "knowledge-rag",
