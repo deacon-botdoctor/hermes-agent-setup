@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -299,6 +300,99 @@ def check_immersion_quality():
         }
     return {'name':'immersion_quality','status':'pass','detail':'silent immersion policy enforced'}
 
+
+def _process_started_at(pid: int):
+    """Return a cross-platform UTC process start time when it can be proved."""
+    if os.name == 'nt':
+        proc = run([
+            'powershell', '-NoProfile', '-NonInteractive', '-Command',
+            f"(Get-Process -Id {pid}).StartTime.ToUniversalTime().ToString('o')",
+        ], timeout=8)
+        return parse_dt(proc.stdout.strip()) if proc.returncode == 0 else None
+    proc = run(['ps', '-o', 'lstart=', '-p', str(pid)], timeout=5)
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        local = datetime.strptime(' '.join(proc.stdout.split()), '%a %b %d %H:%M:%S %Y')
+        return local.replace(tzinfo=datetime.now().astimezone().tzinfo).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def check_telegram_organic_checkpoints():
+    """Prove the effective v2 contract from the active immutable runtime."""
+    config_path = HERMES / 'config.yaml'
+    binding_path = HERMES / 'state/runtime-binding.json'
+    failures = []
+    if not config_path.exists():
+        failures.append('config missing')
+        text = ''
+    else:
+        text = config_path.read_text(encoding='utf-8', errors='replace')
+
+    agent = _top_level_block(text, 'agent')
+    display = _top_level_block(text, 'display')
+    display_platforms = _nested_block(display, 'platforms')
+    telegram = _nested_block(display_platforms, 'telegram', indent=4)
+    interval = _scalar_from_block(agent, 'gateway_notify_interval')
+    global_enabled = _scalar_from_block(display, 'long_running_notifications')
+    telegram_enabled = _scalar_from_block(
+        telegram, 'long_running_notifications', indent=6
+    )
+    if interval != 600:
+        failures.append(f'interval={interval!r} expected=600')
+    if global_enabled is not False:
+        failures.append(f'global={global_enabled!r} expected=False')
+    if telegram_enabled is not True:
+        failures.append(f'telegram={telegram_enabled!r} expected=True')
+
+    binding = load_json(binding_path, {})
+    runtime_raw = str(binding.get('runtime_root') or '').strip()
+    runtime_root = Path(runtime_raw).expanduser()
+    marker_path = runtime_root / 'gateway/run.py'
+    marker = 'HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2'
+    marker_hash = ''
+    if (
+        binding.get('kind') != 'botdoctor_runtime_binding'
+        or binding.get('status') != 'active'
+        or not runtime_raw
+        or not runtime_root.is_dir()
+    ):
+        failures.append('active immutable runtime binding missing or invalid')
+    elif not marker_path.is_file():
+        failures.append('active runtime gateway source missing')
+    else:
+        source = marker_path.read_bytes()
+        marker_hash = hashlib.sha256(source).hexdigest()
+        if marker.encode() not in source:
+            failures.append('active runtime v2 marker missing')
+
+    live = gateway_runtime_binding()
+    live_root = Path(str(live.get('runtime_root') or '')).expanduser()
+    if runtime_raw and live_root != runtime_root:
+        failures.append(f'live runtime mismatch live={live_root} bound={runtime_root}')
+    activated_at = parse_dt(binding.get('generated_at'))
+    process_started = _process_started_at(live['pid']) if live.get('pid') else None
+    if activated_at is None:
+        failures.append('binding activation timestamp missing')
+    if process_started is None:
+        failures.append('process generation unavailable')
+    elif activated_at is not None and process_started < activated_at:
+        failures.append('gateway process predates runtime activation')
+
+    detail = (
+        f'interval={interval!r} global={global_enabled!r} telegram={telegram_enabled!r} '
+        f'runtime={runtime_root} marker_sha256={marker_hash or "missing"} '
+        f'process_started={process_started.isoformat() if process_started else "unknown"}'
+    )
+    return {
+        'name':'telegram_organic_checkpoints',
+        'status':'fail' if failures else 'pass',
+        'severity':'P1',
+        'fix_class':'restart_or_redeploy',
+        'detail':'; '.join(failures) + ('; ' if failures else '') + detail,
+    }
+
 def check_agent_probe():
     p = HERMES/'state/agent-probe-latest.json'
     expected_plist = HOME/'Library/LaunchAgents/ai.hermes.agent-probe.plist'
@@ -402,6 +496,53 @@ def check_tool_readiness():
             broken.append(name)
     status='fail' if age > 12*3600 or broken else 'pass'
     return {'name':'tool_readiness','status':status,'detail':f'age={age}s core_broken={broken[:8]}'}
+
+
+def check_document_visual_delivery():
+    """Verify the actual Telegram surface exposes vision and the release gate."""
+    marker = HERMES / 'state/required-canaries/document-visual-delivery'
+    if not marker.is_file():
+        return {
+            'name':'document_visual_delivery',
+            'status':'skip',
+            'detail':f'not required for this runtime (marker absent: {marker})',
+        }
+    runtime = HERMES / 'hermes-agent'
+    python = runtime / ('venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
+    cli = runtime / 'hermes_cli/main.py'
+    gate = HERMES / 'bin/client-doc-artifact-qa'
+    missing = []
+    if not python.is_file():
+        missing.append(f'runtime python missing: {python}')
+    if not cli.is_file():
+        missing.append(f'Hermes CLI missing: {cli}')
+    if not gate.is_file():
+        missing.append(f'document QA gate missing: {gate}')
+    if missing:
+        return {
+            'name':'document_visual_delivery',
+            'status':'fail',
+            'detail':'; '.join(missing),
+        }
+    probe = run(
+        [str(python), str(cli), 'tools', 'list', '--platform', 'telegram'],
+        timeout=20,
+    )
+    output = (probe.stdout or '') + '\n' + (probe.stderr or '')
+    vision_enabled = bool(
+        re.search(r'(?m)^\s*[✓+]\s+enabled\s+vision\b', output)
+    )
+    if probe.returncode != 0 or not vision_enabled:
+        detail = (
+            f'telegram vision enabled={vision_enabled} cli_rc={probe.returncode}; '
+            + output.strip().replace('\n', ' ')[:240]
+        )
+        return {'name':'document_visual_delivery','status':'fail','detail':detail}
+    return {
+        'name':'document_visual_delivery',
+        'status':'pass',
+        'detail':'Telegram resolves vision toolset and document QA gate is installed',
+    }
 
 def check_canary_reconciler():
     p=HERMES/'state/canary-reconciler-latest.json'
@@ -644,6 +785,15 @@ CHECK_METADATA = {
             'before client-visible use.'
         ),
     },
+    'document_visual_delivery': {
+        'title': 'Telegram document visual-delivery lane unavailable',
+        'severity': 'P1',
+        'fix_class': 'document_visual_delivery',
+        'recommended_action': (
+            'Restore the Telegram vision toolset and evidence-bound document QA '
+            'gate, then rerun the private document canary.'
+        ),
+    },
     'agent_runtime_probe': {
         'title': 'Agent runtime constructor probe failed',
         'severity': 'P1',
@@ -693,8 +843,9 @@ def main():
         check_config, check_client_context, check_gateway_state, check_local_brain,
         check_topic_session_bindings, check_advertised_tool_env,
         check_credential_friction_recent, check_telegram_transcript_hook,
-        check_immersion_quality, check_agent_probe, check_logs, check_tool_readiness,
-        check_canary_reconciler, check_disk,
+        check_immersion_quality, check_telegram_organic_checkpoints,
+        check_agent_probe, check_logs, check_tool_readiness,
+        check_document_visual_delivery, check_canary_reconciler, check_disk,
     ]
     for fn in check_functions:
         try:

@@ -30,7 +30,6 @@ display:
       busy_steer_ack_enabled: false
       tool_progress: false
       interim_assistant_messages: false
-      long_running_notifications: false
 
 session_reset:
   notify: false

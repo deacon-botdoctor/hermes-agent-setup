@@ -5,7 +5,6 @@ task-ledger tools
 from __future__ import annotations
 
 import contextvars
-import hashlib
 import json
 import logging
 import os
@@ -43,8 +42,6 @@ _turn_lock = threading.RLock()
 _MAX_TURN_CONTEXTS = 256
 _TURN_CONTEXT_TTL_SECONDS = 4 * 60 * 60
 _LEDGER_TOOLS = {"task_open", "task_update", "task_done", "task_block", "task_list"}
-_HOUSEKEEPING_TOOLS = {"todo", "memory", "session_search"}
-_TASK_ID_RE = re.compile(r"\bTask opened:\s*(t_[A-Za-z0-9_-]+)\b")
 _ASYNC_COMPLETION_PREFIX = "[ASYNC DELEGATION"
 _ASYNC_DISPATCHED_RE = re.compile(
     r"^Dispatched:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s|$)",
@@ -55,17 +52,9 @@ _ASYNC_DISPATCHED_RE = re.compile(
 @dataclass
 class _TurnContext:
     turn_id: str
-    session_id: str
-    ask: str
-    platform: str
-    requested_by: str
-    source: dict[str, str] = field(default_factory=dict)
     created_monotonic: float = field(default_factory=time.monotonic)
-    substantive_successes: int = 0
     task_id: str = ""
     async_completion_bound: bool = False
-    auto_captured: bool = False
-    receipt_pending: bool = False
 
 
 _turn_contexts: dict[str, _TurnContext] = {}
@@ -254,11 +243,6 @@ def _source_for_session(session_id: str, platform: str = "") -> dict[str, str]:
     return {key: _clean_text(value) for key, value in parsed.items() if value is not None}
 
 
-def _turn_capture_key(session_id: str, turn_id: str) -> str:
-    raw = f"{session_id}\0{turn_id}".encode("utf-8", errors="replace")
-    return "turn:" + hashlib.sha256(raw).hexdigest()
-
-
 def _is_user_turn(user_message: str, source: dict[str, str], parent_session_id: str) -> bool:
     text = _clean_text(user_message)
     if not text or text.startswith("[SYSTEM") or parent_session_id:
@@ -327,7 +311,12 @@ def _before_llm_call(
     sender_id: str = "",
     **_,
 ) -> dict[str, str] | None:
-    """Start authenticated per-turn tracking after gateway auth has passed."""
+    """Bind only explicit durable completions after gateway auth has passed.
+
+    Ordinary foreground work belongs to Hermes' native turn lifecycle.  The
+    ledger must not inject policy, infer a task from tool count, or create a
+    second lifecycle for work that remains inside the current turn.
+    """
     source = dict(_GATEWAY_SOURCE.get() or {})
     _GATEWAY_SOURCE.set({})
     source["platform"] = source.get("platform") or _platform_name(platform)
@@ -339,139 +328,42 @@ def _before_llm_call(
     if not clean_turn_id or not clean_session_id:
         return None
 
-    requested_by = source.get("user_name") or source.get("user_id") or _clean_text(sender_id) or "operator"
-    state = _TurnContext(
-        turn_id=clean_turn_id,
-        session_id=clean_session_id,
-        ask=_clean_text(user_message)[:4000],
-        platform=source.get("platform", ""),
-        requested_by=requested_by,
-        source=source,
-    )
-    async_completion = _is_async_completion(user_message)
-    if async_completion:
-        state.task_id = _active_task_for_source(
-            source,
-            active_at=_async_dispatched_at(user_message),
-        )
-        state.async_completion_bound = bool(state.task_id)
     now = time.monotonic()
     with _turn_lock:
         _prune_turn_contexts(now)
-        _turn_contexts[clean_turn_id] = state
         _session_sources[clean_session_id] = (now, dict(source))
 
-    if async_completion and state.task_id:
+    async_completion = _is_async_completion(user_message)
+    if not async_completion:
+        return None
+
+    task_id = _active_task_for_source(
+        source,
+        active_at=_async_dispatched_at(user_message),
+    )
+    state = _TurnContext(
+        turn_id=clean_turn_id,
+        task_id=task_id,
+        async_completion_bound=bool(task_id),
+    )
+    with _turn_lock:
+        _turn_contexts[clean_turn_id] = state
+
+    if task_id:
         return {
             "context": (
-                f"Async delegation completion belongs to existing task {state.task_id} in this exact chat topic. "
+                f"Async delegation completion belongs to existing task {task_id} in this exact chat topic. "
                 "Integrate the returned work instead of opening a duplicate task. Before replying, call task_update "
                 "with concrete completed/target counts, blockers, and the verified artifact_path when one exists. "
                 "Call task_done only if the user's full request—not merely this worker batch—is actually complete."
             )
         }
 
-    return {
-        "context": (
-            "Task lifecycle enforcement is active for this authenticated turn. "
-            "For work requiring multiple tools or turns, call task_open before work and "
-            "task_done or task_block before claiming completion. If you omit task_open, "
-            "the runtime will auto-capture after the second substantive successful tool; "
-            "its task ID will appear in that tool result."
-        )
-    }
-
-
-def _insert_auto_captured_task(state: _TurnContext) -> str:
-    db = get_db()
-    capture_key = _turn_capture_key(state.session_id, state.turn_id)
-    now = _now_iso()
-    task_id = f"t_{uuid.uuid4().hex[:12]}"
-    source = state.source
-    client_slug = _clean_text(os.environ.get("HERMES_CLIENT_SLUG"))
-    change_required = 1 if client_slug else 0
-    change_status = "pending" if client_slug else "not_required"
-    with _db_lock:
-        try:
-            db.execute(
-                """
-                INSERT INTO tasks
-                    (id, agent, chat_id, thread_id, platform, requested_by, ask,
-                     expected_artifact, status, opened_at, updated_at, session_id,
-                     client_slug, change_record_required, change_recorded,
-                     change_record_status, capture_key)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'in_progress', ?, ?, ?, ?, ?, 0,
-                        ?, ?)
-                """,
-                (
-                    task_id,
-                    AGENT_NAME,
-                    source.get("chat_id") or None,
-                    source.get("thread_id") or None,
-                    state.platform or None,
-                    state.requested_by,
-                    state.ask,
-                    "Verified completion receipt or artifact for this request",
-                    now,
-                    now,
-                    state.session_id,
-                    client_slug or None,
-                    change_required,
-                    change_status,
-                    capture_key,
-                ),
-            )
-            db.commit()
-            return task_id
-        except sqlite3.IntegrityError:
-            row = db.execute(
-                "SELECT id FROM tasks WHERE capture_key=?",
-                (capture_key,),
-            ).fetchone()
-            if row:
-                return str(row["id"])
-            raise
-
-
-def _after_tool_call(
-    *,
-    tool_name: str = "",
-    result: Any = "",
-    status: str = "",
-    turn_id: str = "",
-    **_,
-) -> None:
-    clean_turn_id = _clean_text(turn_id)
-    clean_tool_name = _clean_text(tool_name)
-    if not clean_turn_id:
-        return None
-    with _turn_lock:
-        state = _turn_contexts.get(clean_turn_id)
-        if state is None:
-            return None
-
-        if clean_tool_name == "task_open":
-            match = _TASK_ID_RE.search(str(result or ""))
-            if match:
-                state.task_id = match.group(1)
-            return None
-
-        if clean_tool_name in _LEDGER_TOOLS or clean_tool_name in _HOUSEKEEPING_TOOLS:
-            return None
-        if _clean_text(status).lower() != "ok":
-            return None
-
-        state.substantive_successes += 1
-        if state.task_id or state.substantive_successes < 2:
-            return None
-        state.task_id = _insert_auto_captured_task(state)
-        state.auto_captured = True
-        state.receipt_pending = True
     return None
 
 
 def _before_tool_call(*, tool_name: str = "", turn_id: str = "", **_) -> dict[str, str] | None:
-    """Prevent an explicit open from duplicating a bound or automatic row."""
+    """Prevent an async completion from opening a duplicate durable row."""
     if _clean_text(tool_name) != "task_open":
         return None
     with _turn_lock:
@@ -486,45 +378,7 @@ def _before_tool_call(*, tool_name: str = "", turn_id: str = "", **_) -> dict[st
                     "Use task_update, task_done, or task_block on that task; do not open a duplicate."
                 ),
             }
-        if not state.auto_captured:
-            return None
-        return {
-            "action": "block",
-            "message": (
-                f"Task already auto-captured: {state.task_id}. "
-                "Use task_update, task_done, or task_block on that task."
-            ),
-        }
-
-
-def _attach_task_receipt(*, result: Any = "", turn_id: str = "", **_) -> str | None:
-    clean_turn_id = _clean_text(turn_id)
-    with _turn_lock:
-        state = _turn_contexts.get(clean_turn_id)
-        if state is None or not state.receipt_pending or not state.task_id:
-            return None
-        state.receipt_pending = False
-        task_id = state.task_id
-
-    receipt = {
-        "task_id": task_id,
-        "capture": "runtime_auto",
-        "required_next_action": "Call task_done or task_block before claiming completion.",
-    }
-    if isinstance(result, str):
-        try:
-            parsed = json.loads(result)
-        except (TypeError, ValueError):
-            parsed = None
-        if isinstance(parsed, dict):
-            parsed["_task_ledger"] = receipt
-            return json.dumps(parsed, ensure_ascii=False)
-        return f"{result}\n\n[TASK LEDGER] {json.dumps(receipt, ensure_ascii=False)}"
-    if isinstance(result, dict):
-        transformed = dict(result)
-        transformed["_task_ledger"] = receipt
-        return json.dumps(transformed, ensure_ascii=False)
-    return f"{result}\n\n[TASK LEDGER] {json.dumps(receipt, ensure_ascii=False)}"
+        return None
 
 
 def _after_llm_call(*, turn_id: str = "", **_) -> None:
@@ -604,9 +458,9 @@ def _load_changelog_backend():
 TASK_OPEN_SCHEMA = {
     "name": "task_open",
     "description": (
-        "Register a new work item when the user (Deacon) asks you to do something that "
-        "will take effort, produce an artifact, or span multiple turns. Call this IMMEDIATELY "
-        "when you see an ask. Returns a task_id you must later pass to task_done or task_block."
+        "Register explicit durable work that must outlive the current foreground turn, "
+        "such as an overnight job, monitoring run, or restart-surviving operation. "
+        "Ordinary foreground work does not need a task."
     ),
     "parameters": {
         "type": "object",
@@ -1219,7 +1073,5 @@ def register(ctx):
         register_hook("pre_gateway_dispatch", _capture_gateway_context)
         register_hook("pre_llm_call", _before_llm_call)
         register_hook("pre_tool_call", _before_tool_call)
-        register_hook("post_tool_call", _after_tool_call)
-        register_hook("transform_tool_result", _attach_task_receipt)
         register_hook("post_llm_call", _after_llm_call)
     logger.info("task-ledger: plugin registered")
