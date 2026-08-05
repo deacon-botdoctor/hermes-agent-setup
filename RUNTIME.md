@@ -2,14 +2,14 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.05-golden-83476524`:
+The current public release is `botdoctor-hermes-2026.08.05-golden-46fef7af`:
 
 - upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `8347652422606e91c3695e8652c813a6b35423e1`;
-- baseline wiring: 18 files;
-- runtime payload: 276 files;
+- public Golden source: `46fef7aff953fa81e0740754e4afea5e3a5589e6`;
+- baseline wiring: 19 files;
+- runtime payload: 277 files;
 - assembled runtime fingerprint:
-  `69f1b0fb32f8dfa5470f8b998eb87f9b9d803a0734212dd09882576ea32a7128`.
+  `580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -39,8 +39,13 @@ installations.
 - Task completion now falls back to a profile-local append-only record when
   the optional operator changelog backend is absent.
 - Malformed lifecycle script references fail closed without crashing the turn.
-- Durable task-ledger transitions and the open-loop detector now ship together,
-  so accepted work cannot silently disappear between model turns or restarts.
+- Native Hermes owns ordinary foreground work. An actionable acknowledgement
+  without current-turn action evidence receives one bounded continuation retry;
+  explicit durable work may use Task Ledger, but ordinary turns are not
+  auto-captured into a second task system.
+- The disconnected open-loop hook and task-follow-up sweeper are retired. They
+  no longer inject recovery prompts, rewrite tool results, or compete with the
+  model loop.
 - Silent drain recovery remains durable without leaking internal lifecycle text
   into client chats, and Telegram group ingress stays out of the recovery
   executor that owns replayed work.
@@ -74,6 +79,10 @@ values only when they still exactly match the old defaults.
 
 - **Immediate Telegram typing:** acknowledge accepted work before slow
   pre-model preparation.
+- **Lean agent loop:** current-turn action evidence prevents a bare “working on
+  it” response from ending actionable work, while native Hermes retains tool
+  execution, per-operation timeout recovery, foreground iteration, and final
+  response ownership.
 - **Model-authored long-work checkpoints:** periodic Telegram updates summarize
   real model commentary; they do not invent tool progress or make a second
   model call.
@@ -128,7 +137,7 @@ values only when they still exactly match the old defaults.
   friction can be fixed before the user has to report it manually.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 19
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 26
 cohesive registry entries in this release.
 
 ## Profile additions

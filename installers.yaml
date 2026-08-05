@@ -24,6 +24,7 @@ installers:
     sources:
       - bin/hermes-canary-reconciler.py
       - kit/bin/operator-status.py
+      - kit/bin/telegram-polling-health-probe.py
     destination_dir: "{hermes_home}/bin"
     owner: preserve
     mode: "0755"
@@ -32,6 +33,7 @@ installers:
       paths:
         - "{hermes_home}/bin/hermes-canary-reconciler.py"
         - "{hermes_home}/bin/operator-status.py"
+        - "{hermes_home}/bin/telegram-polling-health-probe.py"
     rollback: restore per-file .bak-host-artifact-* backups
 
   - name: install_host_hygiene

@@ -82,6 +82,23 @@ patches:
       tool-input retention before promotion.
     upstream_issue: null
     retirement_condition: remove when upstream periodic Telegram notifications can summarize newly emitted model commentary and skip rather than invent progress when none exists.
+  - name: telegram_organic_long_running_checkpoints_v2
+    module: modules/telegram_organic_long_running_checkpoints_v2.py
+    function: patch_telegram_organic_long_running_checkpoints_v2
+    target: gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2
+    test: python3 -m pytest -q bin/test/test_telegram_organic_long_running_checkpoints_v1.py bin/test/test_telegram_organic_long_running_checkpoints_v2.py bin/test/test_assembled_runtime_contract.py
+    rollback: restore gateway/run.py from the pre-apply snapshot or .bak-pre-telegram-organic-checkpoints-v2
+    client_impact: restart_required
+    tags: [gateway, telegram, long-running, checkpoint, privacy, cadence]
+    status: extracted
+    route: irreducible
+    reason: >-
+      Existing v1 runtimes need a new marker to receive monotonic 10-minute milestones, strict same-message reuse,
+      and a fail-closed commentary privacy filter without re-enabling noisy display surfaces.
+    upstream_issue: null
+    retirement_condition: remove when upstream guarantees scheduled Telegram milestone headers, one-message edits, and equivalent client-safe commentary filtering.
   - name: telegram_dm_topic_recovery_root_guard_v1
     module: modules/telegram_dm_topic_recovery_root_guard_v1.py
     function: patch_telegram_dm_topic_recovery_root_guard_v1
@@ -262,6 +279,36 @@ patches:
     reason: a policy-approved cold MCP can register during a tool batch, after the current agent has snapshotted valid_tool_names; the next model iteration must receive the new schemas without waiting for another user turn
     upstream_issue: null
     retirement_condition: remove when upstream refreshes the current agent tool snapshot after dynamic MCP registration at the post-tool boundary
+  - name: runtime_env_config_authority_v1
+    module: modules/runtime_env_config_authority_v1.py
+    function: patch_runtime_env_config_authority_v1
+    target: gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_RUNTIME_ENV_CONFIG_AUTHORITY_v1
+    test: python3 -m pytest -q bin/test/test_runtime_env_config_authority_v1.py
+    rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots
+    client_impact: restart_required
+    tags: [gateway, config, env, timeout, progress, restart, reliability]
+    status: extracted
+    route: upstream-pr-pending
+    reason: per-turn credential refresh reloads .env after startup but re-bridges only agent.max_turns, allowing stale env values to silently disable config-authoritative inactivity timeouts and change warning, progress, stall, or restart controls
+    upstream_issue: null
+    retirement_condition: remove when upstream re-applies every config-authoritative agent environment bridge after each runtime dotenv refresh
+  - name: lean_agent_loop_v1
+    module: modules/lean_agent_loop_v1.py
+    function: patch_lean_agent_loop_v1
+    target: agent/agent_runtime_helpers.py + agent/conversation_loop.py + agent/tool_dispatch_helpers.py + run_agent.py + tests/agent/test_intent_ack_continuation.py + tests/run_agent/test_tool_batch_segmentation.py + tests/run_agent/test_run_agent.py
+    owner: engineering-lead
+    idempotency: HERMES_LEAN_AGENT_LOOP_v1 + HERMES_LEAN_AGENT_LOOP_TEST_v1
+    test: python3 -m pytest -q bin/test/test_lean_agent_loop_v1.py tests/agent/test_intent_ack_continuation.py tests/run_agent/test_tool_batch_segmentation.py && python3 -m pytest -q tests/run_agent/test_run_agent.py::TestConcurrentToolExecution::test_single_safe_tool_uses_guarded_worker_path
+    rollback: restore the six touched runtime/test files from the pre-apply snapshot
+    client_impact: restart_required
+    tags: [agent, continuation, acknowledgement, completion, tools, timeout, client-safety]
+    status: extracted
+    route: upstream-pr-pending
+    reason: Hermes already owns foreground turn continuation and guarded tool workers; this minimal overlay scopes action evidence to the current turn, permits only one acknowledgement retry, and routes a single safe call through the existing per-operation timeout path instead of adding a second task or watchdog lifecycle
+    upstream_issue: null
+    retirement_condition: remove when upstream scopes acknowledgement evidence to the current turn, bounds it to one retry, and applies its guarded tool-worker timeout to single safe calls
   - name: mcp_legacy_alias_bridge_v1
     module: modules/xai_deferred_tool_bridge_guard_v1.py
     function: patch_mcp_legacy_alias_bridge_v1

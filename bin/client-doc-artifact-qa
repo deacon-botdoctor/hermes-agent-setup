@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Truthful release gate for client-presentable document artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import subprocess
+import tempfile
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+DRAFT_LABEL = "Layout draft only — not production-ready"
+MIN_ARTIFACT_BYTES = 1_024
+MIN_PREVIEW_BYTES = 1_024
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def regular_file(path: Path, label: str, minimum: int) -> None:
+    if not path.is_file():
+        raise ValueError(f"{label} is not a regular file: {path}")
+    if path.stat().st_size < minimum:
+        raise ValueError(f"{label} is too small ({path.stat().st_size} bytes)")
+
+
+def run(cmd: list[str], timeout: int = 60) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f"command failed: {cmd[0]}: {exc}") from exc
+
+
+def validate_pdf(path: Path) -> int:
+    if not path.read_bytes()[:5] == b"%PDF-":
+        raise ValueError("artifact does not have a PDF signature")
+    info = run(["pdfinfo", str(path)])
+    if info.returncode != 0:
+        raise ValueError("pdfinfo could not read artifact")
+    match = re.search(r"(?m)^Pages:\s*(\d+)\s*$", info.stdout or "")
+    pages = int(match.group(1)) if match else 0
+    if pages < 1:
+        raise ValueError("pdfinfo reported no pages")
+    extracted = run([os.environ.get("PDFTOTEXT_BIN", "pdftotext"), str(path), "-"])
+    if extracted.returncode != 0 or not (extracted.stdout or "").strip():
+        raise ValueError("PDF text extraction failed or returned no text")
+    with tempfile.TemporaryDirectory() as td:
+        prefix = Path(td) / "page"
+        rendered = run(["pdftoppm", "-png", "-r", "96", str(path), str(prefix)], timeout=120)
+        previews = sorted(Path(td).glob("page-*.png"))
+        if rendered.returncode != 0 or len(previews) != pages:
+            raise ValueError(
+                f"all-page render coverage failed: rendered={len(previews)} pages={pages}"
+            )
+        if any(preview.stat().st_size < MIN_PREVIEW_BYTES for preview in previews):
+            raise ValueError("one or more rendered PDF pages are too small")
+    return pages
+
+
+def validate_preview(path: Path) -> None:
+    header = path.read_bytes()[:12]
+    png = header.startswith(b"\x89PNG\r\n\x1a\n")
+    jpeg = header.startswith(b"\xff\xd8\xff")
+    if not (png or jpeg):
+        raise ValueError("preview must be a genuine PNG or JPEG image")
+
+
+def iso_timestamp(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("visual receipt is missing inspected_at")
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError("visual receipt inspected_at is not ISO-8601") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("visual receipt inspected_at must include a timezone")
+    now = datetime.now(timezone.utc)
+    parsed = parsed.astimezone(timezone.utc)
+    if parsed > now:
+        raise ValueError("visual receipt inspected_at is in the future")
+    if (now - parsed).total_seconds() > 7 * 24 * 3600:
+        raise ValueError("visual receipt is older than seven days")
+    return text
+
+
+def verify_vision_tool_result(receipt: dict, preview: Path) -> None:
+    session_id = str(receipt.get("session_id") or "").strip()
+    tool_call_id = str(receipt.get("tool_call_id") or "").strip()
+    result_sha = str(receipt.get("result_sha256") or "").strip()
+    if not session_id or not tool_call_id or not re.fullmatch(r"[0-9a-f]{64}", result_sha):
+        raise ValueError("visual receipt requires session_id, tool_call_id, and result_sha256")
+    state_db = Path.home() / ".hermes/state.db"
+    if not state_db.is_file():
+        raise ValueError(f"Hermes state DB is missing: {state_db}")
+    with sqlite3.connect(state_db) as con:
+        tool_row = con.execute(
+            "select content from messages where session_id=? and tool_call_id=? "
+            "and tool_name='vision_analyze' order by id desc limit 1",
+            (session_id, tool_call_id),
+        ).fetchone()
+        call_row = con.execute(
+            "select tool_calls from messages where session_id=? and tool_calls like ? "
+            "order by id desc limit 1",
+            (session_id, f"%{tool_call_id}%"),
+        ).fetchone()
+    if not tool_row or sha256_bytes(str(tool_row[0] or "").encode()) != result_sha:
+        raise ValueError("referenced vision_analyze result is missing or hash-mismatched")
+    try:
+        calls = json.loads(call_row[0]) if call_row else []
+        call = next(item for item in calls if item.get("id") == tool_call_id or item.get("call_id") == tool_call_id)
+        arguments = json.loads(call["function"]["arguments"])
+        inspected = Path(arguments["image_url"]).expanduser().resolve()
+    except (KeyError, TypeError, ValueError, StopIteration, json.JSONDecodeError) as exc:
+        raise ValueError("referenced vision_analyze call arguments are unreadable") from exc
+    if inspected != preview:
+        raise ValueError("referenced vision_analyze call inspected a different preview")
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def validate_visual_receipt(receipt_path: Path, artifact: Path, preview: Path) -> dict:
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"visual receipt is unreadable: {exc}") from exc
+    if not isinstance(receipt, dict):
+        raise ValueError("visual receipt must be a JSON object")
+    expected = {
+        "artifact_sha256": sha256(artifact),
+        "preview_sha256": sha256(preview),
+    }
+    for field, actual in expected.items():
+        if receipt.get(field) != actual:
+            raise ValueError(f"visual receipt {field} does not match current bytes")
+    if receipt.get("analyzer") != "vision_analyze":
+        raise ValueError("visual receipt analyzer must be vision_analyze")
+    if str(receipt.get("decision") or "").upper() != "PASS":
+        raise ValueError("visual receipt decision must be PASS")
+    iso_timestamp(receipt.get("inspected_at"))
+    findings = receipt.get("findings")
+    if not findings or not isinstance(findings, (str, list)):
+        raise ValueError("visual receipt requires nonempty findings")
+    verify_vision_tool_result(receipt, preview)
+    return receipt
+
+
+def write_report(report_dir: Path, artifact: Path, payload: dict) -> Path:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    target = report_dir / f"{stamp}-{sha256(artifact)[:12]}-{artifact.name}.json"
+    tmp = target.with_suffix(target.suffix + f".tmp-{os.getpid()}")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, target)
+    return target
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("artifact")
+    parser.add_argument(
+        "--release-mode",
+        required=True,
+        choices=("owner-review-draft", "final"),
+    )
+    parser.add_argument("--preview", required=True)
+    parser.add_argument("--visual-receipt")
+    parser.add_argument(
+        "--report-dir",
+        default=str(Path.home() / ".hermes/state/client-doc-artifact-qa"),
+    )
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+
+    artifact = Path(args.artifact).expanduser().resolve()
+    preview = Path(args.preview).expanduser().resolve()
+    status = "REVIEW_DRAFT" if args.release_mode == "owner-review-draft" else "PASS"
+    payload = {
+        "schema_version": 1,
+        "status": status,
+        "release_mode": args.release_mode,
+        "artifact": str(artifact),
+        "preview": str(preview),
+        "checked_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        regular_file(artifact, "artifact", MIN_ARTIFACT_BYTES)
+        regular_file(preview, "preview", MIN_PREVIEW_BYTES)
+        payload["page_count"] = validate_pdf(artifact)
+        validate_preview(preview)
+        payload["artifact_sha256"] = sha256(artifact)
+        payload["preview_sha256"] = sha256(preview)
+        if args.release_mode == "owner-review-draft":
+            if args.visual_receipt:
+                raise ValueError("owner-review draft does not accept or claim visual PASS")
+            payload["client_label"] = DRAFT_LABEL
+        else:
+            if not args.visual_receipt:
+                raise ValueError("final release requires --visual-receipt")
+            receipt = validate_visual_receipt(
+                Path(args.visual_receipt).expanduser().resolve(), artifact, preview
+            )
+            payload["visual_evidence"] = {
+                "analyzer": receipt["analyzer"],
+                "inspected_at": receipt["inspected_at"],
+                "findings": receipt["findings"],
+            }
+    except ValueError as exc:
+        payload["status"] = "FAIL"
+        payload["error"] = str(exc)
+
+    report_path = write_report(Path(args.report_dir).expanduser(), artifact, payload)
+    payload["report_path"] = str(report_path)
+    if args.json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif payload["status"] == "REVIEW_DRAFT":
+        print(f"REVIEW_DRAFT: {DRAFT_LABEL}; report={report_path}")
+    elif payload["status"] == "PASS":
+        print(f"PASS: visual receipt matches artifact and preview; report={report_path}")
+    else:
+        print(f"FAIL: {payload['error']}; report={report_path}")
+    return 0 if payload["status"] in {"REVIEW_DRAFT", "PASS"} else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

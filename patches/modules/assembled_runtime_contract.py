@@ -14,7 +14,7 @@ class AssembledRuntimeContractError(RuntimeError):
     pass
 
 
-_TELEGRAM_CHECKPOINT_MARKER = "HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1"
+_TELEGRAM_CHECKPOINT_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2"
 _TELEGRAM_CHECKPOINT_HELPERS = {
     "_telegram_checkpoint_task_label",
     "_telegram_checkpoint_preview_subject",
@@ -22,6 +22,8 @@ _TELEGRAM_CHECKPOINT_HELPERS = {
     "_capture_telegram_tool_checkpoint",
     "_telegram_checkpoint_activity_label",
     "_format_telegram_model_checkpoint",
+    "_sanitize_telegram_checkpoint_commentary_v2",
+    "_telegram_checkpoint_minutes_v2",
 }
 _TELEGRAM_CHECKPOINT_BANNED_COPY = {
     "Still working on:",
@@ -164,6 +166,16 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         "truthful empty interval": (
             "No new observable milestone completed in this interval."
         ),
+        "monotonic checkpoint origin": "_notify_start = time.monotonic()",
+        "scheduled checkpoint deadline": (
+            "_notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)"
+        ),
+        "commentary privacy filter": (
+            "_sanitize_telegram_checkpoint_commentary_v2(piece)"
+        ),
+        "same-message Telegram failure boundary": (
+            "_heartbeat_msg_id and source.platform == Platform.TELEGRAM"
+        ),
     }
     missing_wiring = [
         label for label, snippet in required_wiring.items() if snippet not in compact
@@ -172,6 +184,45 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         raise AssembledRuntimeContractError(
             "assembled Telegram checkpoint wiring is incomplete: "
             + ", ".join(missing_wiring)
+        )
+
+    notifier_nodes = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "_notify_long_running"
+    ]
+    if len(notifier_nodes) != 1:
+        raise AssembledRuntimeContractError(
+            "assembled Telegram checkpoint notifier is missing or ambiguous"
+        )
+    notifier = notifier_nodes[0]
+    tick_initializers = [
+        node
+        for node in ast.walk(notifier)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and any(
+            isinstance(target, ast.Name) and target.id == "_notify_tick"
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+        )
+    ]
+    tick_increments = [
+        node
+        for node in ast.walk(notifier)
+        if isinstance(node, ast.AugAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "_notify_tick"
+    ]
+    if (
+        len(tick_initializers) != 1
+        or len(tick_increments) != 1
+        or tick_initializers[0].lineno >= tick_increments[0].lineno
+    ):
+        raise AssembledRuntimeContractError(
+            "assembled Telegram checkpoint tick must initialize inside the notifier "
+            "before its first increment"
         )
 
     calls = {
@@ -218,6 +269,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         formatter = namespace["_format_telegram_model_checkpoint"]
         task_label = namespace["_telegram_checkpoint_task_label"]
         capture = namespace["_capture_telegram_tool_checkpoint"]
+        sanitize = namespace["_sanitize_telegram_checkpoint_commentary_v2"]
 
         factual = formatter(
             10,
@@ -250,6 +302,12 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         if task_label("Can you please handle this request?") != "":
             raise AssembledRuntimeContractError(
                 "Telegram checkpoint task labels can echo generic request content"
+            )
+        if sanitize("The focused regression tests now pass.") != (
+            "The focused regression tests now pass."
+        ) or sanitize("I ran python3 -m pytest /private/client/token.txt"):
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint commentary privacy semantics changed"
             )
 
         context = SimpleNamespace(

@@ -1,0 +1,9 @@
+# Telegram foreground-turn checkpoints are the sole fleet exception to the
+# globally quiet long-running notification surface.
+agent:
+  gateway_notify_interval: 600
+
+display:
+  platforms:
+    telegram:
+      long_running_notifications: true
