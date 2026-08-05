@@ -5,3 +5,6 @@ description: Safely activate and recover allowlisted cold MCP backends inside th
 provides_tools:
   - mcp_server_status
   - restart_mcp_server
+provides_hooks:
+  - pre_llm_call
+  - pre_tool_call

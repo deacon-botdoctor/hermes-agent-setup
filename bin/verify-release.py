@@ -211,10 +211,6 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
         "canonical_upstream_sha"
     ):
         errors.append("release upstream SHA does not match source manifest")
-    if release.get("golden_deployment_digest") != manifest.get(
-        "golden_deployment_digest"
-    ):
-        errors.append("release Golden deployment digest does not match source manifest")
     verify_cua_driver_contract(release, errors)
     verify_runtime_coherence_contract(release, errors)
 
@@ -291,13 +287,14 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
     if deployment_digest != release.get("deployment_digest"):
         errors.append("release deployment digest mismatch")
     expected_component_fields = {
+        "baseline_wiring": "baseline_wiring_digest",
         "runtime_payload": "runtime_payload_digest",
     }
     for component, field in expected_component_fields.items():
         if component_digests.get(component) != release.get(field):
             errors.append(f"release {field} mismatch")
 
-    assembled = manifest.get("assembled_runtime_fingerprint")
+    assembled = manifest.get("runtime_fingerprint")
     expected_assembled = release.get("assembled_runtime_fingerprint")
     if not isinstance(assembled, dict) or not isinstance(
         assembled.get("files"), dict

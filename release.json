@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "release": "botdoctor-hermes-2026.08.04-golden-b8f90b14",
+  "release": "botdoctor-hermes-2026.08.05-golden-83476524",
   "status": "current",
   "source_manifest": "runtime-payload-source-manifest.json",
-  "golden_sha": "b8f90b14f9267af63ea067c1fde07786af9b294a",
+  "golden_sha": "8347652422606e91c3695e8652c813a6b35423e1",
   "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-  "source_scope": "sanitized_runtime_payload_only",
-  "runtime_payload_digest": "211cf16fa7b997c2e509cbced79835433560e34b14bf2bd1971413d52d27f612",
-  "deployment_digest": "d18838348dba5482b66a0e8b7e955544a68a2ec61e5ff432190c465029b521d4",
-  "golden_deployment_digest": "284219a6e349b6dc13ffcbbf9704d0ed55693064b597986f2c3bf5449dd4e75b",
+  "source_scope": "sanitized_deployable_components",
+  "baseline_wiring_digest": "b20da4611610cf90d9fde6a8b26f5a5c139c87fc133307fca6538905750f9d61",
+  "runtime_payload_digest": "8ff40745560bf5de108ee8aa027827ce0d5f70d3bd54146bf1106a569a4c2ade",
+  "deployment_digest": "0c76fccc011c6be12156455f192302821ed5122ec3916f35377edf04fefb6c47",
   "assembled_runtime_fingerprint": {
-    "digest": "1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66",
+    "digest": "69f1b0fb32f8dfa5470f8b998eb87f9b9d803a0734212dd09882576ea32a7128",
     "file_count": 77
   },
   "verification": {

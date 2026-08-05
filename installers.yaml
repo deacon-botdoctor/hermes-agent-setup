@@ -1,0 +1,231 @@
+schema_version: 1
+receipt:
+  filename: last-installed-host-artifacts.json
+  roster_key_env: HERMES_ROSTER_KEY
+
+installers:
+  - name: retire_legacy_memory_surfaces
+    owner_lane: baseline_wiring
+    current_registry_entry: retire_legacy_memory_surfaces
+    description: Remove retired Anamnesis/Qdrant bindings and known positive prompt directives while preserving memory data and exact rollback copies.
+    platforms: [linux, macos, windows]
+    operation: retire_legacy_memory_surfaces
+    helper: kit/bin/retire-legacy-memory-surfaces.py
+    rules_source: shared-rules
+    timeout_seconds: 120
+    rollback: run the helper with --rollback against the receipt's exact rollback directory
+
+  - name: install_runtime_health_tools
+    owner_lane: baseline_wiring
+    current_registry_entry: install_runtime_health_tools
+    description: Install the cross-platform local canary reconciler and runtime summary probe used by the client health floor.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    sources:
+      - bin/hermes-canary-reconciler.py
+      - kit/bin/operator-status.py
+    destination_dir: "{hermes_home}/bin"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: files_exist
+      paths:
+        - "{hermes_home}/bin/hermes-canary-reconciler.py"
+        - "{hermes_home}/bin/operator-status.py"
+    rollback: restore per-file .bak-host-artifact-* backups
+
+  - name: install_host_hygiene
+    owner_lane: baseline_wiring
+    current_registry_entry: install_host_hygiene
+    description: Install the shared host-hygiene audit and conservative agent-browser orphan reaper on supported Unix hosts.
+    platforms: [linux, macos]
+    operation: copy_many
+    sources:
+      - bin/hermes-host-hygiene.py
+      - kit/bin/agent-browser-orphan-reaper.py
+    destination_dir: "{hermes_home}/bin"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: files_exist
+      paths:
+        - "{hermes_home}/bin/hermes-host-hygiene.py"
+        - "{hermes_home}/bin/agent-browser-orphan-reaper.py"
+    rollback: restore per-file .bak-host-artifact-* backups; scheduler lifecycle remains operator-control-owned
+
+  - name: sync_kit_bin_scripts
+    owner_lane: baseline_wiring
+    current_registry_entry: sync_kit_bin_scripts
+    description: Sync already-present client-safe kit/bin artifacts into the host bin directory.
+    platforms: [linux, macos, windows]
+    operation: sync_glob
+    source: kit/bin/*
+    destination_dir: "{hermes_home}/bin"
+    existing_only: true
+    exclude_from_file: kit/bin/.control-plane-exclude
+    state_file: "{hermes_home}/state/kit-bin-sync.json"
+    owner: preserve
+    mode: preserve_source
+    post_install_check:
+      type: state_file_exists
+      path: "{hermes_home}/state/kit-bin-sync.json"
+    rollback: restore per-file .bak-kit-sync-* backups
+
+  - name: install_restart_guard
+    owner_lane: baseline_wiring
+    current_registry_entry: install_restart_guard
+    description: Install the shared restart cooldown and health gate script.
+    platforms: [linux, macos]
+    operation: copy
+    source: kit/bin/restart-guard.py
+    destination: "{hermes_home}/bin/restart-guard.py"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: executable
+      path: "{hermes_home}/bin/restart-guard.py"
+    rollback: remove "{hermes_home}/bin/restart-guard.py" or restore backup
+
+  - name: retrofit_hermes_watchdog
+    owner_lane: baseline_wiring
+    current_registry_entry: retrofit_hermes_watchdog
+    description: Replace an existing Hermes watchdog host script with the canonical restart-guard-aware artifact.
+    platforms: [linux, macos]
+    operation: copy
+    source: kit/bin/hermes-watchdog.sh
+    destination: "{hermes_home}/bin/hermes-watchdog.sh"
+    existing_only: true
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: contains
+      path: "{hermes_home}/bin/hermes-watchdog.sh"
+      text: "[restart-guard]"
+    rollback: restore .bak-host-artifact-* backup
+
+  - name: retrofit_auto_remediate
+    owner_lane: baseline_wiring
+    current_registry_entry: retrofit_auto_remediate
+    description: Patch an existing auto-remediate host script to call the shared restart guard.
+    platforms: [linux, macos]
+    operation: replace_block
+    source: kit/installers/retrofit-auto-remediate/restart-guard-fragment.sh
+    destination: "{hermes_home}/bin/auto-remediate.sh"
+    existing_only: true
+    anchor_text: "restart_gateway_spark() {"
+    end_text: "}\n"
+    already_present: "[restart-guard]"
+    owner: preserve
+    mode: preserve_existing
+    post_install_check:
+      type: contains
+      path: "{hermes_home}/bin/auto-remediate.sh"
+      text: "[restart-guard]"
+    rollback: restore .bak-host-artifact-* backup
+
+  - name: retrofit_fleet_connection_check
+    owner_lane: operator_control
+    current_registry_entry: retrofit_fleet_connection_check
+    description: Replace an existing fleet connection check host script with the canonical restart-guard-aware artifact.
+    platforms: [linux, macos]
+    operation: copy
+    source: kit/bin/fleet-connection-check.py
+    destination: "{hermes_home}/bin/fleet-connection-check.py"
+    existing_only: true
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: contains
+      path: "{hermes_home}/bin/fleet-connection-check.py"
+      text: "[restart-guard]"
+    rollback: restore .bak-host-artifact-* backup
+
+  - name: install_mac_display_keepalive
+    owner_lane: baseline_wiring
+    current_registry_entry: install_mac_display_keepalive
+    description: Insert the macOS caffeinate keepalive block into start-hermes.sh.
+    platforms: [macos]
+    operation: insert_before
+    source: kit/installers/mac-display-keepalive/start-hermes-fragment.sh
+    destination: "{hermes_home}/start-hermes.sh"
+    existing_only: true
+    anchor_text: "log \"Starting Hermes gateway...\""
+    already_present: "HERMES_MAC_DISPLAY_KEEPALIVE_v1"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: contains
+      path: "{hermes_home}/start-hermes.sh"
+      text: "HERMES_MAC_DISPLAY_KEEPALIVE_v1"
+    rollback: restore .bak-host-artifact-* backup
+
+  - name: browser_mcp_stdio_install
+    owner_lane: runtime_payload
+    current_registry_entry: browser_mcp_stdio_install
+    description: Install browser MCP server and stdio helper artifacts.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    sources:
+      - mcp-servers/browser/server.py
+      - mcp-servers/browser/mcp_stdio.py
+    destination_dir: "{hermes_home}/mcp-servers/browser"
+    owner: preserve
+    mode: preserve_source
+    post_install_check:
+      type: files_exist
+      paths:
+        - "{hermes_home}/mcp-servers/browser/server.py"
+        - "{hermes_home}/mcp-servers/browser/mcp_stdio.py"
+    rollback: restore .bak-host-artifact-* backups
+
+  - name: codex_provider_alert_filter
+    owner_lane: baseline_wiring
+    current_registry_entry: codex_provider_alert_filter
+    description: Install the canonical Codex CLI provider-alert filter wrapper on hosts with Codex.
+    platforms: [linux, macos, windows]
+    operation: copy_discovered
+    source: kit/bin/codex-provider-alert-filter.js
+    discovery: codex_cli_wrapper
+    owner: preserve
+    mode: preserve_existing
+    post_install_check:
+      type: contains_discovered
+      discovery: codex_cli_wrapper
+      text: "HERMES_CODEX_PROVIDER_ALERT_FILTER_v1"
+    rollback: restore .bak-host-artifact-* backup
+
+  - name: ensure_cua_driver
+    owner_lane: baseline_wiring
+    current_registry_entry: native_hermes_computer_use_install
+    description: Install and verify Golden's pinned Cua Driver through the exact Hermes runtime.
+    platforms: [linux, macos, windows]
+    operation: ensure_cua_driver
+    helper: kit/bin/ensure-cua-driver.py
+    contract: kit/config/cua-driver-release-v1.json
+    require_ready: false
+    timeout_seconds: 960
+    rollback: reinstall the prior approved version through the same native Hermes command; never edit OS permission databases
+
+  - name: ensure_gateway_watchdog
+    owner_lane: baseline_wiring
+    current_registry_entry: ensure_gateway_watchdog
+    description: Install the bounded five-minute local gateway watchdog and platform-native scheduler.
+    platforms: [linux, macos, windows]
+    operation: ensure_gateway_watchdog
+    helper: kit/bin/ensure-gateway-watchdog.py
+    source: kit/bin/hermes-gateway-watchdog-client.py
+    timeout_seconds: 120
+    post_install_check:
+      type: executable
+      path: "{hermes_home}/bin/hermes-gateway-watchdog-client.py"
+    rollback: disable/remove the platform-native watchdog unit and restore the per-file backup
+
+  - name: enforce_gbrain_provider_routing
+    owner_lane: baseline_wiring
+    current_registry_entry: enforce_gbrain_provider_routing
+    description: Preserve the runtime's approved OpenRouter embedding key, remove ZeroEntropy reachability, and disable GBrain's implicit ZeroEntropy reranker.
+    platforms: [linux, macos, windows]
+    operation: enforce_gbrain_provider_routing
+    helper: kit/bin/enforce-gbrain-provider-routing.py
+    timeout_seconds: 120
+    rollback: invoke the helper with the exact rollback metadata path recorded in gbrain_provider_receipt.rollback

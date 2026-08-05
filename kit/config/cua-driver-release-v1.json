@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "release": {
+    "repository": "trycua/cua",
+    "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
+    "tag": "cua-driver-rs-v0.14.2",
+    "version": "0.14.2"
+  },
+  "assets": {
+    "linux-arm64": {
+      "name": "cua-driver-rs-0.14.2-linux-arm64-binary.tar.gz",
+      "sha256": "bcfd49f9f1b3918a5cb6911136e99d365f621b2501ec5998082786941a6b0460"
+    },
+    "linux-x86_64": {
+      "name": "cua-driver-rs-0.14.2-linux-x86_64-binary.tar.gz",
+      "sha256": "2ee12b6170e22aacde74e672634fcb777d84d4752c2f2de3627365d2fc20a84e"
+    },
+    "macos-universal": {
+      "name": "cua-driver-rs-0.14.2-darwin-universal.tar.gz",
+      "sha256": "efc8f88a2f6e7424ab68d080331fd6aa94ef699153f2631d7a9214515151098c"
+    },
+    "windows-arm64": {
+      "name": "cua-driver-rs-0.14.2-windows-arm64.zip",
+      "sha256": "00b108d1c9d61e4b070f8f0de0163383afb92fa9fd3463cf0bfc3a49a54e0ce0"
+    },
+    "windows-x86_64": {
+      "name": "cua-driver-rs-0.14.2-windows-x86_64.zip",
+      "sha256": "3fe856e5a9b6eac6f06644ba1ef9db9c9279213802f3b5b6975993ce9a12c117"
+    }
+  },
+  "installer": {
+    "method": "native_hermes_computer_use_install",
+    "pin_environment": "CUA_DRIVER_RS_VERSION",
+    "telemetry_environment": "CUA_DRIVER_RS_TELEMETRY_ENABLED",
+    "telemetry_default": "0"
+  },
+  "acceptance": {
+    "baseline": "exact_version_present",
+    "gui_canary": "doctor_ready_and_list_windows",
+    "headless_doctor_degraded_allowed": true
+  }
+}
