@@ -54,25 +54,27 @@ def test_release_identity_matches_source_manifest():
     assert release["golden_sha"] == manifest["golden_sha"]
     assert release["canonical_upstream_sha"] == manifest["canonical_upstream_sha"]
     assert release["deployment_digest"] == manifest["deployment_digest"]
-    assert release["golden_deployment_digest"] == (
-        manifest["golden_deployment_digest"]
+    assert (
+        release["baseline_wiring_digest"]
+        == manifest["components"]["baseline_wiring"]["digest"]
     )
     assert (
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 103
-    assert set(manifest["components"]) == {"runtime_payload"}
-    assert release["source_scope"] == "sanitized_runtime_payload_only"
+    assert manifest["components"]["runtime_payload"]["file_count"] == 276
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 18
+    assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
+    assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66",
+        "digest": "69f1b0fb32f8dfa5470f8b998eb87f9b9d803a0734212dd09882576ea32a7128",
         "file_count": 77,
     }
-    assert manifest["assembled_runtime_fingerprint"]["digest"] == (
+    assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["assembled_runtime_fingerprint"]["file_count"] == 77
-    assert len(manifest["assembled_runtime_fingerprint"]["files"]) == 77
+    assert manifest["runtime_fingerprint"]["file_count"] == 77
+    assert len(manifest["runtime_fingerprint"]["files"]) == 77
     assert set(release) == {
         "schema_version",
         "release",
@@ -81,9 +83,9 @@ def test_release_identity_matches_source_manifest():
         "golden_sha",
         "canonical_upstream_sha",
         "source_scope",
+        "baseline_wiring_digest",
         "runtime_payload_digest",
         "deployment_digest",
-        "golden_deployment_digest",
         "assembled_runtime_fingerprint",
         "verification",
         "cua_driver",
@@ -1719,7 +1721,7 @@ def test_public_text_has_no_private_runtime_routes():
         }
     )
     posix_runtime_route = re.compile(
-        r"/(?:Users|home)/[^/\s]+/(?:\.hermes|hermes-agent)"
+        r"/(?:Users|home)/([^/\s]+)/(?:\.hermes|hermes-agent)"
     )
     windows_runtime_route = re.compile(
         r"C:\\+Users\\+([^\\\s]+)\\+\.hermes", re.IGNORECASE
@@ -1729,9 +1731,10 @@ def test_public_text_has_no_private_runtime_routes():
     )
     for relative in sorted(paths):
         text = (ROOT / relative).read_text(encoding="utf-8", errors="ignore")
-        assert posix_runtime_route.search(text) is None, (
-            f"{relative} contains a private POSIX runtime route"
-        )
+        for match in posix_runtime_route.finditer(text):
+            assert match.group(1) in {"Agent", "hermes-test"}, (
+                f"{relative} contains a non-neutral POSIX runtime route"
+            )
         for match in windows_runtime_route.finditer(text):
             assert match.group(1) == "Agent", (
                 f"{relative} contains a non-neutral Windows runtime route"

@@ -45,6 +45,11 @@ _TURN_CONTEXT_TTL_SECONDS = 4 * 60 * 60
 _LEDGER_TOOLS = {"task_open", "task_update", "task_done", "task_block", "task_list"}
 _HOUSEKEEPING_TOOLS = {"todo", "memory", "session_search"}
 _TASK_ID_RE = re.compile(r"\bTask opened:\s*(t_[A-Za-z0-9_-]+)\b")
+_ASYNC_COMPLETION_PREFIX = "[ASYNC DELEGATION"
+_ASYNC_DISPATCHED_RE = re.compile(
+    r"^Dispatched:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s|$)",
+    re.MULTILINE,
+)
 
 
 @dataclass
@@ -58,6 +63,7 @@ class _TurnContext:
     created_monotonic: float = field(default_factory=time.monotonic)
     substantive_successes: int = 0
     task_id: str = ""
+    async_completion_bound: bool = False
     auto_captured: bool = False
     receipt_pending: bool = False
 
@@ -260,6 +266,57 @@ def _is_user_turn(user_message: str, source: dict[str, str], parent_session_id: 
     return bool(source.get("chat_id") and source.get("platform"))
 
 
+def _is_async_completion(user_message: str) -> bool:
+    return _clean_text(user_message).upper().startswith(_ASYNC_COMPLETION_PREFIX)
+
+
+def _async_dispatched_at(user_message: str) -> str:
+    """Convert the watcher's local dispatch timestamp to ledger UTC."""
+    match = _ASYNC_DISPATCHED_RE.search(_clean_text(user_message))
+    if not match:
+        return ""
+    try:
+        local_struct = time.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
+        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.mktime(local_struct)))
+    except (OverflowError, ValueError):
+        return ""
+
+
+def _active_task_for_source(source: dict[str, str], *, active_at: str = "") -> str:
+    """Return the newest active task in this exact authenticated chat topic."""
+    chat_id = _clean_text(source.get("chat_id"))
+    thread_id = _clean_text(source.get("thread_id"))
+    platform = _clean_text(source.get("platform"))
+    if not chat_id:
+        return ""
+
+    predicates = ["chat_id=?", "status IN ('open','in_progress')"]
+    values: list[str] = [chat_id]
+    if thread_id:
+        predicates.append("thread_id=?")
+        values.append(thread_id)
+    else:
+        predicates.append("(thread_id IS NULL OR TRIM(thread_id)='')")
+    if platform:
+        predicates.append("platform=?")
+        values.append(platform)
+    if active_at:
+        # A completion may arrive after newer work has started in the same
+        # topic. Exclude rows that did not exist when this batch dispatched.
+        predicates.append("opened_at<=?")
+        values.append(active_at)
+
+    db = get_db()
+    with _db_lock:
+        row = db.execute(
+            "SELECT id FROM tasks WHERE "
+            + " AND ".join(predicates)
+            + " ORDER BY opened_at DESC, updated_at DESC, id DESC LIMIT 1",
+            tuple(values),
+        ).fetchone()
+    return str(row["id"]) if row else ""
+
+
 def _before_llm_call(
     *,
     session_id: str = "",
@@ -291,11 +348,28 @@ def _before_llm_call(
         requested_by=requested_by,
         source=source,
     )
+    async_completion = _is_async_completion(user_message)
+    if async_completion:
+        state.task_id = _active_task_for_source(
+            source,
+            active_at=_async_dispatched_at(user_message),
+        )
+        state.async_completion_bound = bool(state.task_id)
     now = time.monotonic()
     with _turn_lock:
         _prune_turn_contexts(now)
         _turn_contexts[clean_turn_id] = state
         _session_sources[clean_session_id] = (now, dict(source))
+
+    if async_completion and state.task_id:
+        return {
+            "context": (
+                f"Async delegation completion belongs to existing task {state.task_id} in this exact chat topic. "
+                "Integrate the returned work instead of opening a duplicate task. Before replying, call task_update "
+                "with concrete completed/target counts, blockers, and the verified artifact_path when one exists. "
+                "Call task_done only if the user's full request—not merely this worker batch—is actually complete."
+            )
+        }
 
     return {
         "context": (
@@ -397,12 +471,22 @@ def _after_tool_call(
 
 
 def _before_tool_call(*, tool_name: str = "", turn_id: str = "", **_) -> dict[str, str] | None:
-    """Prevent an explicit open from duplicating this turn's automatic row."""
+    """Prevent an explicit open from duplicating a bound or automatic row."""
     if _clean_text(tool_name) != "task_open":
         return None
     with _turn_lock:
         state = _turn_contexts.get(_clean_text(turn_id))
-        if state is None or not state.auto_captured or not state.task_id:
+        if state is None or not state.task_id:
+            return None
+        if state.async_completion_bound:
+            return {
+                "action": "block",
+                "message": (
+                    f"Async completion is already bound to active task {state.task_id}. "
+                    "Use task_update, task_done, or task_block on that task; do not open a duplicate."
+                ),
+            }
+        if not state.auto_captured:
             return None
         return {
             "action": "block",
@@ -629,25 +713,47 @@ TASK_UPDATE_SCHEMA = {
         "properties": {
             "task_id": {"type": "string", "description": "Task ID from task_open"},
             "note": {"type": "string", "description": "Brief progress note"},
+            "artifact_path": {
+                "type": "string",
+                "description": (
+                    "Optional existing non-empty file, http(s) URL, or Telegram receipt "
+                    "that proves current progress. This does not close the task."
+                ),
+            },
         },
         "required": ["task_id", "note"],
     },
 }
 
 
-def task_update_handler(task_id: str, note: str, **kwargs) -> str:
+def task_update_handler(task_id: str, note: str, artifact_path: str = "", **kwargs) -> str:
     try:
         db = get_db()
-        with _db_lock:
-            cur = db.execute(
-                "UPDATE tasks SET status='in_progress', status_note=?, updated_at=? "
-                "WHERE id=? AND status NOT IN ('done','abandoned')",
-                (note, _now_iso(), task_id),
+        artifact_path = _clean_text(artifact_path)
+        if artifact_path and not _verify_artifact(artifact_path):
+            return (
+                f"Error updating task: artifact verification failed for {task_id}. "
+                "Provide an existing non-empty file, an http(s) URL, or a telegram receipt."
             )
+        with _db_lock:
+            if artifact_path:
+                cur = db.execute(
+                    "UPDATE tasks SET status='in_progress', status_note=?, artifact_path=?, "
+                    "artifact_verified=1, updated_at=? WHERE id=? "
+                    "AND status NOT IN ('done','abandoned')",
+                    (note, artifact_path, _now_iso(), task_id),
+                )
+            else:
+                cur = db.execute(
+                    "UPDATE tasks SET status='in_progress', status_note=?, updated_at=? "
+                    "WHERE id=? AND status NOT IN ('done','abandoned')",
+                    (note, _now_iso(), task_id),
+                )
             db.commit()
         if cur.rowcount == 0:
             return f"Task {task_id} not found or already closed."
-        return f"Task {task_id} updated: {note}"
+        suffix = f"\nArtifact verified: {artifact_path}" if artifact_path else ""
+        return f"Task {task_id} updated: {note}{suffix}"
     except Exception as e:
         return f"Error updating task: {e}"
 
@@ -1056,6 +1162,7 @@ def register(ctx):
         lambda args, **kwargs: task_update_handler(
             task_id=args.get("task_id", ""),
             note=args.get("note", ""),
+            artifact_path=args.get("artifact_path", ""),
             **_clean_kwargs(kwargs),
         ),
     )

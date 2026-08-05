@@ -1076,7 +1076,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             )
             if prior_checkin_block not in original or prior_tail is None:
                 raise RuntimeError("prior restart interruption check-in anchors drifted")
-            patched = original.replace(
+            patched = patched.replace(
                 prior_helper_prefix + prior_tail,
                 SILENT_HELPER,
                 1,
@@ -1085,14 +1085,14 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
         elif LEGACY_MARKER in original:
             legacy_helper_prefix = HELPER_PREFIX.replace(PRIOR_MARKER, LEGACY_MARKER)
             if LEGACY_CHECKIN_BLOCK in original and LEGACY_SEND_TAIL in original:
-                patched = original.replace(LEGACY_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
+                patched = patched.replace(LEGACY_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
                 patched = patched.replace(
                     legacy_helper_prefix + LEGACY_SEND_TAIL,
                     SILENT_HELPER,
                     1,
                 )
             elif RETAINING_V1_CHECKIN_BLOCK in original and RETAINING_V1_SEND_TAIL in original:
-                patched = original.replace(RETAINING_V1_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
+                patched = patched.replace(RETAINING_V1_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
                 patched = patched.replace(
                     legacy_helper_prefix + RETAINING_V1_SEND_TAIL,
                     SILENT_HELPER,
@@ -1108,7 +1108,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             ]
             if METHOD_ANCHOR not in original or len(schedule_blocks) != 1:
                 raise RuntimeError("restart interruption check-in anchors drifted")
-            patched = original.replace(METHOD_ANCHOR, HELPER + METHOD_ANCHOR, 1)
+            patched = patched.replace(METHOD_ANCHOR, HELPER + METHOD_ANCHOR, 1)
             if SCHEDULER_DOC_OLD in patched:
                 patched = patched.replace(SCHEDULER_DOC_OLD, SCHEDULER_DOC_NEW, 1)
             patched = patched.replace(schedule_blocks[0], CHECKIN_BLOCK, 1)

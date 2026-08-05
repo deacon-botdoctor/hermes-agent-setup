@@ -2,13 +2,14 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.04-golden-b8f90b14`:
+The current public release is `botdoctor-hermes-2026.08.05-golden-83476524`:
 
 - upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `b8f90b14f9267af63ea067c1fde07786af9b294a`;
-- runtime payload: 103 files;
+- public Golden source: `8347652422606e91c3695e8652c813a6b35423e1`;
+- baseline wiring: 18 files;
+- runtime payload: 276 files;
 - assembled runtime fingerprint:
-  `1c168feb84dbc1111e093bb52e75072aa7b1d79ff00028654bfbab6a87c0de66`.
+  `69f1b0fb32f8dfa5470f8b998eb87f9b9d803a0734212dd09882576ea32a7128`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -22,6 +23,17 @@ installations.
 
 - The immutable Hermes `v0.20.0` base remains pinned while the public
   overlays repair the fleet-discovered compatibility gaps.
+- Provider routing now makes the dedicated OpenRouter auxiliary key the
+  embedding path, removes retired ZeroEntropy credentials, and verifies the
+  result without printing secrets.
+- Legacy Anamnesis/Qdrant launch surfaces are retired only after native memory
+  is ready, with reversible receipts for upgrades and new installations.
+- Cross-platform host installers now carry the same watchdog, health-probe,
+  runtime-binding, and rollback contracts used by the fleet release gate.
+- Model-authored long-work checkpoints are assembly-checked so status updates
+  remain real work summaries instead of generic timer messages.
+- The complete visual fundamentals package includes Impeccable and the Human
+  Taste skill family instead of leaving those capabilities to manual setup.
 - Native compaction owns summary acceptance again; the retired custom
   postcondition patch no longer rejects valid Codex summaries.
 - Task completion now falls back to a profile-local append-only record when

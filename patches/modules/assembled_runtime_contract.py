@@ -5,11 +5,29 @@ from __future__ import annotations
 import ast
 import inspect
 import re
+import threading
 from pathlib import Path
+from types import SimpleNamespace
 
 
 class AssembledRuntimeContractError(RuntimeError):
     pass
+
+
+_TELEGRAM_CHECKPOINT_MARKER = "HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1"
+_TELEGRAM_CHECKPOINT_HELPERS = {
+    "_telegram_checkpoint_task_label",
+    "_telegram_checkpoint_preview_subject",
+    "_telegram_checkpoint_tool_labels",
+    "_capture_telegram_tool_checkpoint",
+    "_telegram_checkpoint_activity_label",
+    "_format_telegram_model_checkpoint",
+}
+_TELEGRAM_CHECKPOINT_BANNED_COPY = {
+    "Still working on:",
+    "I’ll send the verified outcome when this run completes.",
+    "I'll send the verified outcome when this run completes.",
+}
 
 
 def _function_signature(function: ast.FunctionDef) -> inspect.Signature:
@@ -108,6 +126,174 @@ def verify_agent_init_forwarder_contract(agent_dir: Path) -> None:
             ) from exc
 
 
+def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
+    """Reject assembled runtimes that weaken custom Telegram checkpoints."""
+    gateway_path = agent_dir / "gateway" / "run.py"
+    if not gateway_path.exists():
+        return
+
+    try:
+        source = gateway_path.read_text(encoding="utf-8", errors="strict")
+        tree = ast.parse(source, filename=str(gateway_path))
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise AssembledRuntimeContractError(
+            f"cannot inspect Telegram checkpoint runtime: {exc}"
+        ) from exc
+
+    if _TELEGRAM_CHECKPOINT_MARKER not in source:
+        raise AssembledRuntimeContractError(
+            "assembled gateway is missing the Telegram checkpoint marker"
+        )
+    banned = sorted(copy for copy in _TELEGRAM_CHECKPOINT_BANNED_COPY if copy in source)
+    if banned:
+        raise AssembledRuntimeContractError(
+            "assembled gateway restores canned Telegram checkpoint copy: "
+            + ", ".join(repr(copy) for copy in banned)
+        )
+
+    compact = re.sub(r"\s+", " ", source)
+    required_wiring = {
+        "commentary capture": "ctx.model_checkpoint_updates.append(checkpoint_text)",
+        "interim-message privacy boundary": "if not _want_interim_messages: return",
+        "Telegram commentary callback": (
+            "_want_interim_messages or ctx.source.platform == Platform.TELEGRAM"
+        ),
+        "Telegram heartbeat branch": "if source.platform == Platform.TELEGRAM:",
+        "completed tool lifecycle": "model_checkpoint_tool_completed",
+        "current tool lifecycle": "model_checkpoint_tool_current",
+        "truthful empty interval": (
+            "No new observable milestone completed in this interval."
+        ),
+    }
+    missing_wiring = [
+        label for label, snippet in required_wiring.items() if snippet not in compact
+    ]
+    if missing_wiring:
+        raise AssembledRuntimeContractError(
+            "assembled Telegram checkpoint wiring is incomplete: "
+            + ", ".join(missing_wiring)
+        )
+
+    calls = {
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    missing_calls = sorted(
+        {
+            "_capture_telegram_tool_checkpoint",
+            "_format_telegram_model_checkpoint",
+        }
+        - calls
+    )
+    if missing_calls:
+        raise AssembledRuntimeContractError(
+            "assembled Telegram checkpoint helpers are not wired: "
+            + ", ".join(missing_calls)
+        )
+
+    helper_nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in _TELEGRAM_CHECKPOINT_HELPERS
+    ]
+    helper_counts = {
+        name: sum(node.name == name for node in helper_nodes)
+        for name in _TELEGRAM_CHECKPOINT_HELPERS
+    }
+    invalid_helpers = sorted(
+        name for name, count in helper_counts.items() if count != 1
+    )
+    if invalid_helpers:
+        raise AssembledRuntimeContractError(
+            "assembled Telegram checkpoint helper set is incomplete or ambiguous: "
+            + ", ".join(invalid_helpers)
+        )
+
+    helper_module = ast.Module(body=helper_nodes, type_ignores=[])
+    namespace = {"_redact_gateway_user_facing_secrets": lambda value: value}
+    try:
+        exec(compile(helper_module, str(gateway_path), "exec"), namespace)
+        formatter = namespace["_format_telegram_model_checkpoint"]
+        task_label = namespace["_telegram_checkpoint_task_label"]
+        capture = namespace["_capture_telegram_tool_checkpoint"]
+
+        factual = formatter(
+            10,
+            [],
+            task="the verification",
+            completed=["Ran the focused tests"],
+            current=["Reviewing the pending changes"],
+        )
+        expected_factual = (
+            "10 minutes in on the verification — quick update:\n"
+            "• Ran the focused tests\n"
+            "• Now: Reviewing the pending changes"
+        )
+        if factual != expected_factual:
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint factual summary semantics changed"
+            )
+
+        empty = formatter(10, ["  ", "```"], task=None)
+        expected_empty = (
+            "10 minutes in — quick update:\n"
+            "• No new observable milestone completed in this interval."
+        )
+        if empty != expected_empty or any(
+            copy in empty for copy in _TELEGRAM_CHECKPOINT_BANNED_COPY
+        ):
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint empty-interval semantics changed"
+            )
+        if task_label("Can you please handle this request?") != "":
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint task labels can echo generic request content"
+            )
+
+        context = SimpleNamespace(
+            model_checkpoint_lock=threading.Lock(),
+            model_checkpoint_tool_active={},
+            model_checkpoint_tool_current=[],
+            model_checkpoint_tool_completed=[],
+            _run_still_current=lambda: True,
+        )
+        raw_command = "python3 -m pytest /private/Customer-John/token-abc123"
+        capture(context, "tool.started", "exec_command", raw_command, {})
+        if context.model_checkpoint_tool_current != ["Running the focused tests"]:
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint current tool lifecycle semantics changed"
+            )
+        capture(
+            context,
+            "tool.completed",
+            "exec_command",
+            None,
+            {"result": "private output token-abc123", "is_error": False},
+        )
+        if context.model_checkpoint_tool_current or (
+            context.model_checkpoint_tool_completed != ["Ran the focused tests"]
+        ):
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint completed tool lifecycle semantics changed"
+            )
+        retained = repr(context.__dict__)
+        if any(
+            private_fragment in retained
+            for private_fragment in ("Customer-John", "token-abc123", "/private/")
+        ):
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint state retains raw tool input or result content"
+            )
+    except AssembledRuntimeContractError:
+        raise
+    except Exception as exc:
+        raise AssembledRuntimeContractError(
+            f"Telegram checkpoint semantic probe failed: {exc}"
+        ) from exc
+
+
 def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     """Verify incident-backed cross-file AIAgent contracts.
 
@@ -116,6 +302,7 @@ def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     loop.
     """
     verify_agent_init_forwarder_contract(agent_dir)
+    verify_telegram_checkpoint_contract(agent_dir)
 
     loop_path = agent_dir / "agent" / "conversation_loop.py"
     agent_path = agent_dir / "run_agent.py"

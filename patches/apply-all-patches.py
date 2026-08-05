@@ -478,8 +478,21 @@ def _runtime_backup_paths(hermes_dir: Path) -> set[Path]:
     return backups
 
 
+def _runtime_file_paths(hermes_dir: Path) -> set[Path]:
+    """Return the exact pre-apply file set relative to the runtime root."""
+    return {
+        path.relative_to(hermes_dir)
+        for path in hermes_dir.rglob("*")
+        if path.is_file()
+    }
+
+
 def _remove_new_runtime_backups(
-    hermes_dir: Path, hermes_home: Path, snapshot: Path, preexisting: set[Path]
+    hermes_dir: Path,
+    hermes_home: Path,
+    snapshot: Path,
+    preexisting_backups: set[Path],
+    preexisting_files: set[Path],
 ) -> list[str]:
     """Remove disposable backups from a verified run, preserving retained suffixes."""
     try:
@@ -490,7 +503,7 @@ def _remove_new_runtime_backups(
     if not isinstance(snapshot_files, dict):
         return []
 
-    created = sorted(_runtime_backup_paths(hermes_dir) - preexisting)
+    created = sorted(_runtime_backup_paths(hermes_dir) - preexisting_backups)
     removable = []
     for relative in created:
         if relative.name.endswith(_RETAINED_RUNTIME_BACKUP_SUFFIXES):
@@ -505,7 +518,11 @@ def _remove_new_runtime_backups(
             source_relative = source.relative_to(hermes_home)
         except ValueError:
             continue
-        if str(source_relative) not in snapshot_files:
+        source_runtime_relative = source.relative_to(hermes_dir)
+        if (
+            str(source_relative) not in snapshot_files
+            and source_runtime_relative in preexisting_files
+        ):
             continue
         (hermes_dir / relative).unlink()
         removable.append(str(relative))
@@ -536,6 +553,7 @@ def main():
     print()
 
     preexisting_runtime_backups = _runtime_backup_paths(hermes_dir)
+    preexisting_runtime_files = _runtime_file_paths(hermes_dir)
 
     pre_apply_clean_base = False
     if (hermes_dir / ".git").exists():
@@ -671,7 +689,11 @@ def main():
     if patch_run_verified and snapshot is not None:
         try:
             removed_runtime_backups = _remove_new_runtime_backups(
-                hermes_dir, hermes_home, snapshot, preexisting_runtime_backups
+                hermes_dir,
+                hermes_home,
+                snapshot,
+                preexisting_runtime_backups,
+                preexisting_runtime_files,
             )
             if removed_runtime_backups:
                 print(

@@ -1,0 +1,10 @@
+{
+  "name": "Impeccable",
+  "source": "https://github.com/pbakaus/impeccable",
+  "source_path": ".agents/skills/impeccable",
+  "source_ref": "skill-v4.0.4",
+  "source_commit": "9a949fb543d44cfb406f61bcab99d95d7f12cf1d",
+  "version": "4.0.4",
+  "license": "Apache-2.0",
+  "vendored_at": "2026-08-04"
+}

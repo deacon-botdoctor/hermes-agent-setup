@@ -28,15 +28,6 @@
       "preferred_for": ["canonical knowledge", "library lookup", "code references", "visual asset files"]
     },
     {
-      "id": "memory.anamnesis",
-      "category": "knowledge",
-      "label": "Anamnesis memory",
-      "summary": "Recall conversation facts, preferences, decisions, and prior commitments.",
-      "mcp_server": "anamnesis",
-      "tool_name": "memory_search",
-      "preferred_for": ["remember", "prior decision", "preference", "where we left off"]
-    },
-    {
       "id": "web.search",
       "category": "web",
       "label": "Search MCP",

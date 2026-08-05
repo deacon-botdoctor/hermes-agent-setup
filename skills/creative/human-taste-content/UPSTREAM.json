@@ -1,0 +1,8 @@
+{
+  "name": "Human Taste Content",
+  "source": "https://github.com/Alpha-Mintamir/human-taste-skill",
+  "source_path": "skills/human-taste-content",
+  "source_commit": "43591d157472c87e27418d47e406005cc65c96a8",
+  "license": "MIT",
+  "vendored_at": "2026-08-04"
+}
