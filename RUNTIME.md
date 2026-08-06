@@ -2,14 +2,14 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.05-golden-46fef7af`:
+The current public release is `botdoctor-hermes-2026.08.06-golden-73a18cf7`:
 
 - upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `46fef7aff953fa81e0740754e4afea5e3a5589e6`;
+- public Golden source: `73a18cf77bf49861313b566591d6c9ec547f1972`;
 - baseline wiring: 19 files;
-- runtime payload: 277 files;
+- runtime payload: 279 files;
 - assembled runtime fingerprint:
-  `580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826`.
+  `dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -51,6 +51,17 @@ installations.
   executor that owns replayed work.
 - Explicit attachment resends, voice-memo delivery, contextual reset, and
   runtime-root checks are aligned with the v0.20.0 assembled contracts.
+- Platform delivery is part of the restart drain, so a normal response is not
+  considered quiescent before its transport accepts the outbound message.
+- Telegram checkpoints retain factual model commentary and observable
+  lifecycle milestones while rejecting canned or tool-internal status text.
+- Immediate Telegram typing is emitted at accepted ingress, before model-turn
+  preparation, so slow setup cannot make a healthy agent appear unresponsive.
+- A Codex 429 can use the configured OpenRouter emergency chain; 401/403
+  authentication failures retain the existing spend circuit and safeguards.
+- Composio activation binds only verified fresh connections to the canonical
+  runtime route, and profile runtimes resolve GBrain through the shared
+  canonical bridge while preserving an explicit profile-local wrapper.
 
 ## Native first
 

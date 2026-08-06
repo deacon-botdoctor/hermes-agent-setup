@@ -49,11 +49,14 @@ agent's non-UI tools.
 5. After two unverified attempts at the same transition, do not repeat it a
    third time. Recapture, change delivery mode or semantic route, and continue
    from verified state.
-6. A clear instruction to use the principal's browser authorizes the relevant
-   browser/computer tools for that task. Do not add a second attachment or
-   driver-consent ceremony. Preserve outcome gates for purchases, destructive
-   deletion, final legal/financial submission, public/client messages,
-   account-security changes, credential export, and human-present MFA.
+6. A clear request to do something in a web UI authorizes the configured
+   client-isolated browser/computer tools for that task. Use them without asking
+   whether to use the browser or adding driver-consent ceremony. At human
+   verification, put the checkpoint on screen, state that it is ready, retain
+   state, and resume after clearance. Preserve outcome gates for purchases,
+   destructive deletion, final legal/financial submission, public/client
+   messages, account-security changes, credential export, and human-present
+   verification.
 
 ## Pitfalls
 

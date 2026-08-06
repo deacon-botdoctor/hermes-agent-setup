@@ -31,6 +31,22 @@ patches:
     upstream_issue: null
     retirement_condition: remove the full subsystem when upstream.lock contains equivalent durable recovery, cross-platform path/row handling, and drain-aware cron startup.
 
+  - name: platform_delivery_drain_v1
+    module: modules/platform_delivery_drain_v1.py
+    function: patch_platform_delivery_drain_v1
+    target: gateway/run.py
+    owner: engineering-lead
+    idempotency: HERMES_PLATFORM_DELIVERY_DRAIN_v2
+    test: python3 -m pytest -q bin/test/test_platform_delivery_drain_v1.py
+    rollback: restore gateway/run.py from the pre-apply snapshot recorded under state/apply-snapshots; direct module runs may use the .bak-pre-platform-delivery-drain-v2 sibling
+    client_impact: restart_required
+    tags: [gateway, shutdown, drain, delivery, resume]
+    status: extracted
+    route: upstream-pr-pending
+    reason: the native graceful drain stops tracking a normal response turn before its background platform send receives transport acceptance
+    upstream_issue: null
+    retirement_condition: remove when upstream includes active response-delivery tasks in the native graceful shutdown boundary
+
   - name: lifecycle_guard_invalid_path_v1
     module: modules/lifecycle_guard_invalid_path_v1.py
     function: patch_lifecycle_guard_invalid_path_v1
@@ -99,6 +115,25 @@ patches:
       and a fail-closed commentary privacy filter without re-enabling noisy display surfaces.
     upstream_issue: null
     retirement_condition: remove when upstream guarantees scheduled Telegram milestone headers, one-message edits, and equivalent client-safe commentary filtering.
+  - name: telegram_commentary_capture_v3
+    module: modules/telegram_commentary_capture_v3.py
+    function: patch_telegram_commentary_capture_v3
+    target: gateway/run.py, run_agent.py, agent/codex_runtime.py
+    owner: engineering-lead
+    idempotency: HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3
+    test: python3 -m pytest -q bin/test/test_telegram_commentary_capture_v3.py bin/test/test_telegram_organic_long_running_checkpoints_v2.py bin/test/test_assembled_runtime_contract.py
+    rollback: restore the three touched runtime files from the pre-apply snapshot or their .bak-pre-telegram-commentary-capture-v3 siblings
+    client_impact: restart_required
+    tags: [gateway, telegram, long-running, checkpoint, commentary, codex]
+    status: extracted
+    route: irreducible
+    reason: >-
+      Codex suppresses commentary callbacks when display.show_commentary is false, leaving Telegram's private
+      checkpoint collector with generic tool labels even though the model emitted factual commentary. The v3 bridge
+      enables capture only for Telegram's internal checkpoint lane; the existing gateway display and privacy filters
+      still decide what may become visible.
+    upstream_issue: null
+    retirement_condition: remove when native Hermes can feed hidden, user-safe Codex commentary into Telegram checkpoints without enabling interim-message display.
   - name: telegram_dm_topic_recovery_root_guard_v1
     module: modules/telegram_dm_topic_recovery_root_guard_v1.py
     function: patch_telegram_dm_topic_recovery_root_guard_v1
@@ -129,21 +164,21 @@ patches:
     reason: the runtime calls fallback synchronously after a primary-model Codex auth failure; this boundary allows one matching client-turn paid fallback while blocking recursive/internal activations before the broker sidecar can prove primary recovery.
     upstream_issue: null
     retirement_condition: remove when upstream exposes a pre-fallback auth-failure hook that can reject a selected fallback.
-  - name: telegram_immediate_typing_receipt_v2
+  - name: telegram_immediate_typing_receipt_v3
     module: apply-telegram-immediate-typing-receipt.py
-    function: patch_telegram_immediate_typing_receipt_v2
+    function: patch_telegram_immediate_typing_receipt_v3
     target: plugins/platforms/telegram/adapter.py + gateway/platforms/base.py
     owner: engineering-lead
-    idempotency: HERMES_TELEGRAM_IMMEDIATE_TYPING_RECEIPT_v2
+    idempotency: HERMES_TELEGRAM_IMMEDIATE_TYPING_RECEIPT_v3
     test: python3 -m pytest bin/test/test_telegram_immediate_typing_receipt.py -q
     rollback: restore both runtime files from their pre-typing-receipt backups
     client_impact: restart_required
     tags: [telegram, gateway, typing, latency, telemetry]
     status: extracted
     route: upstream-pr-pending
-    reason: typing currently begins as a background task after Telegram batching and can be starved by synchronous pre-model preparation; there is no time-to-typing telemetry
+    reason: typing otherwise begins only after Telegram batching and can expire while a message waits behind an active turn; this starts one measured native refresh task at accepted ingress and reuses it during processing
     upstream_issue: null
-    retirement_condition: remove when upstream acknowledges accepted inbound before batching with bounded timing telemetry
+    retirement_condition: remove when upstream acknowledges accepted inbound before batching, keeps the action alive through queued-turn admission, and exposes bounded timing telemetry
   - name: telegram_poll_liveness_writer_v1
     module: modules/telegram_poll_liveness_writer_v1.py
     function: patch_telegram_poll_liveness_writer_v1

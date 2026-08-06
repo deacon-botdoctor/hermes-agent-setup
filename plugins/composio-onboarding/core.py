@@ -23,6 +23,9 @@ TOOLKIT_ALIASES = {
     "docs": "googledocs",
     "sheets": "googlesheets",
     "tasks": "googletasks",
+    "sharepoint": "share_point",
+    "share-point": "share_point",
+    "microsoft-sharepoint": "share_point",
 }
 
 

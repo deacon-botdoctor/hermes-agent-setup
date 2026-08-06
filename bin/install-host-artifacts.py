@@ -416,6 +416,8 @@ def apply_retire_legacy_memory_surfaces(
         str(hermes_home),
         "--rules-source",
         str(rules_source),
+        "--hermes-python",
+        str(python),
         "--dry-run" if dry_run else "--apply",
     ]
     proc = subprocess.run(

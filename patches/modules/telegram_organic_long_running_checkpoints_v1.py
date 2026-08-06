@@ -71,8 +71,10 @@ INTERIM_REPLACEMENT = """        def _interim_assistant_cb(text: str, *, already
                 return
             if _stream_consumer is not None:
 """
-CALLBACK_ASSIGNMENT_ANCHOR = """        agent.interim_assistant_callback = _interim_assistant_cb if _want_interim_messages else None
-"""
+CALLBACK_ASSIGNMENT_ANCHOR = (
+    "        agent.interim_assistant_callback = _interim_assistant_cb "
+    "if _want_interim_messages else None\n"
+)
 CALLBACK_ASSIGNMENT_REPLACEMENT = """        # Telegram checkpoints need commentary capture even when immediate
         # interim-message display is disabled.
         agent.interim_assistant_callback = (
@@ -277,24 +279,33 @@ def _telegram_checkpoint_preview_subject(preview):
 
 
 def _telegram_checkpoint_tool_labels(tool_name, preview=None):
-    """Project one tool start into safe current/completed descriptions."""
+    """Project only specific, observable tool work into safe descriptions.
+
+    Generic tool names are not useful evidence. Returning empty labels makes
+    the periodic notifier wait for model commentary or a concrete lifecycle
+    milestone instead of inventing canned progress.
+    """
     name = str(tool_name or "").strip().lower().replace("-", "_")
     if not name or name in {{"_thinking", "todo", "task_update", "task_done"}}:
         return "", ""
     subject = _telegram_checkpoint_preview_subject(preview)
 
     if name in {{"web_search", "web_extract"}} or "search" in name or "query" in name:
-        suffix = f" for {{subject}}" if subject else ""
-        return f"Searching{{suffix}}", f"Reviewed search results{{suffix}}"
+        if not subject:
+            return "", ""
+        return f"Searching {{subject}}", f"Reviewed results from {{subject}}"
     if "browser" in name or "navigate" in name:
-        suffix = f" at {{subject}}" if subject else ""
-        return f"Reviewing the page{{suffix}}", f"Reviewed the page{{suffix}}"
+        if not subject:
+            return "", ""
+        return f"Reviewing {{subject}}", f"Reviewed {{subject}}"
     if any(word in name for word in ("read", "inspect", "memory", "session", "list")):
-        suffix = f" in {{subject}}" if subject else ""
-        return f"Reviewing the relevant material{{suffix}}", f"Reviewed the relevant material{{suffix}}"
+        if not subject:
+            return "", ""
+        return f"Reviewing {{subject}}", f"Reviewed {{subject}}"
     if any(word in name for word in ("patch", "edit", "write", "update", "create")):
-        suffix = f" in {{subject}}" if subject else ""
-        return f"Applying the change{{suffix}}", f"Applied the change{{suffix}}"
+        if not subject:
+            return "", ""
+        return f"Updating {{subject}}", f"Updated {{subject}}"
     if name in {{"terminal", "exec_command", "execute_code", "process"}}:
         lowered = str(preview or "").lower()
         if any(token in lowered for token in ("pytest", " test", "npm test", "pnpm test")):
@@ -303,10 +314,8 @@ def _telegram_checkpoint_tool_labels(tool_name, preview=None):
             return "Reviewing the pending changes", "Reviewed the pending changes"
         if "ssh " in lowered:
             return "Checking the remote runtime", "Checked the remote runtime"
-        return "Running a project check", "Completed a project check"
-    if "delegate" in name:
-        return "Checking another part in parallel", "Finished the parallel check"
-    return "Working through the next concrete step", "Finished another concrete step"
+        return "", ""
+    return "", ""
 
 
 def _capture_telegram_tool_checkpoint(ctx, event_type, tool_name, preview, kwargs):
@@ -371,7 +380,12 @@ def _format_telegram_model_checkpoint(
     current=None,
     activity=None,
 ):
-    """Merge real commentary with factual tool lifecycle progress."""
+    """Merge real commentary with specific factual lifecycle progress.
+
+    An empty string is intentional: the caller skips that scheduled update and
+    preserves the cursor until real commentary or an observable milestone is
+    available. A silent interval is preferable to fake specificity.
+    """
     import re as _re
 
     candidates = []
@@ -411,10 +425,9 @@ def _format_telegram_model_checkpoint(
         lines = [f"{{minutes}} minutes in on {{task_label}} — quick update:"]
     else:
         lines = [f"{{minutes}} minutes in — quick update:"]
-    if bullets:
-        lines.extend(f"• {{bullet}}" for bullet in bullets)
-    else:
-        lines.append("• No new observable milestone completed in this interval.")
+    if not bullets:
+        return ""
+    lines.extend(f"• {{bullet}}" for bullet in bullets)
     return "\\n".join(lines)[:1200]
 '''
 

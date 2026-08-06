@@ -461,36 +461,42 @@ def _patch_selector(content: str) -> str:
 """
     module_replacement = """    fb_provider = (fb.get("provider") or "").strip().lower()
     fb_model = (fb.get("model") or "").strip()
-    try:
-        if (
-            getattr(agent, "_codex_auth_circuit_unavailable", False)
-            and str(getattr(agent, "_current_turn_id", "")) == str(
-                getattr(agent, "_codex_auth_circuit_failure_turn_id", "")
-            )
-            and (
-            fb_provider == "openrouter" or "openrouter.ai" in str(fb.get("base_url") or "").lower()
-            )
-        ):
-            logging.warning("Codex auth circuit unavailable: blocked paid fallback")
-            return agent._try_activate_fallback(reason)
-        from agent.codex_401_circuit import paid_fallback_allowed
-        if not paid_fallback_allowed(
-            entry=fb,
-            turn_id=getattr(agent, "_current_turn_id", ""),
-            event_origin=getattr(agent, "_codex_auth_event_origin", "internal"),
-            circuit_required=(
-                str(getattr(agent, "_codex_auth_event_origin", "internal")).lower() == "client"
+    is_openrouter_fallback = (
+        fb_provider == "openrouter" or "openrouter.ai" in str(fb.get("base_url") or "").lower()
+    )
+    fallback_reason = getattr(reason, "value", reason)
+    # The paid-fallback circuit limits 401/403 amplification. A subscription
+    # rate limit is a separate provider-availability incident and must be able
+    # to use the configured OpenRouter emergency chain.
+    if not (str(fallback_reason or "").strip().lower() == "rate_limit" and is_openrouter_fallback):
+        try:
+            if (
+                getattr(agent, "_codex_auth_circuit_unavailable", False)
                 and str(getattr(agent, "_current_turn_id", "")) == str(
                     getattr(agent, "_codex_auth_circuit_failure_turn_id", "")
                 )
-            ),
-        ):
-            logging.warning("Codex auth circuit open: blocked paid fallback %s/%s", fb_provider, fb_model)
-            return agent._try_activate_fallback(reason)
-    except Exception:
-        if fb_provider == "openrouter" or "openrouter.ai" in str(fb.get("base_url") or "").lower():
-            logging.exception("Codex auth circuit unavailable: blocked paid fallback")
-            return agent._try_activate_fallback(reason)
+                and is_openrouter_fallback
+            ):
+                logging.warning("Codex auth circuit unavailable: blocked paid fallback")
+                return agent._try_activate_fallback(reason)
+            from agent.codex_401_circuit import paid_fallback_allowed
+            if not paid_fallback_allowed(
+                entry=fb,
+                turn_id=getattr(agent, "_current_turn_id", ""),
+                event_origin=getattr(agent, "_codex_auth_event_origin", "internal"),
+                circuit_required=(
+                    str(getattr(agent, "_codex_auth_event_origin", "internal")).lower() == "client"
+                    and str(getattr(agent, "_current_turn_id", "")) == str(
+                        getattr(agent, "_codex_auth_circuit_failure_turn_id", "")
+                    )
+                ),
+            ):
+                logging.warning("Codex auth circuit open: blocked paid fallback %s/%s", fb_provider, fb_model)
+                return agent._try_activate_fallback(reason)
+        except Exception:
+            if is_openrouter_fallback:
+                logging.exception("Codex auth circuit unavailable: blocked paid fallback")
+                return agent._try_activate_fallback(reason)
     if not fb_provider or not fb_model:
 """
     return _replace_once(content, module_anchor, module_replacement, "module fallback selector")

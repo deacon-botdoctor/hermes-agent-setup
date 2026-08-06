@@ -1,9 +1,9 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826",
-    "file_count": 82
+    "digest": "dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90",
+    "file_count": 83
   },
-  "baseline_wiring_digest": "9d47138c0d6cbc249f6b50cae5855666ad65cf9a741df4d6ad9cd2d307d6e106",
+  "baseline_wiring_digest": "df9f89f122149941d84f6e8822b3ae943c276e283d69b682f4593897fed0577f",
   "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,9 +20,9 @@
     "tag": "cua-driver-rs-v0.14.2",
     "version": "0.14.2"
   },
-  "deployment_digest": "4beb35a63ae2e567618132686b7fd1dd9b53611f1b9dcf6cc10c63bbc54a0baa",
-  "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
-  "release": "botdoctor-hermes-2026.08.05-golden-46fef7af",
+  "deployment_digest": "fb9f47000ec259cb8430ec469d1cabffd1ce22e95dcfa3ceed711c48098275ca",
+  "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
+  "release": "botdoctor-hermes-2026.08.06-golden-73a18cf7",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -42,14 +42,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "284a2f15c8af36a54ffccd87f061cf54a2660c9bcfd14dac891668db459ae536",
+  "runtime_payload_digest": "6bc8e0b939c25b22cc0a7ab9b55abe015cf4b8285ec78fe8d16f9409b34a0cfd",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "current",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "26/26 patches applied on pinned upstream; no anchor miss, failure, or not-run",
+    "clean_upstream_rehearsal": "28/28 patches applied on pinned upstream; no anchor miss, failure, or not-run",
     "golden_suite": "full Golden preflight passed"
   }
 }
