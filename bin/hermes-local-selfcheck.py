@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -320,7 +321,7 @@ def _process_started_at(pid: int):
 
 
 def check_telegram_organic_checkpoints():
-    """Prove the effective v2 contract from the active immutable runtime."""
+    """Prove the effective v3 contract from the active immutable runtime."""
     config_path = HERMES / 'config.yaml'
     binding_path = HERMES / 'state/runtime-binding.json'
     failures = []
@@ -349,8 +350,12 @@ def check_telegram_organic_checkpoints():
     binding = load_json(binding_path, {})
     runtime_raw = str(binding.get('runtime_root') or '').strip()
     runtime_root = Path(runtime_raw).expanduser()
-    marker_path = runtime_root / 'gateway/run.py'
-    marker = 'HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2'
+    marker_paths = (
+        runtime_root / 'gateway/run.py',
+        runtime_root / 'run_agent.py',
+        runtime_root / 'agent/codex_runtime.py',
+    )
+    marker = 'HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3'
     marker_hash = ''
     if (
         binding.get('kind') != 'botdoctor_runtime_binding'
@@ -359,13 +364,13 @@ def check_telegram_organic_checkpoints():
         or not runtime_root.is_dir()
     ):
         failures.append('active immutable runtime binding missing or invalid')
-    elif not marker_path.is_file():
-        failures.append('active runtime gateway source missing')
+    elif any(not path.is_file() for path in marker_paths):
+        failures.append('active runtime checkpoint source missing')
     else:
-        source = marker_path.read_bytes()
-        marker_hash = hashlib.sha256(source).hexdigest()
-        if marker.encode() not in source:
-            failures.append('active runtime v2 marker missing')
+        sources = [path.read_bytes() for path in marker_paths]
+        marker_hash = hashlib.sha256(b'\0'.join(sources)).hexdigest()
+        if any(marker.encode() not in source for source in sources):
+            failures.append('active runtime v3 commentary-capture marker missing')
 
     live = gateway_runtime_binding()
     live_root = Path(str(live.get('runtime_root') or '')).expanduser()
@@ -393,16 +398,24 @@ def check_telegram_organic_checkpoints():
         'detail':'; '.join(failures) + ('; ' if failures else '') + detail,
     }
 
+
+def _agent_probe_producer_installed():
+    return (HOME/'Library/LaunchAgents/ai.hermes.agent-probe.plist').exists()
+
+
 def check_agent_probe():
     p = HERMES/'state/agent-probe-latest.json'
-    expected_plist = HOME/'Library/LaunchAgents/ai.hermes.agent-probe.plist'
-    if not p.exists():
-        status = 'fail' if expected_plist.exists() else 'skip'
+    if not _agent_probe_producer_installed():
         return {
             'name':'agent_runtime_probe',
-            'status':status,
-            'detail':'agent probe state missing'
-            + (' while launchd probe is installed' if expected_plist.exists() else ''),
+            'status':'skip',
+            'detail':'macOS agent probe producer not installed for this runtime',
+        }
+    if not p.exists():
+        return {
+            'name':'agent_runtime_probe',
+            'status':'fail',
+            'detail':'agent probe state missing while launchd probe is installed',
         }
     d = load_json(p, {})
     ts = parse_dt(d.get('generated_at') or d.get('checked_at') or d.get('timestamp'))
@@ -584,6 +597,17 @@ def _read_env_keys():
     return keys
 
 
+def _keychain_has_env_key(key):
+    """Recognize a macOS Keychain-backed capability without reading its value."""
+    if sys.platform != 'darwin':
+        return False
+    result = run(
+        ['/usr/bin/security', 'find-generic-password', '-s', key],
+        timeout=3,
+    )
+    return result.returncode == 0
+
+
 def _sqlite(path: Path, query: str, params=()):
     import sqlite3
     con = sqlite3.connect(path)
@@ -655,7 +679,10 @@ def check_advertised_tool_env():
     env_keys = _read_env_keys()
     refs = sorted(set(re.findall(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}', text)))
     capability_refs = [k for k in refs if any(token in k for token in ('API_KEY', 'TOKEN', 'SECRET', 'OAUTH'))]
-    missing = [k for k in capability_refs if not env_keys.get(k) and not os.environ.get(k)]
+    missing = [
+        k for k in capability_refs
+        if not env_keys.get(k) and not os.environ.get(k) and not _keychain_has_env_key(k)
+    ]
     required_missing = [key for key in missing if key not in OPTIONAL_CAPABILITY_ENV_KEYS]
     optional_missing = [key for key in missing if key in OPTIONAL_CAPABILITY_ENV_KEYS]
     status = 'fail' if required_missing else ('warn' if optional_missing else 'pass')

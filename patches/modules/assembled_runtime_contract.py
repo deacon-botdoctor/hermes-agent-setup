@@ -29,6 +29,10 @@ _TELEGRAM_CHECKPOINT_BANNED_COPY = {
     "Still working on:",
     "I’ll send the verified outcome when this run completes.",
     "I'll send the verified outcome when this run completes.",
+    "Finished another concrete step",
+    "Reviewed the relevant material",
+    "Reviewed search results",
+    "No new observable milestone completed in this interval.",
 }
 
 
@@ -163,9 +167,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         "Telegram heartbeat branch": "if source.platform == Platform.TELEGRAM:",
         "completed tool lifecycle": "model_checkpoint_tool_completed",
         "current tool lifecycle": "model_checkpoint_tool_current",
-        "truthful empty interval": (
-            "No new observable milestone completed in this interval."
-        ),
+        "truthful empty interval": 'if not bullets: return ""',
         "monotonic checkpoint origin": "_notify_start = time.monotonic()",
         "scheduled checkpoint deadline": (
             "_notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)"
@@ -289,15 +291,14 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
             )
 
         empty = formatter(10, ["  ", "```"], task=None)
-        expected_empty = (
-            "10 minutes in — quick update:\n"
-            "• No new observable milestone completed in this interval."
-        )
-        if empty != expected_empty or any(
-            copy in empty for copy in _TELEGRAM_CHECKPOINT_BANNED_COPY
-        ):
+        if empty != "":
             raise AssembledRuntimeContractError(
                 "Telegram checkpoint empty-interval semantics changed"
+            )
+        helper_source = ast.unparse(helper_module)
+        if any(copy in helper_source for copy in _TELEGRAM_CHECKPOINT_BANNED_COPY):
+            raise AssembledRuntimeContractError(
+                "Telegram checkpoint contains banned canned progress copy"
             )
         if task_label("Can you please handle this request?") != "":
             raise AssembledRuntimeContractError(

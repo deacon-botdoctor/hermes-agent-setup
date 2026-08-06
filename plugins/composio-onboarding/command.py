@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from . import core
@@ -28,6 +29,7 @@ TOOL_EXAMPLES = (
     ("googlesheets", "read and update spreadsheets"),
     ("slack", "search channels and draft replies"),
     ("hubspot", "look up contacts, companies, and deals"),
+    ("share_point", "find and summarize SharePoint sites and files"),
 )
 
 
@@ -202,6 +204,99 @@ def _issue_api_link(context: dict[str, Any], auth_config_id: str) -> tuple[str, 
     return url, account_id
 
 
+def _route_binding_path() -> Path:
+    home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
+    return Path(
+        os.environ.get("COMPOSIO_ROUTE_BINDINGS_FILE")
+        or home / "config" / "composio-route-bindings.json"
+    )
+
+
+def _write_route_binding(toolkit: str, account_id: str, user_id: str) -> None:
+    if not account_id or quote(account_id, safe="") != account_id:
+        raise core.OnboardingError("verified connected account id cannot become a route binding")
+    if not user_id:
+        raise core.OnboardingError("verified Composio user id cannot become a route binding")
+
+    binding_path = _route_binding_path()
+    bindings: dict[str, Any] = {}
+    if binding_path.exists():
+        try:
+            parsed = json.loads(binding_path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise core.OnboardingError("Composio route bindings file is invalid") from exc
+        if not isinstance(parsed, dict):
+            raise core.OnboardingError("Composio route bindings file must contain an object")
+        bindings = parsed
+
+    bindings[toolkit] = {
+        "connected_account_id": account_id,
+        "user_id": user_id,
+    }
+    binding_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = binding_path.with_name(f".{binding_path.name}.{os.getpid()}.tmp")
+    try:
+        temp_path.write_text(json.dumps(bindings, indent=2, sort_keys=True) + "\n")
+        temp_path.chmod(0o600)
+        os.replace(temp_path, binding_path)
+    except OSError as exc:
+        raise core.OnboardingError("could not persist the verified Composio route binding") from exc
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _route_binding(toolkit: str) -> tuple[str, str]:
+    specific = f"COMPOSIO_ROUTE_CONNECTED_ACCOUNT_{toolkit.upper().replace('-', '_')}"
+    account_id = os.environ.get(specific, "").strip()
+    expected_user_name = f"COMPOSIO_ROUTE_USER_ID_{toolkit.upper().replace('-', '_')}"
+    expected_user = os.environ.get(expected_user_name, "").strip()
+    if not account_id:
+        binding_path = _route_binding_path()
+        if binding_path.exists():
+            try:
+                bindings = json.loads(binding_path.read_text())
+                binding = bindings.get(toolkit) if isinstance(bindings, dict) else None
+            except (OSError, json.JSONDecodeError) as exc:
+                raise core.OnboardingError("Composio route bindings file is invalid") from exc
+            if binding is not None and not isinstance(binding, dict):
+                raise core.OnboardingError("Composio route binding must be an object")
+            if binding:
+                account_id = str(binding.get("connected_account_id") or "").strip()
+                expected_user = str(binding.get("user_id") or "").strip()
+    if account_id and quote(account_id, safe="") != account_id:
+        raise core.OnboardingError(f"{specific} is not a valid connected account id")
+    return account_id, expected_user
+
+
+def _issue_api_reauth(toolkit: str, account_id: str, expected_user: str) -> str:
+    encoded_account_id = quote(account_id, safe="")
+    account = _composio_request("GET", f"/api/v3/connected_accounts/{encoded_account_id}")
+    resolved_id = str(account.get("id") or "").strip()
+    account_toolkit = account.get("toolkit") or {}
+    resolved_toolkit = str(
+        account_toolkit.get("slug") if isinstance(account_toolkit, dict) else account_toolkit
+    ).lower()
+    resolved_user = str(account.get("user_id") or "").strip()
+
+    if resolved_id != account_id:
+        raise core.OnboardingError("configured reauthorization account did not resolve to the same account")
+    if resolved_toolkit != toolkit.lower():
+        raise core.OnboardingError("configured reauthorization account belongs to a different toolkit")
+    if expected_user and resolved_user != expected_user:
+        raise core.OnboardingError("configured reauthorization account belongs to a different Composio user")
+
+    response = _composio_request(
+        "POST",
+        f"/api/v3/connected_accounts/{encoded_account_id}/refresh",
+        {},
+    )
+    refreshed_id = str(response.get("id") or "").strip()
+    url = str(response.get("redirect_url") or "").strip()
+    if refreshed_id != account_id or not url.startswith("https://"):
+        raise core.OnboardingError("Composio reauthorization omitted the redirect URL or changed the account id")
+    return url
+
+
 def _identity_from_account(account: dict[str, Any]) -> str | None:
     data = account.get("data")
     if not isinstance(data, dict):
@@ -215,7 +310,7 @@ def _identity_from_account(account: dict[str, Any]) -> str | None:
 
 def _reconcile_connections(conn, client_slug: str) -> None:
     rows = conn.execute(
-        """SELECT s.id, s.connected_account_id
+        """SELECT s.id, s.alias, s.connected_account_id
            FROM composio_account_slots s
            JOIN composio_onboarding_sessions x ON x.id=s.session_id
            WHERE x.client_slug=? AND s.status='link_sent'
@@ -227,7 +322,7 @@ def _reconcile_connections(conn, client_slug: str) -> None:
         if str(account.get("status") or "").upper() != "ACTIVE":
             continue
         toolkit = account.get("toolkit") or {}
-        core.verify_provider_slot(
+        verified = core.verify_provider_slot(
             conn,
             row["id"],
             connected_account_id=str(account.get("id") or row["connected_account_id"]),
@@ -235,6 +330,12 @@ def _reconcile_connections(conn, client_slug: str) -> None:
             toolkit=str(toolkit.get("slug") or ""),
             verified_email=_identity_from_account(account),
         )
+        if verified["alias"] == "primary":
+            _write_route_binding(
+                verified["toolkit"],
+                str(verified["connected_account_id"] or ""),
+                str(verified["composio_user_id"] or ""),
+            )
 
 
 def handle_connect_command(raw_args: str | None, hook_ctx: dict[str, Any] | None = None) -> str:
@@ -257,6 +358,26 @@ def handle_connect_command(raw_args: str | None, hook_ctx: dict[str, Any] | None
         reason = f"Composio key owner {boundary.composio_client_slug!r} does not match client {client_slug!r}"
     if reason:
         return _bootstrap_message(req, client_slug, reason)
+
+    reauth_account_id, reauth_user_id = _route_binding(req.toolkit)
+    if reauth_account_id:
+        link = _issue_api_reauth(req.toolkit, reauth_account_id, reauth_user_id)
+        lines = [
+            f"Composio reauthorization for {client_slug}",
+            f"Tool: {req.toolkit}",
+            f"Account slot: {req.alias}",
+        ]
+        if req.expected_email:
+            lines.append(f"Expected account: {req.expected_email}")
+        lines.extend(
+            [
+                "",
+                f"Reconnect this account: {link}",
+                "This refreshes the existing client-owned route; it does not create a requester-scoped replacement.",
+                "After OAuth, verify the existing route with a live read before resuming dependent automation.",
+            ]
+        )
+        return "\n".join(lines)
 
     auth_config_id = _auth_config_id(req.toolkit)
     if not auth_config_id:

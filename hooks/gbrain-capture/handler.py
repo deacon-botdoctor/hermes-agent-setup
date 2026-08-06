@@ -71,12 +71,24 @@ TRANSCRIPT_DB = HERMES_HOME / "data" / "telegram-transcript.db"
 
 
 def _find_gbrain_bin() -> Path:
-    """Locate the gbrain executable — handles unix bare-name shim and Windows .cmd."""
-    base = HERMES_HOME / "bin" / "gbrain"
-    for candidate in (base, base.with_suffix(".cmd"), base.with_suffix(".exe"), base.with_suffix(".bat")):
-        if candidate.exists() or candidate.is_symlink():
-            return candidate
-    return base  # fall back; caller logs if missing
+    """Locate the canonical wrapper without assuming a profile-local bin."""
+    shared = Path.home() / ".hermes" / "bin"
+    bases = [HERMES_HOME / "bin" / "gbrain"]
+    if HERMES_HOME != Path.home() / ".hermes":
+        # Profile homes intentionally do not duplicate the CLI. gbrain-mini is
+        # the canonical Spark bridge; never fall back to a profile-local or
+        # PGLite shadow brain when the shared wrapper exists.
+        bases.extend((shared / "gbrain-mini", shared / "gbrain"))
+    for base in bases:
+        for candidate in (
+            base,
+            base.with_suffix(".cmd"),
+            base.with_suffix(".exe"),
+            base.with_suffix(".bat"),
+        ):
+            if candidate.exists() or candidate.is_symlink():
+                return candidate
+    return bases[0]  # caller logs the resolved missing path
 
 
 GBRAIN_BIN = _find_gbrain_bin()

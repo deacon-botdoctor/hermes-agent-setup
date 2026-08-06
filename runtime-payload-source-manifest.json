@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "9d47138c0d6cbc249f6b50cae5855666ad65cf9a741df4d6ad9cd2d307d6e106",
+      "digest": "df9f89f122149941d84f6e8822b3ae943c276e283d69b682f4593897fed0577f",
       "excluded_paths": [],
       "file_count": 19,
       "files": [
@@ -20,7 +20,7 @@
           "type": "blob"
         },
         {
-          "blob": "5a178677df5c983fc79caa329af42dcadcdc5841",
+          "blob": "e6721e50745163a476c6139486a47cb24b0da283",
           "mode": "100755",
           "path": "bin/install-host-artifacts.py",
           "type": "blob"
@@ -92,7 +92,7 @@
           "type": "blob"
         },
         {
-          "blob": "0e690048c892eb5e40aa5e90677dfb4c5d0c7eb2",
+          "blob": "b6ca60ab187be02ce48ecb92e4b7d429bcdb0e55",
           "mode": "100755",
           "path": "kit/bin/retire-legacy-memory-surfaces.py",
           "type": "blob"
@@ -148,13 +148,13 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "284a2f15c8af36a54ffccd87f061cf54a2660c9bcfd14dac891668db459ae536",
+      "digest": "6bc8e0b939c25b22cc0a7ab9b55abe015cf4b8285ec78fe8d16f9409b34a0cfd",
       "excluded_paths": [
         "kit/agent/SOUL.template.md",
         "shared-rules/capability-discovery.md",
         "shared-rules/knowledge-routing.md"
       ],
-      "file_count": 277,
+      "file_count": 279,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -175,7 +175,7 @@
           "type": "blob"
         },
         {
-          "blob": "42728da4be8de4054273952a11a0413a43c7856e",
+          "blob": "a8689f381c7acb790e2106a3ef00a5abeab16c60",
           "mode": "100755",
           "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
@@ -235,7 +235,7 @@
           "type": "blob"
         },
         {
-          "blob": "ee87732ffab9138f1cf677b23077875e3e648879",
+          "blob": "3e473644ef28c4c55362f7ceb2b759fc30ba9cb8",
           "mode": "100644",
           "path": "hooks/gbrain-capture/handler.py",
           "type": "blob"
@@ -265,7 +265,7 @@
           "type": "blob"
         },
         {
-          "blob": "df54ea8c4ace929666fe61f86e58c69ab925014c",
+          "blob": "934cf19ac2768cb79f703a117c188ffaf8f6f871",
           "mode": "100644",
           "path": "mcp-servers/capability-router/browser-routing.capability-entry.json",
           "type": "blob"
@@ -319,7 +319,7 @@
           "type": "blob"
         },
         {
-          "blob": "ff78d487a9363ca2ec2e01a0f830222c0c282360",
+          "blob": "5969a2ced8559bcf482fea43ddebaf2a6517519f",
           "mode": "100644",
           "path": "patches/apply-telegram-immediate-typing-receipt.py",
           "type": "blob"
@@ -331,7 +331,7 @@
           "type": "blob"
         },
         {
-          "blob": "d52c5b6f753dec3aeab85c930c5533fca63b8564",
+          "blob": "4468702a5ed6f731b1184377fdebbb2b638f33cb",
           "mode": "100644",
           "path": "patches/modules/assembled_runtime_contract.py",
           "type": "blob"
@@ -349,7 +349,7 @@
           "type": "blob"
         },
         {
-          "blob": "47a67853f523b7af13aecc2188086ff0eedb7d44",
+          "blob": "2f402487325e4cc05e95b4e3af391334dd16477c",
           "mode": "100644",
           "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
           "type": "blob"
@@ -421,6 +421,12 @@
           "type": "blob"
         },
         {
+          "blob": "3e9c902eef1e297abcf57bd034dc205de9ad0b94",
+          "mode": "100644",
+          "path": "patches/modules/platform_delivery_drain_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "30a9b43e562c63113e5383c7722c2f0077943d86",
           "mode": "100644",
           "path": "patches/modules/registry_loader.py",
@@ -451,6 +457,12 @@
           "type": "blob"
         },
         {
+          "blob": "c5c57878727dc42158ec1f98e8802600cf17d14f",
+          "mode": "100644",
+          "path": "patches/modules/telegram_commentary_capture_v3.py",
+          "type": "blob"
+        },
+        {
           "blob": "ba7fde1f94ae40f3ed3eb219826f369b5c646279",
           "mode": "100755",
           "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
@@ -469,7 +481,7 @@
           "type": "blob"
         },
         {
-          "blob": "7ef2145dfd2677ce0e10dbe2a2a67d72f44b2ad6",
+          "blob": "9ac49d5d77516f474095273e05e4371e6976eec8",
           "mode": "100644",
           "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
           "type": "blob"
@@ -547,7 +559,7 @@
           "type": "blob"
         },
         {
-          "blob": "b5c6d89d184983e33e4105dfe196c3a7d11b5090",
+          "blob": "43ea107063fb6e2c601078fdca71f537fca22873",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -571,25 +583,25 @@
           "type": "blob"
         },
         {
-          "blob": "68c46d08356976a368377a5fa8c3e0a1f0c55e6a",
+          "blob": "01aa73f59920f3ca7be2bf218c5864ecfa8399bb",
           "mode": "100644",
           "path": "plugins/composio-onboarding/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "e88025eaf92c8d2aec6f5e653b492b244c4d91e5",
+          "blob": "1a159ed806fcf24489f9570af545a672c0389cc7",
           "mode": "100644",
           "path": "plugins/composio-onboarding/command.py",
           "type": "blob"
         },
         {
-          "blob": "00989447afb7e3200f6ed356e3e206fcc7849939",
+          "blob": "4c90a4f4e7661d2cc3dde911e6a0f64d8d6e2944",
           "mode": "100644",
           "path": "plugins/composio-onboarding/core.py",
           "type": "blob"
         },
         {
-          "blob": "08dbec5364a97cad72b3d63e5ed2e1bf9d86352c",
+          "blob": "e02d8776bb5bda82cf9bdd5f4b6e9e594c8d6673",
           "mode": "100644",
           "path": "plugins/composio-onboarding/plugin.yaml",
           "type": "blob"
@@ -745,7 +757,7 @@
           "type": "blob"
         },
         {
-          "blob": "0ab4c5344a5aa387288d504e082da20304523dc1",
+          "blob": "ffc4c734ec7bb93c7a2716221524d19cdfbf71af",
           "mode": "100644",
           "path": "shared-rules/content-policy.md",
           "type": "blob"
@@ -1795,7 +1807,7 @@
           "type": "blob"
         },
         {
-          "blob": "f5e5b8c1781c8c89437a63258c71a944c64ad1a0",
+          "blob": "bf7e850aa698e68cdf696d6a557fcbd4296c06e7",
           "mode": "100644",
           "path": "skills/fleet/golden-computer-use-v2/SKILL.md",
           "type": "blob"
@@ -1857,6 +1869,7 @@
         "patches/modules/compaction_completion_status_suppression_v1.py",
         "patches/modules/durable_drain_compatibility_v1.py",
         "patches/modules/durable_drain_inbox_carrier_v1.py",
+        "patches/modules/platform_delivery_drain_v1.py",
         "patches/modules/gateway_runtime_root_guard_v1.py",
         "patches/modules/gateway_service_binding_guard_v1.py",
         "patches/modules/lifecycle_guard_invalid_path_v1.py",
@@ -1874,6 +1887,7 @@
         "patches/modules/telegram_fresh_topic_continuity_v1.py",
         "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
         "patches/modules/telegram_organic_long_running_checkpoints_v2.py",
+        "patches/modules/telegram_commentary_capture_v3.py",
         "patches/modules/telegram_media_download_retry_v1.py",
         "patches/modules/telegram_poll_liveness_writer_v1.py",
         "patches/modules/telegram_transaction_canary_v1.py",
@@ -1909,18 +1923,18 @@
       ]
     }
   },
-  "deployment_digest": "4beb35a63ae2e567618132686b7fd1dd9b53611f1b9dcf6cc10c63bbc54a0baa",
-  "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
+  "deployment_digest": "fb9f47000ec259cb8430ec469d1cabffd1ce22e95dcfa3ceed711c48098275ca",
+  "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "580b5397b886e7ef22267a6baad0f775befc0514b638945c0b6234464605f826",
+    "digest": "dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90",
     "excluded_state_or_artifacts": [
       "gateway/platforms/base.py.bak-pre-telegram-transaction-canary-v1",
       "gateway/stream_consumer.py.bak-pre-telegram-transaction-canary-v1",
       "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1"
     ],
     "expected_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-    "file_count": 82,
+    "file_count": 83,
     "files": {
       ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
         "mode": "100644",
@@ -1944,12 +1958,17 @@
       },
       "agent/chat_completion_helpers.py": {
         "mode": "100644",
-        "sha256": "a21d6d7d2c6f00d16d1c28745e0bff91eee3531055c8589e11edc7a2863f25ef",
+        "sha256": "7b24eee54a2b1731feefee40c6d1ab310eb6178167db98c7b1f7b65b323b3472",
         "type": "blob"
       },
       "agent/codex_401_circuit.py": {
         "mode": "100644",
         "sha256": "09662065f160f228c5c70d447f8d417de95e6bcd3aca313c25ea6e75640f034a",
+        "type": "blob"
+      },
+      "agent/codex_runtime.py": {
+        "mode": "100644",
+        "sha256": "e4a8ed1135caf691bd0b5b8f27c1aac31fd66e69be6fb190fecca5578894799f",
         "type": "blob"
       },
       "agent/conversation_compression.py": {
@@ -2019,7 +2038,7 @@
       },
       "gateway/platforms/base.py": {
         "mode": "100644",
-        "sha256": "2aef535d519ad8cf97aeb6b61fb6b1f004f6a72ebb1e0d3bee7a51db3e3bc143",
+        "sha256": "d98584567151408d2e8b5c03afb36a5bf6b4977f107dd92aa1eaffcbf424721e",
         "type": "blob"
       },
       "gateway/platforms/bluebubbles.py": {
@@ -2054,7 +2073,7 @@
       },
       "gateway/run.py": {
         "mode": "100644",
-        "sha256": "1d6ce02b44522d9eabc847ed425269b208e0f8ce443adbce9ef817828cb4523b",
+        "sha256": "c2dc9e6bf9fa13629f298cbd78440262328233749b9838456844ec0589150b85",
         "type": "blob"
       },
       "gateway/session.py": {
@@ -2129,12 +2148,12 @@
       },
       "plugins/platforms/telegram/adapter.py": {
         "mode": "100644",
-        "sha256": "de5d2c07e1358cdf2945959b733f9e7f2868bf78c0422de2e464ecff2693d847",
+        "sha256": "ed5cdd7d2cbae926840e47f855ceb740b515890e2ef1d486d1bf4f5117cd71e5",
         "type": "blob"
       },
       "run_agent.py": {
         "mode": "100644",
-        "sha256": "07ff44df9bebac63eff7e83f95e9f5557c199e1bda7ad13beaca3ad532bc79cb",
+        "sha256": "66d429a5c109f1a1c681eafa22cc8fafb3ced6222537b4ec5c26ef3f5200593f",
         "type": "blob"
       },
       "tests/agent/test_intent_ack_continuation.py": {
@@ -2333,7 +2352,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "46fef7aff953fa81e0740754e4afea5e3a5589e6",
+    "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
     "upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
     "verified": true
   },

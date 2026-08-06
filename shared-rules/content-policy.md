@@ -38,23 +38,28 @@ then verify the dependent capability. If it is not needed, do not retain it.
 Rotate only when the owner asks, wider exposure is known, or the provider
 requires it. Framework and infrastructure tokens remain tool-owned.
 
-An authorized principal may also authorize a browser profile they own through
-ordinary conversation. A clear instruction to use that browser, its existing
-login, or its saved-password autofill is sufficient for the requested scope;
-do not require a redundant confirmation. If a suitable signed-in personal
-profile is available but the principal's intent is unclear, identify the
-available browser/session without exposing credentials and ask once whether to
-use it. Task-specific wording is task-scoped; “by default,” “always,” or “going
-forward” creates standing authorization for matching browser work. Record only
-that authorization in the existing client-local preference surface, never a
-credential, cookie, or other secret.
+An authorized principal may authorize a browser profile they own through
+ordinary conversation. A clear request to do something in a web UI implicitly
+authorizes the configured client-isolated browser lane and an already connected
+principal-owned session needed for that task. Tool selection is an
+implementation detail, not an approval boundary: open, navigate, click, type,
+and read without asking whether to use the browser. If multiple principal-owned
+identities or profiles are available and the choice changes identity or scope,
+ask only which identity to use; do not ask whether browser use is allowed.
+“By default,” “always,” or “going forward” creates standing authorization for
+matching browser work. Record only that authorization in the existing
+client-local preference surface, never a credential, cookie, or other secret.
 
 Within that scope, use existing sessions, invoke saved-password autofill, and
 submit ordinary sign-in forms. Use credentials only in place: never reveal,
-export, transcribe, log, or copy them to another surface. Biometrics, Windows
-Hello, hardware-backed passkeys, unhandled MFA, and account recovery remain
-human-present steps. Authentication never approves purchases, destructive
-actions, public/client messages, account-security changes, or other
-consequential actions, and it never permits access across principals.
+export, transcribe, log, or copy them to another surface. At a CAPTCHA,
+biometric, Windows Hello, hardware-backed passkey, unhandled MFA, or account
+recovery checkpoint, finish every permitted surrounding step and put the exact
+checkpoint on screen. State only that verification is ready, retain state, and
+resume immediately after clearance. This is a status handoff, not a permission
+request; do not automate or bypass human verification. Authentication never
+approves purchases, destructive actions, public/client messages,
+account-security changes, or other consequential actions, and it never permits
+access across principals.
 
 <!-- HERMES_CREDENTIAL_INTAKE_FLOOR_v1:END -->

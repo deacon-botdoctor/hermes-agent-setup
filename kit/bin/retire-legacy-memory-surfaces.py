@@ -8,12 +8,24 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 RETIRED_SERVERS = frozenset({"anamnesis", "hermes-lcm", "autodream"})
-RETIRED_TOOLSET_VALUES = frozenset(f"mcp-{name}" for name in RETIRED_SERVERS)
+RETIRED_TOOLSET_VALUES = RETIRED_SERVERS | frozenset(
+    f"mcp-{name}" for name in RETIRED_SERVERS
+)
+RETIRED_PLUGINS = frozenset(
+    {"anamnesis", "anamnesis-ingest", "hermes-lcm", "autodream"}
+)
+RETIRED_SCHEDULER_TOKENS = (
+    "anamnesis",
+    "hermes-lcm",
+    "autodream",
+    "lcm_freshness",
+)
 LEGACY_POLICY_TITLE = "# Knowledge Store Policy — GBrain + Anamnesis"
 LEGACY_AGENT_SENTENCE = (
     "Durable artifacts go to GBrain; concise preferences/actions/pointers go to Anamnesis."
@@ -302,8 +314,14 @@ def remove_mapping_sequence_values(
             rest = child.group("rest").strip()
             if rest.startswith("[") and rest.endswith("]"):
                 tokens = [token.strip() for token in rest[1:-1].split(",") if token.strip()]
-                kept = [token for token in tokens if _yaml_scalar(token) not in values]
-                removed.extend(_yaml_scalar(token) for token in tokens if _yaml_scalar(token) in values)
+                kept = [
+                    token for token in tokens if _yaml_scalar(token).lower() not in values
+                ]
+                removed.extend(
+                    _yaml_scalar(token).lower()
+                    for token in tokens
+                    if _yaml_scalar(token).lower() in values
+                )
                 if kept != tokens:
                     newline = child.group("newline") or ""
                     lines[cursor] = (
@@ -314,8 +332,8 @@ def remove_mapping_sequence_values(
                 item_index = cursor + 1
                 while item_index < block_end:
                     item = item_re.match(lines[item_index])
-                    if item and _yaml_scalar(item.group("value")) in values:
-                        removed.append(_yaml_scalar(item.group("value")))
+                    if item and _yaml_scalar(item.group("value")).lower() in values:
+                        removed.append(_yaml_scalar(item.group("value")).lower())
                         del lines[item_index]
                         block_end -= 1
                         end -= 1
@@ -336,12 +354,53 @@ def remove_mapping_sequence_values(
     return "".join(lines), removed
 
 
-def normalize_config(text: str) -> tuple[str, list[str]]:
+def _retired_python_command(value: Any) -> bool:
+    normalized = str(value or "").replace("\\", "/").lower()
+    return (
+        "/mcp-servers/anamnesis/" in normalized
+        and "/python" in normalized
+        and ("/.venv/" in normalized or "/venv/" in normalized)
+    )
+
+
+def replace_exact_command_scalars(
+    text: str, replacements: dict[str, str]
+) -> tuple[str, int]:
+    """Replace exact YAML command scalars while preserving comments and quoting."""
+    lines = text.splitlines(keepends=True)
+    count = 0
+    command_re = re.compile(r"^(?P<prefix>\s*command:\s*)(?P<body>.*?)(?P<newline>\r?\n)?$")
+    for index, line in enumerate(lines):
+        match = command_re.match(line)
+        if not match:
+            continue
+        body = match.group("body")
+        scalar, separator, comment = body.partition(" #")
+        stripped = scalar.strip()
+        value = _yaml_scalar(stripped)
+        replacement = replacements.get(value)
+        if replacement is None:
+            continue
+        quote = stripped[:1] if stripped[:1] in {"'", '"'} else ""
+        rendered = f"{quote}{replacement}{quote}"
+        suffix = f" #{comment}" if separator else ""
+        lines[index] = (
+            f"{match.group('prefix')}{rendered}{suffix}{match.group('newline') or ''}"
+        )
+        count += 1
+    return "".join(lines), count
+
+
+def normalize_config(
+    text: str, hermes_python: str | None = None
+) -> tuple[str, list[str]]:
     before = load_yaml(text)
     servers = before.get("mcp_servers") or {}
     if not isinstance(servers, dict):
         raise ValueError("config.yaml mcp_servers must be a mapping")
-    active = RETIRED_SERVERS & set(servers)
+    active = {
+        str(name) for name in servers if str(name).lower() in RETIRED_SERVERS
+    }
     updated, removed = remove_mapping_children(text, "mcp_servers", set(active))
     updated, removed_toolsets = remove_mapping_sequence_values(
         updated, "platform_toolsets", RETIRED_TOOLSET_VALUES
@@ -349,37 +408,82 @@ def normalize_config(text: str) -> tuple[str, list[str]]:
     updated, removed_policy = remove_mapping_sequence_values(
         updated, "mcp_policy", RETIRED_SERVERS
     )
+    updated, removed_plugins = remove_mapping_sequence_values(
+        updated, "plugins", RETIRED_PLUGINS
+    )
+    parsed_after_removal = load_yaml(updated)
+    remaining_servers_after_removal = parsed_after_removal.get("mcp_servers") or {}
+    retired_python_commands = {
+        str(entry.get("command"))
+        for entry in remaining_servers_after_removal.values()
+        if isinstance(entry, dict) and _retired_python_command(entry.get("command"))
+    }
+    replaced_python_commands = 0
+    if retired_python_commands:
+        if not hermes_python:
+            raise ValueError(
+                "remaining MCP servers depend on the retired Anamnesis interpreter"
+            )
+        updated, replaced_python_commands = replace_exact_command_scalars(
+            updated,
+            {command: str(hermes_python) for command in retired_python_commands},
+        )
     config_rewritten = False
     for legacy, replacement in KNOWN_CONFIG_REWRITES.items():
         if legacy in updated:
             updated = updated.replace(legacy, replacement)
             config_rewritten = True
     after = load_yaml(updated)
-    remaining = RETIRED_SERVERS & set((after.get("mcp_servers") or {}))
+    remaining = {
+        str(name)
+        for name in (after.get("mcp_servers") or {})
+        if str(name).lower() in RETIRED_SERVERS
+    }
     remaining_toolsets = {
         str(value)
         for values in (after.get("platform_toolsets") or {}).values()
         if isinstance(values, list)
         for value in values
-        if str(value) in RETIRED_TOOLSET_VALUES
+        if str(value).lower() in RETIRED_TOOLSET_VALUES
     }
     remaining_policy = {
         str(value)
         for values in (after.get("mcp_policy") or {}).values()
         if isinstance(values, list)
         for value in values
-        if str(value) in RETIRED_SERVERS
+        if str(value).lower() in RETIRED_SERVERS
+    }
+    remaining_plugins = {
+        str(value)
+        for values in (after.get("plugins") or {}).values()
+        if isinstance(values, list)
+        for value in values
+        if str(value).lower() in RETIRED_PLUGINS
+    }
+    remaining_python_commands = {
+        str(entry.get("command"))
+        for entry in (after.get("mcp_servers") or {}).values()
+        if isinstance(entry, dict) and _retired_python_command(entry.get("command"))
     }
     if (
         remaining
         or remaining_toolsets
         or remaining_policy
+        or remaining_plugins
+        or remaining_python_commands
         or set(removed) != active
     ):
         raise ValueError(
             "unable to remove retired runtime bindings exactly: "
             + ", ".join(
-                sorted(remaining | remaining_toolsets | remaining_policy | active)
+                sorted(
+                    remaining
+                    | remaining_toolsets
+                    | remaining_policy
+                    | remaining_plugins
+                    | remaining_python_commands
+                    | active
+                )
             )
         )
     changes = [f"config:mcp_servers.{name}" for name in sorted(removed)]
@@ -387,6 +491,10 @@ def normalize_config(text: str) -> tuple[str, list[str]]:
         changes.append("config:platform_toolsets.retired-memory")
     if removed_policy:
         changes.append("config:mcp_policy.retired-memory")
+    if removed_plugins:
+        changes.append("config:plugins.retired-memory")
+    if replaced_python_commands:
+        changes.append("config:retired-memory-python")
     if config_rewritten:
         changes.append("config:descriptions.retired-memory")
     return updated, changes
@@ -417,6 +525,29 @@ def instruction_paths(home: Path) -> list[Path]:
     return list(dict.fromkeys(paths))
 
 
+def retired_scheduler_paths(home: Path) -> list[Path]:
+    """Return user-owned scheduler definitions that still invoke retired memory."""
+    account_home = home.parent
+    roots = (
+        account_home / ".config" / "systemd" / "user",
+        account_home / "Library" / "LaunchAgents",
+    )
+    matches: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.iterdir()):
+            try:
+                if not path.is_file() or path.stat().st_size > 1024 * 1024:
+                    continue
+                searchable = f"{path.name}\n{path.read_text(encoding='utf-8', errors='replace')}".lower()
+            except OSError:
+                continue
+            if any(token in searchable for token in RETIRED_SCHEDULER_TOKENS):
+                matches.append(path)
+    return matches
+
+
 def active_directives(path: Path, text: str) -> list[dict[str, Any]]:
     findings = []
     for line_number, line in enumerate(text.splitlines(), 1):
@@ -429,14 +560,16 @@ def active_directives(path: Path, text: str) -> list[dict[str, Any]]:
     return findings
 
 
-def plan_changes(home: Path, rules_source: Path) -> tuple[dict[Path, str], list[str], list[dict[str, Any]]]:
+def plan_changes(
+    home: Path, rules_source: Path, hermes_python: str | None = None
+) -> tuple[dict[Path, str], list[Path], list[str], list[dict[str, Any]]]:
     replacements: dict[Path, str] = {}
     changes: list[str] = []
     findings: list[dict[str, Any]] = []
     config = home / "config.yaml"
     if config.is_file():
         original = config.read_text(encoding="utf-8")
-        updated, config_changes = normalize_config(original)
+        updated, config_changes = normalize_config(original, hermes_python)
         if updated != original:
             replacements[config] = updated
             changes.extend(config_changes)
@@ -492,27 +625,100 @@ def plan_changes(home: Path, rules_source: Path) -> tuple[dict[Path, str], list[
         if text is None:
             text = path.read_text(encoding="utf-8", errors="strict")
         findings.extend(active_directives(path, text))
-    return replacements, list(dict.fromkeys(changes)), findings
+    scheduler_paths = retired_scheduler_paths(home)
+    changes.extend(f"scheduler:{path.name}" for path in scheduler_paths)
+    return replacements, scheduler_paths, list(dict.fromkeys(changes)), findings
 
 
-def apply_replacements(home: Path, replacements: dict[Path, str]) -> Path:
+def _rollback_member(home: Path, path: Path) -> tuple[str, Path]:
+    resolved_home = home.resolve()
+    resolved = path.resolve()
+    if resolved.is_relative_to(resolved_home):
+        return "hermes_home", resolved.relative_to(resolved_home)
+    account_home = resolved_home.parent
+    if resolved.is_relative_to(account_home):
+        return "account_home", resolved.relative_to(account_home)
+    raise ValueError(f"retirement path is outside the runtime account: {path}")
+
+
+def _prepare_scheduler_retirement(path: Path) -> dict[str, Any]:
+    """Stop a retired user scheduler before any source files are changed."""
+    action: dict[str, Any] = {"path": str(path), "command": None, "returncode": None}
+    if ".config/systemd/user" in path.as_posix() and path.suffix == ".service":
+        command = ["systemctl", "--user", "disable", "--now", path.name]
+    elif "/Library/LaunchAgents/" in path.as_posix() and path.suffix == ".plist":
+        command = ["launchctl", "bootout", f"gui/{os.getuid()}", str(path)]
+    else:
+        command = []
+    if command and shutil.which(command[0]):
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+        action["command"] = command[:3]
+        action["returncode"] = proc.returncode
+        # systemctl returns 0 for an already-disabled inactive unit. launchctl
+        # returns non-zero when a plist was not loaded, which is also safe to retire.
+        if command[0] == "systemctl" and proc.returncode != 0:
+            raise RuntimeError(
+                f"unable to stop retired scheduler {path.name}: {proc.stderr[-240:]}"
+            )
+    return action
+
+
+def _reload_scheduler_managers(paths: list[Path]) -> None:
+    if any(
+        ".config/systemd/user" in path.as_posix() and path.suffix == ".service"
+        for path in paths
+    ) and shutil.which("systemctl"):
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+
+def apply_replacements(
+    home: Path, replacements: dict[Path, str], scheduler_paths: list[Path]
+) -> tuple[Path, list[dict[str, Any]]]:
     rollback = home / "state" / "rollbacks" / f"retired-memory-surfaces-{utc_stamp()}"
     rollback.mkdir(parents=True, exist_ok=False)
     manifest = {"schema_version": 1, "files": []}
+    scheduler_actions = [
+        _prepare_scheduler_retirement(path) for path in scheduler_paths
+    ]
     for path, updated in replacements.items():
-        relative = path.relative_to(home)
-        backup = rollback / relative
+        scope, relative = _rollback_member(home, path)
+        backup = rollback / scope / relative
         backup.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, backup)
         tmp = path.with_name(f".{path.name}.retired-memory-{os.getpid()}")
         tmp.write_text(updated, encoding="utf-8")
         shutil.copymode(path, tmp)
         os.replace(tmp, path)
-        manifest["files"].append({"path": relative.as_posix()})
+        manifest["files"].append(
+            {"scope": scope, "path": relative.as_posix(), "operation": "replace"}
+        )
+    for path in scheduler_paths:
+        scope, relative = _rollback_member(home, path)
+        backup = rollback / scope / relative
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, backup)
+        path.unlink()
+        manifest["files"].append(
+            {"scope": scope, "path": relative.as_posix(), "operation": "retire"}
+        )
+    _reload_scheduler_managers(scheduler_paths)
     (rollback / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    return rollback
+    return rollback, scheduler_actions
 
 
 def restore(home: Path, rollback: Path) -> dict[str, Any]:
@@ -520,12 +726,25 @@ def restore(home: Path, rollback: Path) -> dict[str, Any]:
     restored = []
     for row in manifest.get("files") or []:
         relative = Path(str(row["path"]))
-        source = rollback / relative
-        destination = home / relative
-        if not source.is_file() or not destination.resolve().is_relative_to(home.resolve()):
+        scope = str(row.get("scope") or "hermes_home")
+        root = home if scope == "hermes_home" else home.parent if scope == "account_home" else None
+        if root is None:
+            raise ValueError(f"invalid rollback scope: {scope}")
+        source = rollback / scope / relative
+        destination = root / relative
+        if not source.is_file() or not destination.resolve().is_relative_to(root.resolve()):
             raise ValueError(f"invalid rollback member: {relative}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
         restored.append(relative.as_posix())
+    _reload_scheduler_managers(
+        [
+            (home if str(row.get("scope") or "hermes_home") == "hermes_home" else home.parent)
+            / Path(str(row["path"]))
+            for row in manifest.get("files") or []
+            if row.get("operation") == "retire"
+        ]
+    )
     return {"ok": True, "status": "restored", "restored": restored, "rollback": str(rollback)}
 
 
@@ -533,6 +752,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--hermes-home", type=Path, required=True)
     parser.add_argument("--rules-source", type=Path)
+    parser.add_argument("--hermes-python")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--rollback", type=Path)
@@ -551,7 +771,9 @@ def main(argv: list[str] | None = None) -> int:
     if missing_rules:
         parser.error("--rules-source is missing: " + ", ".join(missing_rules))
 
-    replacements, changes, findings = plan_changes(home, args.rules_source)
+    replacements, scheduler_paths, changes, findings = plan_changes(
+        home, args.rules_source, args.hermes_python
+    )
     if findings:
         payload = {
             "ok": False,
@@ -562,7 +784,7 @@ def main(argv: list[str] | None = None) -> int:
         }
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 1
-    if not replacements:
+    if not replacements and not scheduler_paths:
         payload = {
             "ok": True,
             "status": "idempotent",
@@ -577,12 +799,15 @@ def main(argv: list[str] | None = None) -> int:
             "credential_values_recorded": False,
         }
     else:
-        rollback = apply_replacements(home, replacements)
+        rollback, scheduler_actions = apply_replacements(
+            home, replacements, scheduler_paths
+        )
         payload = {
             "ok": True,
             "status": "installed",
             "changes": changes,
             "rollback": str(rollback),
+            "scheduler_actions": scheduler_actions,
             "credential_values_recorded": False,
         }
     print(json.dumps(payload, indent=2, sort_keys=True))
