@@ -3,12 +3,12 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "df9f89f122149941d84f6e8822b3ae943c276e283d69b682f4593897fed0577f",
+      "digest": "1f985cdbdb433f2dad0e2d53d65628178e063f7781adcc75cac116815a1f869b",
       "excluded_paths": [],
-      "file_count": 19,
+      "file_count": 24,
       "files": [
         {
-          "blob": "ded3a59202e0c41bfccc154ac5c89d37ce739c00",
+          "blob": "3079381af2eef0d90a376989dcfa314649a8c196",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.py",
           "type": "blob"
@@ -20,7 +20,13 @@
           "type": "blob"
         },
         {
-          "blob": "e6721e50745163a476c6139486a47cb24b0da283",
+          "blob": "5aa066c4157a712861e762fb23aa10835deab22d",
+          "mode": "100755",
+          "path": "bin/hermes-local-selfcheck.py",
+          "type": "blob"
+        },
+        {
+          "blob": "a4a17ff77dea4dd982f84c988b8cd07603551209",
           "mode": "100755",
           "path": "bin/install-host-artifacts.py",
           "type": "blob"
@@ -32,7 +38,7 @@
           "type": "blob"
         },
         {
-          "blob": "7fc89f51129daad3d7d3b14d29ae0b680e9f49b7",
+          "blob": "b74b34d64eec523cd138d88841a4c4fd3d2d9a2a",
           "mode": "100644",
           "path": "installers.yaml",
           "type": "blob"
@@ -47,6 +53,12 @@
           "blob": "0c1db1d0492e9959e8e6ca33de4bb8f31460e88b",
           "mode": "100755",
           "path": "kit/bin/auth-preflight.py",
+          "type": "blob"
+        },
+        {
+          "blob": "51701a724e0b29948e83d569e83cb30eea14e64c",
+          "mode": "100755",
+          "path": "kit/bin/check-sqlite-wal.py",
           "type": "blob"
         },
         {
@@ -74,7 +86,13 @@
           "type": "blob"
         },
         {
-          "blob": "3c23617d18c6258adf85f9b6459c2eaa27848b0a",
+          "blob": "b7d51583837a6d318a30ee8a78b1166cfac65ffb",
+          "mode": "100755",
+          "path": "kit/bin/hermes-safe-restart.sh",
+          "type": "blob"
+        },
+        {
+          "blob": "4c35485f0ffb6014d875fdbba0bc3293f990f4ce",
           "mode": "100644",
           "path": "kit/bin/operator-status.py",
           "type": "blob"
@@ -116,28 +134,45 @@
           "type": "blob"
         },
         {
+          "blob": "73912b84a51e0ec187872ba4bf796d07663188f6",
+          "mode": "100755",
+          "path": "kit/bin/telegram_delivery.py",
+          "type": "blob"
+        },
+        {
           "blob": "370c55ee43c3fd6ab6b5f63886ee920c00b68881",
           "mode": "100644",
           "path": "kit/config/cua-driver-release-v1.json",
+          "type": "blob"
+        },
+        {
+          "blob": "4206608523e7dffbf68553f2b06d2fba131729a4",
+          "mode": "100644",
+          "path": "recipes/tool-doctor/mcp-provisioning-v1.yaml",
           "type": "blob"
         }
       ],
       "paths": [
         "bin/gbrain-enable-embeddings.py",
         "bin/hermes-canary-reconciler.py",
+        "bin/hermes-local-selfcheck.py",
         "bin/hermes-host-hygiene.py",
         "bin/install-host-artifacts.py",
         "bin/tool-doctor.py",
         "installers.yaml",
+        "recipes/tool-doctor/mcp-provisioning-v1.yaml",
         "kit/bin/agent-browser-orphan-reaper.py",
         "kit/bin/auth-preflight.py",
+        "kit/bin/check-sqlite-wal.py",
         "kit/bin/ensure-cua-driver.py",
         "kit/bin/ensure-gateway-watchdog.py",
         "kit/bin/enforce-gbrain-provider-routing.py",
         "kit/bin/gbrain-enable-embeddings.py",
         "kit/bin/hermes-gateway-watchdog-client.py",
+        "kit/bin/hermes-safe-restart.sh",
         "kit/bin/operator-status.py",
         "kit/bin/telegram-polling-health-probe.py",
+        "kit/bin/telegram_delivery.py",
         "kit/bin/probe-client-health.py",
         "kit/bin/probe-client-health.ps1",
         "kit/bin/retire-legacy-memory-surfaces.py",
@@ -148,13 +183,9 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "6bc8e0b939c25b22cc0a7ab9b55abe015cf4b8285ec78fe8d16f9409b34a0cfd",
-      "excluded_paths": [
-        "kit/agent/SOUL.template.md",
-        "shared-rules/capability-discovery.md",
-        "shared-rules/knowledge-routing.md"
-      ],
-      "file_count": 279,
+      "digest": "124947c5aa827ffc24d212af69f04dd59dc98d3255a570e3a79098c95fabddbf",
+      "excluded_paths": [],
+      "file_count": 285,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -172,12 +203,6 @@
           "blob": "afc2ca82f35784c02355a743240834ca31b2b3c7",
           "mode": "100755",
           "path": "bin/hermes-client-day-review",
-          "type": "blob"
-        },
-        {
-          "blob": "a8689f381c7acb790e2106a3ef00a5abeab16c60",
-          "mode": "100755",
-          "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
         },
         {
@@ -241,6 +266,12 @@
           "type": "blob"
         },
         {
+          "blob": "6d3025ee7f8bf0a2a6e4a8048512a8c2799af482",
+          "mode": "100755",
+          "path": "hooks/pre-commit",
+          "type": "blob"
+        },
+        {
           "blob": "de838f2d200bff3845ecc36a439f4f8bc02e580c",
           "mode": "100644",
           "path": "hooks/telegram-transcript/HOOK.yaml",
@@ -250,6 +281,12 @@
           "blob": "d3606dead2cc2d9679e231596b6ba414cb01e0cf",
           "mode": "100644",
           "path": "hooks/telegram-transcript/handler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2a58465b48caa61fa6778558f5492d94552efef2",
+          "mode": "100644",
+          "path": "kit/agent/SOUL.template.md",
           "type": "blob"
         },
         {
@@ -379,7 +416,7 @@
           "type": "blob"
         },
         {
-          "blob": "fa46edac1a5996e1ab49d067807422a107cc7fa4",
+          "blob": "acb6d4064491cd91210174abab9d447e4b39e808",
           "mode": "100644",
           "path": "patches/modules/lean_agent_loop_v1.py",
           "type": "blob"
@@ -559,7 +596,7 @@
           "type": "blob"
         },
         {
-          "blob": "43ea107063fb6e2c601078fdca71f537fca22873",
+          "blob": "95f78809948754394f788b65912902486dcef0fa",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -643,19 +680,19 @@
           "type": "blob"
         },
         {
-          "blob": "29321e8e8d68d5970a51c5284956e01a375c370a",
+          "blob": "86880faaaaab57d0f3c71b73f8e42ca0fe773089",
           "mode": "100644",
           "path": "plugins/semantic-computer-control-guard/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "609df6e3f93b9e06fdb6eb7d7e19e1cbc8d9d082",
+          "blob": "7ae9638540180b54c62612be5d2ca5db58432072",
           "mode": "100644",
           "path": "plugins/semantic-computer-control-guard/guard.py",
           "type": "blob"
         },
         {
-          "blob": "807bf15ff01568ae714676f309ceccfd72280ba3",
+          "blob": "808e124525c2277e1f4554a6561caa69723af74a",
           "mode": "100644",
           "path": "plugins/semantic-computer-control-guard/plugin.yaml",
           "type": "blob"
@@ -697,25 +734,25 @@
           "type": "blob"
         },
         {
-          "blob": "d8f9db6d6b8113d6da195fd168e7882c16a6e76f",
+          "blob": "0b10d928567e58b1920ce8fc9e60f2d196e03f29",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
         },
         {
-          "blob": "79a2bfbd9db2604a69f52e92105a66d7f474044f",
+          "blob": "f5b28bd7fcfd96c63ad459387849a77202686ec9",
           "mode": "100644",
           "path": "shared-defaults/README.md",
           "type": "blob"
         },
         {
-          "blob": "ce9189673ac42a5fd56318625608f338b1276e25",
+          "blob": "47e4900fd336d8de15bb59ece5d848345c44e92a",
           "mode": "100644",
           "path": "shared-defaults/config-client-quiet-display.yaml",
           "type": "blob"
         },
         {
-          "blob": "1e4299b2b4e5185e79a80eb59f5bed435b3fac9c",
+          "blob": "9713b2b4f9a95659457700e95a5645f2d50c6f03",
           "mode": "100644",
           "path": "shared-defaults/config-mcp-on-demand-control.yaml",
           "type": "blob"
@@ -724,6 +761,12 @@
           "blob": "444fbb4aaf4df43a27e97f81f21c8e6772fa45b8",
           "mode": "100644",
           "path": "shared-defaults/config-model-autonomy.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "533ab7118a52b84a0ebeb91901830c0edf21c373",
+          "mode": "100644",
+          "path": "shared-defaults/config-native-image-generation.yaml",
           "type": "blob"
         },
         {
@@ -745,9 +788,15 @@
           "type": "blob"
         },
         {
-          "blob": "49320fbe8b3e8249116dde2bae551e011f8678c6",
+          "blob": "a098aa021653a45ba4b14b19c13f00cbc03a3fad",
           "mode": "100644",
           "path": "shared-defaults/retired-policy-defaults-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "1cf6d0e0995e4ecf89f9e7f77075adfe0c57e64e",
+          "mode": "100644",
+          "path": "shared-rules/capability-discovery.md",
           "type": "blob"
         },
         {
@@ -766,6 +815,18 @@
           "blob": "164e7823dbf27c636a9617386c456bf0cdcf6481",
           "mode": "100644",
           "path": "shared-rules/file-delivery.md",
+          "type": "blob"
+        },
+        {
+          "blob": "422f1389d71ca59e1619f4ab41f98a4a179d5713",
+          "mode": "100644",
+          "path": "shared-rules/image-generation-routing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c910dd15ff2ad8fe0c00c4bedbaae47556e7a172",
+          "mode": "100644",
+          "path": "shared-rules/knowledge-routing.md",
           "type": "blob"
         },
         {
@@ -1825,6 +1886,12 @@
           "type": "blob"
         },
         {
+          "blob": "ea8fdde8a4ec34ec8c095ea10774ca2d558f4d7a",
+          "mode": "100644",
+          "path": "skills/internal/creative-output-escalation/SKILL.md",
+          "type": "blob"
+        },
+        {
           "blob": "416010dd6cb1b4bfdffb0dc8584ddad4fd6a3588",
           "mode": "100644",
           "path": "upstream.lock",
@@ -1834,7 +1901,6 @@
       "paths": [
         "bin/client-doc-artifact-qa",
         "bin/hermes-client-day-review",
-        "bin/hermes-local-selfcheck.py",
         "bin/hermes-reflect-candidates-to-drafts.py",
         "bin/hermes-self-reflect.py",
         "bin/hermes-skillify-autopromote.py",
@@ -1847,6 +1913,7 @@
         "bin/telegram-transaction-canary.py",
         "hooks/gbrain-capture",
         "hooks/open-loop-detector",
+        "hooks/pre-commit",
         "hooks/telegram-transcript",
         "kit/agent/SOUL.template.md",
         "kit/bin/papercut.py",
@@ -1911,6 +1978,7 @@
         "shared-rules/content-policy.md",
         "shared-rules/capability-discovery.md",
         "shared-rules/file-delivery.md",
+        "shared-rules/image-generation-routing.md",
         "shared-rules/knowledge-store-policy.md",
         "shared-rules/knowledge-routing.md",
         "shared-rules/westminster-marque.md",
@@ -1918,32 +1986,28 @@
         "skills/fleet/nightly-client-reflection-default",
         "skills/fleet/papercuts",
         "skills/fleet/golden-computer-use-v2",
+        "skills/internal/creative-output-escalation",
         "skills/creative",
         "upstream.lock"
       ]
     }
   },
-  "deployment_digest": "fb9f47000ec259cb8430ec469d1cabffd1ce22e95dcfa3ceed711c48098275ca",
-  "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
+  "deployment_digest": "15d13a184cee635e39582a9109bae88becf161a3ec709c529c5a1fe63a9f080c",
+  "golden_sha": "6219fcccfc42c5f22f504c15f590c0b9da0cf8dd",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90",
+    "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
     "excluded_state_or_artifacts": [
       "gateway/platforms/base.py.bak-pre-telegram-transaction-canary-v1",
       "gateway/stream_consumer.py.bak-pre-telegram-transaction-canary-v1",
       "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1"
     ],
     "expected_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-    "file_count": 83,
+    "file_count": 82,
     "files": {
       ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
         "mode": "100644",
         "sha256": "085236cd7b1d1055f70d7c93b374918fcade8b7607e7890b6e7d664576b00891",
-        "type": "blob"
-      },
-      "agent/agent_init.py": {
-        "mode": "100644",
-        "sha256": "48f51f9cf62f2a1019f5bfd108830defa6f8b3af407be1974b8940cddf1b83d4",
         "type": "blob"
       },
       "agent/agent_runtime_helpers.py": {
@@ -2098,7 +2162,7 @@
       },
       "hermes_cli/config_defaults.py": {
         "mode": "100644",
-        "sha256": "15663c035cbc7bd7e704f8b7849a457cf632344bfe5a0a9a51f3571d6e463cdf",
+        "sha256": "5a406c218ded615b9b73f762a3adcee77c6e2c298e715f64cab6d28bd93e9eed",
         "type": "blob"
       },
       "hermes_cli/gateway.py": {
@@ -2352,7 +2416,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
+    "golden_sha": "6219fcccfc42c5f22f504c15f590c0b9da0cf8dd",
     "upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
     "verified": true
   },

@@ -8,17 +8,6 @@ from pathlib import Path
 MARKER = "HERMES_LEAN_AGENT_LOOP_v1"
 TEST_MARKER = "HERMES_LEAN_AGENT_LOOP_TEST_v1"
 
-CONFIG_DEFAULT_ANCHOR = '        "intent_ack_continuation": "auto",\n'
-CONFIG_DEFAULT_REPLACEMENT = (
-    f'        "intent_ack_continuation": True,  # {MARKER}\n'
-)
-AGENT_INIT_DEFAULT_ANCHOR = (
-    '    agent._intent_ack_continuation = _agent_section.get("intent_ack_continuation", "auto")\n'
-)
-AGENT_INIT_DEFAULT_REPLACEMENT = (
-    f'    agent._intent_ack_continuation = _agent_section.get("intent_ack_continuation", True)  # {MARKER}\n'
-)
-
 HISTORY_TOOL_ANCHOR = '''    if any(isinstance(msg, dict) and msg.get("role") == "tool" for msg in messages):
         return False
 '''
@@ -215,8 +204,6 @@ def _replace_once(source: str, old: str, new: str, label: str) -> str:
 def patch_lean_agent_loop_v1(hermes_dir: Path) -> bool:
     root = Path(hermes_dir)
     paths = {
-        "config_defaults": root / "hermes_cli" / "config_defaults.py",
-        "agent_init": root / "agent" / "agent_init.py",
         "helper": root / "agent" / "agent_runtime_helpers.py",
         "conversation": root / "agent" / "conversation_loop.py",
         "planner": root / "agent" / "tool_dispatch_helpers.py",
@@ -231,18 +218,6 @@ def patch_lean_agent_loop_v1(hermes_dir: Path) -> bool:
 
     original = {name: path.read_text(encoding="utf-8") for name, path in paths.items()}
     patched = dict(original)
-    patched["config_defaults"] = _replace_once(
-        patched["config_defaults"],
-        CONFIG_DEFAULT_ANCHOR,
-        CONFIG_DEFAULT_REPLACEMENT,
-        "config default",
-    )
-    patched["agent_init"] = _replace_once(
-        patched["agent_init"],
-        AGENT_INIT_DEFAULT_ANCHOR,
-        AGENT_INIT_DEFAULT_REPLACEMENT,
-        "agent init default",
-    )
     patched["helper"] = _replace_once(
         patched["helper"], HISTORY_TOOL_ANCHOR, HISTORY_TOOL_REPLACEMENT, "current-turn evidence"
     )

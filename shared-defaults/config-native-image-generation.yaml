@@ -1,0 +1,5 @@
+# Native Hermes image generation. This top-level block is consumed directly by
+# tools/image_generation_tool.py and the provider plugins.
+image_gen:
+  provider: openai-codex
+  model: gpt-image-2-high

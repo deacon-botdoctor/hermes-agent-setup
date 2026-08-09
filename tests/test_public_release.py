@@ -62,19 +62,19 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 279
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 19
+    assert manifest["components"]["runtime_payload"]["file_count"] == 285
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 24
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90",
-        "file_count": 83,
+        "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
+        "file_count": 82,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 83
-    assert len(manifest["runtime_fingerprint"]["files"]) == 83
+    assert manifest["runtime_fingerprint"]["file_count"] == 82
+    assert len(manifest["runtime_fingerprint"]["files"]) == 82
     assert set(release) == {
         "schema_version",
         "release",
@@ -1470,6 +1470,52 @@ def test_prepare_home_rejects_reused_staging(tmp_path):
 
     with pytest.raises(ValueError, match="unique empty"):
         assembler.prepare_posix_dependencies(tmp_path / "runtime", staging)
+
+
+def test_assembler_restores_promisor_metadata_for_partial_local_source(
+    tmp_path, monkeypatch
+):
+    assembler = load_script("public_partial_clone", "assemble-runtime.py")
+    source = tmp_path / "source"
+    output = tmp_path / "output"
+    source.mkdir()
+    output.mkdir()
+    writes = []
+
+    def fake_subprocess_run(argv, **_kwargs):
+        key = argv[-1]
+        if key == "remote.origin.promisor":
+            return SimpleNamespace(returncode=0, stdout="true\n", stderr="")
+        if key == "remote.origin.partialclonefilter":
+            return SimpleNamespace(returncode=0, stdout="blob:none\n", stderr="")
+        raise AssertionError(argv)
+
+    def fake_run(argv, **_kwargs):
+        if argv[-3:] == ["remote", "get-url", "origin"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout="https://github.com/NousResearch/hermes-agent.git\n",
+                stderr="",
+            )
+        writes.append(argv)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(assembler.subprocess, "run", fake_subprocess_run)
+    monkeypatch.setattr(assembler, "run", fake_run)
+
+    assembler.restore_partial_clone_metadata(output, source)
+
+    assert [argv[3:] for argv in writes] == [
+        [
+            "remote",
+            "set-url",
+            "origin",
+            "https://github.com/NousResearch/hermes-agent.git",
+        ],
+        ["config", "remote.origin.promisor", "true"],
+        ["config", "remote.origin.partialclonefilter", "blob:none"],
+        ["config", "extensions.partialClone", "origin"],
+    ]
 
 
 def test_windows_source_canonicalization_accepts_only_crlf():

@@ -336,12 +336,12 @@ patches:
     owner: engineering-lead
     idempotency: HERMES_LEAN_AGENT_LOOP_v1 + HERMES_LEAN_AGENT_LOOP_TEST_v1
     test: python3 -m pytest -q bin/test/test_lean_agent_loop_v1.py tests/agent/test_intent_ack_continuation.py tests/run_agent/test_tool_batch_segmentation.py && python3 -m pytest -q tests/run_agent/test_run_agent.py::TestConcurrentToolExecution::test_single_safe_tool_uses_guarded_worker_path
-    rollback: restore the six touched runtime/test files from the pre-apply snapshot
+    rollback: restore the seven touched runtime/test files from the pre-apply snapshot
     client_impact: restart_required
     tags: [agent, continuation, acknowledgement, completion, tools, timeout, client-safety]
     status: extracted
     route: upstream-pr-pending
-    reason: Hermes already owns foreground turn continuation and guarded tool workers; this minimal overlay scopes action evidence to the current turn, permits only one acknowledgement retry, and routes a single safe call through the existing per-operation timeout path instead of adding a second task or watchdog lifecycle
+    reason: Hermes already owns foreground turn continuation and guarded tool workers, and Golden enables the native continuation mode through config; this minimal overlay only scopes action evidence to the current turn, permits one acknowledgement retry, and routes a single safe call through the existing per-operation timeout path instead of changing Hermes defaults or adding a second task/watchdog lifecycle
     upstream_issue: null
     retirement_condition: remove when upstream scopes acknowledgement evidence to the current turn, bounds it to one retry, and applies its guarded tool-worker timeout to single safe calls
   - name: mcp_legacy_alias_bridge_v1

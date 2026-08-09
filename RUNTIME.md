@@ -2,14 +2,14 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.06-golden-73a18cf7`:
+The current public release is `botdoctor-hermes-2026.08.09-golden-6219fccc`:
 
 - upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `73a18cf77bf49861313b566591d6c9ec547f1972`;
-- baseline wiring: 19 files;
-- runtime payload: 279 files;
+- public Golden source: `6219fcccfc42c5f22f504c15f590c0b9da0cf8dd`;
+- baseline wiring: 24 files;
+- runtime payload: 285 files;
 - assembled runtime fingerprint:
-  `dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90`.
+  `dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade`.
 
 Machines do not install “latest.” They build and verify these exact identities.
 The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
@@ -62,6 +62,16 @@ installations.
 - Composio activation binds only verified fresh connections to the canonical
   runtime route, and profile runtimes resolve GBrain through the shared
   canonical bridge while preserving an explicit profile-local wrapper.
+- New profiles use native `tool_use_enforcement: auto`; stale explicit `false`
+  values are treated as configuration drift instead of surviving a runtime
+  update unnoticed.
+- Native image generation is configured as a first-class capability, with
+  visual-reference and escalation guidance that prefers the real image model
+  over low-fidelity local compositing.
+- Runtime health checks now share one portable floor for SQLite/WAL pressure,
+  Telegram delivery, safe restart, active runtime identity, and canary state.
+- Golden no longer rewrites Hermes defaults already owned upstream; retired
+  policy leaves are removed only when they still equal Golden's former value.
 
 ## Native first
 

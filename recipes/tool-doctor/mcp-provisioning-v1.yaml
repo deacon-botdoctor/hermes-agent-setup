@@ -1,0 +1,64 @@
+version: 1
+playbook:
+  missing_executable_declared_mcp_venv:
+    action: repair
+    budget: one_attempt_per_agent_server_signature_per_day
+    guardrails:
+      - verify_source_exists
+      - refuse_cross_agent_paths
+      - receipt_required
+  connection_closed_python_mcp:
+    action: repair
+    budget: one_attempt_per_agent_server_signature_per_day
+    guardrails:
+      - no_secret_touch
+      - no_provider_or_model_changes
+      - re_probe_after_attempt
+      - receipt_required
+  auth_or_token:
+    action: escalate
+    runbook: operator-auth-repair-runbook
+    guardrails:
+      - never_self_fix
+      - redact_evidence
+  unknown:
+    action: escalate
+    runbook: operator-tool-doctor-unknown-signature
+    guardrails:
+      - never_self_fix
+      - include_command_cwd_and_env_key_names_only
+  pglite_wasm_runtime:
+    action: escalate
+    runbook: operations/mac-gbrain-pglite-wasm-resolution
+    guardrails:
+      - engine_or_migration_level
+      - not_recipe_repairable_per_host
+recipes:
+  browser-lane-missing-venv:
+    rung: SIDECAR
+    supported_platforms: [linux]
+    servers: [browser, browser-lane]
+    signature: missing executable
+    source_path: "${TOOL_DOCTOR_BROWSER_LANE_SOURCE}"
+    target_path: "{home}/repos/browser-lane"
+    backup_suffix: .bak-tooldoctor-phase0-20260704
+    repair: create_browser_lane_venv
+    verify: mcp_list_tools
+    touches_secrets: false
+  golden-mcp-python-server-connection-closed:
+    rung: SIDECAR
+    supported_platforms: [linux]
+    servers: [local-document-tools, search, web-search, capability-router, telegram-admin, browser]
+    signature: Connection closed
+    source_path: "${HERMES_GOLDEN_REPO}/mcp-servers"
+    repair: verify_existing_python_mcp
+    verify: mcp_list_tools
+    touches_secrets: false
+  gbrain-wrapper-connection-closed:
+    rung: SIDECAR
+    supported_platforms: [linux]
+    servers: [gbrain]
+    signature: Connection closed
+    repair: escalate_gbrain_pglite
+    verify: mcp_list_tools
+    touches_secrets: false
