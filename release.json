@@ -3,7 +3,7 @@
     "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
     "file_count": 82
   },
-  "baseline_wiring_digest": "c497d0129219755831c62e94abec7db46326ac539393c1a86937f2a1751859f0",
+  "baseline_wiring_digest": "b4926a439c825765591e7b0cd5c77d736b3b947bd82313744b3031f0c2485e4e",
   "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,7 +20,7 @@
     "tag": "cua-driver-rs-v0.14.2",
     "version": "0.14.2"
   },
-  "deployment_digest": "1d4ef168dc7d6fdb32caf91488fee57ca9278416be6164cf27f5df444e33d8c9",
+  "deployment_digest": "f75aeb4c45860f9bc712e28c77dea1a302f7a8c958d7519436f7f6c8ed45338d",
   "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
   "release": "botdoctor-hermes-2026.08.10-golden-70b74502",
   "runtime_coherence": {
