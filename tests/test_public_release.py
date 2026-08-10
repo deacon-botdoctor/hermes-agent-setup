@@ -1472,6 +1472,48 @@ def test_prepare_home_rejects_reused_staging(tmp_path):
         assembler.prepare_posix_dependencies(tmp_path / "runtime", staging)
 
 
+def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
+    tmp_path, monkeypatch
+):
+    assembler = load_script("public_pinned_staging", "assemble-runtime.py")
+    runtime = tmp_path / "runtime"
+    staging = tmp_path / "staging"
+    (runtime / "scripts").mkdir(parents=True)
+    (runtime / "scripts" / "install.sh").write_text(
+        "#!/bin/bash\n", encoding="utf-8"
+    )
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        (runtime / ".hermes-bootstrap-complete").write_text(
+            "installer-state\n", encoding="utf-8"
+        )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(assembler, "run", fake_run)
+
+    assembler.prepare_posix_dependencies(runtime, staging)
+
+    command, kwargs = calls[0]
+    assert command == [
+        "bash",
+        str(runtime / "scripts" / "install.sh"),
+        "--skip-setup",
+        "--skip-browser",
+        "--dir",
+        str(runtime),
+        "--hermes-home",
+        str(staging),
+        "--commit",
+        assembler.RELEASE["canonical_upstream_sha"],
+        "--force-commit",
+    ]
+    assert kwargs["env"]["HOME"] == str(staging / ".installer-user")
+    assert kwargs["env"]["HERMES_HOME"] == str(staging)
+    assert not (runtime / ".hermes-bootstrap-complete").exists()
+
+
 def test_assembler_restores_promisor_metadata_for_partial_local_source(
     tmp_path, monkeypatch
 ):
