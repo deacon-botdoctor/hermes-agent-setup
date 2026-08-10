@@ -3,12 +3,12 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "1f985cdbdb433f2dad0e2d53d65628178e063f7781adcc75cac116815a1f869b",
+      "digest": "1ec888bc4a1916637517b281ed20a9bbde7aef1f8534509ffacc9bd1cbc1ff07",
       "excluded_paths": [],
       "file_count": 24,
       "files": [
         {
-          "blob": "3079381af2eef0d90a376989dcfa314649a8c196",
+          "blob": "b6a05692bba4f93d072e807660f8fb882309b3c5",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.py",
           "type": "blob"
@@ -1992,8 +1992,8 @@
       ]
     }
   },
-  "deployment_digest": "15d13a184cee635e39582a9109bae88becf161a3ec709c529c5a1fe63a9f080c",
-  "golden_sha": "6219fcccfc42c5f22f504c15f590c0b9da0cf8dd",
+  "deployment_digest": "75ff8b6f1b909868b0c9487020863cfb5a5b5f150e05bd5f4b7f8c36925701b6",
+  "golden_sha": "02ab4ea712a181757feab395c8365399154ecef3",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
@@ -2416,7 +2416,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "6219fcccfc42c5f22f504c15f590c0b9da0cf8dd",
+    "golden_sha": "02ab4ea712a181757feab395c8365399154ecef3",
     "upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
     "verified": true
   },
