@@ -187,4 +187,52 @@ def test_unreadable_crontab_is_a_failed_action(tmp_path: Path):
 
     assert result["ok"] is False
     assert result["actions"][0]["status"] == "failed:crontab_read"
-    assert result["failed_actions"] == [result["actions"][0]]
+    assert result["failed_actions"] == result["actions"]
+    assert all(action["status"] == "failed:crontab_read" for action in result["actions"])
+
+
+def test_retired_codex_health_actor_is_not_in_default_registry():
+    reconciler = load_reconciler("canary_retired_codex_default")
+
+    assert all(entry["capability_id"] != "codex" for entry in reconciler.default_registry())
+    assert reconciler.RETIRED_CRON_TAGS == ("HERMES_CODEX_EXEC_HEALTH",)
+
+
+def test_retired_codex_cron_is_removed_without_touching_unrelated_lines(
+    tmp_path: Path, monkeypatch
+):
+    reconciler = load_reconciler("canary_retired_codex_cleanup")
+    configure_profile(reconciler, tmp_path)
+    reconciler.load_registry = lambda: []
+    retired = "*/20 * * * * /old/codex-exec-health.py # HERMES_CODEX_EXEC_HEALTH"
+    unrelated = "0 4 * * * /usr/local/bin/backup # KEEP_ME"
+    reconciler.current_crontab = lambda: [retired, unrelated]
+    reconciler.LAUNCH_AGENT_DIRS = ()
+    reconciler.run = lambda command, **_kwargs: subprocess.CompletedProcess(
+        command, 1, "", "unavailable"
+    )
+    installed: dict[str, str] = {}
+
+    def fake_subprocess_run(command, **_kwargs):
+        assert command[0] == "crontab"
+        installed["crontab"] = Path(command[1]).read_text(encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(reconciler.subprocess, "run", fake_subprocess_run)
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=False,
+            run_canaries=False,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["actions"][0] == {
+        "capability": "retired_scheduler_cleanup",
+        "canary": "HERMES_CODEX_EXEC_HEALTH",
+        "action": "ensure_retired",
+        "status": "updated",
+    }
+    assert installed["crontab"] == unrelated + "\n"

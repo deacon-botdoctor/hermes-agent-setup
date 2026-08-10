@@ -30,6 +30,7 @@ LAUNCH_AGENT_DIRS = (
     Path("/Library/LaunchAgents"),
     Path("/System/Library/LaunchAgents"),
 )
+RETIRED_CRON_TAGS = ("HERMES_CODEX_EXEC_HEALTH",)
 
 
 def iso() -> str:
@@ -117,29 +118,6 @@ def default_registry() -> list[dict[str, Any]]:
                 "cron_tag": "HERMES_LOCAL_SELFCHECK",
                 "run_if_stale_seconds": 1800,
                 "args": ["--agent-id", "{agent_id}", "--agent-name", "{agent_name}"],
-            },
-        },
-        {
-            "capability_id": "codex",
-            "title": "Codex CLI/auth lane",
-            "detect": {"any_command": ["codex"], "any_path": ["~/.codex/auth.json", "~/.codex/config.toml"]},
-            "canary": {
-                "id": "codex_exec_health",
-                "required": False,
-                "script": "bin/codex-exec-health.py",
-                "state": "state/codex-exec-health.json",
-                "interval_minutes": 20,
-                "cron_tag": "HERMES_CODEX_EXEC_HEALTH",
-                "run_if_stale_seconds": 3600,
-                "env": {
-                    "CODEX_EXEC_HEALTH_TIMEOUT": "30",
-                    # Real backend exec is gated to at most once per 6h per host.
-                    # The login-status + endpoint + blob checks still run every tick;
-                    # only the billed gpt-5.5 exec is throttled. Prevents a 401'd host
-                    # from firing a real probe every 20 min (subscription quota storm).
-                    "CODEX_EXEC_HEALTH_REAL_PROBE": "periodic",
-                    "CODEX_EXEC_HEALTH_REAL_PROBE_MIN_INTERVAL_SECONDS": "21600",
-                },
             },
         },
         {
@@ -368,8 +346,15 @@ def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
     try:
         discovered = run(
             [
-                "systemctl", "--user", "list-units", "--type=timer", "--state=active",
-                "--all", "--plain", "--no-legend", "--no-pager",
+                "systemctl",
+                "--user",
+                "list-units",
+                "--type=timer",
+                "--state=active",
+                "--all",
+                "--plain",
+                "--no-legend",
+                "--no-pager",
             ],
             timeout=10,
             env=env_for_runtime(),
@@ -525,6 +510,23 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
     missing: list[dict[str, Any]] = []
     optional_unavailable: list[dict[str, Any]] = []
 
+    for retired_tag in RETIRED_CRON_TAGS:
+        cron_lines = current_crontab()
+        if cron_lines is None:
+            status = "failed:crontab_read"
+        elif not any(_cron_line_has_tag(line, retired_tag) for line in cron_lines):
+            continue
+        else:
+            status = install_cron(retired_tag, "", args.dry_run, ensure_present=False, current=cron_lines)
+        actions.append(
+            {
+                "capability": "retired_scheduler_cleanup",
+                "canary": retired_tag,
+                "action": "ensure_retired",
+                "status": status,
+            }
+        )
+
     for spec in registry:
         ok, reasons = detected(spec, cfg)
         if not ok:
@@ -555,6 +557,10 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
             capabilities.append(cap)
             continue
         tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id', 'UNKNOWN')}")
+        if tag in RETIRED_CRON_TAGS:
+            cap["canary"].update({"status": "retired", "reason": "superseded by the contract-derived fleet pulse"})
+            capabilities.append(cap)
+            continue
         line = cron_line_for(canary, script, agent_id, agent_name)
         cron_lines = current_crontab()
         schedule_kind = existing_schedule(tag, script, line, cron_lines or [])

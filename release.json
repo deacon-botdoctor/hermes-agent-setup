@@ -3,7 +3,7 @@
     "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
     "file_count": 82
   },
-  "baseline_wiring_digest": "1ec888bc4a1916637517b281ed20a9bbde7aef1f8534509ffacc9bd1cbc1ff07",
+  "baseline_wiring_digest": "b4926a439c825765591e7b0cd5c77d736b3b947bd82313744b3031f0c2485e4e",
   "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,9 +20,9 @@
     "tag": "cua-driver-rs-v0.14.2",
     "version": "0.14.2"
   },
-  "deployment_digest": "75ff8b6f1b909868b0c9487020863cfb5a5b5f150e05bd5f4b7f8c36925701b6",
-  "golden_sha": "02ab4ea712a181757feab395c8365399154ecef3",
-  "release": "botdoctor-hermes-2026.08.10-golden-02ab4ea7",
+  "deployment_digest": "f75aeb4c45860f9bc712e28c77dea1a302f7a8c958d7519436f7f6c8ed45338d",
+  "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
+  "release": "botdoctor-hermes-2026.08.10-golden-70b74502",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -50,6 +50,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "28/28 patches applied on pinned upstream; no anchor miss, failure, or not-run",
-    "golden_suite": "full Golden preflight passed; baseline-only scheduler update, runtime payload unchanged"
+    "golden_suite": "full Golden preflight passed; retired per-host Codex canary removed, runtime payload unchanged"
   }
 }

@@ -19,8 +19,11 @@ installations.
 - The canary reconciler now accepts only an exact active native-scheduler
   command or the exact canonical cron line, removes its owned duplicate cron
   entry after native-scheduler proof, and fails closed when crontab inspection
-  fails. The Hermes pin, runtime payload, and assembled fingerprint are
-  unchanged; their exact identities remain owned by `release.json`.
+  fails. The retired per-host Codex-exec health actor is now removed instead of
+  being recreated; the contract-derived fleet pulse and lane guardian remain
+  the health authorities. The Hermes pin, runtime payload, and assembled
+  fingerprint are unchanged; their exact identities remain owned by
+  `release.json`.
 
 ## Current public payload
 
