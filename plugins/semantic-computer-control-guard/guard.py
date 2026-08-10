@@ -187,6 +187,29 @@ def _serialized(args: Any) -> str:
         return str(args)
 
 
+def _result_has_fresh_capture(result: Any) -> bool:
+    parsed = result
+    if isinstance(result, str):
+        try:
+            parsed = json.loads(result)
+        except (TypeError, json.JSONDecodeError):
+            return False
+    if not isinstance(parsed, dict):
+        return False
+    if parsed.get("mode") in {"ax", "som", "vision"}:
+        return True
+    if parsed.get("_multimodal") is not True:
+        return False
+    content = parsed.get("content")
+    return bool(
+        isinstance(content, list)
+        and any(
+            isinstance(item, dict) and item.get("type") == "image_url"
+            for item in content
+        )
+    )
+
+
 def _direct_ui_block(tool_name: str, args: Any) -> dict[str, str] | None:
     if tool_name not in _DIRECT_UI_TOOL_NAMES:
         return None
@@ -351,6 +374,7 @@ def _on_pre_tool_call(tool_name: str = "", args: Any = None, **kwargs: Any):
 def _on_post_tool_call(
     tool_name: str = "",
     args: Any = None,
+    result: Any = None,
     status: str = "",
     **kwargs: Any,
 ) -> None:
@@ -369,7 +393,14 @@ def _on_post_tool_call(
         if action in _CAPTURE_ACTIONS:
             _STATE[session] = "ready" if status == "ok" else "capture_required"
         elif action in _NATIVE_ACTIONS | _BROWSER_ACTIONS:
-            _STATE[session] = "capture_required"
+            capture_after_ready = bool(
+                status == "ok"
+                and call.get("capture_after") is True
+                and _result_has_fresh_capture(result)
+            )
+            _STATE[session] = (
+                "ready" if capture_after_ready else "capture_required"
+            )
 
 
 def _on_session_end(**kwargs: Any) -> None:

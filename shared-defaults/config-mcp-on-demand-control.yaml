@@ -5,11 +5,14 @@ plugins:
     - mcp-on-demand-control
 platform_toolsets:
   cli:
+    - image_gen
     - mcp-on-demand-control
     - mcp-capability-router
   telegram:
+    - image_gen
     - mcp-on-demand-control
     - mcp-capability-router
   cron:
+    - image_gen
     - mcp-on-demand-control
     - mcp-capability-router

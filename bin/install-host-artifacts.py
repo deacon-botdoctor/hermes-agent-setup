@@ -102,10 +102,7 @@ def resolve_hermes_python(hermes_dir: Path, explicit: Path | None = None) -> Pat
     for candidate in candidates:
         if candidate.is_file():
             return candidate
-    raise ValueError(
-        f"could not resolve the exact Hermes runtime Python for {hermes_dir}; "
-        "pass --hermes-python"
-    )
+    raise ValueError(f"could not resolve the exact Hermes runtime Python for {hermes_dir}; pass --hermes-python")
 
 
 def set_mode(path: Path, mode: Any, source: Path | None = None) -> None:
@@ -199,6 +196,28 @@ def check_post(check: dict[str, Any] | None, *, repo: Path, hermes_home: Path, h
         return all(
             expand_value(p, repo=repo, hermes_home=hermes_home, hermes_dir=hermes_dir).is_file()
             for p in check.get("paths", [])
+        )
+    if kind == "python_json":
+        path = expand_value(check["path"], repo=repo, hermes_home=hermes_home, hermes_dir=hermes_dir)
+        env = os.environ.copy()
+        env["HERMES_HOME"] = str(hermes_home)
+        try:
+            proc = subprocess.run(
+                [sys.executable, str(path), *[str(arg) for arg in check.get("args", [])]],
+                capture_output=True,
+                text=True,
+                timeout=int(check.get("timeout_seconds", 30)),
+                check=False,
+                env=env,
+            )
+            payload = json.loads(proc.stdout)
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            return False
+        expected = check.get("expected") or {}
+        return (
+            proc.returncode == 0
+            and isinstance(payload, dict)
+            and all(payload.get(key) == value for key, value in expected.items())
         )
     if kind == "state_file_exists":
         path = expand_value(check["path"], repo=repo, hermes_home=hermes_home, hermes_dir=hermes_dir)
@@ -527,12 +546,28 @@ def apply_entry(
         results = []
         changed = False
         for src_value in entry["sources"]:
-            src = source_path(src_value, repo)
-            dst = (
-                expand_value(entry["destination_dir"], repo=repo, hermes_home=hermes_home, hermes_dir=hermes_dir)
-                / src.name
-            )
-            status, meta = copy_file(src, dst, mode=entry.get("mode"), dry_run=dry_run)
+            if isinstance(src_value, dict):
+                src = source_path(src_value["source"], repo)
+                dst = expand_value(
+                    src_value["destination"],
+                    repo=repo,
+                    hermes_home=hermes_home,
+                    hermes_dir=hermes_dir,
+                )
+                mode = src_value.get("mode", entry.get("mode"))
+            else:
+                src = source_path(src_value, repo)
+                dst = (
+                    expand_value(
+                        entry["destination_dir"],
+                        repo=repo,
+                        hermes_home=hermes_home,
+                        hermes_dir=hermes_dir,
+                    )
+                    / src.name
+                )
+                mode = entry.get("mode")
+            status, meta = copy_file(src, dst, mode=mode, dry_run=dry_run)
             changed = changed or status == STATUS_INSTALLED
             results.append({"source": str(src), "status": status, **meta})
         return (STATUS_INSTALLED if changed else STATUS_IDEMPOTENT), {"files": results}
@@ -716,11 +751,15 @@ def main(argv: list[str] | None = None) -> int:
                 current_platform=current_platform,
                 dry_run=args.dry_run,
             )
-            verified = args.dry_run or status == STATUS_SKIPPED or check_post(
-                entry.get("post_install_check"),
-                repo=repo,
-                hermes_home=hermes_home,
-                hermes_dir=hermes_dir,
+            verified = (
+                args.dry_run
+                or status == STATUS_SKIPPED
+                or check_post(
+                    entry.get("post_install_check"),
+                    repo=repo,
+                    hermes_home=hermes_home,
+                    hermes_dir=hermes_dir,
+                )
             )
             if status in {STATUS_ANCHOR_MISS, STATUS_FAILED} or not verified:
                 failures += 1

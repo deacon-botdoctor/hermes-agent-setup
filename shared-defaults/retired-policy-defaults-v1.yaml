@@ -18,6 +18,18 @@ retired_defaults:
     summary_model: gpt-5.6-luna
     summary_provider: openai-codex
   auxiliary:
+    image_gen:
+      provider: openai-codex
+      model: gpt-image-2-high
+      default_for: ordinary_text_to_image
+      aux_escalation_only_for:
+        - source_image_or_reference_edit
+        - identity_or_reference_matching
+        - quality_push
+        - variants_or_comparison
+        - codex_qa_failure
+        - production_finalization
+      qa_required_for_final: true
     promise_extraction:
       provider: openai-codex
       model: gpt-5.6-luna
@@ -131,6 +143,7 @@ retired_defaults:
     tool_progress_command: false
     tool_progress_overrides: {}
     compact: false
+    context_pressure_notifications: false
     inline_diffs: true
     personality: helpful
     resume_display: full

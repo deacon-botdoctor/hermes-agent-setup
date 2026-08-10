@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Merge shared-defaults/*.yaml into a client's config.yaml.
 
-Every leaf key in each defaults file REPLACES the same-keyed value in the client's
-config.yaml unless the dotted path appears in the manifest's `overlay_config_exemptions`
-list. The MCP control default instead reconciles its governed plugin and platform
-toolset lists additively. Missing intermediate dicts are created. Keys present in the
-client config but not in defaults are preserved untouched. Idempotent.
+By default, each leaf in a defaults file replaces the same-keyed client value unless
+the dotted path is exempt or protected. A nonempty native image block is client-owned
+as a unit; Golden supplies both provider and model only when that block is absent or
+empty. The MCP control default reconciles its governed plugin and platform toolset
+lists additively. Missing intermediate dicts are created. Keys absent from the defaults
+remain untouched. Idempotent.
 
 Usage:
     merge-shared-defaults.py \\
@@ -78,7 +79,8 @@ _SENTINEL = object()
 # Auxiliary lanes are different: they are fleet-owned routine tool routes. Drift
 # here breaks tools silently (for example Codex-mini vision on ChatGPT accounts).
 # Apply shared-default auxiliary routing unless a manifest explicitly exempts a
-# dotted auxiliary path.
+# dotted auxiliary path. Native image generation is a default-if-missing lane:
+# a nonempty top-level mapping is client-owned as one provider/model route.
 PROTECTED_PREFIXES = (
     "model.default",
     "model.provider",
@@ -91,6 +93,8 @@ PROTECTED_PREFIXES = (
     "compression.summary_provider",
     "compression.summary_base_url",
 )
+
+IMAGE_GEN_LEAVES = {"image_gen.provider", "image_gen.model"}
 
 
 def _is_protected(dotted: str) -> bool:
@@ -112,8 +116,13 @@ def merge(
     skipped: list[str] = []
 
     merged = _deep_copy(client_config)
+    configured_image_block = client_config.get("image_gen")
+    preserve_image_block = isinstance(configured_image_block, dict) and bool(configured_image_block)
     for dotted, value in _walk_leaves("", defaults):
         if dotted in exempt_set or _is_protected(dotted):
+            skipped.append(dotted)
+            continue
+        if dotted in IMAGE_GEN_LEAVES and preserve_image_block:
             skipped.append(dotted)
             continue
         if _set_dotted(merged, dotted, value):
@@ -190,7 +199,10 @@ def reconcile_mcp_control_defaults(
             current = platforms.get(platform)
             current = [item for item in current if item not in revoked_toolsets] if isinstance(current, list) else []
             governed = additions + backend_toolsets
-            wanted = current + [item for item in governed if item not in current]
+            wanted = list(current)
+            for item in governed:
+                if item not in wanted:
+                    wanted.append(item)
             if current != wanted or platforms.get(platform) != wanted:
                 platforms[platform] = wanted
                 applied.append(dotted)
@@ -205,7 +217,10 @@ def reconcile_mcp_control_defaults(
                 continue
             current = [item for item in current_value if item not in revoked_toolsets]
             governed = ["mcp-on-demand-control", *backend_toolsets]
-            wanted = current + [item for item in governed if item not in current]
+            wanted = list(current)
+            for item in governed:
+                if item not in wanted:
+                    wanted.append(item)
             if current_value != wanted:
                 platforms[platform] = wanted
                 applied.append(dotted)
@@ -335,9 +350,7 @@ def main(argv: list[str]) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        if retirement.get("schema_version") != 1 or not isinstance(
-            retirement.get("retired_defaults"), dict
-        ):
+        if retirement.get("schema_version") != 1 or not isinstance(retirement.get("retired_defaults"), dict):
             print(f"error: {retirement_path}: invalid retirement manifest", file=sys.stderr)
             return 1
         merged, retired, skipped = retire_matching_defaults(

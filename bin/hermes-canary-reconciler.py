@@ -5,8 +5,11 @@ import argparse
 import hashlib
 import json
 import os
+import plistlib
+import re
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -202,7 +205,7 @@ def format_args(items: list[str], agent_id: str, agent_name: str) -> list[str]:
 
 def cron_line_for(canary: dict[str, Any], script: Path, agent_id: str, agent_name: str) -> str:
     interval = int(canary.get("interval_minutes") or 20)
-    tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id','UNKNOWN')}")
+    tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id', 'UNKNOWN')}")
     jitter_seed = f"{HERMES}\x00{tag}".encode("utf-8")
     jitter = int.from_bytes(hashlib.sha256(jitter_seed).digest()[:4], "big") % 180
     env_parts = [f"HERMES_HOME={sh_quote(str(HERMES))}"]
@@ -227,6 +230,93 @@ def current_crontab() -> list[str]:
     return [line for line in p.stdout.splitlines() if line.strip()]
 
 
+def _mentions_schedule(value: Any, needles: tuple[str, ...]) -> bool:
+    if isinstance(value, str):
+        return any(needle in value for needle in needles)
+    if isinstance(value, dict):
+        return any(_mentions_schedule(item, needles) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_mentions_schedule(item, needles) for item in value)
+    return False
+
+
+def _active_launchd_schedule(path: Path, needles: tuple[str, ...]) -> bool:
+    try:
+        with path.open("rb") as handle:
+            payload = plistlib.load(handle)
+        label = payload.get("Label") if isinstance(payload, dict) else None
+        if not isinstance(label, str) or not _mentions_schedule(payload, needles):
+            return False
+        domain = f"gui/{os.getuid()}"
+        loaded = run(
+            ["launchctl", "print", f"{domain}/{label}"],
+            timeout=10,
+            env=env_for_runtime(),
+            cwd=HOME,
+        )
+        if loaded.returncode != 0:
+            return False
+        disabled = run(
+            ["launchctl", "print-disabled", domain],
+            timeout=10,
+            env=env_for_runtime(),
+            cwd=HOME,
+        )
+    except (OSError, plistlib.InvalidFileException, subprocess.SubprocessError):
+        return False
+    return (
+        disabled.returncode != 0 or re.search(rf'["\']?{re.escape(label)}["\']?\s*=>\s*true', disabled.stdout) is None
+    )
+
+
+def _active_systemd_schedule(paths: list[Path], needles: tuple[str, ...]) -> bool:
+    timers: set[Path] = set()
+    for path in paths:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not any(needle in text for needle in needles):
+            continue
+        timer = path if path.suffix == ".timer" else path.with_suffix(".timer")
+        if timer.is_file():
+            timers.add(timer)
+    for timer in timers:
+        try:
+            enabled = run(
+                ["systemctl", "--user", "is-enabled", timer.name],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+            active = run(
+                ["systemctl", "--user", "is-active", timer.name],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if enabled.returncode == 0 and active.returncode == 0:
+            return True
+    return False
+
+
+def existing_schedule(tag: str, script: Path) -> str | None:
+    if any(not line.lstrip().startswith("#") and (tag in line or str(script) in line) for line in current_crontab()):
+        return "cron"
+    portable_name = script.stem.removeprefix("hermes-")
+    needles = (tag, str(script), script.name, portable_name)
+    for path in (HOME / "Library/LaunchAgents").glob("*.plist"):
+        if _active_launchd_schedule(path, needles):
+            return "launchd"
+    systemd_home = HOME / ".config/systemd/user"
+    systemd_paths = [*systemd_home.glob("*.service"), *systemd_home.glob("*.timer")]
+    if _active_systemd_schedule(systemd_paths, needles):
+        return "systemd-user"
+    return None
+
+
 def install_cron(tag: str, line: str, dry_run: bool) -> str:
     current = current_crontab()
     matching = [x for x in current if tag in x]
@@ -237,10 +327,22 @@ def install_cron(tag: str, line: str, dry_run: bool) -> str:
     if dry_run:
         return "would_update"
     payload = "\n".join(lines) + "\n"
+    temp_path: Path | None = None
     try:
+        # Darwin's crontab truncates long file arguments. Keep the install
+        # payload in the OS temp directory rather than beneath a deep profile
+        # path; NamedTemporaryFile remains private (0600) and is always removed.
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=tempfile.gettempdir(),
+            prefix="hermes-cron-",
+            delete=False,
+        ) as handle:
+            handle.write(payload)
+            temp_path = Path(handle.name)
         p = subprocess.run(
-            ["crontab", "-"],
-            input=payload,
+            ["crontab", str(temp_path)],
             text=True,
             capture_output=True,
             timeout=10,
@@ -251,6 +353,9 @@ def install_cron(tag: str, line: str, dry_run: bool) -> str:
         return "failed:crontab_timeout"
     except Exception as exc:
         return "failed:" + type(exc).__name__ + ": " + str(exc)[:160]
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
     if p.returncode != 0:
         return "failed:" + ((p.stderr or p.stdout).strip()[:200])
     return "updated"
@@ -308,9 +413,10 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
                 optional_unavailable.append(unavailable)
             capabilities.append(cap)
             continue
-        tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id','UNKNOWN')}")
+        tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id', 'UNKNOWN')}")
         line = cron_line_for(canary, script, agent_id, agent_name)
-        cron_status = install_cron(tag, line, args.dry_run)
+        schedule_kind = existing_schedule(tag, script)
+        cron_status = f"present:{schedule_kind}" if schedule_kind else install_cron(tag, line, args.dry_run)
         actions.append(
             {"capability": cap_id, "canary": canary.get("id"), "action": "ensure_cron", "status": cron_status}
         )
@@ -375,7 +481,7 @@ def main() -> int:
     args = ap.parse_args()
     payload = reconcile(args)
     print(json.dumps(payload, indent=2 if args.json else None, sort_keys=True))
-    return 0
+    return 0 if payload["ok"] else 1
 
 
 if __name__ == "__main__":

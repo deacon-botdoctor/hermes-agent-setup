@@ -1,9 +1,9 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "dfb90a934b0d170832a1a4909ffa2c3ad1a0b38654147299920bffc194f90c90",
-    "file_count": 83
+    "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
+    "file_count": 82
   },
-  "baseline_wiring_digest": "df9f89f122149941d84f6e8822b3ae943c276e283d69b682f4593897fed0577f",
+  "baseline_wiring_digest": "1f985cdbdb433f2dad0e2d53d65628178e063f7781adcc75cac116815a1f869b",
   "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,9 +20,9 @@
     "tag": "cua-driver-rs-v0.14.2",
     "version": "0.14.2"
   },
-  "deployment_digest": "fb9f47000ec259cb8430ec469d1cabffd1ce22e95dcfa3ceed711c48098275ca",
-  "golden_sha": "73a18cf77bf49861313b566591d6c9ec547f1972",
-  "release": "botdoctor-hermes-2026.08.06-golden-73a18cf7",
+  "deployment_digest": "15d13a184cee635e39582a9109bae88becf161a3ec709c529c5a1fe63a9f080c",
+  "golden_sha": "6219fcccfc42c5f22f504c15f590c0b9da0cf8dd",
+  "release": "botdoctor-hermes-2026.08.09-golden-6219fccc",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -42,7 +42,7 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "6bc8e0b939c25b22cc0a7ab9b55abe015cf4b8285ec78fe8d16f9409b34a0cfd",
+  "runtime_payload_digest": "124947c5aa827ffc24d212af69f04dd59dc98d3255a570e3a79098c95fabddbf",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",

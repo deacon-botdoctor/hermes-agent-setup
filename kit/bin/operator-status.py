@@ -197,7 +197,7 @@ def transcript_summary(home: Path) -> dict:
         latest = conn.execute("select max(timestamp) from telegram_messages").fetchone()[0]
         info["latest_timestamp"] = latest
         info["age_seconds"] = age_seconds(latest)
-        cutoff = (datetime.now(UTC).timestamp() - 86400)
+        cutoff = datetime.now(UTC).timestamp() - 86400
         info["recent_24h_rows"] = int(
             conn.execute(
                 "select count(*) from telegram_messages where timestamp >= datetime(?, 'unixepoch')",
@@ -265,7 +265,10 @@ def session_continuity_meta_summary(home: Path) -> dict:
         return info
 
     continuity_meta_patterns = [
-        re.compile(r"same replay as before\.|nothing new\. last user input|thread is current\b|thread is clean\b|observed:\s*no unresolved work\b", re.IGNORECASE),
+        re.compile(
+            r"same replay as before\.|nothing new\. last user input|thread is current\b|thread is clean\b|observed:\s*no unresolved work\b",
+            re.IGNORECASE,
+        ),
     ]
     recent_cutoff = datetime.now(UTC) - timedelta(minutes=90)
     hits = []
@@ -298,7 +301,13 @@ def session_continuity_meta_summary(home: Path) -> dict:
                 record = None
             if isinstance(record, dict):
                 role = str(record.get("role") or record.get("speaker") or record.get("type") or "").strip().lower()
-                body = str(record.get("content") or record.get("text") or record.get("message") or record.get("output_text") or raw_line)
+                body = str(
+                    record.get("content")
+                    or record.get("text")
+                    or record.get("message")
+                    or record.get("output_text")
+                    or raw_line
+                )
                 rec_ts = record.get("timestamp") or record.get("created_at") or record.get("ts")
                 parsed = parse_iso(str(rec_ts)) if rec_ts else None
                 if parsed is not None:
@@ -309,13 +318,17 @@ def session_continuity_meta_summary(home: Path) -> dict:
                 continue
             if not any(pattern.search(body) for pattern in continuity_meta_patterns):
                 continue
-            hits.append({
-                "timestamp": (line_dt.isoformat().replace("+00:00", "Z") if isinstance(line_dt, datetime) else None),
-                "sender_name": "session-assistant",
-                "text": body[:280],
-                "source": "session",
-                "path": str(path),
-            })
+            hits.append(
+                {
+                    "timestamp": (
+                        line_dt.isoformat().replace("+00:00", "Z") if isinstance(line_dt, datetime) else None
+                    ),
+                    "sender_name": "session-assistant",
+                    "text": body[:280],
+                    "source": "session",
+                    "path": str(path),
+                }
+            )
     if hits:
         info["continuity_meta_reply_hits"] = hits[-6:]
         info["continuity_meta_reply_count"] = len(hits)
@@ -383,7 +396,10 @@ def transcript_friction_summary(conn: sqlite3.Connection, home: Path) -> dict:
         "[SYSTEM] Gateway restarted mid-task.",
     )
     continuity_meta_patterns = [
-        re.compile(r"^(same replay as before\.|nothing new\. last user input\b|thread is clean\b|observed:\s*no unresolved work\b)", re.IGNORECASE),
+        re.compile(
+            r"^(same replay as before\.|nothing new\. last user input\b|thread is clean\b|observed:\s*no unresolved work\b)",
+            re.IGNORECASE,
+        ),
     ]
     recent_cutoff = datetime.now(UTC) - timedelta(minutes=20)
     hits: list[dict] = []
@@ -413,20 +429,24 @@ def transcript_friction_summary(conn: sqlite3.Connection, home: Path) -> dict:
                 streak = 1
             if streak >= 3:
                 duplicate_streak_max = max(duplicate_streak_max, streak)
-                duplicate_hits.append({
-                    "timestamp": timestamp,
-                    "sender_name": sender,
-                    "text": body[:280],
-                    "streak": streak,
-                })
-            if any(pattern.search(body) for pattern in continuity_meta_patterns):
-                if hit_dt is None or hit_dt.astimezone(UTC) >= recent_cutoff:
-                    continuity_meta_count += 1
-                    continuity_meta_hits.append({
+                duplicate_hits.append(
+                    {
                         "timestamp": timestamp,
                         "sender_name": sender,
                         "text": body[:280],
-                    })
+                        "streak": streak,
+                    }
+                )
+            if any(pattern.search(body) for pattern in continuity_meta_patterns):
+                if hit_dt is None or hit_dt.astimezone(UTC) >= recent_cutoff:
+                    continuity_meta_count += 1
+                    continuity_meta_hits.append(
+                        {
+                            "timestamp": timestamp,
+                            "sender_name": sender,
+                            "text": body[:280],
+                        }
+                    )
         else:
             streak = 0
         last_norm = norm
@@ -453,12 +473,14 @@ def transcript_friction_summary(conn: sqlite3.Connection, home: Path) -> dict:
                 anger_score += anger_matched
         if matched:
             latest_frustration_at = timestamp
-            hits.append({
-                "timestamp": timestamp,
-                "sender_name": sender,
-                "text": body[:280],
-                "signals": matched,
-            })
+            hits.append(
+                {
+                    "timestamp": timestamp,
+                    "sender_name": sender,
+                    "text": body[:280],
+                    "signals": matched,
+                }
+            )
     hits.reverse()
     friction_index = min(friction_score, 10)
     anger_index = min(anger_score, 10)
@@ -474,7 +496,7 @@ def transcript_friction_summary(conn: sqlite3.Connection, home: Path) -> dict:
     }
 
 
-def auth_summary(home: Path) -> dict:
+def auth_summary(home: Path, fallback_home: Path | None = None) -> dict:
     auth = read_json(home / "auth.json") or {}
     recognized = auth.get("recognized_users") or []
     if not isinstance(recognized, list):
@@ -492,8 +514,12 @@ def auth_summary(home: Path) -> dict:
         elif value:
             credential_pool_entries += 1
     env_home_channel = None
-    env_path = home / ".env"
-    if env_path.exists():
+    env_paths = [home / ".env"]
+    if fallback_home is not None and fallback_home != home:
+        env_paths.append(fallback_home / ".env")
+    for env_path in env_paths:
+        if not env_path.exists():
+            continue
         try:
             for raw in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
                 line = raw.strip()
@@ -505,6 +531,8 @@ def auth_summary(home: Path) -> dict:
                     break
         except Exception:
             pass
+        if env_home_channel:
+            break
     return {
         "exists": bool(auth),
         "recognized_users": len(recognized),
@@ -518,22 +546,24 @@ def auth_summary(home: Path) -> dict:
 
 
 def _fresh_canary_proof(home: Path, job_id: str | None) -> bool:
-    ident = str(job_id or '').strip().lower()
-    if ident != 'canary-codex-main':
+    ident = str(job_id or "").strip().lower()
+    if ident != "canary-codex-main":
         return False
-    log_path = home / 'logs' / 'com.hermes.cron.canary-main-shell-proof.log'
+    log_path = home / "logs" / "com.hermes.cron.canary-main-shell-proof.log"
     if not log_path.exists():
         return False
     try:
-        lines = [line.strip() for line in log_path.read_text(encoding='utf-8', errors='ignore').splitlines() if line.strip()]
+        lines = [
+            line.strip() for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()
+        ]
     except Exception:
         return False
     created_at = None
     for line in reversed(lines[-40:]):
         if '"created_at"' not in line:
             continue
-        _, _, tail = line.partition(':')
-        created_at = tail.strip().strip(',').strip().strip('"')
+        _, _, tail = line.partition(":")
+        created_at = tail.strip().strip(",").strip().strip('"')
         if created_at:
             break
     if not created_at:
@@ -555,14 +585,16 @@ def cron_summary(home: Path, lane_base: Path) -> dict:
         deliver = str(row.get("deliver") or "")
         if not deliver.startswith("telegram:"):
             continue
-        delivery_jobs.append({
-            "id": row.get("id"),
-            "name": row.get("name"),
-            "last_status": row.get("last_status"),
-            "last_error": row.get("last_error") or row.get("last_delivery_error"),
-            "last_run_at": row.get("last_run_at"),
-            "next_run_at": row.get("next_run_at"),
-        })
+        delivery_jobs.append(
+            {
+                "id": row.get("id"),
+                "name": row.get("name"),
+                "last_status": row.get("last_status"),
+                "last_error": row.get("last_error") or row.get("last_delivery_error"),
+                "last_run_at": row.get("last_run_at"),
+                "next_run_at": row.get("next_run_at"),
+            }
+        )
         if row.get("last_delivery_error") or (row.get("last_status") and row.get("last_status") != "ok"):
             delivery_failures.append(row.get("id") or row.get("name") or "unknown-job")
     stale_jobs = []
@@ -591,12 +623,18 @@ def cron_summary(home: Path, lane_base: Path) -> dict:
         except Exception:
             runtime_ms = None
         if runtime_ms and runtime_ms >= 30000:
-            slow_jobs.append({
-                "id": row.get("id") or row.get("name") or "unknown-job",
-                "duration_ms": runtime_ms,
-            })
+            slow_jobs.append(
+                {
+                    "id": row.get("id") or row.get("name") or "unknown-job",
+                    "duration_ms": runtime_ms,
+                }
+            )
     return {
-        "jobs_path": str((lane_base / "cron" / "jobs.json") if (lane_base / "cron" / "jobs.json").exists() else (home / "cron" / "jobs.json")),
+        "jobs_path": str(
+            (lane_base / "cron" / "jobs.json")
+            if (lane_base / "cron" / "jobs.json").exists()
+            else (home / "cron" / "jobs.json")
+        ),
         "delivery_jobs_total": len(delivery_jobs),
         "delivery_failures": delivery_failures,
         "stale_jobs": stale_jobs,
@@ -608,9 +646,7 @@ def gateway_summary(lane_base: Path) -> dict:
     state = read_json(lane_base / "gateway_state.json") or {}
     platforms = state.get("platforms") if isinstance(state, dict) else {}
     telegram = platforms.get("telegram") if isinstance(platforms, dict) else {}
-    last_successful_poll_at = (
-        telegram.get("last_successful_poll_at") if isinstance(telegram, dict) else None
-    )
+    last_successful_poll_at = telegram.get("last_successful_poll_at") if isinstance(telegram, dict) else None
     return {
         "path": str(lane_base / "gateway_state.json"),
         "exists": bool(state),
@@ -682,8 +718,7 @@ def gateway_service_runtime_summary(home: Path) -> dict:
     # but the wrapper IS the desired state (preserves keychain-loaded auth). Suppress.
     blessed_wrapper = _blessed_gateway_wrapper(home)
     if info["service_definition_stale"] and (
-        blessed_wrapper
-        or re.search(r"\.hermes/(start-hermes\.sh|bin/hermes-[\w.-]+\.sh)", text)
+        blessed_wrapper or re.search(r"\.hermes/(start-hermes\.sh|bin/hermes-[\w.-]+\.sh)", text)
     ):
         info["service_definition_stale"] = False
         info["blessed_wrapper"] = blessed_wrapper or "status-reported-wrapper"
@@ -804,7 +839,11 @@ def memory_summary(home: Path) -> dict:
     return {
         "exists": memory.exists(),
         "path": str(memory),
-        "has_botdoctor_updates": ("## Bot Doctor Capability Updates" in memory.read_text(encoding="utf-8", errors="ignore")) if memory.exists() else False,
+        "has_botdoctor_updates": (
+            "## Bot Doctor Capability Updates" in memory.read_text(encoding="utf-8", errors="ignore")
+        )
+        if memory.exists()
+        else False,
     }
 
 
@@ -853,23 +892,79 @@ def log_paths(home: Path, lane_base: Path) -> list[str]:
 
 def scan_log_signatures(paths: list[str], lines: int = 240, recent_window_seconds: int = 2 * 3600) -> list[dict]:
     patterns = [
-        ("http_401", re.compile(r"(?:http\s*401|error code:\s*401|status\s*401|\b401\b[^\n]{0,40}(?:unauthorized|authentication|invalid x-api-key|missing authentication header))", re.IGNORECASE)),
+        (
+            "http_401",
+            re.compile(
+                r"(?:http\s*401|error code:\s*401|status\s*401|\b401\b[^\n]{0,40}(?:unauthorized|authentication|invalid x-api-key|missing authentication header))",
+                re.IGNORECASE,
+            ),
+        ),
         ("telegram_bad_request", re.compile(r"bad request", re.IGNORECASE)),
-        ("telegram_polling_conflict", re.compile(r"terminated by other getupdates request|only one bot instance|telegram polling conflict", re.IGNORECASE)),
+        (
+            "telegram_polling_conflict",
+            re.compile(
+                r"terminated by other getupdates request|only one bot instance|telegram polling conflict", re.IGNORECASE
+            ),
+        ),
         ("home_channel_prompt", re.compile(r"no home channel is set for telegram|/sethome", re.IGNORECASE)),
         ("permission_denied", re.compile(r"permission denied|publickey|not authorized", re.IGNORECASE)),
-        ("provider_timeout", re.compile(r"provider timeout|provider .*timed out|timed out.*provider|timeout while.*provider|request timed out.*provider|deadline exceeded.*provider", re.IGNORECASE)),
-        ("provider_request_invalid", re.compile(r"error code:\s*400|no models provided|invalid request", re.IGNORECASE)),
-        ("channel_prompt_missing", re.compile(r"AttributeError: .*channel_prompt|has no attribute 'channel_prompt'", re.IGNORECASE)),
-        ("session_resume_event_shape_mismatch", re.compile(r"AttributeError: .*MessageEvent|has no attribute 'channel_prompt'|has no attribute '[A-Za-z_]+'.*MessageEvent", re.IGNORECASE)),
-        ("hook_api_mismatch", re.compile(r"hook.*(AttributeError|TypeError)|Loaded hook .* but .* failed", re.IGNORECASE)),
+        (
+            "provider_timeout",
+            re.compile(
+                r"provider timeout|provider .*timed out|timed out.*provider|timeout while.*provider|request timed out.*provider|deadline exceeded.*provider",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "provider_request_invalid",
+            re.compile(r"error code:\s*400|no models provided|invalid request", re.IGNORECASE),
+        ),
+        (
+            "channel_prompt_missing",
+            re.compile(r"AttributeError: .*channel_prompt|has no attribute 'channel_prompt'", re.IGNORECASE),
+        ),
+        (
+            "session_resume_event_shape_mismatch",
+            re.compile(
+                r"AttributeError: .*MessageEvent|has no attribute 'channel_prompt'|has no attribute '[A-Za-z_]+'.*MessageEvent",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "hook_api_mismatch",
+            re.compile(r"hook.*(AttributeError|TypeError)|Loaded hook .* but .* failed", re.IGNORECASE),
+        ),
         ("clarify_error", re.compile(r"clarify .*?\[error\]", re.IGNORECASE)),
         ("context_compaction", re.compile(r"compacting context", re.IGNORECASE)),
-        ("session_reset_noise", re.compile(r"gateway restarted mid-task|continue the interrupted work|session-resume", re.IGNORECASE)),
-        ("selfheal_restart_loop", re.compile(r"client-selfheal-heartbeat.*unhealthy; actions=.*started-task|restart cooldown active|restarted via task", re.IGNORECASE)),
-        ("limitation_language", re.compile(r"\b(i can[' ]?t do that|i wasn[' ]?t able to|i do not know|i don't know|systems? are limiting me|my systems? are limiting me)\b", re.IGNORECASE)),
+        (
+            "session_reset_noise",
+            re.compile(r"gateway restarted mid-task|continue the interrupted work|session-resume", re.IGNORECASE),
+        ),
+        (
+            "selfheal_restart_loop",
+            re.compile(
+                r"client-selfheal-heartbeat.*unhealthy; actions=.*started-task|restart cooldown active|restarted via task",
+                re.IGNORECASE,
+            ),
+        ),
+        (
+            "limitation_language",
+            re.compile(
+                r"\b(i can[' ]?t do that|i wasn[' ]?t able to|i do not know|i don't know|systems? are limiting me|my systems? are limiting me)\b",
+                re.IGNORECASE,
+            ),
+        ),
     ]
-    recent_only = {"http_401", "clarify_error", "context_compaction", "session_reset_noise", "selfheal_restart_loop", "limitation_language", "provider_request_invalid", "provider_timeout"}
+    recent_only = {
+        "http_401",
+        "clarify_error",
+        "context_compaction",
+        "session_reset_noise",
+        "selfheal_restart_loop",
+        "limitation_language",
+        "provider_request_invalid",
+        "provider_timeout",
+    }
     findings: list[dict] = []
     seen: set[tuple[str, str]] = set()
     cutoff = datetime.now(UTC) - timedelta(seconds=recent_window_seconds)
@@ -916,7 +1011,13 @@ def scan_log_signatures(paths: list[str], lines: int = 240, recent_window_second
                     last_match_ts = effective_ts
                     if excerpt is None:
                         excerpt = line.strip()[:320]
-                if code == "telegram_polling_conflict" and hit_count > 0 and last_match_ts is not None and last_connected_ts is not None and last_connected_ts > last_match_ts:
+                if (
+                    code == "telegram_polling_conflict"
+                    and hit_count > 0
+                    and last_match_ts is not None
+                    and last_connected_ts is not None
+                    and last_connected_ts > last_match_ts
+                ):
                     excerpt = None
                     hit_count = 0
             else:
@@ -927,7 +1028,7 @@ def scan_log_signatures(paths: list[str], lines: int = 240, recent_window_second
                 if matches:
                     hit_count = len(matches)
                     match = matches[0]
-                    excerpt = search_text[max(0, match.start() - 160):match.end() + 160].strip()
+                    excerpt = search_text[max(0, match.start() - 160) : match.end() + 160].strip()
             if hit_count <= 0 or excerpt is None:
                 continue
             key = (code, raw_path)
@@ -948,7 +1049,9 @@ def fence_orphan_summary(min_age_seconds: int = 3600) -> dict:
     try:
         p = subprocess.run(
             ["pgrep", "-af", "bash.*__HERMES_FENCE__"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
     except Exception as exc:
         info["error"] = f"pgrep failed: {exc}"
@@ -971,7 +1074,9 @@ def fence_orphan_summary(min_age_seconds: int = 3600) -> dict:
         try:
             pr = subprocess.run(
                 ["ps", "-p", str(pid), "-o", "etimes="],
-                capture_output=True, text=True, timeout=3,
+                capture_output=True,
+                text=True,
+                timeout=3,
             )
             if pr.returncode == 0:
                 val = (pr.stdout or "").strip()
@@ -1107,7 +1212,9 @@ def dream_agent_summary(home: Path) -> dict:
                 else:
                     pr = subprocess.run(
                         ["systemctl", "--user", "list-timers", "--all", "--no-legend", "--no-pager"],
-                        capture_output=True, text=True, timeout=6,
+                        capture_output=True,
+                        text=True,
+                        timeout=6,
                     )
                     info["scheduled"] = "dream" in (pr.stdout or "").lower()
                     info["scheduler_source"] = "systemd"
@@ -1189,6 +1296,7 @@ def runtime_root_summary() -> dict:
              "dual_root": bool, "active_roots": [str, ...]}.
     """
     import glob as _glob
+
     info: dict = {"roots": [], "dual_root": False, "active_roots": []}
     home = str(Path.home())
     candidate_globs = [
@@ -1236,11 +1344,13 @@ def runtime_root_summary() -> dict:
             cmd = parts[1]
             if venv_python in cmd or f"{root}/gateway/run.py" in cmd:
                 live_pids.append(pid)
-        info["roots"].append({
-            "path": root,
-            "has_run_py": run_py.exists(),
-            "live_pids": live_pids,
-        })
+        info["roots"].append(
+            {
+                "path": root,
+                "has_run_py": run_py.exists(),
+                "live_pids": live_pids,
+            }
+        )
         if run_py.exists() and live_pids:
             info["active_roots"].append(root)
 
@@ -1263,34 +1373,91 @@ def classify(report: dict) -> tuple[str, list[dict]]:
     owner_dm_flow = report.get("owner_dm_flow") or {}
 
     if gateway["gateway_state"] != "running":
-        reasons.append({"code": "gateway_not_running", "severity": "unhealthy", "detail": f"gateway_state={gateway['gateway_state']}"})
+        reasons.append(
+            {
+                "code": "gateway_not_running",
+                "severity": "unhealthy",
+                "detail": f"gateway_state={gateway['gateway_state']}",
+            }
+        )
     if gateway["telegram_state"] not in {None, "connected"}:
-        reasons.append({"code": "telegram_not_connected", "severity": "unhealthy", "detail": f"telegram_state={gateway['telegram_state']}"})
+        reasons.append(
+            {
+                "code": "telegram_not_connected",
+                "severity": "unhealthy",
+                "detail": f"telegram_state={gateway['telegram_state']}",
+            }
+        )
     if (
         gateway["updated_age_seconds"] is not None
         and gateway["updated_age_seconds"] > 900
         and gateway["gateway_state"] != "running"
     ):
-        reasons.append({"code": "gateway_state_stale", "severity": "degraded", "detail": f"gateway_state age={gateway['updated_age_seconds']}s"})
+        reasons.append(
+            {
+                "code": "gateway_state_stale",
+                "severity": "degraded",
+                "detail": f"gateway_state age={gateway['updated_age_seconds']}s",
+            }
+        )
     if gateway_service.get("service_definition_stale"):
-        reasons.append({"code": "gateway_service_definition_stale", "severity": "degraded", "detail": gateway_service.get("detail") or "gateway service definition is stale"})
+        reasons.append(
+            {
+                "code": "gateway_service_definition_stale",
+                "severity": "degraded",
+                "detail": gateway_service.get("detail") or "gateway service definition is stale",
+            }
+        )
     if gateway_service.get("service_not_loaded") and gateway.get("gateway_state") == "running":
-        reasons.append({"code": "gateway_service_not_loaded", "severity": "degraded", "detail": gateway_service.get("detail") or "gateway service is not loaded while gateway process is running"})
+        reasons.append(
+            {
+                "code": "gateway_service_not_loaded",
+                "severity": "degraded",
+                "detail": gateway_service.get("detail")
+                or "gateway service is not loaded while gateway process is running",
+            }
+        )
     if gateway_service.get("manual_process_only"):
-        reasons.append({"code": "gateway_manual_process_only", "severity": "degraded", "detail": gateway_service.get("detail") or "gateway process is running outside the managed service"})
+        reasons.append(
+            {
+                "code": "gateway_manual_process_only",
+                "severity": "degraded",
+                "detail": gateway_service.get("detail") or "gateway process is running outside the managed service",
+            }
+        )
     owner_dm_lag = owner_dm_flow.get("lag_seconds")
     if owner_dm_flow.get("pending_owner_dm") and gateway.get("telegram_state") == "connected":
-        reasons.append({"code": "connected_not_processing", "severity": "unhealthy", "detail": f"owner_dm lag_seconds={owner_dm_lag if owner_dm_lag is not None else 'na'} latest_inbound_at={owner_dm_flow.get('latest_inbound_at') or 'unknown'} session_updated_at={owner_dm_flow.get('session_updated_at') or 'unknown'}"})
-    if auth["recognized_users"] == 0 and int(auth.get("provider_count") or 0) == 0 and int(auth.get("credential_pool_entries") or 0) == 0:
+        reasons.append(
+            {
+                "code": "connected_not_processing",
+                "severity": "unhealthy",
+                "detail": f"owner_dm lag_seconds={owner_dm_lag if owner_dm_lag is not None else 'na'} latest_inbound_at={owner_dm_flow.get('latest_inbound_at') or 'unknown'} session_updated_at={owner_dm_flow.get('session_updated_at') or 'unknown'}",
+            }
+        )
+    if (
+        auth["recognized_users"] == 0
+        and int(auth.get("provider_count") or 0) == 0
+        and int(auth.get("credential_pool_entries") or 0) == 0
+    ):
         reasons.append({"code": "auth_continuity_thin", "severity": "degraded", "detail": "recognized_users=0"})
     if not auth.get("telegram_home_channel"):
-        reasons.append({"code": "telegram_home_channel_missing", "severity": "degraded", "detail": "TELEGRAM_HOME_CHANNEL missing"})
+        reasons.append(
+            {"code": "telegram_home_channel_missing", "severity": "degraded", "detail": "TELEGRAM_HOME_CHANNEL missing"}
+        )
     if remediation.get("attempted") and remediation.get("handoff_ok") is False:
         handoff_age = remediation.get("updated_age_seconds")
         if handoff_age is None or handoff_age <= 21600:
-            reasons.append({"code": "handoff_failed", "severity": "degraded", "detail": remediation.get("error") or "recent operator handoff failed"})
+            reasons.append(
+                {
+                    "code": "handoff_failed",
+                    "severity": "degraded",
+                    "detail": remediation.get("error") or "recent operator handoff failed",
+                }
+            )
     if selfheal["exists"] and selfheal["healthy"] is False:
-        reasons.append({"code": "selfheal_unhealthy", "severity": "degraded", "detail": "client self-heal reported unhealthy"})
+        reasons.append(
+            {"code": "selfheal_unhealthy", "severity": "degraded", "detail": "client self-heal reported unhealthy"}
+        )
     if gateway.get("latency_ms") is not None:
         try:
             latency_ms = float(gateway["latency_ms"])
@@ -1299,9 +1466,13 @@ def classify(report: dict) -> tuple[str, list[dict]]:
         if latency_ms is not None and latency_ms >= 2500:
             reasons.append({"code": "gateway_slow", "severity": "degraded", "detail": f"latency_ms={latency_ms}"})
     if cron.get("stale_jobs"):
-        reasons.append({"code": "stale_job_execution", "severity": "degraded", "detail": f"stale_jobs={len(cron['stale_jobs'])}"})
+        reasons.append(
+            {"code": "stale_job_execution", "severity": "degraded", "detail": f"stale_jobs={len(cron['stale_jobs'])}"}
+        )
     if cron.get("slow_jobs"):
-        reasons.append({"code": "slow_job_execution", "severity": "degraded", "detail": f"slow_jobs={len(cron['slow_jobs'])}"})
+        reasons.append(
+            {"code": "slow_job_execution", "severity": "degraded", "detail": f"slow_jobs={len(cron['slow_jobs'])}"}
+        )
     if transcript.get("friction_index", 0) >= 4:
         reasons.append(
             {
@@ -1337,87 +1508,263 @@ def classify(report: dict) -> tuple[str, list[dict]]:
     for finding in report.get("log_findings") or []:
         code = finding.get("code")
         if code == "http_401":
-            reasons.append({"code": "log_signature_401", "severity": "degraded", "detail": f"401 detected in {finding.get('path')}"})
+            reasons.append(
+                {
+                    "code": "log_signature_401",
+                    "severity": "degraded",
+                    "detail": f"401 detected in {finding.get('path')}",
+                }
+            )
         elif code == "telegram_bad_request":
-            reasons.append({"code": "telegram_bad_request", "severity": "degraded", "detail": f"Bad Request detected in {finding.get('path')}"})
+            reasons.append(
+                {
+                    "code": "telegram_bad_request",
+                    "severity": "degraded",
+                    "detail": f"Bad Request detected in {finding.get('path')}",
+                }
+            )
         elif code == "telegram_polling_conflict":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "telegram_polling_conflict", "severity": "degraded", "detail": f"Telegram polling conflict detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "telegram_polling_conflict",
+                    "severity": "degraded",
+                    "detail": f"Telegram polling conflict detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "home_channel_prompt":
-            reasons.append({"code": "home_channel_prompt_detected", "severity": "degraded", "detail": f"Home-channel prompt detected in {finding.get('path')}"})
+            reasons.append(
+                {
+                    "code": "home_channel_prompt_detected",
+                    "severity": "degraded",
+                    "detail": f"Home-channel prompt detected in {finding.get('path')}",
+                }
+            )
         elif code == "permission_denied":
-            reasons.append({"code": "permission_denied", "severity": "degraded", "detail": f"Permission/auth failure detected in {finding.get('path')}"})
+            reasons.append(
+                {
+                    "code": "permission_denied",
+                    "severity": "degraded",
+                    "detail": f"Permission/auth failure detected in {finding.get('path')}",
+                }
+            )
         elif code == "provider_timeout":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "provider_timeout_detected", "severity": "degraded", "detail": f"Provider timeout detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "provider_timeout_detected",
+                    "severity": "degraded",
+                    "detail": f"Provider timeout detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "provider_request_invalid":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "provider_request_invalid", "severity": "degraded", "detail": f"Invalid provider request detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "provider_request_invalid",
+                    "severity": "degraded",
+                    "detail": f"Invalid provider request detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "channel_prompt_missing":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "channel_prompt_missing", "severity": "degraded", "detail": f"channel_prompt event-shape mismatch detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "channel_prompt_missing",
+                    "severity": "degraded",
+                    "detail": f"channel_prompt event-shape mismatch detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "session_resume_event_shape_mismatch":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "session_resume_event_shape_mismatch", "severity": "degraded", "detail": f"session resume event-shape mismatch detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "session_resume_event_shape_mismatch",
+                    "severity": "degraded",
+                    "detail": f"session resume event-shape mismatch detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "hook_api_mismatch":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "hook_api_mismatch", "severity": "degraded", "detail": f"hook API mismatch detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "hook_api_mismatch",
+                    "severity": "degraded",
+                    "detail": f"hook API mismatch detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "clarify_error":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "clarify_loop_risk", "severity": "degraded", "detail": f"Clarify tool errors detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "clarify_loop_risk",
+                    "severity": "degraded",
+                    "detail": f"Clarify tool errors detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "context_compaction":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "context_compaction_loop", "severity": "degraded", "detail": f"Context compaction loop detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "context_compaction_loop",
+                    "severity": "degraded",
+                    "detail": f"Context compaction loop detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "session_reset_noise":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "session_reset_noise", "severity": "degraded", "detail": f"Session-reset noise detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "session_reset_noise",
+                    "severity": "degraded",
+                    "detail": f"Session-reset noise detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "selfheal_restart_loop":
             hit_count = int(finding.get("hit_count") or 1)
-            reasons.append({"code": "selfheal_restart_loop", "severity": "degraded", "detail": f"Self-heal restart loop signals detected in {finding.get('path')} (hits={hit_count})"})
+            reasons.append(
+                {
+                    "code": "selfheal_restart_loop",
+                    "severity": "degraded",
+                    "detail": f"Self-heal restart loop signals detected in {finding.get('path')} (hits={hit_count})",
+                }
+            )
         elif code == "limitation_language":
-            reasons.append({"code": "limitation_language_detected", "severity": "degraded", "detail": f"Limitation language detected in {finding.get('path')}"})
-    timeout_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "provider_timeout")
-    invalid_request_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "provider_request_invalid")
-    clarify_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "clarify_error")
-    compaction_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "context_compaction")
-    polling_conflict_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "telegram_polling_conflict")
-    session_reset_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "session_reset_noise")
-    selfheal_loop_hits = sum(int(finding.get("hit_count") or 1) for finding in (report.get("log_findings") or []) if finding.get("code") == "selfheal_restart_loop")
+            reasons.append(
+                {
+                    "code": "limitation_language_detected",
+                    "severity": "degraded",
+                    "detail": f"Limitation language detected in {finding.get('path')}",
+                }
+            )
+    timeout_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "provider_timeout"
+    )
+    invalid_request_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "provider_request_invalid"
+    )
+    clarify_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "clarify_error"
+    )
+    compaction_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "context_compaction"
+    )
+    polling_conflict_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "telegram_polling_conflict"
+    )
+    session_reset_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "session_reset_noise"
+    )
+    selfheal_loop_hits = sum(
+        int(finding.get("hit_count") or 1)
+        for finding in (report.get("log_findings") or [])
+        if finding.get("code") == "selfheal_restart_loop"
+    )
     continuity_meta_hits = int(transcript.get("continuity_meta_reply_count", 0) or 0)
     if timeout_hits >= 2:
-        reasons.append({"code": "provider_degraded", "severity": "degraded", "detail": f"provider_timeout_hits={timeout_hits}"})
+        reasons.append(
+            {"code": "provider_degraded", "severity": "degraded", "detail": f"provider_timeout_hits={timeout_hits}"}
+        )
     if timeout_hits >= 4:
-        reasons.append({"code": "retry_storm", "severity": "degraded", "detail": f"provider_timeout_hits={timeout_hits}"})
+        reasons.append(
+            {"code": "retry_storm", "severity": "degraded", "detail": f"provider_timeout_hits={timeout_hits}"}
+        )
     if timeout_hits >= 2 and transcript.get("friction_index", 0) >= 2:
-        reasons.append({"code": "client_friction_under_latency", "severity": "degraded", "detail": f"timeout_hits={timeout_hits}, friction_index={transcript.get('friction_index', 0)}"})
+        reasons.append(
+            {
+                "code": "client_friction_under_latency",
+                "severity": "degraded",
+                "detail": f"timeout_hits={timeout_hits}, friction_index={transcript.get('friction_index', 0)}",
+            }
+        )
     if invalid_request_hits >= 1:
-        reasons.append({"code": "model_selection_empty", "severity": "degraded", "detail": f"invalid_request_hits={invalid_request_hits}"})
+        reasons.append(
+            {
+                "code": "model_selection_empty",
+                "severity": "degraded",
+                "detail": f"invalid_request_hits={invalid_request_hits}",
+            }
+        )
     if clarify_hits >= 2:
-        reasons.append({"code": "clarify_loop_risk", "severity": "degraded", "detail": f"clarify_error_hits={clarify_hits}"})
+        reasons.append(
+            {"code": "clarify_loop_risk", "severity": "degraded", "detail": f"clarify_error_hits={clarify_hits}"}
+        )
     if compaction_hits >= 3:
-        reasons.append({"code": "context_compaction_loop", "severity": "degraded", "detail": f"context_compaction_hits={compaction_hits}"})
+        reasons.append(
+            {
+                "code": "context_compaction_loop",
+                "severity": "degraded",
+                "detail": f"context_compaction_hits={compaction_hits}",
+            }
+        )
     if polling_conflict_hits >= 1:
-        reasons.append({"code": "duplicate_poller_risk", "severity": "degraded", "detail": f"polling_conflict_hits={polling_conflict_hits}"})
+        reasons.append(
+            {
+                "code": "duplicate_poller_risk",
+                "severity": "degraded",
+                "detail": f"polling_conflict_hits={polling_conflict_hits}",
+            }
+        )
     if session_reset_hits >= 2:
-        reasons.append({"code": "session_reset_chatter", "severity": "degraded", "detail": f"session_reset_hits={session_reset_hits}"})
+        reasons.append(
+            {
+                "code": "session_reset_chatter",
+                "severity": "degraded",
+                "detail": f"session_reset_hits={session_reset_hits}",
+            }
+        )
     if selfheal_loop_hits >= 2:
-        reasons.append({"code": "restart_loop_risk", "severity": "degraded", "detail": f"selfheal_loop_hits={selfheal_loop_hits}"})
+        reasons.append(
+            {"code": "restart_loop_risk", "severity": "degraded", "detail": f"selfheal_loop_hits={selfheal_loop_hits}"}
+        )
     if polling_conflict_hits >= 1 and transcript.get("friction_index", 0) >= 2:
-        reasons.append({"code": "client_friction_under_polling_conflict", "severity": "degraded", "detail": f"polling_conflict_hits={polling_conflict_hits}, friction_index={transcript.get('friction_index', 0)}"})
+        reasons.append(
+            {
+                "code": "client_friction_under_polling_conflict",
+                "severity": "degraded",
+                "detail": f"polling_conflict_hits={polling_conflict_hits}, friction_index={transcript.get('friction_index', 0)}",
+            }
+        )
     if clarify_hits >= 2 and compaction_hits >= 2:
-        reasons.append({"code": "client_experience_spinout", "severity": "degraded", "detail": f"clarify_hits={clarify_hits}, compaction_hits={compaction_hits}"})
+        reasons.append(
+            {
+                "code": "client_experience_spinout",
+                "severity": "degraded",
+                "detail": f"clarify_hits={clarify_hits}, compaction_hits={compaction_hits}",
+            }
+        )
     if continuity_meta_hits >= 1:
-        reasons.append({"code": "client_experience_spinout", "severity": "degraded", "detail": f"continuity_meta_reply_count={continuity_meta_hits}"})
+        reasons.append(
+            {
+                "code": "client_experience_spinout",
+                "severity": "degraded",
+                "detail": f"continuity_meta_reply_count={continuity_meta_hits}",
+            }
+        )
 
     if fence_orphans.get("count", 0) > 0:
         orphans = fence_orphans.get("orphans") or []
         pid_csv = ",".join(str(o.get("pid")) for o in orphans[:6])
         max_age = max((int(o.get("age_seconds") or 0) for o in orphans), default=0)
-        reasons.append({
-            "code": "fence_orphan_bash",
-            "severity": "unhealthy" if len(orphans) >= 3 else "degraded",
-            "detail": f"orphan_count={len(orphans)}, max_age_s={max_age}, pids={pid_csv}",
-        })
+        reasons.append(
+            {
+                "code": "fence_orphan_bash",
+                "severity": "unhealthy" if len(orphans) >= 3 else "degraded",
+                "detail": f"orphan_count={len(orphans)}, max_age_s={max_age}, pids={pid_csv}",
+            }
+        )
 
     if dream.get("broken"):
         detail_parts = []
@@ -1427,19 +1774,23 @@ def classify(report: dict) -> tuple[str, list[dict]]:
             detail_parts.append(f"consolidated_age_s={int(dream['consolidated_age_seconds'])}")
         if dream.get("log_signals"):
             detail_parts.append("log=" + ",".join(dream["log_signals"]))
-        reasons.append({
-            "code": "dream_consolidation_broken",
-            "severity": "degraded",
-            "detail": "; ".join(detail_parts) or "dream signals present",
-        })
+        reasons.append(
+            {
+                "code": "dream_consolidation_broken",
+                "severity": "degraded",
+                "detail": "; ".join(detail_parts) or "dream signals present",
+            }
+        )
 
     if runtime_roots.get("dual_root"):
         active = runtime_roots.get("active_roots") or []
-        reasons.append({
-            "code": "runtime_dual_root",
-            "severity": "unhealthy",
-            "detail": f"active_roots={len(active)}: " + " | ".join(active[:4]),
-        })
+        reasons.append(
+            {
+                "code": "runtime_dual_root",
+                "severity": "unhealthy",
+                "detail": f"active_roots={len(active)}: " + " | ".join(active[:4]),
+            }
+        )
 
     overall = "healthy"
     if any(r["severity"] == "unhealthy" for r in reasons):
@@ -1478,38 +1829,42 @@ def build_incidents(report: dict, registry: dict) -> dict:
                 excerpt = str((finding or {}).get("excerpt") or "").strip()
                 if excerpt:
                     excerpts.append(excerpt)
-                log_evidence.append({
-                    "path": str((finding or {}).get("path") or ""),
-                    "excerpt": excerpt[:400],
-                    "hit_count": int((finding or {}).get("hit_count") or 1),
-                    "line_count": int((finding or {}).get("line_count") or 0),
-                })
+                log_evidence.append(
+                    {
+                        "path": str((finding or {}).get("path") or ""),
+                        "excerpt": excerpt[:400],
+                        "hit_count": int((finding or {}).get("hit_count") or 1),
+                        "line_count": int((finding or {}).get("line_count") or 0),
+                    }
+                )
             if excerpts:
                 trace_signature = excerpts[0][:240]
                 trace_hash = hashlib.sha256("\n".join(excerpts).encode("utf-8")).hexdigest()[:16]
-        incidents.append({
-            "incident_type": code,
-            "incident_family": reg.get("incident_family") or "uncategorized",
-            "severity": severity,
-            "source_host": report["identity"]["hostname"],
-            "source_agent": report["identity"]["agent_name"],
-            "trigger_source": "operator_status",
-            "observed_at": report["generated_at"],
-            "repeat_count": len(rows),
-            "runbook_ref": reg.get("runbook_ref") or "",
-            "playbook_family": reg.get("playbook_family") or "",
-            "approval_tier": reg.get("approval_tier") or "read_only",
-            "trace_signature": trace_signature,
-            "trace_signature_hash": trace_hash,
-            "details": [str(row.get("detail") or "") for row in rows],
-            "log_evidence": log_evidence,
-            "evidence_refs": [
-                report["evidence"]["gateway_state_path"],
-                report["evidence"]["auth_path"],
-                report["evidence"]["transcript_db_path"],
-                report["evidence"]["jobs_path"],
-            ],
-        })
+        incidents.append(
+            {
+                "incident_type": code,
+                "incident_family": reg.get("incident_family") or "uncategorized",
+                "severity": severity,
+                "source_host": report["identity"]["hostname"],
+                "source_agent": report["identity"]["agent_name"],
+                "trigger_source": "operator_status",
+                "observed_at": report["generated_at"],
+                "repeat_count": len(rows),
+                "runbook_ref": reg.get("runbook_ref") or "",
+                "playbook_family": reg.get("playbook_family") or "",
+                "approval_tier": reg.get("approval_tier") or "read_only",
+                "trace_signature": trace_signature,
+                "trace_signature_hash": trace_hash,
+                "details": [str(row.get("detail") or "") for row in rows],
+                "log_evidence": log_evidence,
+                "evidence_refs": [
+                    report["evidence"]["gateway_state_path"],
+                    report["evidence"]["auth_path"],
+                    report["evidence"]["transcript_db_path"],
+                    report["evidence"]["jobs_path"],
+                ],
+            }
+        )
 
     return {
         "schema_version": 1,
@@ -1528,20 +1883,22 @@ def build_runtime_trace_incidents(report: dict) -> dict:
     for incident in (report.get("incidents") or {}).get("incidents") or []:
         if not incident.get("trace_signature") and not incident.get("log_evidence"):
             continue
-        incidents.append({
-            "incident_type": incident.get("incident_type") or "",
-            "runbook_ref": incident.get("runbook_ref") or "",
-            "incident_family": incident.get("incident_family") or "uncategorized",
-            "approval_tier": incident.get("approval_tier") or "read_only",
-            "severity": incident.get("severity") or "degraded",
-            "observed_at": incident.get("observed_at") or report.get("generated_at"),
-            "repeat_count": int(incident.get("repeat_count") or 0),
-            "trace_signature": incident.get("trace_signature") or "",
-            "trace_signature_hash": incident.get("trace_signature_hash") or "",
-            "log_evidence": incident.get("log_evidence") or [],
-            "evidence_refs": incident.get("evidence_refs") or [],
-            "details": incident.get("details") or [],
-        })
+        incidents.append(
+            {
+                "incident_type": incident.get("incident_type") or "",
+                "runbook_ref": incident.get("runbook_ref") or "",
+                "incident_family": incident.get("incident_family") or "uncategorized",
+                "approval_tier": incident.get("approval_tier") or "read_only",
+                "severity": incident.get("severity") or "degraded",
+                "observed_at": incident.get("observed_at") or report.get("generated_at"),
+                "repeat_count": int(incident.get("repeat_count") or 0),
+                "trace_signature": incident.get("trace_signature") or "",
+                "trace_signature_hash": incident.get("trace_signature_hash") or "",
+                "log_evidence": incident.get("log_evidence") or [],
+                "evidence_refs": incident.get("evidence_refs") or [],
+                "details": incident.get("details") or [],
+            }
+        )
     return {
         "schema_version": 1,
         "generated_at": report.get("generated_at"),
@@ -1556,9 +1913,15 @@ def build_report(home: Path) -> dict:
     lane_base = resolve_lane_base(home)
     config = read_yaml(home / "config.yaml")
     soul = soul_identity(home)
-    client_identity = str(config.get("client_identity") or "").strip() or soul.get("client_identity") or slugify(home.name)
+    client_identity = (
+        str(config.get("client_identity") or "").strip() or soul.get("client_identity") or slugify(home.name)
+    )
     client_label = soul.get("client_label") or ""
-    agent_name = str(config.get("agent_name") or config.get("assistant_name") or "").strip() or soul.get("agent_name") or home.name
+    agent_name = (
+        str(config.get("agent_name") or config.get("assistant_name") or "").strip()
+        or soul.get("agent_name")
+        or home.name
+    )
     paths = log_paths(home, lane_base)
     report = {
         "schema_version": 1,
@@ -1576,7 +1939,10 @@ def build_report(home: Path) -> dict:
         "gateway_service": gateway_service_runtime_summary(home),
         "owner_dm_flow": owner_dm_flow_summary(home, lane_base),
         "transcript": transcript_summary(home),
-        "auth": auth_summary(lane_base if (lane_base / "auth.json").exists() else home),
+        "auth": auth_summary(
+            lane_base if (lane_base / "auth.json").exists() else home,
+            fallback_home=home,
+        ),
         "cron": cron_summary(home, lane_base),
         "selfheal": selfheal_summary(home),
         "windows_runtime": windows_runtime_summary(home),
@@ -1590,7 +1956,11 @@ def build_report(home: Path) -> dict:
             "gateway_state_path": str(lane_base / "gateway_state.json"),
             "auth_path": str((lane_base / "auth.json") if (lane_base / "auth.json").exists() else (home / "auth.json")),
             "transcript_db_path": str(home / "data" / "telegram-transcript.db"),
-            "jobs_path": str((lane_base / "cron" / "jobs.json") if (lane_base / "cron" / "jobs.json").exists() else (home / "cron" / "jobs.json")),
+            "jobs_path": str(
+                (lane_base / "cron" / "jobs.json")
+                if (lane_base / "cron" / "jobs.json").exists()
+                else (home / "cron" / "jobs.json")
+            ),
             "log_paths": paths,
         },
     }
@@ -1603,7 +1973,9 @@ def build_report(home: Path) -> dict:
     report["incidents"] = build_incidents(report, registry)
     report["runtime_trace_incidents"] = build_runtime_trace_incidents(report)
     report["friction_points"] = [reason["code"] for reason in reasons]
-    report["needs_operator"] = any(r["severity"] == "unhealthy" for r in reasons) or not report["operator_alerts"]["configured"]
+    report["needs_operator"] = (
+        any(r["severity"] == "unhealthy" for r in reasons) or not report["operator_alerts"]["configured"]
+    )
     report["needs_privileged_access"] = any(r["code"] in {"gateway_not_running"} for r in reasons)
     report["can_self_repair"] = overall != "unhealthy"
     report["operator_summary"] = build_operator_summary(report)
@@ -1673,7 +2045,9 @@ def write_outputs(home: Path, report: dict) -> tuple[Path, Path, Path]:
     runtime_trace_path = state_dir / "runtime-trace-incidents.json"
     json_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     incidents_path.write_text(json.dumps(report.get("incidents") or {}, indent=2) + "\n", encoding="utf-8")
-    runtime_trace_path.write_text(json.dumps(report.get("runtime_trace_incidents") or {}, indent=2) + "\n", encoding="utf-8")
+    runtime_trace_path.write_text(
+        json.dumps(report.get("runtime_trace_incidents") or {}, indent=2) + "\n", encoding="utf-8"
+    )
     lines = [
         "# Operator Summary",
         "",
@@ -1737,7 +2111,9 @@ def write_outputs(home: Path, report: dict) -> tuple[Path, Path, Path]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a local operator-facing Hermes status snapshot.")
     parser.add_argument("--hermes-home", default="", help="Override Hermes home path.")
-    parser.add_argument("--write", action="store_true", help="Write operator-status.json and operator-status-brief.md under state/.")
+    parser.add_argument(
+        "--write", action="store_true", help="Write operator-status.json and operator-status-brief.md under state/."
+    )
     parser.add_argument("--format", choices=["json", "brief"], default="json", help="Output format to stdout.")
     args = parser.parse_args()
 

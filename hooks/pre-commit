@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+repo="$(git rev-parse --show-toplevel)"
+exec "$repo/kit/bin/hermes-pii-scan.py" --staged

@@ -3,7 +3,6 @@
 display:
   busy_input_mode: steer
   busy_text_mode: steer
-  busy_ack: false
   busy_ack_enabled: false
   busy_ack_detail: false
   busy_steer_ack_enabled: false
@@ -14,11 +13,7 @@ display:
   tool_progress_command: false
   tool_preview_length: 0
   timestamps: false
-  gateway_status_messages: false
   background_process_notifications: false
-  gateway_restart_notifications: false
-  session_reset_events: false
-  context_pressure_notifications: false
   streaming: false
   show_cost: false
   show_reasoning: false
@@ -48,10 +43,6 @@ compression:
   protect_last_n: 12
   proactive_prune_tokens: 48000
   progress_notices: false
-
-notifications:
-  compression_events: false
-  session_reset_events: false
 
 platforms:
   telegram:

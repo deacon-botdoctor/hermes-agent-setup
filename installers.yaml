@@ -18,22 +18,27 @@ installers:
   - name: install_runtime_health_tools
     owner_lane: baseline_wiring
     current_registry_entry: install_runtime_health_tools
-    description: Install the cross-platform local canary reconciler and runtime summary probe used by the client health floor.
+    description: Install the cross-platform local self-check, canary reconciler, and runtime summary probes used by the client health floor.
     platforms: [linux, macos, windows]
     operation: copy_many
     sources:
+      - bin/hermes-local-selfcheck.py
       - bin/hermes-canary-reconciler.py
+      - bin/tool-doctor.py
+      - source: recipes/tool-doctor/mcp-provisioning-v1.yaml
+        destination: "{hermes_home}/recipes/tool-doctor/mcp-provisioning-v1.yaml"
+        mode: "0644"
       - kit/bin/operator-status.py
       - kit/bin/telegram-polling-health-probe.py
     destination_dir: "{hermes_home}/bin"
     owner: preserve
     mode: "0755"
     post_install_check:
-      type: files_exist
-      paths:
-        - "{hermes_home}/bin/hermes-canary-reconciler.py"
-        - "{hermes_home}/bin/operator-status.py"
-        - "{hermes_home}/bin/telegram-polling-health-probe.py"
+      type: python_json
+      path: "{hermes_home}/bin/tool-doctor.py"
+      args: ["--self-test"]
+      expected:
+        status: pass
     rollback: restore per-file .bak-host-artifact-* backups
 
   - name: install_host_hygiene

@@ -58,6 +58,49 @@ def verify_clean_upstream(path: Path, upstream_sha: str) -> None:
         raise RuntimeError("upstream checkout is not clean before assembly")
 
 
+def restore_partial_clone_metadata(output: Path, source: Path) -> None:
+    """Keep a local blobless source clone fetchable after cloning from it.
+
+    Git does not propagate partial-clone promisor metadata when cloning from a
+    local repository. Without restoring it before checkout, missing blobs are
+    reported as deleted files and the clean-runtime gate fails misleadingly.
+    """
+    promisor = subprocess.run(
+        ["git", "-C", str(source), "config", "--get", "remote.origin.promisor"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if promisor.returncode or promisor.stdout.strip().lower() != "true":
+        return
+
+    origin = run(["git", "-C", str(source), "remote", "get-url", "origin"])
+    origin_url = origin.stdout.strip()
+    if not origin_url:
+        raise RuntimeError("partial upstream source has no fetchable origin remote")
+    partial_filter = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(source),
+            "config",
+            "--get",
+            "remote.origin.partialclonefilter",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    filter_value = partial_filter.stdout.strip() or "blob:none"
+    for command in (
+        ["remote", "set-url", "origin", origin_url],
+        ["config", "remote.origin.promisor", "true"],
+        ["config", "remote.origin.partialclonefilter", filter_value],
+        ["config", "extensions.partialClone", "origin"],
+    ):
+        run(["git", "-C", str(output), *command])
+
+
 def clone_upstream(
     output: Path, source: Path | None, upstream_url: str, upstream_sha: str
 ) -> None:
@@ -75,6 +118,7 @@ def clone_upstream(
                 str(output),
             ]
         )
+        restore_partial_clone_metadata(output, source)
     else:
         run(
             [
