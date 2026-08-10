@@ -274,6 +274,27 @@ def _launchd_invokes_script(payload: Any, script: Path) -> bool:
     return _command_invokes_script(argv, script)
 
 
+def _launchd_has_recurring_trigger(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    interval = payload.get("StartInterval")
+    if isinstance(interval, (int, float)) and not isinstance(interval, bool) and interval > 0:
+        return True
+    calendar = payload.get("StartCalendarInterval")
+    if isinstance(calendar, dict):
+        return True
+    if isinstance(calendar, list) and any(isinstance(item, dict) for item in calendar):
+        return True
+    keep_alive = payload.get("KeepAlive")
+    if keep_alive is True or isinstance(keep_alive, dict) and bool(keep_alive):
+        return True
+    for key in ("WatchPaths", "QueueDirectories"):
+        value = payload.get(key)
+        if isinstance(value, list) and any(isinstance(item, str) and item for item in value):
+            return True
+    return payload.get("StartOnMount") is True
+
+
 def _launchd_print_invokes_script(text: str, script: Path) -> bool:
     program: str | None = None
     arguments: list[str] = []
@@ -296,12 +317,25 @@ def _launchd_print_invokes_script(text: str, script: Path) -> bool:
     return _launchd_invokes_script(payload, script)
 
 
+def _launchd_print_has_recurring_trigger(text: str) -> bool:
+    if re.search(r"(?:^|\n)\s*run interval = [1-9][0-9]* seconds\s*(?:\n|$)", text):
+        return True
+    if re.search(r"(?:^|\n)\s*continuous = true\s*(?:\n|$)", text):
+        return True
+    match = re.search(r"(?:^|\n)\s*event triggers = \{(.*?)\n\s*\}", text, re.DOTALL)
+    return match is not None and bool(match.group(1).strip())
+
+
 def _active_launchd_schedule(path: Path, script: Path) -> bool:
     try:
         with path.open("rb") as handle:
             payload = plistlib.load(handle)
         label = payload.get("Label") if isinstance(payload, dict) else None
-        if not isinstance(label, str) or not _launchd_invokes_script(payload, script):
+        if (
+            not isinstance(label, str)
+            or not _launchd_invokes_script(payload, script)
+            or not _launchd_has_recurring_trigger(payload)
+        ):
             return False
         domain = f"gui/{os.getuid()}"
         loaded = run(
@@ -310,7 +344,11 @@ def _active_launchd_schedule(path: Path, script: Path) -> bool:
             env=env_for_runtime(),
             cwd=HOME,
         )
-        if loaded.returncode != 0 or not _launchd_print_invokes_script(loaded.stdout, script):
+        if (
+            loaded.returncode != 0
+            or not _launchd_print_invokes_script(loaded.stdout, script)
+            or not _launchd_print_has_recurring_trigger(loaded.stdout)
+        ):
             return False
         disabled = run(
             ["launchctl", "print-disabled", domain],
@@ -342,7 +380,7 @@ def _systemd_show_invokes_script(text: str, script: Path) -> bool:
     return False
 
 
-def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
+def _systemd_schedule_details(paths: list[Path], script: Path) -> list[dict[str, Any]]:
     timer_names = {path.name for path in paths if path.suffix == ".timer"}
     try:
         discovered = run(
@@ -368,6 +406,7 @@ def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
             fields = line.split()
             if fields and fields[0].endswith(".timer") and Path(fields[0]).name == fields[0]:
                 timer_names.add(fields[0])
+    schedules: list[dict[str, Any]] = []
     for timer_name in sorted(timer_names):
         try:
             enabled = run(
@@ -388,9 +427,15 @@ def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
                 env=env_for_runtime(),
                 cwd=HOME,
             )
+            timer_fragment = run(
+                ["systemctl", "--user", "show", timer_name, "--property=FragmentPath", "--value"],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
         except (OSError, subprocess.SubprocessError):
             continue
-        if enabled.returncode != 0 or active.returncode != 0 or triggers.returncode != 0:
+        if triggers.returncode != 0:
             continue
         for service_name in triggers.stdout.split():
             if not service_name.endswith(".service") or Path(service_name).name != service_name:
@@ -402,45 +447,48 @@ def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
                     env=env_for_runtime(),
                     cwd=HOME,
                 )
+                service_fragment = run(
+                    [
+                        "systemctl",
+                        "--user",
+                        "show",
+                        service_name,
+                        "--property=FragmentPath",
+                        "--value",
+                    ],
+                    timeout=10,
+                    env=env_for_runtime(),
+                    cwd=HOME,
+                )
             except (OSError, subprocess.SubprocessError):
                 continue
             if command.returncode == 0 and _systemd_show_invokes_script(command.stdout, script):
-                return True
-    return False
+                schedules.append(
+                    {
+                        "timer": timer_name,
+                        "service": service_name,
+                        "enabled": enabled.returncode == 0,
+                        "active": active.returncode == 0,
+                        "timer_fragment": (
+                            timer_fragment.stdout.strip()
+                            if timer_fragment.returncode == 0
+                            else ""
+                        ),
+                        "service_fragment": (
+                            service_fragment.stdout.strip()
+                            if service_fragment.returncode == 0
+                            else ""
+                        ),
+                    }
+                )
+    return schedules
 
 
-def _systemd_unit_invokes_script(path: Path, script: Path) -> bool:
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    text = re.sub(r"\\\n\s*", " ", text)
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line.startswith("ExecStart="):
-            continue
-        try:
-            argv = shlex.split(line.removeprefix("ExecStart="), comments=False, posix=True)
-        except ValueError:
-            continue
-        if _command_invokes_script(argv, script, systemd=True):
-            return True
-    return False
-
-
-def _systemd_timer_service(path: Path) -> str | None:
-    service_name = path.with_suffix(".service").name
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if line.startswith("Unit="):
-            service_name = line.removeprefix("Unit=").strip()
-    if not service_name.endswith(".service") or Path(service_name).name != service_name:
-        return None
-    return service_name
+def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
+    return any(
+        schedule["enabled"] and schedule["active"]
+        for schedule in _systemd_schedule_details(paths, script)
+    )
 
 
 def retire_launchd_schedules(script: Path, dry_run: bool) -> str | None:
@@ -487,32 +535,45 @@ def retire_launchd_schedules(script: Path, dry_run: bool) -> str | None:
 
 def retire_systemd_schedules(script: Path, dry_run: bool) -> str | None:
     systemd_home = HOME / ".config/systemd/user"
-    schedules: list[tuple[Path, Path]] = []
-    for timer_path in systemd_home.glob("*.timer"):
-        service_name = _systemd_timer_service(timer_path)
-        if service_name is None:
-            continue
-        service_path = systemd_home / service_name
-        if _systemd_unit_invokes_script(service_path, script):
-            schedules.append((timer_path, service_path))
+    systemd_paths = [*systemd_home.glob("*.service"), *systemd_home.glob("*.timer")]
+    schedules = _systemd_schedule_details(systemd_paths, script)
     if not schedules:
         return None
     if dry_run:
         return "would_update"
-    for timer_path, service_path in schedules:
+    timer_names = sorted({str(schedule["timer"]) for schedule in schedules})
+    fragments: set[Path] = set()
+    for schedule in schedules:
+        for key in ("timer_fragment", "service_fragment"):
+            raw_fragment = str(schedule.get(key) or "")
+            if not raw_fragment:
+                continue
+            fragment = Path(raw_fragment)
+            if not fragment.is_absolute():
+                continue
+            fragment = Path(os.path.normpath(str(fragment)))
+            try:
+                fragment.relative_to(systemd_home)
+            except ValueError:
+                continue
+            fragments.add(fragment)
+    for timer_name in timer_names:
         try:
             stopped = run(
-                ["systemctl", "--user", "disable", "--now", timer_path.name],
+                ["systemctl", "--user", "disable", "--now", timer_name],
                 timeout=10,
                 env=env_for_runtime(),
                 cwd=HOME,
             )
             if stopped.returncode != 0:
-                return f"failed:systemd_disable:{timer_path.name}"
-            timer_path.unlink()
-            service_path.unlink()
+                return f"failed:systemd_disable:{timer_name}"
         except (OSError, subprocess.SubprocessError) as exc:
             return f"failed:systemd_retire:{type(exc).__name__}"
+    try:
+        for fragment in sorted(fragments):
+            fragment.unlink(missing_ok=True)
+    except OSError as exc:
+        return f"failed:systemd_retire:{type(exc).__name__}"
     try:
         reloaded = run(
             ["systemctl", "--user", "daemon-reload"],
@@ -524,6 +585,18 @@ def retire_systemd_schedules(script: Path, dry_run: bool) -> str | None:
         return f"failed:systemd_reload:{type(exc).__name__}"
     if reloaded.returncode != 0:
         return "failed:systemd_reload"
+    for timer_name in timer_names:
+        try:
+            masked = run(
+                ["systemctl", "--user", "mask", timer_name],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"failed:systemd_mask:{type(exc).__name__}"
+        if masked.returncode != 0:
+            return f"failed:systemd_mask:{timer_name}"
     return "updated"
 
 

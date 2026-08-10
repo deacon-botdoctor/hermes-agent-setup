@@ -68,6 +68,7 @@ def test_loaded_launchd_schedule_replaces_owned_cron_without_touching_other_jobs
             {
                 "Label": label,
                 "ProgramArguments": [sys.executable, str(script)],
+                "StartInterval": 900,
             },
             handle,
         )
@@ -77,6 +78,7 @@ def test_loaded_launchd_schedule_replaces_owned_cron_without_touching_other_jobs
     reconciler.current_crontab = lambda: [stale_owned_cron, unrelated_cron]
     loaded_job = (
         f"program = {sys.executable}\n"
+        "run interval = 900 seconds\n"
         "arguments = {\n"
         f"0 = {sys.executable}\n"
         f"1 = {script}\n"
@@ -113,6 +115,56 @@ def test_loaded_launchd_schedule_replaces_owned_cron_without_touching_other_jobs
     assert installed["crontab"] == unrelated_cron + "\n"
     persisted = json.loads(reconciler.LATEST_PATH.read_text(encoding="utf-8"))
     assert persisted["actions"][0]["status"] == "normalized:launchd"
+
+
+def test_one_shot_launchd_job_does_not_suppress_canonical_cron(tmp_path: Path):
+    reconciler = load_reconciler("canary_launchd_one_shot")
+    script, canary = configure_profile(reconciler, tmp_path)
+    launch_agent_dir = reconciler.LAUNCH_AGENT_DIRS[0]
+    launch_agent_dir.mkdir(parents=True)
+    label = "com.example.one-shot-canary"
+    with (launch_agent_dir / f"{label}.plist").open("wb") as handle:
+        plistlib.dump(
+            {
+                "Label": label,
+                "ProgramArguments": [sys.executable, str(script)],
+                "StartInterval": 900,
+            },
+            handle,
+        )
+    reconciler.current_crontab = lambda: []
+    loaded_job = (
+        f"program = {sys.executable}\n"
+        "arguments = {\n"
+        f"0 = {sys.executable}\n"
+        f"1 = {script}\n"
+        "}\n"
+    )
+
+    def fake_run(command, **_kwargs):
+        if command[:2] == ["launchctl", "print"] and len(command) == 3:
+            return subprocess.CompletedProcess(command, 0, loaded_job, "")
+        if command[:2] == ["launchctl", "print-disabled"]:
+            return subprocess.CompletedProcess(command, 0, "disabled services = {}", "")
+        return subprocess.CompletedProcess(command, 1, "", "unavailable")
+
+    reconciler.run = fake_run
+    expected_cron = reconciler.cron_line_for(
+        canary, script, "test-agent", "Test Agent"
+    )
+
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=True,
+            run_canaries=False,
+        )
+    )
+
+    assert expected_cron.endswith("# HERMES_CANARY_LOCAL_PROBE")
+    assert result["ok"] is True
+    assert result["actions"][0]["status"] == "would_update"
 
 
 def test_scheduler_name_collision_does_not_suppress_canonical_cron(tmp_path: Path):
@@ -313,6 +365,23 @@ def test_retired_codex_systemd_actor_is_disabled_and_removed(tmp_path: Path):
 
     def fake_run(command, **_kwargs):
         commands.append(command)
+        if command[:3] == ["systemctl", "--user", "list-units"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] in (
+            ["systemctl", "--user", "is-enabled"],
+            ["systemctl", "--user", "is-active"],
+        ):
+            return subprocess.CompletedProcess(command, 0, "active\n", "")
+        if command[:3] == ["systemctl", "--user", "show"]:
+            if command[3] == timer.name and command[4] == "--property=Triggers":
+                return subprocess.CompletedProcess(command, 0, service.name + "\n", "")
+            if command[3] == timer.name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(command, 0, str(timer) + "\n", "")
+            if command[3] == service.name and command[4] == "--property=ExecStart":
+                value = f"argv[]={sys.executable} {script} ; ignore_errors=no\n"
+                return subprocess.CompletedProcess(command, 0, value, "")
+            if command[3] == service.name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(command, 0, str(service) + "\n", "")
         return subprocess.CompletedProcess(command, 0, "", "")
 
     reconciler.run = fake_run
@@ -343,5 +412,126 @@ def test_retired_codex_systemd_actor_is_disabled_and_removed(tmp_path: Path):
         timer.name,
     ] in commands
     assert ["systemctl", "--user", "daemon-reload"] in commands
+    assert ["systemctl", "--user", "mask", timer.name] in commands
     assert not timer.exists()
     assert not service.exists()
+
+
+def test_retired_manager_discovered_systemd_actor_is_disabled_and_masked(
+    tmp_path: Path,
+):
+    reconciler = load_reconciler("canary_retired_external_systemd")
+    configure_profile(reconciler, tmp_path)
+    reconciler.load_registry = lambda: []
+    reconciler.current_crontab = lambda: []
+    reconciler.LAUNCH_AGENT_DIRS = ()
+    script = reconciler.HERMES / "bin/codex-exec-health.py"
+    timer_name = "codex-exec-health.timer"
+    service_name = "codex-exec-health.service"
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[:3] == ["systemctl", "--user", "list-units"]:
+            value = f"{timer_name} loaded active waiting Codex health\n"
+            return subprocess.CompletedProcess(command, 0, value, "")
+        if command[:3] in (
+            ["systemctl", "--user", "is-enabled"],
+            ["systemctl", "--user", "is-active"],
+        ):
+            return subprocess.CompletedProcess(command, 0, "active\n", "")
+        if command[:3] == ["systemctl", "--user", "show"]:
+            if command[3] == timer_name and command[4] == "--property=Triggers":
+                return subprocess.CompletedProcess(command, 0, service_name + "\n", "")
+            if command[3] == timer_name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(
+                    command, 0, f"/etc/systemd/user/{timer_name}\n", ""
+                )
+            if command[3] == service_name and command[4] == "--property=ExecStart":
+                value = f"argv[]={sys.executable} {script} ; ignore_errors=no\n"
+                return subprocess.CompletedProcess(command, 0, value, "")
+            if command[3] == service_name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(
+                    command, 0, f"/etc/systemd/user/{service_name}\n", ""
+                )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    reconciler.run = fake_run
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=False,
+            run_canaries=False,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["actions"] == [
+        {
+            "capability": "retired_scheduler_cleanup",
+            "canary": "HERMES_CODEX_EXEC_HEALTH",
+            "action": "ensure_retired",
+            "scheduler": "systemd-user",
+            "status": "updated",
+        }
+    ]
+    assert ["systemctl", "--user", "disable", "--now", timer_name] in commands
+    assert ["systemctl", "--user", "mask", timer_name] in commands
+
+
+def test_systemd_drop_in_redirect_does_not_retire_unrelated_effective_job(
+    tmp_path: Path,
+):
+    reconciler = load_reconciler("canary_retired_systemd_redirect")
+    configure_profile(reconciler, tmp_path)
+    reconciler.load_registry = lambda: []
+    reconciler.current_crontab = lambda: []
+    reconciler.LAUNCH_AGENT_DIRS = ()
+    systemd_home = reconciler.HOME / ".config/systemd/user"
+    systemd_home.mkdir(parents=True)
+    script = reconciler.HERMES / "bin/codex-exec-health.py"
+    timer = systemd_home / "codex-exec-health.timer"
+    service = systemd_home / "codex-exec-health.service"
+    timer.write_text("[Timer]\nOnUnitActiveSec=20m\n", encoding="utf-8")
+    service.write_text(
+        f"[Service]\nExecStart={sys.executable} {script}\n", encoding="utf-8"
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[:3] == ["systemctl", "--user", "list-units"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        if command[:3] in (
+            ["systemctl", "--user", "is-enabled"],
+            ["systemctl", "--user", "is-active"],
+        ):
+            return subprocess.CompletedProcess(command, 0, "active\n", "")
+        if command[:3] == ["systemctl", "--user", "show"]:
+            if command[3] == timer.name and command[4] == "--property=Triggers":
+                return subprocess.CompletedProcess(command, 0, service.name + "\n", "")
+            if command[3] == timer.name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(command, 0, str(timer) + "\n", "")
+            if command[3] == service.name and command[4] == "--property=ExecStart":
+                value = "argv[]=/usr/bin/logger unrelated ; ignore_errors=no\n"
+                return subprocess.CompletedProcess(command, 0, value, "")
+            if command[3] == service.name and command[4] == "--property=FragmentPath":
+                return subprocess.CompletedProcess(command, 0, str(service) + "\n", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    reconciler.run = fake_run
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=False,
+            run_canaries=False,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["actions"] == []
+    assert timer.exists()
+    assert service.exists()
+    assert not any(command[:3] == ["systemctl", "--user", "disable"] for command in commands)

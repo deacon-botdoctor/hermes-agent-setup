@@ -3,12 +3,12 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "22ad234c42ba7e13dbc37d36e03eb358f70012da333520982c67b1e449f1b7b6",
+      "digest": "c497d0129219755831c62e94abec7db46326ac539393c1a86937f2a1751859f0",
       "excluded_paths": [],
       "file_count": 24,
       "files": [
         {
-          "blob": "0e866b31a413e04c1e1e5fac7db3f53573d7ba51",
+          "blob": "8b64df39e8c9bb071f40901d29be57ef92137777",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.py",
           "type": "blob"
@@ -1992,7 +1992,7 @@
       ]
     }
   },
-  "deployment_digest": "bea2cba41939831d4f4bebdaa2c8dbded9d302e19378dad46c9937f6e53da3d9",
+  "deployment_digest": "1d4ef168dc7d6fdb32caf91488fee57ca9278416be6164cf27f5df444e33d8c9",
   "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
