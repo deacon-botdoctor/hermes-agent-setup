@@ -187,6 +187,7 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
             str(profile_home),
             "--commit",
             str(RELEASE["canonical_upstream_sha"]),
+            "--force-commit",
         ],
         env=env,
         timeout=1800,

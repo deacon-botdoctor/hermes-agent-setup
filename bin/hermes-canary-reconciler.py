@@ -7,12 +7,14 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from xml.parsers.expat import ExpatError
 
 HOME = Path(os.environ.get("HOME") or str(Path.home())).expanduser()
 HERMES = Path(os.environ.get("HERMES_HOME") or str(HOME / ".hermes")).expanduser()
@@ -23,6 +25,12 @@ LATEST_PATH = STATE_DIR / "canary-reconciler-latest.json"
 LOG_PATH = LOG_DIR / "canary-reconciler.log"
 REGISTRY_PATHS = [HERMES / "config" / "local-canary-registry.json", HERMES / "state" / "local-canary-registry.json"]
 PATH_PREFIX = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:" + str(HOME / ".local/bin")
+LAUNCH_AGENT_DIRS = (
+    HOME / "Library/LaunchAgents",
+    Path("/Library/LaunchAgents"),
+    Path("/System/Library/LaunchAgents"),
+)
+RETIRED_CRON_TAGS = ("HERMES_CODEX_EXEC_HEALTH",)
 
 
 def iso() -> str:
@@ -113,29 +121,6 @@ def default_registry() -> list[dict[str, Any]]:
             },
         },
         {
-            "capability_id": "codex",
-            "title": "Codex CLI/auth lane",
-            "detect": {"any_command": ["codex"], "any_path": ["~/.codex/auth.json", "~/.codex/config.toml"]},
-            "canary": {
-                "id": "codex_exec_health",
-                "required": False,
-                "script": "bin/codex-exec-health.py",
-                "state": "state/codex-exec-health.json",
-                "interval_minutes": 20,
-                "cron_tag": "HERMES_CODEX_EXEC_HEALTH",
-                "run_if_stale_seconds": 3600,
-                "env": {
-                    "CODEX_EXEC_HEALTH_TIMEOUT": "30",
-                    # Real backend exec is gated to at most once per 6h per host.
-                    # The login-status + endpoint + blob checks still run every tick;
-                    # only the billed gpt-5.5 exec is throttled. Prevents a 401'd host
-                    # from firing a real probe every 20 min (subscription quota storm).
-                    "CODEX_EXEC_HEALTH_REAL_PROBE": "periodic",
-                    "CODEX_EXEC_HEALTH_REAL_PROBE_MIN_INTERVAL_SECONDS": "21600",
-                },
-            },
-        },
-        {
             "capability_id": "mcp",
             "title": "MCP tool servers",
             "detect": {"config_contains": ["mcp_servers", "mcp:", "model_context_protocol"]},
@@ -223,29 +208,99 @@ def sh_quote(value: str) -> str:
     return "'" + value.replace("'", "'\\''") + "'"
 
 
-def current_crontab() -> list[str]:
+def current_crontab() -> list[str] | None:
     p = run(["crontab", "-l"], timeout=10, env=env_for_runtime(), cwd=HOME)
     if p.returncode != 0:
-        return []
+        detail = f"{p.stdout}\n{p.stderr}".lower()
+        return [] if "no crontab for" in detail else None
     return [line for line in p.stdout.splitlines() if line.strip()]
 
 
-def _mentions_schedule(value: Any, needles: tuple[str, ...]) -> bool:
-    if isinstance(value, str):
-        return any(needle in value for needle in needles)
-    if isinstance(value, dict):
-        return any(_mentions_schedule(item, needles) for item in value.values())
-    if isinstance(value, (list, tuple)):
-        return any(_mentions_schedule(item, needles) for item in value)
+def _same_script_path(value: str, script: Path, systemd: bool = False) -> bool:
+    candidate = value
+    if systemd:
+        escaped_percent = "\x00"
+        candidate = candidate.replace("%%", escaped_percent).replace("%h", str(HOME)).replace(escaped_percent, "%")
+    if not os.path.isabs(candidate):
+        return False
+    return os.path.normpath(candidate) == os.path.normpath(str(script))
+
+
+def _command_invokes_script(argv: list[str], script: Path, systemd: bool = False) -> bool:
+    """Recognize only deterministic native-supervisor argv forms.
+
+    Cron is handled by exact canonical-line equality.  Trying to emulate shell
+    parsing here recreates a shell interpreter and makes schedule proof less
+    reliable, not more reliable.
+    """
+    if not argv:
+        return False
+    argv = list(argv)
+    if systemd and argv:
+        argv = [argv[0].lstrip("-@:+!"), *argv[1:]]
+    index = 0
+    if index < len(argv) and Path(argv[index]).name == "env":
+        index += 1
+        while index < len(argv) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", argv[index], re.DOTALL):
+            index += 1
+    if index >= len(argv):
+        return False
+    command = argv[index:]
+    if _same_script_path(command[0], script, systemd):
+        return True
+    executable = Path(command[0]).name
+    if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", executable):
+        return len(command) > 1 and _same_script_path(command[1], script, systemd)
     return False
 
 
-def _active_launchd_schedule(path: Path, needles: tuple[str, ...]) -> bool:
+def _launchd_invokes_script(payload: Any, script: Path) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    program = payload.get("Program")
+    arguments = payload.get("ProgramArguments")
+    if program is None:
+        return (
+            isinstance(arguments, list)
+            and all(isinstance(item, str) for item in arguments)
+            and _command_invokes_script(arguments, script)
+        )
+    if not isinstance(program, str):
+        return False
+    argv = [program]
+    if isinstance(arguments, list) and arguments and all(isinstance(item, str) for item in arguments):
+        argv.extend(arguments[1:])
+    return _command_invokes_script(argv, script)
+
+
+def _launchd_print_invokes_script(text: str, script: Path) -> bool:
+    program: str | None = None
+    arguments: list[str] = []
+    in_arguments = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if in_arguments:
+            if line == "}":
+                in_arguments = False
+            elif line:
+                arguments.append(re.sub(r"^\d+\s*=\s*", "", line))
+            continue
+        if line == "arguments = {":
+            in_arguments = True
+        elif line.startswith("program = "):
+            program = line.removeprefix("program = ").strip()
+    payload: dict[str, Any] = {"ProgramArguments": arguments}
+    if program is not None:
+        payload["Program"] = program
+    return _launchd_invokes_script(payload, script)
+
+
+def _active_launchd_schedule(path: Path, script: Path) -> bool:
     try:
         with path.open("rb") as handle:
             payload = plistlib.load(handle)
         label = payload.get("Label") if isinstance(payload, dict) else None
-        if not isinstance(label, str) or not _mentions_schedule(payload, needles):
+        if not isinstance(label, str) or not _launchd_invokes_script(payload, script):
             return False
         domain = f"gui/{os.getuid()}"
         loaded = run(
@@ -254,7 +309,7 @@ def _active_launchd_schedule(path: Path, needles: tuple[str, ...]) -> bool:
             env=env_for_runtime(),
             cwd=HOME,
         )
-        if loaded.returncode != 0:
+        if loaded.returncode != 0 or not _launchd_print_invokes_script(loaded.stdout, script):
             return False
         disabled = run(
             ["launchctl", "print-disabled", domain],
@@ -262,68 +317,139 @@ def _active_launchd_schedule(path: Path, needles: tuple[str, ...]) -> bool:
             env=env_for_runtime(),
             cwd=HOME,
         )
-    except (OSError, plistlib.InvalidFileException, subprocess.SubprocessError):
+    except (OSError, plistlib.InvalidFileException, ExpatError, subprocess.SubprocessError):
         return False
     return (
         disabled.returncode != 0 or re.search(rf'["\']?{re.escape(label)}["\']?\s*=>\s*true', disabled.stdout) is None
     )
 
 
-def _active_systemd_schedule(paths: list[Path], needles: tuple[str, ...]) -> bool:
-    timers: set[Path] = set()
-    for path in paths:
+def _systemd_show_invokes_script(text: str, script: Path) -> bool:
+    for line in text.splitlines():
+        match = re.search(
+            r"(?:^|;\s*)argv\[\]=(.*?)(?:\s*;\s*(?:ignore_errors|start_time|stop_time|pid|code|status)=|$)",
+            line,
+        )
+        if not match:
+            continue
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+            argv = shlex.split(match.group(1), comments=False, posix=True)
+        except ValueError:
             continue
-        if not any(needle in text for needle in needles):
-            continue
-        timer = path if path.suffix == ".timer" else path.with_suffix(".timer")
-        if timer.is_file():
-            timers.add(timer)
-    for timer in timers:
+        if _command_invokes_script(argv, script, systemd=True):
+            return True
+    return False
+
+
+def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
+    timer_names = {path.name for path in paths if path.suffix == ".timer"}
+    try:
+        discovered = run(
+            [
+                "systemctl",
+                "--user",
+                "list-units",
+                "--type=timer",
+                "--state=active",
+                "--all",
+                "--plain",
+                "--no-legend",
+                "--no-pager",
+            ],
+            timeout=10,
+            env=env_for_runtime(),
+            cwd=HOME,
+        )
+    except (OSError, subprocess.SubprocessError):
+        discovered = None
+    if discovered is not None and discovered.returncode == 0:
+        for line in discovered.stdout.splitlines():
+            fields = line.split()
+            if fields and fields[0].endswith(".timer") and Path(fields[0]).name == fields[0]:
+                timer_names.add(fields[0])
+    for timer_name in sorted(timer_names):
         try:
             enabled = run(
-                ["systemctl", "--user", "is-enabled", timer.name],
+                ["systemctl", "--user", "is-enabled", timer_name],
                 timeout=10,
                 env=env_for_runtime(),
                 cwd=HOME,
             )
             active = run(
-                ["systemctl", "--user", "is-active", timer.name],
+                ["systemctl", "--user", "is-active", timer_name],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+            triggers = run(
+                ["systemctl", "--user", "show", timer_name, "--property=Triggers", "--value"],
                 timeout=10,
                 env=env_for_runtime(),
                 cwd=HOME,
             )
         except (OSError, subprocess.SubprocessError):
             continue
-        if enabled.returncode == 0 and active.returncode == 0:
-            return True
+        if enabled.returncode != 0 or active.returncode != 0 or triggers.returncode != 0:
+            continue
+        for service_name in triggers.stdout.split():
+            if not service_name.endswith(".service") or Path(service_name).name != service_name:
+                continue
+            try:
+                command = run(
+                    ["systemctl", "--user", "show", service_name, "--property=ExecStart", "--value"],
+                    timeout=10,
+                    env=env_for_runtime(),
+                    cwd=HOME,
+                )
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if command.returncode == 0 and _systemd_show_invokes_script(command.stdout, script):
+                return True
     return False
 
 
-def existing_schedule(tag: str, script: Path) -> str | None:
-    if any(not line.lstrip().startswith("#") and (tag in line or str(script) in line) for line in current_crontab()):
+def existing_schedule(
+    tag: str,
+    script: Path,
+    expected_cron_line: str | None = None,
+    cron_lines: list[str] | None = None,
+) -> str | None:
+    lines = current_crontab() if cron_lines is None else cron_lines
+    if expected_cron_line is not None and lines is not None and expected_cron_line in lines:
         return "cron"
-    portable_name = script.stem.removeprefix("hermes-")
-    needles = (tag, str(script), script.name, portable_name)
-    for path in (HOME / "Library/LaunchAgents").glob("*.plist"):
-        if _active_launchd_schedule(path, needles):
-            return "launchd"
+    for directory in LAUNCH_AGENT_DIRS:
+        for path in directory.glob("*.plist"):
+            if _active_launchd_schedule(path, script):
+                return "launchd"
     systemd_home = HOME / ".config/systemd/user"
     systemd_paths = [*systemd_home.glob("*.service"), *systemd_home.glob("*.timer")]
-    if _active_systemd_schedule(systemd_paths, needles):
+    if _active_systemd_schedule(systemd_paths, script):
         return "systemd-user"
     return None
 
 
-def install_cron(tag: str, line: str, dry_run: bool) -> str:
-    current = current_crontab()
-    matching = [x for x in current if tag in x]
-    if matching == [line]:
+def _cron_line_has_tag(line: str, tag: str) -> bool:
+    return re.search(rf"(?:^|\s)#\s*{re.escape(tag)}\s*$", line) is not None
+
+
+def install_cron(
+    tag: str,
+    line: str,
+    dry_run: bool,
+    ensure_present: bool = True,
+    current: list[str] | None = None,
+) -> str:
+    if current is None:
+        current = current_crontab()
+    if current is None:
+        return "failed:crontab_read"
+    matching = [x for x in current if _cron_line_has_tag(x, tag)]
+    desired = [line] if ensure_present else []
+    if matching == desired:
         return "unchanged"
-    lines = [x for x in current if tag not in x]
-    lines.append(line)
+    lines = [x for x in current if not _cron_line_has_tag(x, tag)]
+    if ensure_present:
+        lines.append(line)
     if dry_run:
         return "would_update"
     payload = "\n".join(lines) + "\n"
@@ -384,6 +510,23 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
     missing: list[dict[str, Any]] = []
     optional_unavailable: list[dict[str, Any]] = []
 
+    for retired_tag in RETIRED_CRON_TAGS:
+        cron_lines = current_crontab()
+        if cron_lines is None:
+            status = "failed:crontab_read"
+        elif not any(_cron_line_has_tag(line, retired_tag) for line in cron_lines):
+            continue
+        else:
+            status = install_cron(retired_tag, "", args.dry_run, ensure_present=False, current=cron_lines)
+        actions.append(
+            {
+                "capability": "retired_scheduler_cleanup",
+                "canary": retired_tag,
+                "action": "ensure_retired",
+                "status": status,
+            }
+        )
+
     for spec in registry:
         ok, reasons = detected(spec, cfg)
         if not ok:
@@ -414,9 +557,32 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
             capabilities.append(cap)
             continue
         tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id', 'UNKNOWN')}")
+        if tag in RETIRED_CRON_TAGS:
+            cap["canary"].update({"status": "retired", "reason": "superseded by the contract-derived fleet pulse"})
+            capabilities.append(cap)
+            continue
         line = cron_line_for(canary, script, agent_id, agent_name)
-        schedule_kind = existing_schedule(tag, script)
-        cron_status = f"present:{schedule_kind}" if schedule_kind else install_cron(tag, line, args.dry_run)
+        cron_lines = current_crontab()
+        schedule_kind = existing_schedule(tag, script, line, cron_lines or [])
+        native_schedule = schedule_kind in {"launchd", "systemd-user"}
+        if cron_lines is None:
+            cron_change = "failed:crontab_read"
+        else:
+            cron_change = install_cron(
+                tag,
+                line,
+                args.dry_run,
+                ensure_present=not native_schedule,
+                current=cron_lines,
+            )
+        if cron_change == "unchanged" and schedule_kind:
+            cron_status = f"present:{schedule_kind}"
+        elif schedule_kind and cron_change == "updated":
+            cron_status = f"normalized:{schedule_kind}"
+        elif schedule_kind and cron_change == "would_update":
+            cron_status = f"would_normalize:{schedule_kind}"
+        else:
+            cron_status = cron_change
         actions.append(
             {"capability": cap_id, "canary": canary.get("id"), "action": "ensure_cron", "status": cron_status}
         )

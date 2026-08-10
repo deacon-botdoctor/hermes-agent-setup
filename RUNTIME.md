@@ -2,24 +2,30 @@
 
 ## Exact release
 
-The current public release is `botdoctor-hermes-2026.08.09-golden-6219fccc`:
-
-- upstream Hermes `0.20.0`: `3c27eb6234bf91b8ceee9e9071591b31e9b148cb`;
-- public Golden source: `6219fcccfc42c5f22f504c15f590c0b9da0cf8dd`;
-- baseline wiring: 24 files;
-- runtime payload: 285 files;
-- assembled runtime fingerprint:
-  `dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade`.
-
-Machines do not install “latest.” They build and verify these exact identities.
-The profile installer also pins Cua Driver `0.14.2`; exact-version presence is
-required on macOS, Windows, and Linux, while GUI readiness remains a separate
-native doctor/session/permission gate.
+[`release.json`](release.json) is the authoritative source for the current
+release identity, upstream and Golden SHAs, component digests, Cua Driver
+version, and assembled runtime fingerprint. The linked
+[`runtime-payload-source-manifest.json`](runtime-payload-source-manifest.json)
+owns the exact component file inventories, counts, and Git blob identities.
+Machines do not install “latest.” They build and verify those exact identities.
+Exact Cua Driver presence is required on macOS, Windows, and Linux, while GUI
+readiness remains a separate native doctor/session/permission gate.
 Private fleet health probes, host routes, and service adapters are deliberately
 not part of this public source manifest; native service tooling owns public
 installations.
 
 ## What changed in this release
+
+- The canary reconciler now accepts only an exact active native-scheduler
+  command or the exact canonical cron line, removes its owned duplicate cron
+  entry after native-scheduler proof, and fails closed when crontab inspection
+  fails. The retired per-host Codex-exec health actor is now removed instead of
+  being recreated; the contract-derived fleet pulse and lane guardian remain
+  the health authorities. The Hermes pin, runtime payload, and assembled
+  fingerprint are unchanged; their exact identities remain owned by
+  `release.json`.
+
+## Current public payload
 
 - The immutable Hermes `v0.20.0` base remains pinned while the public
   overlays repair the fleet-discovered compatibility gaps.

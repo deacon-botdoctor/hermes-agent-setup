@@ -74,6 +74,15 @@ def test_release_identity_matches_source_manifest():
         release["assembled_runtime_fingerprint"]["digest"]
     )
     assert manifest["runtime_fingerprint"]["file_count"] == 82
+    assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
+    assert (
+        manifest["runtime_fingerprint"]["upstream_sha"]
+        == release["canonical_upstream_sha"]
+    )
+    assert (
+        manifest["runtime_fingerprint"]["expected_upstream_sha"]
+        == release["canonical_upstream_sha"]
+    )
     assert len(manifest["runtime_fingerprint"]["files"]) == 82
     assert set(release) == {
         "schema_version",
@@ -96,6 +105,29 @@ def test_release_identity_matches_source_manifest():
         "golden_suite",
         "clean_upstream_rehearsal",
     }
+
+
+def test_verifier_rejects_nested_fingerprint_golden_mismatch(monkeypatch):
+    verifier = load_script("public_verify_nested_golden", "verify-release.py")
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
+    )
+    manifest["runtime_fingerprint"]["golden_sha"] = "0" * 40
+    read_json = verifier._read_json
+
+    def fake_read_json(path):
+        if path == verifier.RELEASE_PATH:
+            return release
+        if path == verifier.SOURCE_MANIFEST_PATH:
+            return manifest
+        return read_json(path)
+
+    monkeypatch.setattr(verifier, "_read_json", fake_read_json)
+
+    _, errors = verifier.verify_public_source()
+
+    assert "source manifest assembled runtime Golden SHA mismatch" in errors
 
 
 def test_release_pins_the_golden_cua_driver_contract():
@@ -1470,6 +1502,56 @@ def test_prepare_home_rejects_reused_staging(tmp_path):
 
     with pytest.raises(ValueError, match="unique empty"):
         assembler.prepare_posix_dependencies(tmp_path / "runtime", staging)
+
+
+def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
+    tmp_path, monkeypatch
+):
+    assembler = load_script("public_pinned_staging", "assemble-runtime.py")
+    runtime = tmp_path / "runtime"
+    staging = tmp_path / "staging"
+    (runtime / "scripts").mkdir(parents=True)
+    (runtime / "scripts" / "install.sh").write_text(
+        "#!/bin/bash\n", encoding="utf-8"
+    )
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        (runtime / ".hermes-bootstrap-complete").write_text(
+            "installer-state\n", encoding="utf-8"
+        )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(assembler, "run", fake_run)
+
+    assembler.prepare_posix_dependencies(runtime, staging)
+
+    command, kwargs = calls[0]
+    assert command == [
+        "bash",
+        str(runtime / "scripts" / "install.sh"),
+        "--skip-setup",
+        "--skip-browser",
+        "--dir",
+        str(runtime),
+        "--hermes-home",
+        str(staging),
+        "--commit",
+        assembler.RELEASE["canonical_upstream_sha"],
+        "--force-commit",
+    ]
+    assert kwargs["env"]["HOME"] == str(staging / ".installer-user")
+    assert kwargs["env"]["HERMES_HOME"] == str(staging)
+    assert (
+        runtime / ".hermes-bootstrap-complete"
+    ).read_text(encoding="utf-8") == "installer-state\n"
+    runtime_manifest = load_script(
+        "public_bootstrap_installer_state", "runtime-payload-manifest.py"
+    )
+    assert runtime_manifest.is_runtime_state_or_artifact(
+        ".hermes-bootstrap-complete"
+    )
 
 
 def test_assembler_restores_promisor_metadata_for_partial_local_source(
