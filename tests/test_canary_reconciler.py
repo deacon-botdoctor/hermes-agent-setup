@@ -236,3 +236,112 @@ def test_retired_codex_cron_is_removed_without_touching_unrelated_lines(
         "status": "updated",
     }
     assert installed["crontab"] == unrelated + "\n"
+
+
+def test_retired_codex_launchd_actor_is_unloaded_and_removed(tmp_path: Path):
+    reconciler = load_reconciler("canary_retired_codex_launchd")
+    configure_profile(reconciler, tmp_path)
+    reconciler.load_registry = lambda: []
+    reconciler.current_crontab = lambda: []
+    launch_agent_dir = reconciler.LAUNCH_AGENT_DIRS[0]
+    launch_agent_dir.mkdir(parents=True)
+    script = reconciler.HERMES / "bin/codex-exec-health.py"
+    label = "com.example.codex-exec-health"
+    plist = launch_agent_dir / f"{label}.plist"
+    with plist.open("wb") as handle:
+        plistlib.dump(
+            {"Label": label, "ProgramArguments": [sys.executable, str(script)]},
+            handle,
+        )
+    loaded_job = (
+        f"program = {sys.executable}\n"
+        "arguments = {\n"
+        f"0 = {sys.executable}\n"
+        f"1 = {script}\n"
+        "}\n"
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        if command[:2] == ["launchctl", "print"]:
+            return subprocess.CompletedProcess(command, 0, loaded_job, "")
+        if command[:2] == ["launchctl", "bootout"]:
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 1, "", "unavailable")
+
+    reconciler.run = fake_run
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=False,
+            run_canaries=False,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["actions"] == [
+        {
+            "capability": "retired_scheduler_cleanup",
+            "canary": "HERMES_CODEX_EXEC_HEALTH",
+            "action": "ensure_retired",
+            "scheduler": "launchd",
+            "status": "updated",
+        }
+    ]
+    assert ["launchctl", "bootout", f"gui/{reconciler.os.getuid()}/{label}"] in commands
+    assert not plist.exists()
+
+
+def test_retired_codex_systemd_actor_is_disabled_and_removed(tmp_path: Path):
+    reconciler = load_reconciler("canary_retired_codex_systemd")
+    configure_profile(reconciler, tmp_path)
+    reconciler.load_registry = lambda: []
+    reconciler.current_crontab = lambda: []
+    reconciler.LAUNCH_AGENT_DIRS = ()
+    systemd_home = reconciler.HOME / ".config/systemd/user"
+    systemd_home.mkdir(parents=True)
+    script = reconciler.HERMES / "bin/codex-exec-health.py"
+    timer = systemd_home / "codex-exec-health.timer"
+    service = systemd_home / "codex-exec-health.service"
+    timer.write_text("[Timer]\nOnUnitActiveSec=20m\n", encoding="utf-8")
+    service.write_text(
+        f"[Service]\nExecStart={sys.executable} {script}\n", encoding="utf-8"
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    reconciler.run = fake_run
+    result = reconciler.reconcile(
+        argparse.Namespace(
+            agent_id="test-agent",
+            agent_name="Test Agent",
+            dry_run=False,
+            run_canaries=False,
+        )
+    )
+
+    assert result["ok"] is True
+    assert result["actions"] == [
+        {
+            "capability": "retired_scheduler_cleanup",
+            "canary": "HERMES_CODEX_EXEC_HEALTH",
+            "action": "ensure_retired",
+            "scheduler": "systemd-user",
+            "status": "updated",
+        }
+    ]
+    assert [
+        "systemctl",
+        "--user",
+        "disable",
+        "--now",
+        timer.name,
+    ] in commands
+    assert ["systemctl", "--user", "daemon-reload"] in commands
+    assert not timer.exists()
+    assert not service.exists()

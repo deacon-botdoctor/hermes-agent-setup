@@ -238,7 +238,13 @@ def is_runtime_state_or_artifact(path: str) -> bool:
         for part in parts
     ):
         return True
-    if name in {"config.yaml", ".env", "auth.json", ".install_method"}:
+    if name in {
+        "config.yaml",
+        ".env",
+        "auth.json",
+        ".install_method",
+        ".hermes-bootstrap-complete",
+    }:
         return True
     if "__pycache__" in parts[:-1] or name.endswith((".pyc", ".pyo")):
         return True

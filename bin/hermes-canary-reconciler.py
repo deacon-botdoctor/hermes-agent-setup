@@ -31,6 +31,7 @@ LAUNCH_AGENT_DIRS = (
     Path("/System/Library/LaunchAgents"),
 )
 RETIRED_CRON_TAGS = ("HERMES_CODEX_EXEC_HEALTH",)
+RETIRED_SCRIPTS = {"HERMES_CODEX_EXEC_HEALTH": "bin/codex-exec-health.py"}
 
 
 def iso() -> str:
@@ -408,6 +409,124 @@ def _active_systemd_schedule(paths: list[Path], script: Path) -> bool:
     return False
 
 
+def _systemd_unit_invokes_script(path: Path, script: Path) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    text = re.sub(r"\\\n\s*", " ", text)
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("ExecStart="):
+            continue
+        try:
+            argv = shlex.split(line.removeprefix("ExecStart="), comments=False, posix=True)
+        except ValueError:
+            continue
+        if _command_invokes_script(argv, script, systemd=True):
+            return True
+    return False
+
+
+def _systemd_timer_service(path: Path) -> str | None:
+    service_name = path.with_suffix(".service").name
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith("Unit="):
+            service_name = line.removeprefix("Unit=").strip()
+    if not service_name.endswith(".service") or Path(service_name).name != service_name:
+        return None
+    return service_name
+
+
+def retire_launchd_schedules(script: Path, dry_run: bool) -> str | None:
+    schedules: list[tuple[Path, str]] = []
+    for directory in LAUNCH_AGENT_DIRS:
+        for path in directory.glob("*.plist"):
+            try:
+                with path.open("rb") as handle:
+                    payload = plistlib.load(handle)
+            except (OSError, plistlib.InvalidFileException, ExpatError):
+                continue
+            label = payload.get("Label") if isinstance(payload, dict) else None
+            if isinstance(label, str) and _launchd_invokes_script(payload, script):
+                schedules.append((path, label))
+    if not schedules:
+        return None
+    if dry_run:
+        return "would_update"
+    domain = f"gui/{os.getuid()}"
+    for path, label in schedules:
+        try:
+            loaded = run(
+                ["launchctl", "print", f"{domain}/{label}"],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+            if loaded.returncode == 0:
+                if not _launchd_print_invokes_script(loaded.stdout, script):
+                    return f"failed:launchd_label_collision:{label}"
+                stopped = run(
+                    ["launchctl", "bootout", f"{domain}/{label}"],
+                    timeout=10,
+                    env=env_for_runtime(),
+                    cwd=HOME,
+                )
+                if stopped.returncode != 0:
+                    return f"failed:launchd_bootout:{label}"
+            path.unlink()
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"failed:launchd_retire:{type(exc).__name__}"
+    return "updated"
+
+
+def retire_systemd_schedules(script: Path, dry_run: bool) -> str | None:
+    systemd_home = HOME / ".config/systemd/user"
+    schedules: list[tuple[Path, Path]] = []
+    for timer_path in systemd_home.glob("*.timer"):
+        service_name = _systemd_timer_service(timer_path)
+        if service_name is None:
+            continue
+        service_path = systemd_home / service_name
+        if _systemd_unit_invokes_script(service_path, script):
+            schedules.append((timer_path, service_path))
+    if not schedules:
+        return None
+    if dry_run:
+        return "would_update"
+    for timer_path, service_path in schedules:
+        try:
+            stopped = run(
+                ["systemctl", "--user", "disable", "--now", timer_path.name],
+                timeout=10,
+                env=env_for_runtime(),
+                cwd=HOME,
+            )
+            if stopped.returncode != 0:
+                return f"failed:systemd_disable:{timer_path.name}"
+            timer_path.unlink()
+            service_path.unlink()
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"failed:systemd_retire:{type(exc).__name__}"
+    try:
+        reloaded = run(
+            ["systemctl", "--user", "daemon-reload"],
+            timeout=10,
+            env=env_for_runtime(),
+            cwd=HOME,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"failed:systemd_reload:{type(exc).__name__}"
+    if reloaded.returncode != 0:
+        return "failed:systemd_reload"
+    return "updated"
+
+
 def existing_schedule(
     tag: str,
     script: Path,
@@ -511,6 +630,22 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
     optional_unavailable: list[dict[str, Any]] = []
 
     for retired_tag in RETIRED_CRON_TAGS:
+        retired_script = expand_path(RETIRED_SCRIPTS[retired_tag])
+        for scheduler, retire in (
+            ("launchd", retire_launchd_schedules),
+            ("systemd-user", retire_systemd_schedules),
+        ):
+            native_status = retire(retired_script, args.dry_run)
+            if native_status is not None:
+                actions.append(
+                    {
+                        "capability": "retired_scheduler_cleanup",
+                        "canary": retired_tag,
+                        "action": "ensure_retired",
+                        "scheduler": scheduler,
+                        "status": native_status,
+                    }
+                )
         cron_lines = current_crontab()
         if cron_lines is None:
             status = "failed:crontab_read"

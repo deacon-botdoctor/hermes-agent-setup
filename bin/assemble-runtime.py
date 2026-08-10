@@ -192,10 +192,6 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
         env=env,
         timeout=1800,
     )
-    # The upstream installer writes a desktop-bootstrap sentinel into the code
-    # checkout. It is installer state, not runtime source, and would make the
-    # exact assembled-runtime fingerprint unverifiable.
-    (output / ".hermes-bootstrap-complete").unlink(missing_ok=True)
 
 
 def main() -> int:

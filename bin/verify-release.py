@@ -304,6 +304,15 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
         errors.append("release assembled runtime fingerprint is invalid")
     else:
         files = assembled["files"]
+        if assembled.get("verified") is not True:
+            errors.append("source manifest assembled runtime fingerprint is unverified")
+        if assembled.get("golden_sha") != release.get("golden_sha"):
+            errors.append("source manifest assembled runtime Golden SHA mismatch")
+        for field in ("upstream_sha", "expected_upstream_sha"):
+            if assembled.get(field) != release.get("canonical_upstream_sha"):
+                errors.append(
+                    f"source manifest assembled runtime {field} mismatch"
+                )
         canonical = ""
         for relative in sorted(files):
             try:
