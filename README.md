@@ -86,16 +86,24 @@ Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 9. install the release-pinned recurring runtime-coherence check for the host's
    native scheduler.
 
-Browser automation, Composio, and additional MCP servers should be enabled only
-when the agent has a real use for them. See [DEFAULTS.md](DEFAULTS.md).
+There are no generic fleet installs. Before activation, a fresh agent must also
+have an exact client-owned runtime manifest that declares its principal,
+purpose, expected transports, workload capabilities, scheduled workflows, and
+the canaries that prove those workflows. Install every capability required by
+that manifest, run the real user path, and prove that each required canary is
+fresh and centrally visible to Doc. A deliberately smaller installation is an
+exception and must be recorded in the manifest with its reason. Browser
+automation, Composio, and additional MCP servers remain cold unless the
+client's actual workload requires them. See [DEFAULTS.md](DEFAULTS.md).
 
-### Lean does not mean less capable
+### Fully decked does not mean always loaded
 
 The old setup eagerly loaded optional tools, MCP servers, browser wiring, and
 duplicate memory/context layers into every session. That increased prompt and
 tool-list size, obscured routing, and created more always-on failure surfaces.
-The native-first setup keeps the base runtime small and discovers optional
-capabilities when a request needs them.
+The native-first setup keeps session exposure small while provisioning the
+client's complete declared capability set and discovering cold capabilities on
+demand.
 
 A cold capability is not a missing capability. Skills, configured MCP servers,
 approved connectors, and browser automation remain discoverable and can be

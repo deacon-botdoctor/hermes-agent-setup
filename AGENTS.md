@@ -20,6 +20,27 @@ This repository is a public, source-visible release bundle:
 Do not silently substitute upstream `main`, an older public bundle, a private
 fleet checkout, or a dirty live runtime.
 
+## Fleet fresh-install contract
+
+There are no generic fleet installs. Before building a fresh client runtime,
+resolve its canonical identity and dedicated runtime repository, then require
+an exact client-owned manifest that declares:
+
+- principal, purpose, runtime owner, host, and expected transports;
+- every capability needed for the client's real interactive and scheduled
+  workloads;
+- the intended schedule set, including an explicit empty set when the client
+  truly has no scheduled work;
+- a required canary and freshness bound for each workload; and
+- the central Doc consumer that will alert on missing, stale, or failed proof.
+
+Provision and verify the full declared set unless the manifest explicitly
+records a scoped-down exception and its reason. Configuration presence is not
+closure: bind the runtime, activate the native service, run the real user path,
+produce fresh canary receipts, confirm Doc consumption, and preserve a tested
+rollback. Stop before activation when the client manifest, dedicated source
+repository, canary ownership, or central consumer is missing.
+
 ## First classify the machine
 
 Choose one path from evidence:
