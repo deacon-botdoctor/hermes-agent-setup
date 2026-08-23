@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "capability": "native-agent-continuity",
+  "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-golden.git",
+  "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f",
+  "platforms": ["linux", "macos", "windows"],
+  "activation": "manifest_driven_existing_selfheal",
+  "package_digest": "c0c780d67ce24b8e3033a51e40387b139a44ce9b84e726f129ff67ec1298658e",
+  "files": [
+    {"path": "native-continuity/bin/client-selfheal-heartbeat.ps1", "sha256": "09e73a1bea5c1918bedf3b47089c4debe2ae7b71a70124df62781e2efbc7410c", "mode": "0644"},
+    {"path": "native-continuity/bin/client-selfheal-heartbeat.sh", "sha256": "bd1cf9c51d641b9c5cf36c1f0886f51dea4eb79d939bd76aa59caa7014cee740", "mode": "0755"},
+    {"path": "native-continuity/bin/gbrain-mcp.py", "sha256": "2192f168ff0cfb63e70c39d6bd7a634d28c64c5450c58c87f409bbd90ec753eb", "mode": "0755"},
+    {"path": "native-continuity/bin/native-agent-continuity.py", "sha256": "d7c208f50ea8bb8accf0e669afb2a9bd7014864ebb48a45e267bbe6be6e33d35", "mode": "0755"},
+    {"path": "native-continuity/bin/native-session-luna-carder.py", "sha256": "bccea3111768eada0054105e82e2f2b3fa5bce40aa416f09f6f3a13348f22f6f", "mode": "0755"},
+    {"path": "native-continuity/bin/native-session-runner.py", "sha256": "0c871ddad2441ab7c6c077c879703f397de909d60a0c06361d634289c9376f2d", "mode": "0755"},
+    {"path": "native-continuity/bin/native-session-sync.py", "sha256": "7325b84bf90771612421f4ad5e30f1646462beb6d3443606c54372ab63eccf62", "mode": "0755"},
+    {"path": "native-continuity/bin/session-redact-export.py", "sha256": "e72f4180b528d9919e5deed070f289a317c5f0f5c0b7ff22cc8ba18e5ccbf7ea", "mode": "0755"},
+    {"path": "native-continuity/bin/tenant-gbrain-baseline.py", "sha256": "0a6bd825fc77afafc5b95c72cad31a266d2b3ec8bbc523b9c891efdc13ef3c84", "mode": "0755"},
+    {"path": "native-continuity/config/native-agent-continuity-v1.json", "sha256": "25c356e116bf158db628adf8859400b4fcab172f91ae8415df24f0d6c1a16005", "mode": "0644"}
+  ]
+}

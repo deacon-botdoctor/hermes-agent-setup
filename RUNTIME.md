@@ -14,6 +14,12 @@ Private fleet health probes, host routes, and service adapters are deliberately
 not part of this public source manifest; native service tooling owns public
 installations.
 
+The `native_agent_continuity` entry in `release.json` is a narrow overlay with
+its own source commit, file inventory, modes, and package digest. It deliberately
+does not change the older general-runtime Golden or upstream pins. Its activation
+is manifest-driven: managed provisioning opts a new tenant in, while an existing
+or manual installation without that tenant manifest remains untouched.
+
 ## What changed in this release
 
 - The canary reconciler now accepts only an exact active native-scheduler
@@ -24,6 +30,12 @@ installations.
   the health authorities. The Hermes pin, runtime payload, and assembled
   fingerprint are unchanged; their exact identities remain owned by
   `release.json`.
+- New managed clients declare native-agent continuity by default. Existing
+  self-heal runs the GBrain baseline once, reconciles supported native coding
+  agents, then exports, syncs, and cards new sessions on each normal heartbeat.
+  Codex is enrolled only when its existing login is usable; provider install,
+  login, billing, and credential changes remain out of scope. Claude and Gemini
+  adapters are detection-only until an explicit adapter contract is enabled.
 
 ## Current public payload
 
@@ -162,6 +174,13 @@ values only when they still exactly match the old defaults.
 - **Client friction review:** the daily review emits a content-safe scored
   papercut summary so repeated routing, update, tool, auth, and dependency
   friction can be fixed before the user has to report it manually.
+- **Tenant-native coding continuity:** a local, Git-backed GBrain vault exposes
+  15 bounded read/write MCP tools to supported native agents. Session capture
+  strips secrets, URLs, absolute paths, reasoning, and tool payloads before
+  write-through. Luna generates at most eight cards per request, while the
+  runner drains every current batch to zero pending with no daily ceiling. The
+  baseline and agent binding both emit verification and rollback receipts and
+  leave no persistent GBrain server process.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
 condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 26
@@ -181,6 +200,9 @@ The bounded profile installer places only manifest-owned files:
 - reflection and papercut skills/scripts, plus the lazy semantic-control skill;
 - runtime-owned reflection, transaction, LLM-receipt reconciliation, and
   papercut helpers.
+- the integrity-pinned native-agent-continuity controller, session pipeline,
+  GBrain MCP, cross-platform self-heal hooks, and contract. These files stay
+  dormant unless a tenant provisioning manifest opts the profile in.
 
 It backs up every replaced destination, preserves unrelated local files, never
 reads `.env`, and does not switch or restart a service. Before profile mutation,

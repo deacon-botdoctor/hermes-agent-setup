@@ -27,6 +27,11 @@ RELEASE = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
 SOURCE_MANIFEST = json.loads(
     (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
 )
+NATIVE_CONTINUITY_CONTRACT = json.loads(
+    (ROOT / "contracts/native-agent-continuity-release-v1.json").read_text(
+        encoding="utf-8"
+    )
+)
 REQUIRED_PLUGINS = (
     "botdoctor-immersion",
     "mcp-on-demand-control",
@@ -236,6 +241,17 @@ def profile_files(home: Path) -> list[tuple[Path, Path, int]]:
                 continue
             mode = int(str(entry.get("mode") or "100644")[-3:], 8)
             mappings[destination] = (source, mode)
+
+    for entry in NATIVE_CONTINUITY_CONTRACT.get("files") or []:
+        relative = str(entry.get("path") or "")
+        source = ROOT / relative
+        if relative.startswith("native-continuity/bin/"):
+            destination = home / "bin" / source.name
+        elif relative == "native-continuity/config/native-agent-continuity-v1.json":
+            destination = home / "config" / source.name
+        else:
+            raise ValueError(f"unsupported native continuity package path: {relative}")
+        mappings[destination] = (source, int(str(entry["mode"]), 8))
 
     router_floor = (
         ROOT

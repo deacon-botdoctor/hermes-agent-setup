@@ -17,6 +17,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_PATH = ROOT / "release.json"
 SOURCE_MANIFEST_PATH = ROOT / "runtime-payload-source-manifest.json"
+NATIVE_CONTINUITY_CONTRACT_PATH = (
+    ROOT / "contracts/native-agent-continuity-release-v1.json"
+)
 RUNTIME_COHERENCE_FILES = (
     "maintenance/bin/install-runtime-coherence.py",
     "maintenance/launchd/com.hermes.runtime-coherence.plist.template",
@@ -196,6 +199,93 @@ def verify_runtime_coherence_contract(
             errors.append("release runtime_coherence installer is not executable")
 
 
+def verify_native_agent_continuity_contract(
+    release: dict[str, Any], errors: list[str]
+) -> None:
+    metadata = release.get("native_agent_continuity")
+    if not isinstance(metadata, dict):
+        errors.append("release native_agent_continuity contract is missing")
+        return
+    entry = metadata.get("contract")
+    if not isinstance(entry, dict):
+        errors.append("release native_agent_continuity contract pointer is invalid")
+        return
+    try:
+        relative = _safe_path(entry.get("path"))
+    except ValueError as exc:
+        errors.append(f"release native_agent_continuity contract: {exc}")
+        return
+    expected_contract_sha = str(entry.get("sha256") or "")
+    if (
+        ROOT / relative != NATIVE_CONTINUITY_CONTRACT_PATH
+        or re.fullmatch(r"[0-9a-f]{64}", expected_contract_sha) is None
+        or not NATIVE_CONTINUITY_CONTRACT_PATH.is_file()
+        or NATIVE_CONTINUITY_CONTRACT_PATH.is_symlink()
+        or hashlib.sha256(NATIVE_CONTINUITY_CONTRACT_PATH.read_bytes()).hexdigest()
+        != expected_contract_sha
+    ):
+        errors.append("release native_agent_continuity contract digest mismatch")
+        return
+    try:
+        contract = _read_json(NATIVE_CONTINUITY_CONTRACT_PATH)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        errors.append(f"release native_agent_continuity contract is invalid: {exc}")
+        return
+    if (
+        contract.get("schema_version") != 1
+        or contract.get("capability") != "native-agent-continuity"
+        or re.fullmatch(r"[0-9a-f]{40}", str(contract.get("source_commit") or ""))
+        is None
+        or contract.get("platforms") != ["linux", "macos", "windows"]
+        or contract.get("activation") != "manifest_driven_existing_selfheal"
+        or any(
+            metadata.get(field) != contract.get(field)
+            for field in ("source_commit", "platforms", "activation", "package_digest")
+        )
+    ):
+        errors.append("release native_agent_continuity identity is invalid")
+        return
+    declared = contract.get("files")
+    if not isinstance(declared, list) or len(declared) != 10:
+        errors.append("release native_agent_continuity file inventory is invalid")
+        return
+    actual: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for row in declared:
+        if not isinstance(row, dict) or set(row) != {"path", "sha256", "mode"}:
+            errors.append("release native_agent_continuity file entry is invalid")
+            continue
+        try:
+            item = _safe_path(row.get("path"))
+        except ValueError as exc:
+            errors.append(f"release native_agent_continuity file: {exc}")
+            continue
+        if item in seen or not item.startswith("native-continuity/"):
+            errors.append(f"release native_agent_continuity file ownership is invalid: {item}")
+            continue
+        seen.add(item)
+        path = ROOT / item
+        mode = str(row.get("mode") or "")
+        digest = str(row.get("sha256") or "")
+        if (
+            re.fullmatch(r"0[0-7]{3}", mode) is None
+            or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            or not path.is_file()
+            or path.is_symlink()
+            or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+            or format(path.stat().st_mode & 0o777, "04o") != mode
+        ):
+            errors.append(f"release native_agent_continuity file drifted: {item}")
+            continue
+        actual.append({"path": item, "sha256": digest, "mode": mode})
+    canonical = json.dumps(actual, sort_keys=True, separators=(",", ":")).encode()
+    if (
+        actual != declared
+        or hashlib.sha256(canonical).hexdigest() != contract.get("package_digest")
+    ):
+        errors.append("release native_agent_continuity package digest mismatch")
+
+
 def verify_public_source() -> tuple[dict[str, Any], list[str]]:
     release = _read_json(RELEASE_PATH)
     manifest = _read_json(SOURCE_MANIFEST_PATH)
@@ -213,6 +303,7 @@ def verify_public_source() -> tuple[dict[str, Any], list[str]]:
         errors.append("release upstream SHA does not match source manifest")
     verify_cua_driver_contract(release, errors)
     verify_runtime_coherence_contract(release, errors)
+    verify_native_agent_continuity_contract(release, errors)
 
     components = manifest.get("components")
     if not isinstance(components, dict):

@@ -22,7 +22,17 @@
   },
   "deployment_digest": "f75aeb4c45860f9bc712e28c77dea1a302f7a8c958d7519436f7f6c8ed45338d",
   "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
-  "release": "botdoctor-hermes-2026.08.10-golden-70b74502",
+  "native_agent_continuity": {
+    "activation": "manifest_driven_existing_selfheal",
+    "contract": {
+      "path": "contracts/native-agent-continuity-release-v1.json",
+      "sha256": "119993e5c2aa9be08d90dc4a90672bef8244be74502cee5f1651f9447c83fe74"
+    },
+    "package_digest": "c0c780d67ce24b8e3033a51e40387b139a44ce9b84e726f129ff67ec1298658e",
+    "platforms": ["linux", "macos", "windows"],
+    "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
+  },
+  "release": "botdoctor-hermes-2026.08.23-continuity-3408573b",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -50,6 +60,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "28/28 patches applied on pinned upstream; no anchor miss, failure, or not-run",
-    "golden_suite": "full Golden preflight passed; retired per-host Codex canary removed, runtime payload unchanged"
+    "golden_suite": "native continuity suite 67/67 plus adjacent setup suite 49/49; macOS and Linux isolated baseline canaries passed; Windows path and Joe/Michael regressions passed"
   }
 }
