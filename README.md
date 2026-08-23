@@ -14,6 +14,12 @@ manifest allowlists every shipped runtime file by Git blob identity. Fleet
 health/start adapters, routes, credentials, client identities, private data,
 and operator control are not included.
 
+This release also carries a separately pinned native-agent-continuity overlay.
+It does not advance the general Hermes runtime pin. Managed new-client
+provisioning writes the tenant manifest that activates the overlay through the
+existing self-heal scheduler; installations without that manifest receive the
+verified files but are not enrolled or changed automatically.
+
 ## Start here
 
 Give the agent access to this repository and say:
@@ -85,6 +91,15 @@ Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 8. install the native gateway service only after verification; and
 9. install the release-pinned recurring runtime-coherence check for the host's
    native scheduler.
+
+For a managed new client, the provisioner also declares
+`native-agent-continuity`. The next existing self-heal run installs and verifies
+the tenant-local GBrain baseline, binds an authenticated Codex installation to
+the 15-tool read/write MCP, and drains the sanitized session backlog into GBrain
+and Luna-authored cards. A Luna request is capped at eight cards, but the runner
+continues until the current backlog is empty; there is no cards-per-day limit.
+Claude and Gemini can be detected without being silently authenticated or
+enrolled.
 
 There are no generic fleet installs. Before activation, a fresh agent must also
 have an exact client-owned runtime manifest that declares its principal,

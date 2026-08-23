@@ -99,6 +99,7 @@ def test_release_identity_matches_source_manifest():
         "verification",
         "cua_driver",
         "runtime_coherence",
+        "native_agent_continuity",
         "update_contract",
     }
     assert set(release["verification"]) == {
@@ -442,9 +443,58 @@ def test_profile_installer_maps_only_bounded_profile_files(tmp_path):
     assert "hooks/telegram-transcript/handler.py" in destinations
     assert "mcp-servers/capability-router/registry.json" in destinations
     assert "bin/telegram-transaction-canary.py" in destinations
+    assert "bin/native-agent-continuity.py" in destinations
+    assert "bin/native-session-runner.py" in destinations
+    assert "bin/client-selfheal-heartbeat.sh" in destinations
+    assert "bin/client-selfheal-heartbeat.ps1" in destinations
+    assert "config/native-agent-continuity-v1.json" in destinations
     assert not any(path.startswith("patches/") for path in destinations)
     assert not any(path.startswith("shared-defaults/") for path in destinations)
     assert not any(path.startswith("kit/systemd/") for path in destinations)
+
+
+def test_native_agent_continuity_overlay_is_exact_and_manifest_driven():
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    contract = json.loads(
+        (ROOT / "contracts/native-agent-continuity-release-v1.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert contract["source_commit"] == (
+        "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
+    )
+    assert contract["activation"] == "manifest_driven_existing_selfheal"
+    assert contract["platforms"] == ["linux", "macos", "windows"]
+    assert len(contract["files"]) == 10
+    assert release["native_agent_continuity"]["package_digest"] == contract[
+        "package_digest"
+    ]
+    assert any(
+        row["path"].endswith("native-session-luna-carder.py")
+        for row in contract["files"]
+    )
+    assert (
+        json.loads(
+            (ROOT / "native-continuity/config/native-agent-continuity-v1.json").read_text()
+        )["boundaries"]["daily_card_limit"]
+        is None
+    )
+
+
+def test_verifier_rejects_native_continuity_package_drift(monkeypatch):
+    verifier = load_script("public_verify_native_continuity_drift", "verify-release.py")
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    errors = []
+    monkeypatch.setattr(
+        verifier,
+        "NATIVE_CONTINUITY_CONTRACT_PATH",
+        ROOT / "native-continuity/config/native-agent-continuity-v1.json",
+    )
+
+    verifier.verify_native_agent_continuity_contract(release, errors)
+
+    assert errors == ["release native_agent_continuity contract digest mismatch"]
 
 
 def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
