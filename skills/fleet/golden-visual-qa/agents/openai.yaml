@@ -1,0 +1,4 @@
+interface:
+  display_name: "Golden Visual QA"
+  short_description: "Fail-closed visual artifact closeout"
+  default_prompt: "Use $golden-visual-qa to render, inspect, and close out this compiled visual before delivery."

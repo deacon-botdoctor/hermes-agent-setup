@@ -1,0 +1,6 @@
+id: telegram-topic-post
+name: telegram-topic-post
+version: 1.0.0
+description: Post authorized cross-topic updates through the configured Telegram bot identity.
+provides_tools:
+  - telegram_topic_post

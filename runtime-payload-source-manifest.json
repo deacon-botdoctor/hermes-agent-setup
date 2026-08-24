@@ -1,16 +1,34 @@
 {
-  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+  "canonical_upstream_sha": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "b4926a439c825765591e7b0cd5c77d736b3b947bd82313744b3031f0c2485e4e",
+      "digest": "c43951d5bb638aaf7af6e76f75e3f230991c35b6ca77cbd6cf20571a442f966d",
       "excluded_paths": [],
-      "file_count": 24,
+      "file_count": 33,
       "files": [
         {
-          "blob": "4b7ba53e4cc9169eb6f0ed2db4b282bc4f3dbe9c",
+          "blob": "06357d511e8454e7001bcd5cb1f75cbbcd933d6f",
+          "mode": "100755",
+          "path": "bin/composio-remote-mcp-verify.py",
+          "type": "blob"
+        },
+        {
+          "blob": "2e0810c7e1f7f8f9876bc0d50eb4ddd9d469a781",
+          "mode": "100755",
+          "path": "bin/hermes-canary-reconciler.ps1",
+          "type": "blob"
+        },
+        {
+          "blob": "c7e9f2f7db5a9418eb2467860c27e54a636c8fbb",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e2a2d139dc5af87a52b09b8cff52fd59a2e93cb8",
+          "mode": "100644",
+          "path": "bin/hermes-disk-retention.py",
           "type": "blob"
         },
         {
@@ -20,13 +38,19 @@
           "type": "blob"
         },
         {
-          "blob": "5aa066c4157a712861e762fb23aa10835deab22d",
+          "blob": "1d576af58b4047c6a10dce3c0a8fe8fa7421ed83",
           "mode": "100755",
           "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
         },
         {
-          "blob": "a4a17ff77dea4dd982f84c988b8cd07603551209",
+          "blob": "7d76e323271fc06ba2da2f49052483acdcfcdf82",
+          "mode": "100644",
+          "path": "bin/hermes-windows-capacity-containment.ps1",
+          "type": "blob"
+        },
+        {
+          "blob": "365f4df1c429aa5d157ba58bde6cbcfd7d93d406",
           "mode": "100755",
           "path": "bin/install-host-artifacts.py",
           "type": "blob"
@@ -38,7 +62,13 @@
           "type": "blob"
         },
         {
-          "blob": "b74b34d64eec523cd138d88841a4c4fd3d2d9a2a",
+          "blob": "3c19170350e827f63c0d4fb3b5d64fcd6d7832d9",
+          "mode": "100755",
+          "path": "bin/tool-readiness-probe.py",
+          "type": "blob"
+        },
+        {
+          "blob": "f8899089f75356ba983b3d51184f08b6f172bfcb",
           "mode": "100644",
           "path": "installers.yaml",
           "type": "blob"
@@ -68,19 +98,25 @@
           "type": "blob"
         },
         {
+          "blob": "d658667e84af54817122d8f59c2211961880e3e5",
+          "mode": "100644",
+          "path": "kit/bin/ensure-browser-use-cli.py",
+          "type": "blob"
+        },
+        {
           "blob": "c73665f745003635f06577684ff8ec859f87afbd",
           "mode": "100755",
           "path": "kit/bin/ensure-cua-driver.py",
           "type": "blob"
         },
         {
-          "blob": "994fa1b5d63b03cbfc18dce999a2dac5d9b1981c",
+          "blob": "c3aa335caee6f6887532e246c827881f59c44688",
           "mode": "100644",
           "path": "kit/bin/ensure-gateway-watchdog.py",
           "type": "blob"
         },
         {
-          "blob": "b5f9405eb23c4957ad1de0d32268ccc5c8c59d50",
+          "blob": "6ca9c961b8d39aaf3160704518277689fba64994",
           "mode": "100644",
           "path": "kit/bin/hermes-gateway-watchdog-client.py",
           "type": "blob"
@@ -89,6 +125,12 @@
           "blob": "b7d51583837a6d318a30ee8a78b1166cfac65ffb",
           "mode": "100755",
           "path": "kit/bin/hermes-safe-restart.sh",
+          "type": "blob"
+        },
+        {
+          "blob": "cf644726702a674e58a49df46acff497880ffb92",
+          "mode": "100755",
+          "path": "kit/bin/operator-handoff.py",
           "type": "blob"
         },
         {
@@ -140,9 +182,21 @@
           "type": "blob"
         },
         {
+          "blob": "0c94563c7ef51534f870869e2386a7adf52f71e5",
+          "mode": "100644",
+          "path": "kit/config/browser-use-cli-release-v1.json",
+          "type": "blob"
+        },
+        {
           "blob": "370c55ee43c3fd6ab6b5f63886ee920c00b68881",
           "mode": "100644",
           "path": "kit/config/cua-driver-release-v1.json",
+          "type": "blob"
+        },
+        {
+          "blob": "8ca4d8350b6eb53065ba1ef4158fcf0fc1e6cedf",
+          "mode": "100644",
+          "path": "kit/config/pylock.browser-use-cli-v1.toml",
           "type": "blob"
         },
         {
@@ -155,22 +209,36 @@
       "paths": [
         "bin/gbrain-enable-embeddings.py",
         "bin/hermes-canary-reconciler.py",
+        "bin/hermes-canary-reconciler.ps1",
+        "bin/hermes-disk-retention.py",
         "bin/hermes-local-selfcheck.py",
+        "bin/hermes-windows-capacity-containment.ps1",
         "bin/hermes-host-hygiene.py",
         "bin/install-host-artifacts.py",
         "bin/tool-doctor.py",
+        "bin/tool-readiness-probe.py",
+        "bin/composio-remote-mcp-verify.py",
         "installers.yaml",
         "recipes/tool-doctor/mcp-provisioning-v1.yaml",
         "kit/bin/agent-browser-orphan-reaper.py",
         "kit/bin/auth-preflight.py",
         "kit/bin/check-sqlite-wal.py",
         "kit/bin/ensure-cua-driver.py",
+        "kit/bin/ensure-browser-use-cli.py",
         "kit/bin/ensure-gateway-watchdog.py",
         "kit/bin/enforce-gbrain-provider-routing.py",
         "kit/bin/gbrain-enable-embeddings.py",
         "kit/bin/hermes-gateway-watchdog-client.py",
         "kit/bin/hermes-safe-restart.sh",
         "kit/bin/operator-status.py",
+        "kit/bin/operator-handoff.py",
+        "kit/bin/native-agent-continuity.py",
+        "kit/bin/gbrain-mcp.py",
+        "kit/bin/tenant-gbrain-baseline.py",
+        "kit/bin/session-redact-export.py",
+        "kit/bin/native-session-sync.py",
+        "kit/bin/native-session-luna-carder.py",
+        "kit/bin/native-session-runner.py",
         "kit/bin/telegram-polling-health-probe.py",
         "kit/bin/telegram_delivery.py",
         "kit/bin/probe-client-health.py",
@@ -178,14 +246,17 @@
         "kit/bin/retire-legacy-memory-surfaces.py",
         "kit/bin/start-hermes.ps1",
         "kit/bin/start-hermes.sh",
-        "kit/config/cua-driver-release-v1.json"
+        "kit/config/cua-driver-release-v1.json",
+        "kit/config/browser-use-cli-release-v1.json",
+        "kit/config/pylock.browser-use-cli-v1.toml",
+        "kit/config/native-agent-continuity-v1.json"
       ]
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "124947c5aa827ffc24d212af69f04dd59dc98d3255a570e3a79098c95fabddbf",
+      "digest": "f14a0056e4963b933ea560d27cdc90fcb5beee1d65285267314401692ec6a6b6",
       "excluded_paths": [],
-      "file_count": 285,
+      "file_count": 742,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -200,19 +271,25 @@
           "type": "blob"
         },
         {
+          "blob": "b03fbd053b0461a6357b716c8b66a88f07c5037c",
+          "mode": "100755",
+          "path": "bin/golden-visual-qa",
+          "type": "blob"
+        },
+        {
           "blob": "afc2ca82f35784c02355a743240834ca31b2b3c7",
           "mode": "100755",
           "path": "bin/hermes-client-day-review",
           "type": "blob"
         },
         {
-          "blob": "109e257f0a50f458031f0f5dbe84cb58f9db6347",
+          "blob": "5eff01cc88a9fd18346e97304fcf56d1606a8bd6",
           "mode": "100755",
           "path": "bin/hermes-reflect-candidates-to-drafts.py",
           "type": "blob"
         },
         {
-          "blob": "604f36dffda9624ed503716a48ecc444ee7c7cc9",
+          "blob": "d426eefa83ea945dc8b0420d5eb02e71ac391f0c",
           "mode": "100755",
           "path": "bin/hermes-self-reflect.py",
           "type": "blob"
@@ -242,13 +319,19 @@
           "type": "blob"
         },
         {
-          "blob": "757fe2e95eedc57ea7f8aa176e8c6cd2a7d3e439",
+          "blob": "555e18456af96176442a6a930515ed30f5d74427",
           "mode": "100755",
           "path": "bin/self-improvement-trigger.py",
           "type": "blob"
         },
         {
-          "blob": "d312f45bea93d1dad0f4e94e710c8c129dfc4d60",
+          "blob": "ac22af4febbe51107fcfbbccd4f71da2b2c4cda2",
+          "mode": "100755",
+          "path": "bin/tasks",
+          "type": "blob"
+        },
+        {
+          "blob": "d0439edf799d7ea84407cde38c4e901a5feba1bf",
           "mode": "100644",
           "path": "bin/telegram-transaction-canary.py",
           "type": "blob"
@@ -278,7 +361,7 @@
           "type": "blob"
         },
         {
-          "blob": "d3606dead2cc2d9679e231596b6ba414cb01e0cf",
+          "blob": "8fe9f4d1c0456a82a951cc2ca2a6e10a1217e284",
           "mode": "100644",
           "path": "hooks/telegram-transcript/handler.py",
           "type": "blob"
@@ -368,7 +451,7 @@
           "type": "blob"
         },
         {
-          "blob": "4468702a5ed6f731b1184377fdebbb2b638f33cb",
+          "blob": "8cab6a2968bc9b38fc324557b58e65517e9cc349",
           "mode": "100644",
           "path": "patches/modules/assembled_runtime_contract.py",
           "type": "blob"
@@ -392,9 +475,21 @@
           "type": "blob"
         },
         {
+          "blob": "58bf3e45276a93f33e5884de5789d096ccf1999a",
+          "mode": "100644",
+          "path": "patches/modules/cron_operator_delivery_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "facc4a72e202e0e1ef50016f84aba7d7c2cd902a",
           "mode": "100644",
           "path": "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "6e7c8d806809481ff8ec5ca26222c340c7ebe94a",
+          "mode": "100644",
+          "path": "patches/modules/cua_existing_profile_launch_grant_v1.py",
           "type": "blob"
         },
         {
@@ -416,19 +511,19 @@
           "type": "blob"
         },
         {
+          "blob": "b5c4e81dd1a205f84e4365e173641b89ea2b63f9",
+          "mode": "100644",
+          "path": "patches/modules/inactivity_fresh_worker_recovery_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "acb6d4064491cd91210174abab9d447e4b39e808",
           "mode": "100644",
           "path": "patches/modules/lean_agent_loop_v1.py",
           "type": "blob"
         },
         {
-          "blob": "14d4f1dcd26d082cc464af72b57efd7ca2ac6d94",
-          "mode": "100644",
-          "path": "patches/modules/lifecycle_guard_invalid_path_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1333f16ec985410a85ea8c5fe90a4b07e18b1201",
+          "blob": "f08bac228df1c6a2b33b599040f84959f4fb98b2",
           "mode": "100755",
           "path": "patches/modules/llm_attempt_receipts_v1.py",
           "type": "blob"
@@ -446,7 +541,7 @@
           "type": "blob"
         },
         {
-          "blob": "b25e9607355a9cc71ed1a5f270e356478d84046c",
+          "blob": "378afcaebb6785be6fca9989834e695f909a7bed",
           "mode": "100644",
           "path": "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
           "type": "blob"
@@ -455,6 +550,18 @@
           "blob": "633813b2008ae3ba2ebbd43f9335c5a0c677c02f",
           "mode": "100644",
           "path": "patches/modules/media_same_path_resend_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "6f022064f9b04152451b0fd37c0affc37d15b6d6",
+          "mode": "100644",
+          "path": "patches/modules/native_browser_use_safety_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ade04396c9511a63971ba4f5271ed4eaf489f5c5",
+          "mode": "100644",
+          "path": "patches/modules/oneshot_cron_provenance_v1.py",
           "type": "blob"
         },
         {
@@ -470,7 +577,7 @@
           "type": "blob"
         },
         {
-          "blob": "5fd83ad1a829937228655503316afbb8874f467b",
+          "blob": "32ee9405462d3c326323d268a3414b295650da79",
           "mode": "100644",
           "path": "patches/modules/restart_interruption_checkin_v1.py",
           "type": "blob"
@@ -482,13 +589,13 @@
           "type": "blob"
         },
         {
-          "blob": "2978d4745355d6191ded90accfedd019c0b27ced",
+          "blob": "3b1dde5e1dffbf5cd583251661c46941da2f99e2",
           "mode": "100644",
           "path": "patches/modules/silent_context_lifecycle_v1.py",
           "type": "blob"
         },
         {
-          "blob": "4c85f96e74f5e3f5b23f6f9837d64d7104663b6a",
+          "blob": "1d87acfa20d535616341f36c173a4da949c4094c",
           "mode": "100644",
           "path": "patches/modules/state_db_descriptor_lifecycle_v1.py",
           "type": "blob"
@@ -506,7 +613,7 @@
           "type": "blob"
         },
         {
-          "blob": "9eb6d1f2c72c59445d85bf2b83c9a3b989e2a083",
+          "blob": "386f3c8b5cfe74f45316cc30fbd597782b98bb05",
           "mode": "100644",
           "path": "patches/modules/telegram_fresh_topic_continuity_v1.py",
           "type": "blob"
@@ -518,13 +625,13 @@
           "type": "blob"
         },
         {
-          "blob": "9ac49d5d77516f474095273e05e4371e6976eec8",
+          "blob": "74983ebb7775fad3b3ae030d79c251e92178a316",
           "mode": "100644",
           "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
           "type": "blob"
         },
         {
-          "blob": "e2363f43895b9be12acd058dd85adf0bea0e3b16",
+          "blob": "7cc1c5b2ff2611a08554e040833866e689480fe1",
           "mode": "100644",
           "path": "patches/modules/telegram_organic_long_running_checkpoints_v2.py",
           "type": "blob"
@@ -536,13 +643,19 @@
           "type": "blob"
         },
         {
-          "blob": "7c4167c46147001e445bdc4e9b83e0cbe45e8c3c",
+          "blob": "8e29ee02b4b7b28f70e715d14b6474c64af070cb",
+          "mode": "100644",
+          "path": "patches/modules/telegram_progress_cleanup_success_gate_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "40021f9e68a885dfeb67426b85d46d373e6a0e30",
           "mode": "100644",
           "path": "patches/modules/telegram_transaction_canary_v1.py",
           "type": "blob"
         },
         {
-          "blob": "25c77194c675fe8e29e9afa900a304d5f1384be0",
+          "blob": "e35a286b828188ae0e1153b70717b8ffb5c1ce39",
           "mode": "100644",
           "path": "patches/modules/voice_memo_single_delivery_v1.py",
           "type": "blob"
@@ -554,25 +667,25 @@
           "type": "blob"
         },
         {
-          "blob": "1ae8c8515c8f8f5f00e1cd98d69a83fbfa47e8a1",
+          "blob": "c5692a5ad674bcc32c2bf7fdd45a42bdc34594b1",
           "mode": "100644",
           "path": "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
           "type": "blob"
         },
         {
-          "blob": "05fc903b325782ea68f3a5916da0d9650030872d",
+          "blob": "2825be7a534d53d1619d58f9edf78360cc102f39",
           "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-3c27eb62-durable-drain-v1.patch",
+          "path": "patches/payloads/durable-drain-inbox-v1/hermes-agent-9da6d455-durable-drain-v1.patch",
           "type": "blob"
         },
         {
-          "blob": "14ff6d461bf065f63c850af3f76c378b1f2465e7",
+          "blob": "dba1bac9e332b7f9cfdaf577ce29cb1a2c82eb29",
           "mode": "100644",
           "path": "patches/payloads/durable-drain-inbox-v1/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "8bc58945e074e766c4c8d95dd351c0a8f1ebb422",
+          "blob": "0f7a42d3825346d0f4bb3d56e1f7ee8676b57a42",
           "mode": "100644",
           "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
           "type": "blob"
@@ -584,19 +697,25 @@
           "type": "blob"
         },
         {
+          "blob": "d8d70b853b249ede55e60f73a395ed78fcc0f255",
+          "mode": "100644",
+          "path": "patches/payloads/llm-attempt-receipts-v1/outcome_stop_guard_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "7aa407fb949fbfa75c21e4816293bd0cc3a9c483",
           "mode": "100644",
           "path": "patches/payloads/session-search-current-topic-v2/golden_topic_recall.py",
           "type": "blob"
         },
         {
-          "blob": "85cca07387fc655de4dce9298f37a509e71f9a9a",
+          "blob": "cee1aa49c4009613eab65b3bb37338f652ad7a65",
           "mode": "100644",
           "path": "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
           "type": "blob"
         },
         {
-          "blob": "95f78809948754394f788b65912902486dcef0fa",
+          "blob": "e080a7c4db61b335f02d27bfc3776f50efe95d20",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -608,13 +727,13 @@
           "type": "blob"
         },
         {
-          "blob": "1d34a366a4a1dea17bde4b9c2105fa4583991516",
+          "blob": "d9b69402529d9aa472bcc4cfe37a332b0d468ee1",
           "mode": "100644",
           "path": "plugins/botdoctor-immersion/middleware.py",
           "type": "blob"
         },
         {
-          "blob": "70cf7038fcd81c7e099511a70566f07f35ab225f",
+          "blob": "5abbd061f4067ad22cf6e64f1312b85c7585bcfc",
           "mode": "100644",
           "path": "plugins/botdoctor-immersion/plugin.yaml",
           "type": "blob"
@@ -686,33 +805,51 @@
           "type": "blob"
         },
         {
-          "blob": "7ae9638540180b54c62612be5d2ca5db58432072",
+          "blob": "e4314cec22e5f4a5576658d565a4e65dc1e8010f",
           "mode": "100644",
           "path": "plugins/semantic-computer-control-guard/guard.py",
           "type": "blob"
         },
         {
-          "blob": "808e124525c2277e1f4554a6561caa69723af74a",
+          "blob": "e1c997e7bdce9d1ad86b118771e95770a1989700",
           "mode": "100644",
           "path": "plugins/semantic-computer-control-guard/plugin.yaml",
           "type": "blob"
         },
         {
-          "blob": "9b7b3a1a12eef34a5e050d5f95eb6fa569bce600",
+          "blob": "242287738b0c3baf0b3ae79e35ad7c78f8f39bcb",
           "mode": "100644",
           "path": "plugins/task-ledger/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "5a03f3b8dbafd3314ecd032a4693e3348fe2033a",
+          "blob": "dc84c836b89d6c633ba47701c38ba84e787b5150",
           "mode": "100644",
           "path": "plugins/task-ledger/plugin.yaml",
           "type": "blob"
         },
         {
-          "blob": "2abd75407d976221e4e7b911c0bc8eebcb64f7fb",
+          "blob": "8f73496faf8b2280ec00e341baa1558c5bd1c000",
           "mode": "100644",
           "path": "plugins/task-ledger/tools.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c28cc61341364ffcfd6b6faa3520792be35ba64a",
+          "mode": "100644",
+          "path": "plugins/telegram-topic-post/__init__.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c23652040dc1470269d29f085e0641db1e056095",
+          "mode": "100644",
+          "path": "plugins/telegram-topic-post/plugin.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "8671376d1b9b54314e6046ee0d91505e229e6b2b",
+          "mode": "100644",
+          "path": "plugins/telegram-topic-post/tools.py",
           "type": "blob"
         },
         {
@@ -734,13 +871,13 @@
           "type": "blob"
         },
         {
-          "blob": "0b10d928567e58b1920ce8fc9e60f2d196e03f29",
+          "blob": "bb2775791e954e082c56563f212df7666883ea00",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
         },
         {
-          "blob": "f5b28bd7fcfd96c63ad459387849a77202686ec9",
+          "blob": "2b1bdafb792f62e6a9b79103db8735ea4cb5035b",
           "mode": "100644",
           "path": "shared-defaults/README.md",
           "type": "blob"
@@ -752,7 +889,7 @@
           "type": "blob"
         },
         {
-          "blob": "9713b2b4f9a95659457700e95a5645f2d50c6f03",
+          "blob": "ef2f7474cab4d87382af8c9e9729a77c3f55b4e8",
           "mode": "100644",
           "path": "shared-defaults/config-mcp-on-demand-control.yaml",
           "type": "blob"
@@ -776,7 +913,7 @@
           "type": "blob"
         },
         {
-          "blob": "41c4ee44135a507e93cbd49cd62c7ec79ebb0f68",
+          "blob": "7d0a344b8d4bab9a930f4c7d7297caabb8277582",
           "mode": "100644",
           "path": "shared-defaults/config-telegram-organic-checkpoints.yaml",
           "type": "blob"
@@ -794,6 +931,12 @@
           "type": "blob"
         },
         {
+          "blob": "03648f25047907ab45e186e5e870397c0eb107e4",
+          "mode": "100644",
+          "path": "shared-defaults/skill-catalog-index.json",
+          "type": "blob"
+        },
+        {
           "blob": "1cf6d0e0995e4ecf89f9e7f77075adfe0c57e64e",
           "mode": "100644",
           "path": "shared-rules/capability-discovery.md",
@@ -806,19 +949,25 @@
           "type": "blob"
         },
         {
-          "blob": "ffc4c734ec7bb93c7a2716221524d19cdfbf71af",
+          "blob": "bfe69464025b1f3aec3329aea38fa9c74dd8ef6d",
           "mode": "100644",
           "path": "shared-rules/content-policy.md",
           "type": "blob"
         },
         {
-          "blob": "164e7823dbf27c636a9617386c456bf0cdcf6481",
+          "blob": "15a4cf774aa95d35e026f0fd685fd456bb83bdfc",
           "mode": "100644",
           "path": "shared-rules/file-delivery.md",
           "type": "blob"
         },
         {
-          "blob": "422f1389d71ca59e1619f4ab41f98a4a179d5713",
+          "blob": "9f6cd25346ca6978f2bc33f5caa11b34e66ebe69",
+          "mode": "100644",
+          "path": "shared-rules/host-health.md",
+          "type": "blob"
+        },
+        {
+          "blob": "88241ba316cc83013f229b6ae35093242764ba3d",
           "mode": "100644",
           "path": "shared-rules/image-generation-routing.md",
           "type": "blob"
@@ -836,9 +985,21 @@
           "type": "blob"
         },
         {
-          "blob": "b5c4d31640f14339133750c28ee4b886234532d2",
+          "blob": "4ead37003804d46759323f0dbb963f6ee1588484",
+          "mode": "100644",
+          "path": "shared-rules/machine-capability.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3a18939e73eacea0018f71c461e3debb1f029ba5",
           "mode": "100644",
           "path": "shared-rules/truth-over-comfort.md",
+          "type": "blob"
+        },
+        {
+          "blob": "63b67e93eddc3c28bc6e7745233aa758ed88b4d7",
+          "mode": "100644",
+          "path": "shared-rules/video-production-routing.md",
           "type": "blob"
         },
         {
@@ -935,6 +1096,1704 @@
           "blob": "d4fc6cf11140b1f6f4448c56d6c8d46cd33e3805",
           "mode": "100644",
           "path": "skills/creative/human-taste/references/research-sources.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "00aaaeed5c5f216b593781b9905c97b83bef3695",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a246ccf9c34a65d58249b2789da2ca14dc24b777",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "d722d705c09ff53cb163a19164df0c0e44aacc37",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/animate-text.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5d108f94ab44c3819c09ff15db67c033e164849b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/animejs.md",
+          "type": "blob"
+        },
+        {
+          "blob": "61915aa7938798b86653abe35cd94a3fbe139df3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/css-animations.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8e03eafd531a93b837718f80042fb89711031fda",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/gsap-easing-and-stagger.md",
+          "type": "blob"
+        },
+        {
+          "blob": "98256c8560cee648312985db689dc10b5c1f30e3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/gsap-timeline-and-labels.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e84670dc2997b53c1d8855b8e96e3a925d1070b5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/gsap-transforms-and-perf.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d47b3d0df600423248a9fb1edd76b0a39d10c1bc",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/gsap.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f826b1f9215cbab54669cd0711b3cfccd5c9a53f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/html-in-canvas-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5f56d33ea9e429a93be7027dacb4aece37cb6d6a",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/lottie.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e6c3b1c5533b074712144a8a945869e14b42728b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/three.md",
+          "type": "blob"
+        },
+        {
+          "blob": "675d1bd753f6e1104d16cccec9e1386268bb6c50",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/typegpu.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fc87cdad98a192e692a2b4ee84a240852877a434",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/adapters/waapi.md",
+          "type": "blob"
+        },
+        {
+          "blob": "864a68b7555998de0bbc5f47df8565d29701d1b7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints-index.md",
+          "type": "blob"
+        },
+        {
+          "blob": "90501e4b6f15a1c46481c4836855287c4a843ecd",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/agent-progress-theater.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e1e4e62d0c59c3f1f116235a575a9b0566c2ec51",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/camera-journey.md",
+          "type": "blob"
+        },
+        {
+          "blob": "625cf89d2e640d535bb3ca127fdbe86869ebaf54",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/comparison-split.md",
+          "type": "blob"
+        },
+        {
+          "blob": "1234152fd2897bb3b624d34ce92cba278e7afc94",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/constellation-hub.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cc791c9348677d8bff63e27f2d400767ef5395a0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/cta-morph-press.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d47a66779c1acdc857992865c9551cb94505d9ac",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/cursor-ui-demo.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2cea2a1cd78020c92873fb300c5ea9f2a7d858e3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/dataviz-countup.md",
+          "type": "blob"
+        },
+        {
+          "blob": "408ce700d62290a474180bb5022682c1e67afdea",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/device-surface-showcase.md",
+          "type": "blob"
+        },
+        {
+          "blob": "1752ee4540f2868595210a2ba29683c289584eee",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/fixed-anchor-cycle.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e7588d447e58ee12076f1d768dc6eb05d6987151",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/grid-card-assemble.md",
+          "type": "blob"
+        },
+        {
+          "blob": "4d992335175fc688ae3de3f7efe5f7e1f3ed69f4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/kinetic-type-beats.md",
+          "type": "blob"
+        },
+        {
+          "blob": "554e175ab5cae93607007b81aa443ea0d65e2481",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/logo-assemble-lockup.md",
+          "type": "blob"
+        },
+        {
+          "blob": "751d143984013d5d50cdd2514eb6ea62b22374bd",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/overwhelm-surround.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2eb2fd2f0e1a3c940b2fcb011c8a919931fcb6c1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/panel-edit-live-sync.md",
+          "type": "blob"
+        },
+        {
+          "blob": "57fd27e8aadb9c5eaa4ffe7afeb9ecd3925e0380",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/prompt-type-submit-generate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d3f172e4bc11e466ddacd32109a01073f76a709b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/spatial-pan-stations.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f4e0984685f3f3a76017a9cafc08bea524796863",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/ticker-takeover.md",
+          "type": "blob"
+        },
+        {
+          "blob": "90bf56b587c40a39b7256f5ee0661c9b0cb23bf0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/titlecard-reveal.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c7cc88d4b3190cad5138feabac13a51791add0fc",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/transcript-scroll-artifact-reveal.md",
+          "type": "blob"
+        },
+        {
+          "blob": "23b1cbaf91d0914365f160323e869a997f3fd98c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/typewriter-reveal.md",
+          "type": "blob"
+        },
+        {
+          "blob": "40f75fcb792a48938f2267761d0657b99b8fc25d",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/video-text-pivot.md",
+          "type": "blob"
+        },
+        {
+          "blob": "38467542024a00eaba44f1e3258dac37088aed5e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/blueprints/zoom-out-workspace-reveal.md",
+          "type": "blob"
+        },
+        {
+          "blob": "31950a9e6cf36fbe50879a7601032693a91deb21",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/brand-reveal-assemble-zoom.html",
+          "type": "blob"
+        },
+        {
+          "blob": "d60e753aea56df33cc8664c1757898c96f92ae41",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/comparison-split-cards.html",
+          "type": "blob"
+        },
+        {
+          "blob": "af4efcf614a120aeb8d135de1061797cfc8064ad",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/concept-demo-decode-pan.html",
+          "type": "blob"
+        },
+        {
+          "blob": "3896aa43a38c26c07a56256246d7ab5cc9655ca3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/cta-morph-press.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ad5d77e935a07758022666e6a35003b3856015a8",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/cta-orbit-collapse.html",
+          "type": "blob"
+        },
+        {
+          "blob": "4557db48dc5eba07e85627d337ade88db88c564a",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/demo-page-scroll-spotlight.html",
+          "type": "blob"
+        },
+        {
+          "blob": "7d2ae6f62d3ef15a35ccf6428b30b47b6ee4347c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/hook-counter-burst.html",
+          "type": "blob"
+        },
+        {
+          "blob": "b641d96e83131746ebbcd619079f3762318e03fd",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/messaging-multi-phrase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "01fb553342f4078754d9ec130e2f7e06288a1da5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/metric-video-text-pivot.html",
+          "type": "blob"
+        },
+        {
+          "blob": "a5f7800456103173abc6a537104c89ec30e316f7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/problem-mockup-overwhelm.html",
+          "type": "blob"
+        },
+        {
+          "blob": "52df7b20b5055c8cd65422ae46ec859141d05a97",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/proof-logo-chain.html",
+          "type": "blob"
+        },
+        {
+          "blob": "6c1a23baa04d54ce305f0e6ea73e1e4d1e17b3aa",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/takeover-ticker-displace.html",
+          "type": "blob"
+        },
+        {
+          "blob": "a5de4d62ab7356bbb269bb8455b66074f43553b1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/examples/workflow-approve-press.html",
+          "type": "blob"
+        },
+        {
+          "blob": "8568d22791ec1ef7690c175df6bf5cfeecf33559",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules-index.md",
+          "type": "blob"
+        },
+        {
+          "blob": "08ac4895b81030042022f39273d3f3ad6ac85597",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/3d-camera-flight.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e3a8f86350862068d719aed7312998e04e50ebe7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/3d-page-scroll.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5ca2641b068a358188bb922a35ef32271067d67b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/3d-text-depth-layers.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0ae63af7e598367da6737be778d0611af47b5913",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/ai-tracking-box.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e1807bdd92e1f0b4465a3f046f414c8feee3db36",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/ambient-glow-bloom.md",
+          "type": "blob"
+        },
+        {
+          "blob": "040e9766d6bcad3b24e3929018014d31c63b2b9d",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/anchored-layout-expand.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8a0eb9019f431da239941a52bfb63dfb1286d062",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/asr-keyword-glow.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7d47ebc9dd91262b1d9505e2e3b15d1a49963921",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/avatar-cloud-network.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b979bade937bcf312ce63950275848c094073a12",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/camera-cursor-tracking.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3ae8ae1cb7501061e84a0daa110bddea8f3a98f4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/card-morph-anchor.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0b6c1063807493b65e6ac64ccc80dffb0769bdeb",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/center-outward-expansion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "527878f1765ffbfa558f6644fc88e8255198a037",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/chart-scrub-readout.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c35713a92b72f4147e0f9a4b73c3a4cdd6fa691b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/chromatic-glitch.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a75f6da5459d5a6c6840311b9f1e36b3415b2fce",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/context-sensitive-cursor.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d521589c961e57ee825940f5a09b4ad442e175ab",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/control-target-sync.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a28e80fa6fb9292acff3854d0274157c3ee907f3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/coordinate-target-zoom.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5d9da5f3072e4ee2990b44dde6c9c37a302429c0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/counting-dynamic-scale.md",
+          "type": "blob"
+        },
+        {
+          "blob": "97ba6c4a039ec1adff8d47ad97d12316a68970b1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/css-marker-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "95ef75b981a8a3d68d2ab3d732f20cac02d2cb20",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/cursor-click-ripple.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e2495915994fae112de73037fd3d93ab450fdea9",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/cursor-drag.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e1b974a8f2f4c9ac40c23f5fc65e86646f9f83f7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/depth-of-field-blur.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8d1968088a6f5a7567eafeec1790e01c88e4ee96",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/depth-scatter-assemble.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2d3ba111cb68e0da64aa9b0eb11615cfa5731d7d",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/discrete-text-sequence.md",
+          "type": "blob"
+        },
+        {
+          "blob": "259cc6361fe2fa1e3978ffc176a3f7a5ad6f5d1c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/dynamic-content-sequencing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e633dad56b20dae13c220baca7d34626b17b09db",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/gradient-text-sweep.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0dcf6954f2523429f22cc05227baef32a74af6fe",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/gsap-effects.md",
+          "type": "blob"
+        },
+        {
+          "blob": "04c23cca398ff3c05b7aaccf56b3171deecf76e7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/hacker-flip-3d.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c82b1595c0eef03e4bbebbea46a20889a6567475",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/kinetic-beat-slam.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d631de6260ed0512370e2f5e449e90f1968364e4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/motion-blur-streak.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bd5895557bd7512b640580394209764052a6607e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/multi-cursor-choreography.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9b03ce7cf24c13143ba3c57bb8c82e3b49ae7c2e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/multi-phase-camera.md",
+          "type": "blob"
+        },
+        {
+          "blob": "25e552618d5ce65abf4dd7eef6590e3cc9e66aa6",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/nudge-curve.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ef46b771c38a2b30d038d3631a08a4b640c2c7e8",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/orbit-3d-entry.md",
+          "type": "blob"
+        },
+        {
+          "blob": "01a96e4a8a040e23f4e577ecd893d6a27469d428",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/particle-burst.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9fec017088384a1893e214f988a06227001e6559",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/physics-press-reaction.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3c6eac9671ce61e9307abf5bb068beea59f74e4a",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/press-release-spring.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae4b84f9acabd6337faa7601ff793684ddda8996",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/reactive-displacement.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cc350543577bd640f035cca1f7e27acdbc2bbb92",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/scale-swap-transition.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6619603b75febc427b49c0b21def8e9727bd461e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/sine-wave-loop.md",
+          "type": "blob"
+        },
+        {
+          "blob": "def415a99b833199d84c4e93b562c3951dd7602c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/split-tilt-cards.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2debc1eee003dd25f6c163f856aa8a0f7922466c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/spring-pop-entrance.md",
+          "type": "blob"
+        },
+        {
+          "blob": "58679e72cbe9c8f532317ce6804db086f8cfe192",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/stat-bars-and-fills.md",
+          "type": "blob"
+        },
+        {
+          "blob": "073d0fd0bb81296548bf3e56b860630e41fa6c01",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/svg-icon-enrichment.md",
+          "type": "blob"
+        },
+        {
+          "blob": "218fc6214b950f901bc32dd6ed872b0e5e883cb4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/svg-path-draw.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0621633e2bdf9e2d3c98c15764212852f720858e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/theme-crossfade-morph.md",
+          "type": "blob"
+        },
+        {
+          "blob": "55e22ca56f7156e09371ea6ab49ee1a97cc75f56",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/vertical-spring-ticker.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fe6faac8f23ea9896eead3162deec3cc1ee0917b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/viewport-change.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e19322bf3b4bb067ffb713c0ff73ca87f0517605",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/rules/waterfall-entry.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7a118c6f6966b91b74f96fc77bf8ca59b8a230fc",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/animation-map-sampling.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ef6ddb8b7eb03d736b16b15b380380515b49ba1a",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/animation-map-sampling.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d26b2065b194255fd129dbfbc695797614fb1ba4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/animation-map.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f3cbbecdfee6ba720ab9177ab9aa96a3748d21cf",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/animation-map.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ce1846a12d43dc01c7c9b9d4b19a62723b960242",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/package-loader.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7b36a3ceb37d00bc2e07c7cc50714945a1d583a5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/scripts/package-loader.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "88abb439bf9bc1b4cd00ce72dd029c79966f8944",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/techniques.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3f1bd3363628a01f9d4e24febc1fc4fb84936bc3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/TRANSITION-REGISTRY.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3d40b9db5c520fc642fafe5b0e2f351ce2e12e1e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/catalog.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b86b52012b41d8da60f9fb396da3a4dab8d7e985",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-3d.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2698ba90ece6a581d0482e89c244cf2cf0c5651e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-blur.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6ec60b80cec571776134265053b2ef1a322b4077",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-cover.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5db9b97385d7ff1650cadcb427b29d3031a50326",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-destruction.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3966fa9aa5b6dcb36f5215c5c2cba53cb177736e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-dissolve.md",
+          "type": "blob"
+        },
+        {
+          "blob": "44627f7c276a2dac3cec216b5aabd2fffaec1a79",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-distortion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ee16700684216e80e81d60d8c28a1079173e6f44",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-grid.md",
+          "type": "blob"
+        },
+        {
+          "blob": "08d4d5293eff3412695e0df81bf140f687bd5671",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-light.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fa119e7de2a02db264c43fe2e65eb68d1de85884",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-mechanical.md",
+          "type": "blob"
+        },
+        {
+          "blob": "698368a3879d0e28a4b9b83e1e49c25e60e47dc4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-other.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b7f550351f1d044eb342d32cb68943cc01491b67",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-push.md",
+          "type": "blob"
+        },
+        {
+          "blob": "040dad2f130fbe74b508255b81e6a0d812b8861e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-radial.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b16e26469d6b813c730567fa931adb753b42797f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/css-scale.md",
+          "type": "blob"
+        },
+        {
+          "blob": "425a13e256e9322759f02e9261be282123b028f8",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-animation/transitions/overview.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "95ccc63a46039a1fe1599aacf89dc9428ef13b72",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d344b53df8dcccf58c6444961cfca036f21bb682",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "276ef235dcf4bfac14cc51f3b14b6cc50362d723",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/references/attributes.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e92e0166fd182418fdfb00f4b541a9cbfe787546",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/references/diagnosis.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5bfb37f1b6a16d697b0412eddf7cb1b5a5025620",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/references/fx-registry.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6189aa2e2a00713ee6b345622bb3b3692a62efd5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/references/presets.md",
+          "type": "blob"
+        },
+        {
+          "blob": "271d4c0c912bf44a7dd98538a34a39bc54105af4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-audio/scripts/carve.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "b01ee482c1bfa7d2ab9ffb2ebd5ff98af354442f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "52e8b0678d90c84b33893d992fd43f8a728295c6",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "da3c05f507d0f8f4485412135e15e71bd9d72f9d",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/beats.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0ba144583ef764882dace3e29f293359a0fc8a65",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/cloud.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7ae21e35c7208eb4e4f7ac0d8522b2d81ed6e373",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/cloudrun.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7e2a2e0dd33dd01f9673bd3a5d34be89ba6cab99",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/compare-and-batch.md",
+          "type": "blob"
+        },
+        {
+          "blob": "96e12569fb10bdcaeb826a6b6a48ffdb02fb2166",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/doctor-browser.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f51f11eeca4154b4957635c218a1b3ec86ce5bd6",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/init-and-scaffold.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9c5639f0c73bff78f17c10e1ed6539ac72e4ccc4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/lambda.md",
+          "type": "blob"
+        },
+        {
+          "blob": "1420306af57151f6d25c64f65e6a94aa843fd6a2",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/lint-validate-inspect.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f5ed1f4e8e805b4622518bbed147c50ff41ce55e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/preview-render.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2fdc89537ea27c88761d81d512ef7747fa75d082",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-cli/references/upgrade-info-misc.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "3e44a4e54a11f84b1e6d09fd745915c87aa6febf",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a1552db32251be7460373846b2b5ae5610315725",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "416e409bbd927f17da9f9b0df195618db39b8a55",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/brief-contract.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6195edf37e56e1af0b254aed39f41b32710cbd4f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/brief-format.md",
+          "type": "blob"
+        },
+        {
+          "blob": "271407d1e4315c90d8d7a29dc784aff80bf60f3f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/composition-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ea8f0cdc1fab3ffbe46bf0c5fbb41e2b650afb92",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/data-attributes.md",
+          "type": "blob"
+        },
+        {
+          "blob": "44aef9835858a4f04bd78423dbfdb8b09a079476",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/determinism-rules.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6b1da927f26a9873db73756bdde9320e24d3bee4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/frame-worker-core.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5898485a8573d5ae3c2b012cea23e44f0e88fba7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/full-screen-motion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c38a00ead70d6ac6994fbd25d9c6864c28731f81",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/minimal-composition.md",
+          "type": "blob"
+        },
+        {
+          "blob": "92a5c46846d6fe483e9ee865e4bcfb805bef30fa",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/production-loop.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7ae9d5e6df5ca56491680cf527e1e3f6459af052",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/review-loop.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ad2b8ba4708d0d1e25965a2d2330f2ed526d5290",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/script-format.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8fe8102ff6f55cdbeb97d03be49b1e6058a25d01",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/storyboard-format.md",
+          "type": "blob"
+        },
+        {
+          "blob": "4b3dd8162923f1f5937ec58c524c0bdd4b235387",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/sub-compositions.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2148342b4622d5f2982e22369590adcaf376ea12",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/subagent-dispatch.md",
+          "type": "blob"
+        },
+        {
+          "blob": "715451e4990df7f71eb661d1aa2697645369e588",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/tailwind.md",
+          "type": "blob"
+        },
+        {
+          "blob": "991135a959ef5ea1e69c94ba1b501bc88fe992f1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/tracks-and-clips.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0d50268f61116baaec09bfa2d0f1c41d7b1c7994",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/references/variables-and-media.md",
+          "type": "blob"
+        },
+        {
+          "blob": "123b59c9fbeba968d9b0511552d9e7c9fd645d60",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-core/scripts/lib/frame-packets-core.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "293067cbafc4704a930757d35926d29cfd39484c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e13211676fdc1ccd01c62cfed286e16238ccb409",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "c082ea2fefdd47bd2679d72d6a50a3a41aa99eaf",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/biennale-yellow/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8ca668456354e2bf252452c0af04c1599a123f12",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/biennale-yellow/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "186f8252ad7aeaa18d1fbed1680e4227f0a9ac23",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/biennale-yellow/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "00e4d88318288c8c138716d266b13dcb31350d57",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blockframe/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f0cdb26fd0a8a5b816ac82d9de8b1c92ad180798",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blockframe/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "3f5a165072f67559e2c10bbd12d5cbb8bae820e5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blockframe/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "e821dee2dccc8e424ac160ca6714d561027cce46",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blue-professional/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5a599c2703c2453e50cf263cb31bcb6f5b576872",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blue-professional/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ff00e7be733ca18714a5b48c4f49669b68d17f5f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/blue-professional/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "c9f31256cd127913c3ff2457811f8467639da539",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/bold-poster/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ee1d4bfb6871de5dcf32c970d8d5b39b663d7f51",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/bold-poster/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "a8f91897faa3b5b4c74108a6424fcf9290325cd6",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/bold-poster/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "4dff52def23bb5492844cbbc25a25c19909c6fc4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/broadside/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "00f4b6f8db1791833dabc8e163e15845f1e45810",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/broadside/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "0d2a6cd15266207ca6feed354cadd2b8eaa21670",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/broadside/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "a37f828c847c031f1603406ce1440a8fc2b4f803",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/capsule/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0742a0532170739e8dfd6a2b2b0dc60ddf7566aa",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/capsule/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "65b4e196dbf09cd76208df59daaf77b142bd1dba",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/capsule/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "a00c21d9250ace9886fc835834993b9d63f64b3f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cartesian/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "135fa971929954b52a5b4f0f7964de8dddd624ae",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cartesian/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "7918b04e9ddb4bfb924668f24470a24e1d4b9e71",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cartesian/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "af52eec8f3cd86880530f4c0169c9cf422e31e4e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cobalt-grid/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e604347cf7f5b5e94186c202a1e83d1ea3d512ee",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cobalt-grid/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "d9449880f1a7b21ff30976dcdbd1d8a385cf3386",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/cobalt-grid/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "aa15b65eab5c50e8b4c861b525f7365f9f6c925f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "18c7a33421fddcd27fe4b789e2d4d6754fb52f04",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ffed311d3ecff2090519c97c2e7149ccd96305b2",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/EBGaramond-400.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "85d520902feaa6f8646f036bf1dbe6b901106e8f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/EBGaramond-700.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "f15b025d666269fb07daf0263e54231481e4289c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/Inter-400.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "a68fb101cd9224aa7bb6ca80356b5132c40c6f3f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/Inter-700.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "585887339efd032b6b715466ae72d86e306bec79",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/JetBrainsMono-400.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "3a4e333fc9316f9989e16af6788bf1fc788c7084",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/JetBrainsMono-700.woff2",
+          "type": "blob"
+        },
+        {
+          "blob": "da3ca89595df81b16855b86a4d0d370f34a908fa",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/OFL-eb-garamond.txt",
+          "type": "blob"
+        },
+        {
+          "blob": "40589daa9de8bc96606292ea0be712ff0f0626eb",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/OFL-inter.txt",
+          "type": "blob"
+        },
+        {
+          "blob": "8f7ed671137e7a27c646ead86f45d5cb4875f459",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/fonts/OFL-jetbrains-mono.txt",
+          "type": "blob"
+        },
+        {
+          "blob": "e0a70eab89b1e20dc131153f04f0424d44b2acc1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/code-editorial/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "0c73b04acba1d4b86e5285daa90273b5e346a3c9",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/coral/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "41f2a59603e4a7949230ed270cf38d47aede492c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/coral/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ae87659f3b61426694e9e522f6573b28b1d6c4e7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/coral/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "e00e6fed67b6a1a1f366119714d548238427d752",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/creative-mode/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "231e39bf048db4c6049e76b2a007abdfaddf6ff0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/creative-mode/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "e540e40a39733abced1ea3d249f692c0eca32832",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/creative-mode/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ed3ebf49e0a0f78cb5ac543e5c175d8da4c07541",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/daisy-days/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6431baaa6cd6129f22085436cc9d7889abee6d99",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/daisy-days/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "c577bdbab3a1f023139349f3a63f2e5ff875b274",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/daisy-days/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "83e2594f6301b54d98569ad478417d6fbb0d95ed",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/editorial-forest/FRAME.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b3d28986797c7643674ba93e120f8b104fc29d80",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/editorial-forest/caption-skin.html",
+          "type": "blob"
+        },
+        {
+          "blob": "c5c08718fef48120a17ee7d7858e3bfe592c63e7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/frame-presets/editorial-forest/frame-showcase.html",
+          "type": "blob"
+        },
+        {
+          "blob": "e60e2d76a481c0f1f3853374532411426b261f9e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/bold-energetic.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a4b79c939d0517c3235cccf9dadc4cc59ef5b8c8",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/clean-corporate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "84f81d5622d8f3fd18b97e072a45e171356008ae",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/dark-premium.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fbd5542b2a01ba16e5601d20d4115bc91d146201",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/jewel-rich.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e26d247379de3a2133af87294f5e3d7304a86c1e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/monochrome.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cc3cb9d63b0320310852659b99d38de62e811288",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/nature-earth.md",
+          "type": "blob"
+        },
+        {
+          "blob": "94c3e86e8de695ad49c1108c96ea3113095de368",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/neon-electric.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f4e99c5383955b41932e776152f38be5179ce27b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/pastel-soft.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2b1907aac544928b0fd82d82a2bdd21960be6830",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/palettes/warm-editorial.md",
+          "type": "blob"
+        },
+        {
+          "blob": "69549bbebac1a16b5696c58e8b715949e7e675d1",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/audio-reactive.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b1d436a5b9b371452e2186c9489cf1c7ee78616c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/beat-direction.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e2ddb391c06f492897dc49e8762f7235b9634418",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/composition-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0578cd155a7bbc1c3af7e31d1a6ce7f6416e86f3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/data-in-motion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "130d469df25aed5f057c81e507b22226417da43b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/design-adherence.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b0a9019226c9885fb6a385a93c94f51bbcd6b9c8",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/design-picker.md",
+          "type": "blob"
+        },
+        {
+          "blob": "696f91d95fac415a6afdc1fd7a5e8df5cd21fe8b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/design-spec.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e39459f222ecc7a6035207812c1eef5f4499788e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/house-style.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f7acae70c767cc066cde789f66c96b1dd9813af0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/motion-principles.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c28fff2ee65ec0620db9033a62834c6aa580384e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/narration.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ef6450d46c289e1027250a87e857835f9b68c75f",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/prompt-expansion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e6931f76030e128a8a51e41dbf9b84f61389bb8e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/story-spine.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2e5713d632efef682329b98bfdfb9f94910aa464",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/typography.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fb2a19320a30e10a9801b93e2053f30dde737aa6",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/video-composition.md",
+          "type": "blob"
+        },
+        {
+          "blob": "621ff9e6bfd4f0fd4b2e8c0e2a121939082bf3ea",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/references/visual-styles.md",
+          "type": "blob"
+        },
+        {
+          "blob": "429243ee6679a812b7d0928792d4014087e88740",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/scripts/contrast-report.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b4efba788d03ed84d6fae25e3a7102fde934f61e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/scripts/extract-audio-data.py",
+          "type": "blob"
+        },
+        {
+          "blob": "ce1846a12d43dc01c7c9b9d4b19a62723b960242",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/scripts/package-loader.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7b36a3ceb37d00bc2e07c7cc50714945a1d583a5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/scripts/package-loader.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6cb6f0878dc1b1e7296664b193c080a91babc335",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-creative/templates/design-picker.html",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-keyframes/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "cc981fae8e6ed9516ca74303dd0cb43152c657be",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-keyframes/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ca4855919d6f907288829d8dbef48e8842b514b5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-keyframes/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "2cb053d51e335257ba2bab26d0049d82849bda32",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-keyframes/agents/openai.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "3c3211d1c611e6faf88379f97535aafde19b57f0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-keyframes/references/keyframe-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "57c2f6cad2972426f42bb347c011967ee4e1a9eb",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ed776edad85304b50f560974ed9a8796052455f5",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "95bee6ff87928db0f6b3d39008e4f0913600ea79",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/examples/add-block.md",
+          "type": "blob"
+        },
+        {
+          "blob": "1371289ddfa21b27ec461947686c840f02e3d956",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/examples/add-component.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c34ec97847059002b7a115b937ab6dfa67495dd3",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/component-quality-bar.md",
+          "type": "blob"
+        },
+        {
+          "blob": "10a00191fc7a5aecd0f1b114a08e480136242b53",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/contributing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3e53838c10b91dbf5fb196c95cde64bc385d2bc7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/demo-html-pattern.md",
+          "type": "blob"
+        },
+        {
+          "blob": "550a9a7cf878045ca56ae77e02f087610c9e8c05",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/discovery.md",
+          "type": "blob"
+        },
+        {
+          "blob": "65e3d34e57f1e509f82476992c8d72c05a7106ee",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/install-locations.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d6648aafc463a378dd851c36d6cabd8804b476e4",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/placeholder-material.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8834c959e2d1d02d30e44e0c72d5960619a31c3a",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/templates.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d3f4474cfa7af80e157c44c51dd6cb0ce6d1d076",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/wiring-blocks.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9521a2174a37734efb3de8370224e21647a5655c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes-registry/references/wiring-components.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "fd2168c22c1035138f43c2487b929b99b0465039",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f47c1361933858e0fb7412e47f03e2d049fbd327",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "a07d7c9c10246e28912021c2f072fd22e58ef0ad",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/capability-menu.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fafbe8c8b2d5e8b775310267c901fe2e80d3b8d0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/intent-interview.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5cffa19199fe9d97d9d776051221ab17298a8e51",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/pitch-round.md",
+          "type": "blob"
+        },
+        {
+          "blob": "68cfac034e6339ba780f48bf02b47d81de31bb81",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/route-briefs.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dcca9efbf924c3b82622e9bd0dd601ed8bcfbd69",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/embedded-captions.md",
+          "type": "blob"
+        },
+        {
+          "blob": "b75b6ed311a316fad9b99bb934d1fd2f61b2a6f0",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/faceless-explainer.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d3e7c2d2b871e04f870143edff7f25f73ca7c89e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/general-video.md",
+          "type": "blob"
+        },
+        {
+          "blob": "41e3216cd703715a090be3fe88f1ad5f851be18d",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/motion-graphics.md",
+          "type": "blob"
+        },
+        {
+          "blob": "205418299ab4241fe964d9cea1423f847e55a19e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/music-to-video.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bd93c7f9005de39b4863cd4e29ced9864db18c6e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/pr-to-video.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e9c2cd3ebea0da2b35a2ee2b661fe557743c6d70",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/product-launch-video.md",
+          "type": "blob"
+        },
+        {
+          "blob": "257e042f485852ad2917ae134b1b460e1a3fefd7",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/remotion-to-hyperframes.md",
+          "type": "blob"
+        },
+        {
+          "blob": "5bb4ee971365ee98edbb2b7685c9ae37f754ea4b",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/slideshow.md",
+          "type": "blob"
+        },
+        {
+          "blob": "42ec6e65b3af1aabaf70cdc539ed6a8e6ee69a25",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/routes/talking-head-recut.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cf5c79d05ee880cde8c86a4b199b642151eec88e",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/skill-lifecycle.md",
+          "type": "blob"
+        },
+        {
+          "blob": "934de53086041e3bfea4048f632157bde7fdd363",
+          "mode": "100644",
+          "path": "skills/creative/hyperframes/references/workflow-catalog.md",
           "type": "blob"
         },
         {
@@ -1868,13 +3727,955 @@
           "type": "blob"
         },
         {
-          "blob": "bf7e850aa698e68cdf696d6a557fcbd4296c06e7",
+          "blob": "17df1e2dbcfacf1e381b6153b10eac6002151231",
+          "mode": "100644",
+          "path": "skills/creative/media-use/.gitignore",
+          "type": "blob"
+        },
+        {
+          "blob": "ae06b37e1c5116ccfaa615ac25ec1aabf5658d8c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "5655ccb439e6195c575c00442839a47c68ce0f79",
+          "mode": "100644",
+          "path": "skills/creative/media-use/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c5155d713970ab134978dfd692eaaf018d765dbd",
+          "mode": "100644",
+          "path": "skills/creative/media-use/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "750d6e83934164d6cb38f6cc96269104dc4695b4",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/CREDITS.md",
+          "type": "blob"
+        },
+        {
+          "blob": "12da953a356a49458d03e09185336d81f4b92f81",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/chime.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "2706b1d2ea64721d1888d15fee2fcc98f0609570",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/click-soft.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "2706b1d2ea64721d1888d15fee2fcc98f0609570",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/click.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "6b4487ff46c03a883ded41b2ad0bb2830b2dbde6",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/error.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "124f4501948aafd03ae655bf11570bfbe47fa704",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/glitch-1.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "580b6fdc4f665660b2c74872a0bcdccf826222be",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/glitch-2.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "5a8adc2442314cf79e6e1fb25598d0149afbd421",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/glitch-3.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "ecfe0c48a672e77c98afac6810fd4c446dde94b0",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/impact-bass-1.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "4ae448b58a5011e4aaeeab3cbcaf0e4a0d59cd86",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/impact-bass-2.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "d669006e01071d57b3ee7c8ada064a2bf6b7dddc",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/key-press.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "7db0ad7ca58f8ebcebb813a253c47b039ef2b9ec",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/manifest.json",
+          "type": "blob"
+        },
+        {
+          "blob": "d3f0d1fa22dde07ae601b20cbafb9cc1274dafeb",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/notification.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "99808c8b6399ffa82a074ffeb0f180ec9afd3920",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/ping.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "e3ed16fef09641bbd7c0d53f508c71d6af863efb",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/pop.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "0cea32c08dc8524cd592d6779165157115cb6dc2",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/riser.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "dae37802ff423cfb82a259a60812a83e5397a520",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/sparkle.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "ff69cc04200bb1af6e0785a801ca4d77281b4fce",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/typing.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "93b721800780ac4fe5e1847bb58dc60248db2402",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/whoosh-cinematic.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "e23e513d273009fbf48e8bcd44f65953e38bc3b0",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/whoosh-short.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "e23e513d273009fbf48e8bcd44f65953e38bc3b0",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/assets/sfx/whoosh.mp3",
+          "type": "blob"
+        },
+        {
+          "blob": "9c43da908abe463e42d9ba211edbea2b874bf5c7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/bgm.md",
+          "type": "blob"
+        },
+        {
+          "blob": "65687f680336861388464657a685d816b6beda7e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/captions/authoring.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d39be28dce42613ae2a7520e32e256f95350007a",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/captions/motion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "3a87d6410f73db41b880bd329b0539d5ad30834c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/captions/transcript-handling.md",
+          "type": "blob"
+        },
+        {
+          "blob": "eff9fd551f7fa2e19858ea4010d1e71e514cd9a9",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/remove-background.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8c5793464c9c5e43e23259b9ce8708b451580662",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/requirements.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6df3268cc354dbbb127b9eb47c2e867b38fb061d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/sfx.md",
+          "type": "blob"
+        },
+        {
+          "blob": "06df2ce445bc7eb13fc4e0b42321cf405d9c6db4",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/transcribe.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e11262cae282e7ed57f78f08f6b5ab817609fa35",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/tts-to-captions.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d9fbd43349676b0408c834fe429d0d6af612911c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/references/tts.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bc005eeff99cd4f738c7bc777b653639d12b36f7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/audio.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b229e40cc3ba11192b16661e169c50e02601e598",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/audio.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "3b6dcbf4a84c798689e02c0068fb799dc011ab7b",
+          "mode": "100755",
+          "path": "skills/creative/media-use/audio/scripts/heygen-tts.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4c91d005f2a6969186fcfd38e98ea16e80a195f8",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/bgm.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "46967605c7de378bcafec853b5b459ff39b239c1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/bgm.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4988b619202f15a6002be7475bc80408f8b0c0f2",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/concurrency.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d033860b86823c7473cd096fcbbe8b9f3d5e6ce7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/concurrency.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ed784ffd4057e935a8fbfb02f1ba7e0d4d13f99b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/heygen.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "22542f3552072db8134fe0cc2816de6ddb48df55",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/heygen.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a11c0151ce34b916fb29af4cc2771bb82e6166a4",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/python.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4598d02e03a6e6c3007b6403f92e085bdffce80a",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/python.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f72baf34ee789f4f3d89083d282265cce930a3dc",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/sfx.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "3c89d58748f7bb52b37a377f71e45931f33223e1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/sfx.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8bb004e138963802d830ae83ab14ae0d93642728",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/tts.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b8e6b49a9bf8ab9af47db9d24f14a9fb7c79dcea",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/tts.spawn.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a4f651908d96bcfbe245ba479f6687524ec6c966",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lib/tts.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c28cba8f7340c82bb3945597ce242d3d9718f039",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/lyria-recipe.py",
+          "type": "blob"
+        },
+        {
+          "blob": "aa9cc19361444b0c95e5dcfb507f0c7105eae53e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/audio/scripts/wait-bgm.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "dc3ed9ae55b6909732ca8f06cf8c89dc99da2bc6",
+          "mode": "100644",
+          "path": "skills/creative/media-use/luts/README.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9f6725c4a7c80c4b368a01196f57c0dcdc3a44c1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/luts/index.json",
+          "type": "blob"
+        },
+        {
+          "blob": "504d6303323ce9a4d5d685a57028c11d0b0c9e97",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/audio.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2292eef785993fc087a23a2eb3c9ab4b17866847",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/grading.md",
+          "type": "blob"
+        },
+        {
+          "blob": "37903ab58fbec08f7851253babd28087152edd04",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/media-treatment-recipes.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6651b2804931bfdf153842d8cf25f22155c98537",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/media-treatments.md",
+          "type": "blob"
+        },
+        {
+          "blob": "26bd366ccd9ab75feb016aafe71d7c5540d06251",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/memory.md",
+          "type": "blob"
+        },
+        {
+          "blob": "776d1ed5d591df64245c717fddcbebc626b10652",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/meta.md",
+          "type": "blob"
+        },
+        {
+          "blob": "95b242a7cb587fa8d550c493467358c75564d26b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/operations.md",
+          "type": "blob"
+        },
+        {
+          "blob": "61c13cb32e4158a77848363539e5a136a954aa4c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/resolve.md",
+          "type": "blob"
+        },
+        {
+          "blob": "ef5329e726f6aa39fbe45d6c1052b23aa85dc627",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/setup-providers.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e0aac2de532581919f83447245a18f32bda995ef",
+          "mode": "100644",
+          "path": "skills/creative/media-use/references/telemetry-dashboard.md",
+          "type": "blob"
+        },
+        {
+          "blob": "4fd1f342d33b6ad2f7f2eb567bc52776b919fae3",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/audio-duck.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7e4bfef6ff2eee1fcf2b2b0c489edc37f9f4b138",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/dither.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "1e2d61f270e063734e64a6f2ba5ac62c58cae896",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/dither.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7184c6fc1538ab41864dd94a54dc40f52ce22f1d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/eval.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b140ed02c7c501738a6dfc4662213afd8a71603f",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/adopt.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a961ae1776473fe149d1a08d05cc0c300b09fa7e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/adopt.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "462354d098b7e48517d37255b8ad565569c866f0",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/bgm-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e05caf1e3e2d61b6efd9a5a1a00e6bc0f17799e9",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/brand-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7011b45fcd4ad0bcde9593982dd261d61633300d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/bundled-sfx-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "869fe896f32df46559b0b37c0c35e6d92beb03e1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/bundled-sfx-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c7c7d6f714629e0ee0c589ab778dffcc300c3e1d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cache.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c8ecff05591e20a26ab213e0e6ae0f6f87d5eb1c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/candidates.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "972577b3c00f2439c3a68171f13267813ba3cf33",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/candidates.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c4e96b7501587e2d5bf557c697e233967fc20709",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/codex-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e3a54815b591b735cf6836dc6e553f0a686a0a04",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/codex-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ed4ffbde93f1a80dbf2d477842f60d939b35e639",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/coverage.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "92b8f2012ba0c5dcf8eb552ac0c980e8a632ca57",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cube-build.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7824d7a2cfb334d1c1f2188ef2a522d1a97f8874",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cube-build.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "4aef33ac03b1b8009eb3cd947272e820da3ff2d3",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cube-validate.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "2465bfbcdeeb850adf03ff526ee084506ec145c1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cube-validate.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "07d0d34159c187791025a16c35a4127743ae4b2c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cutlist.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "72e6f2b0df007a3c875bcac64c646979fb861906",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/cutlist.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5330e8e358d1ca933b69348dd3ab5c99467f1a7a",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/duck.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7609d6ce51611db691a156b77b2f1a4be7b13ea2",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/duck.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e59a9c5ab600ba4b32dec45ff2d229778004da64",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/error-diffusion.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b1569158b97b6c06a3f1955dde84e3cec8a307e1",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/error-diffusion.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "2527f6626d705534c522af123d61e070977f12c2",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/freeze.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "c71eb76a0852994419ea09d2c5344fb96e3fab6b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/freeze.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f419d5b3b95a6f46c7c3f6adca64605a3113226e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/grade-analyzer.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0a649029d6fc87821949e6ffee72f7d3355e33e6",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/grade-analyzer.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "bbf40c7ca35a47c210381f95a8891b03babb0520",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-cli.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "56594ac0d0e83e976bf0dc80eae65caebd6ad7a5",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-cli.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e52254c25a7cc0a0516ff7007e2b32c5a0501656",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-search.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "dc7f4b42af153da0182ea24ce8a5eedc1412ad69",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-search.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "799ac0442e9f4dafb1a80ca2e35b2e3856341850",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-video-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d258d4c9ebdce60ac9a7c2488cc87c136510a18e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/heygen-video-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "69b26397e78cd84e49c15662e30460e0d16b5085",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/image-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "65b019a92e9cdd88e3ca97f27986ea170dea9236",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/index-gen.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "af292ff324cdcaf66dea862f9f0a2484e5e9df63",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/local-models.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e1cc56368fcf47dbb45947484dac19ecc09c3be7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/local-models.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b8b1bc6c2160f164524c237f7ffff13eebab9138",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/local-run.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "7e9c883dbc2dab1c6b896908c5f29d19e3bb700b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/local-run.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d4028af94f688321a8ed1f7773d2b25e8c8f3226",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/logo-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5863d409b9d7dbdd47313b72835446ca54898104",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/logo-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e7ca747489cf21ef89c41e2f8f96682ecdae6c2c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/ltx-video-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b24e35cda5142b2d50ff1da1c145dc82a4977c8c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/ltx-video-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "51c600b38c44fe01b850b30968f6cacb936999c5",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/lut-preset-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "1d4cd9f8b1fe0292b6f41cf43f3a3e83666570ce",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/lut-preset-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "0bd2f7b3daced59418f88188b5981b7b812314a7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/manifest.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "08e078ff27a005485251c6ed741948598c0faebb",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/manifest.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b9e8859a986a468ff0036e3c69b3981ad7c4513c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/match.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "9de2f920bf7efe870c994232a4e0675757059cd2",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/mflux-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "585bb963849d2375b7e9e6db9060b87854edbc1f",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/misses.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d9b25856622fc76e5c6299e081d5889f6b820aae",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/misses.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8ada152d05ada89b3a5af67dbe59bfc1af8a5fce",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/npx-sync.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "83244e642a0ed2d74256ec159c1d947f2e0d5a07",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/npx-sync.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "04df79c7d4b1da6c6da51248fd817e1029c2bee7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/parakeet-words.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f74e78481fca10640c2b47e6350d14203e4720eb",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/parakeet-words.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6bc3f7345f1be8a772d001281de873347a1a4421",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/prefs-store.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e0bc5ca814f18b994bd0de8eab86dee6a78184a7",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/prefs-store.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f7e0a72224301e24da917098a3f9e5c418492cca",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/probe.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d4d896cc382bfec860a93d65c06d71fe28aa6019",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/probe.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "6220e88ee9fe0e2ced1f9bf12d97fc06bae79a41",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/providers.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e11ec96a31b073e07a3daea55e7b50cc32192276",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/recipe-store.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "954291293d2b6f5c9aba157eccf770ed0dd25454",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/recipe-store.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8faa91920946fcccd2cf55e60b56f821f517a31d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/registry.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "08f30351c3819037c0e51a1ca7584f01f10a2e4b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/registry.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b545b4852d925f8a01334a7f90277fb1d241c895",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/search.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "8d68a6882121f4cd2079b11a8ee67f496e896540",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/search.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "24c9e5398fdaf3fddff2595df2d37a4f1b2f1e65",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/sfx-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "831e4eb170ecd4c25337255d8e6001f9416a4f78",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/specs.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "1c9172b318e001f5cb0c94934fce31e03c75dffb",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/specs.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "39611971cce29a91617e3857313df88a74a39119",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/stats.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ff0b6b466e8f4c5caf6ad62dd46b66429886a621",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/stats.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "43603d762973983c43015d7a97b37b7ee38c2e8d",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/telemetry.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "1a66d60f78e0037df5eb8236176f624a325f3037",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/telemetry.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "b2058780f1b98e8f8f72cd8fe06faff3cd6c8b17",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/tts-local-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "11ec193b78c6533583105e89bd57426b807cd499",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/tts-local-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "806f146ba04d8b4d783dee46820265d3347d74f0",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/usage.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "271e70762779a75a2fa7887907eb070ddaa47b2e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/usage.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "2c80ae6e22b36bc4c87c48b4f6b5b7bcab619e0e",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/voice-provider.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "f24bc468f09b6f21c12515e9f260bf564e847146",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/voice-provider.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "114cf766ceacbdbbe163f0baf64b6f4788677262",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/lib/words.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "5f13583de8b2e3e1ff0e558852cd1e25e72f14b3",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/prefs.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "ae26c8c79ec6c84567645d67e2aa8fd0febba38c",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/recipe.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "a554aeb966e2dc9c54e59c1ce28fb90a9ca83280",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/resolve.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "028270b08e310fbc299fb9bed408c8a7153fa4fd",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/resolve.test.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "e702606966d1a66d7c13db267e47df4a142f6b9b",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/transcribe.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "d76bd022fb98f009428c27e9510fa081a427d951",
+          "mode": "100644",
+          "path": "skills/creative/media-use/scripts/transcript-cut.mjs",
+          "type": "blob"
+        },
+        {
+          "blob": "975f4ec1fa694905a7ae029a7a234e8f042bcf66",
           "mode": "100644",
           "path": "skills/fleet/golden-computer-use-v2/SKILL.md",
           "type": "blob"
         },
         {
-          "blob": "904ecd870bec022ec3d6424a873a02ec13bea8f1",
+          "blob": "122ca417ba074fba8cc20189378875093ad687ae",
+          "mode": "100644",
+          "path": "skills/fleet/golden-visual-qa/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f0e5b29a94d4effd5986916560228ef26541bddc",
+          "mode": "100644",
+          "path": "skills/fleet/golden-visual-qa/agents/openai.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "b89a3dd88f70707bcd6d846edf0406e6493c4359",
+          "mode": "100644",
+          "path": "skills/fleet/golden-visual-qa/references/review-contract.md",
+          "type": "blob"
+        },
+        {
+          "blob": "4d0b1eab0490ab14541b05707c796c21a70b1f3f",
           "mode": "100644",
           "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
           "type": "blob"
@@ -1886,13 +4687,25 @@
           "type": "blob"
         },
         {
-          "blob": "ea8fdde8a4ec34ec8c095ea10774ca2d558f4d7a",
+          "blob": "ba183e6dd6ccec4fa4a9356ad94136bff010c30c",
+          "mode": "100644",
+          "path": "skills/internal/capability-scout/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "d69d16bd957e2f370ed18838507c7b8859330dc2",
           "mode": "100644",
           "path": "skills/internal/creative-output-escalation/SKILL.md",
           "type": "blob"
         },
         {
-          "blob": "416010dd6cb1b4bfdffb0dc8584ddad4fd6a3588",
+          "blob": "397a37d7b6939685cd5433e527d542fe0ccf619d",
+          "mode": "100644",
+          "path": "skills/internal/self-improvement-loop-gates/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "be13da596e51ad49daaa462544fb2ca39f3051ae",
           "mode": "100644",
           "path": "upstream.lock",
           "type": "blob"
@@ -1900,12 +4713,14 @@
       ],
       "paths": [
         "bin/client-doc-artifact-qa",
+        "bin/golden-visual-qa",
         "bin/hermes-client-day-review",
         "bin/hermes-reflect-candidates-to-drafts.py",
         "bin/hermes-self-reflect.py",
         "bin/hermes-skillify-autopromote.py",
         "bin/llm-attempt-reconcile.py",
         "bin/client-local-evidence-query.py",
+        "bin/tasks",
         "bin/open-loop-detector.sh",
         "bin/papercut_inbox.py",
         "bin/registry-sync.py",
@@ -1930,6 +4745,8 @@
         "patches/modules/clarify_prose_deadlock_guard_v1.py",
         "patches/modules/context_compaction_postconditions_v1.py",
         "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
+        "patches/modules/cron_operator_delivery_v1.py",
+        "patches/modules/cua_existing_profile_launch_grant_v1.py",
         "patches/modules/silent_context_lifecycle_v1.py",
         "patches/modules/state_db_descriptor_lifecycle_v1.py",
         "patches/modules/voice_memo_single_delivery_v1.py",
@@ -1939,14 +4756,17 @@
         "patches/modules/platform_delivery_drain_v1.py",
         "patches/modules/gateway_runtime_root_guard_v1.py",
         "patches/modules/gateway_service_binding_guard_v1.py",
-        "patches/modules/lifecycle_guard_invalid_path_v1.py",
         "patches/modules/llm_attempt_receipts_v1.py",
+        "patches/modules/oneshot_cron_provenance_v1.py",
         "patches/modules/media_same_path_resend_v1.py",
         "patches/modules/mcp_in_turn_refresh_v1.py",
         "patches/modules/mcp_legacy_alias_dispatch_v1.py",
         "patches/modules/mcp_legacy_cold_alias_activation_v1.py",
+        "patches/modules/native_browser_use_safety_v1.py",
         "patches/modules/intent_ack_progressive_v1.py",
+        "patches/modules/inactivity_fresh_worker_recovery_v1.py",
         "patches/modules/lean_agent_loop_v1.py",
+        "patches/modules/lifecycle_guard_invalid_path_v1.py",
         "patches/modules/registry_loader.py",
         "patches/modules/restart_interruption_checkin_v1.py",
         "patches/modules/runtime_env_config_authority_v1.py",
@@ -1957,6 +4777,7 @@
         "patches/modules/telegram_commentary_capture_v3.py",
         "patches/modules/telegram_media_download_retry_v1.py",
         "patches/modules/telegram_poll_liveness_writer_v1.py",
+        "patches/modules/telegram_progress_cleanup_success_gate_v1.py",
         "patches/modules/telegram_transaction_canary_v1.py",
         "patches/modules/windows_gateway_task_identity_v1.py",
         "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
@@ -1971,6 +4792,7 @@
         "plugins/mcp-on-demand-control",
         "plugins/semantic-computer-control-guard",
         "plugins/task-ledger",
+        "plugins/telegram-topic-post",
         "plugins/telegram-transcript",
         "scripts/merge-shared-defaults.py",
         "shared-defaults",
@@ -1978,51 +4800,114 @@
         "shared-rules/content-policy.md",
         "shared-rules/capability-discovery.md",
         "shared-rules/file-delivery.md",
+        "shared-rules/host-health.md",
         "shared-rules/image-generation-routing.md",
         "shared-rules/knowledge-store-policy.md",
         "shared-rules/knowledge-routing.md",
+        "shared-rules/machine-capability.md",
         "shared-rules/westminster-marque.md",
         "shared-rules/truth-over-comfort.md",
+        "shared-rules/video-production-routing.md",
         "skills/fleet/nightly-client-reflection-default",
         "skills/fleet/papercuts",
         "skills/fleet/golden-computer-use-v2",
+        "skills/fleet/golden-visual-qa",
+        "skills/internal/capability-scout",
         "skills/internal/creative-output-escalation",
+        "skills/internal/self-improvement-loop-gates",
         "skills/creative",
         "upstream.lock"
       ]
     }
   },
-  "deployment_digest": "f75aeb4c45860f9bc712e28c77dea1a302f7a8c958d7519436f7f6c8ed45338d",
-  "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
+  "deployment_digest": "efd9ec47e3ea8b9424ca799e892458b5c1cb28859d616f3ec928041c99ce280a",
+  "golden_sha": "d1ff1e9ca6864ff2e1a687b5983b36623d8f2a51",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
+    "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
     "excluded_state_or_artifacts": [
+      "agent/codex_runtime.py.bak-pre-telegram-commentary-capture-v3",
+      "agent/conversation_compression.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "agent/conversation_loop.py.bak-20260824-092138-state-db-descriptor-lifecycle-v1",
+      "agent/prompt_builder.py.bak-20260824-092138-skill-index-allowlist",
+      "cli-config.yaml.example.bak-pre-windows-gateway-task-identity-v1",
+      "gateway/delivery_ledger.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "gateway/platforms/base.py.bak-20260824-092137-pre-typing-receipt",
       "gateway/platforms/base.py.bak-pre-telegram-transaction-canary-v1",
+      "gateway/platforms/base.py.bak-telegram-dm-topic-root-guard",
+      "gateway/platforms/base.py.bak-voice-memo-single-delivery-v1",
+      "gateway/platforms/whatsapp_cloud.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "gateway/relay/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "gateway/run.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "gateway/run.py.bak-20260824-092138-pre-session-reset-policy",
+      "gateway/run.py.bak-20260824-092138-state-db-descriptor-lifecycle-v1",
+      "gateway/run.py.bak-pre-cron-scheduler-can-dispatch-compat-v1",
+      "gateway/run.py.bak-pre-inactivity-fresh-worker-recovery-v1",
+      "gateway/run.py.bak-pre-media-same-path-resend-v1",
+      "gateway/run.py.bak-pre-platform-delivery-drain-v2",
+      "gateway/run.py.bak-pre-restart-interruption-checkin-v7",
+      "gateway/run.py.bak-pre-telegram-commentary-capture-v3",
+      "gateway/run.py.bak-pre-telegram-model-checkpoints-v1",
+      "gateway/run.py.bak-pre-telegram-organic-checkpoints-v2",
+      "gateway/run.py.bak-pre-telegram-progress-cleanup-success-gate-v1",
+      "gateway/run.py.bak-voice-memo-single-delivery-v1",
+      "gateway/session.py.bak-20260824-092138-pre-session-reset-policy",
+      "gateway/session.py.bak-pre-inactivity-fresh-worker-recovery-v1",
+      "gateway/slash_commands.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
       "gateway/stream_consumer.py.bak-pre-telegram-transaction-canary-v1",
-      "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1"
+      "hermes_cli/config_defaults.py.bak-pre-windows-gateway-task-identity-v1",
+      "hermes_cli/gateway_windows.py.bak-pre-windows-gateway-task-identity-v1",
+      "hermes_cli/tools_config.py.bak-pre-native-browser-use-safety-v1",
+      "model_tools.py.bak-pre-native-browser-use-safety-v1",
+      "plugins/platforms/discord/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/feishu/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/matrix/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/slack/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/teams/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/telegram/adapter.py.bak-20260824-092137-media-download-retry",
+      "plugins/platforms/telegram/adapter.py.bak-20260824-092137-poll-liveness-writer",
+      "plugins/platforms/telegram/adapter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "plugins/platforms/telegram/adapter.py.bak-20260824-092137-pre-typing-receipt",
+      "plugins/platforms/telegram/adapter.py.bak-pre-telegram-transaction-canary-v1",
+      "run_agent.py.bak-pre-telegram-commentary-capture-v3",
+      "scripts/install.ps1.bak-pre-native-browser-use-safety-v1",
+      "scripts/install.sh.bak-pre-native-browser-use-safety-v1",
+      "tests/gateway/test_active_session_text_merge.py.bak-telegram-dm-topic-root-guard",
+      "tests/gateway/test_base_topic_sessions.py.bak-telegram-dm-topic-root-guard",
+      "tests/gateway/test_base_topic_sessions.py.bak-voice-memo-single-delivery-v1",
+      "tests/gateway/test_command_bypass_active_session.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_delivery_ledger.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_drain_inbox.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_restart_resume_pending.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_restart_resume_pending.py.bak-pre-restart-interruption-checkin-v7",
+      "tests/gateway/test_slack_approval_buttons.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_telegram_approval_buttons.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/gateway/test_telegram_noise_filter.py.bak-20260824-092137-pre-silent-context-lifecycle-v1",
+      "tests/tools/test_browser_use_cli.py.bak-pre-native-browser-use-safety-v1",
+      "tools/browser_use_cli.py.bak-pre-native-browser-use-safety-v1",
+      "tools/tts_tool.py.bak-voice-memo-single-delivery-v1"
     ],
-    "expected_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
-    "file_count": 82,
+    "expected_upstream_sha": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
+    "file_count": 93,
     "files": {
       ".golden-runtime-carriers/durable-drain-inbox-v1.json": {
         "mode": "100644",
-        "sha256": "085236cd7b1d1055f70d7c93b374918fcade8b7607e7890b6e7d664576b00891",
+        "sha256": "601cc767981b26adb22bd9d921a6150cc098ca4710564bfb827a38fe5c4228d3",
         "type": "blob"
       },
       "agent/agent_runtime_helpers.py": {
         "mode": "100644",
-        "sha256": "3d454dba310bb8ecb035badad71451e21a11f29fbc134ba8e8f1adcfd77e2346",
+        "sha256": "fa7f5d329c80266053b04a54cff7e848e7e5181abc9da1e71c4b6bb32dfe3396",
         "type": "blob"
       },
       "agent/auxiliary_client.py": {
         "mode": "100644",
-        "sha256": "186bfa5a1b5c26492ffdb389721607e980705c98e1475d12fb5816e46afae55a",
+        "sha256": "a34989b98c1d08734121436ad7948903702845275f367e67cda40202c4491bab",
         "type": "blob"
       },
       "agent/chat_completion_helpers.py": {
         "mode": "100644",
-        "sha256": "7b24eee54a2b1731feefee40c6d1ab310eb6178167db98c7b1f7b65b323b3472",
+        "sha256": "1816496789e48541ebaece50c6b2d088e10edbb56ff71a7d4a5cfcbb6e305624",
         "type": "blob"
       },
       "agent/codex_401_circuit.py": {
@@ -2032,22 +4917,22 @@
       },
       "agent/codex_runtime.py": {
         "mode": "100644",
-        "sha256": "e4a8ed1135caf691bd0b5b8f27c1aac31fd66e69be6fb190fecca5578894799f",
+        "sha256": "f01e61054b988b31c7f8c8fbccfdba9e31fea16bedc8494971e84111f85e183f",
         "type": "blob"
       },
       "agent/conversation_compression.py": {
         "mode": "100644",
-        "sha256": "d5c15ef32974f4eff58a8868191ce1ce9d89e6a7346d7f844f89a0c90c298d8c",
+        "sha256": "8f1fa50a8c9d97c6bfe03875f29c689858b2db2639785b91632f0385dd931e91",
         "type": "blob"
       },
       "agent/conversation_loop.py": {
         "mode": "100644",
-        "sha256": "448f0ec249a897ca1ee2af3b36ef74eac94b99c935af5afcba4235c7bbdb6ad2",
+        "sha256": "46c171b15620fd07042d38d21fbf8d2cadd2c4c2c98b49781b51e8b64cd6de3f",
         "type": "blob"
       },
       "agent/llm_attempt_receipts.py": {
         "mode": "100644",
-        "sha256": "01218c1beaa43e0753f1b5c329618b458f165bcd3c2a163c7ce98edd99707bcf",
+        "sha256": "27d3789a3170ec673800507f0c8de7cf7df32c29a4aabb59c7d1af23a8b71c7f",
         "type": "blob"
       },
       "agent/open_todo_stop.py": {
@@ -2055,34 +4940,39 @@
         "sha256": "28ffde411c7cbd9aa2a9aa8e97377f5a13c44c9c06c6fe2b19bf56c4a163ebde",
         "type": "blob"
       },
+      "agent/outcome_stop.py": {
+        "mode": "100644",
+        "sha256": "6bdb7d5f2c949e026d7fcb15babad8954d15d10458c121eae3d91ff619514e3e",
+        "type": "blob"
+      },
       "agent/prompt_builder.py": {
         "mode": "100644",
-        "sha256": "0c73bde064ac3b47b89ee3b45c4ed067062e6912250246031aafd593c8ff9452",
+        "sha256": "5e71cf49bdcdd522cf8800ef809c5d4455193f828ead9b779e0aeb4e93773256",
         "type": "blob"
       },
       "agent/tool_dispatch_helpers.py": {
         "mode": "100644",
-        "sha256": "000187df49c48965cdde05961b8ecaf4262c98615402bde41bdcbbe167648d4a",
+        "sha256": "f5c772771ee8df66af3286970d0f64f13c818d2d4abc422c19dc0846e6acf1fd",
         "type": "blob"
       },
       "agent/tool_executor.py": {
         "mode": "100644",
-        "sha256": "15ffc27d0eedb6b69094ac5891aef829e051facdca87223bc75795ca95e621af",
+        "sha256": "5ef509965c929c4e7995d0d014d0889061aa30c72451491962c82efbdf905f2a",
         "type": "blob"
       },
       "agent/turn_finalizer.py": {
         "mode": "100644",
-        "sha256": "9f91e6f1e722ec4ef08d192bed2507014e81eb0a3fe3fe1cd76727c204aef345",
+        "sha256": "41ba85282132b264d39518f9179e87f9ebe7249a7be29e7598adbdbadb97d2d3",
         "type": "blob"
       },
       "cli-config.yaml.example": {
         "mode": "100644",
-        "sha256": "fca6e749532ec0b6e9edcc8614cfaa98893ed4ebd9f05e77b75c0ad4057af428",
+        "sha256": "fdb916e4836085b2e0dece1df01198be9478f7fb9a7256995f73b3bec9ec9262",
         "type": "blob"
       },
-      "cron/lifecycle_guard.py": {
+      "cron/scheduler.py": {
         "mode": "100644",
-        "sha256": "5360ac60feab05304a27173ebe25e3a7a1abb869a5070981972d661388462ad8",
+        "sha256": "6d354eb4a725a1f9bb8f851757695475db0aa303382e7cd4e1ef5c7669a1c75c",
         "type": "blob"
       },
       "gateway/delivery_ledger.py": {
@@ -2097,12 +4987,12 @@
       },
       "gateway/platforms/api_server.py": {
         "mode": "100644",
-        "sha256": "a057772e510f8f70ad94ed4d0228fb07600c74513b8eac07cd18cd66dc4f176b",
+        "sha256": "0792ec0b87bfe06b11eed29d70b060eef8f88530473202dc17d0eb5daa2b9f12",
         "type": "blob"
       },
       "gateway/platforms/base.py": {
         "mode": "100644",
-        "sha256": "d98584567151408d2e8b5c03afb36a5bf6b4977f107dd92aa1eaffcbf424721e",
+        "sha256": "27c1236c4a1338c08ae0114d24831ddc087c0145b034cdf7c7eab9a61ee726fe",
         "type": "blob"
       },
       "gateway/platforms/bluebubbles.py": {
@@ -2122,7 +5012,7 @@
       },
       "gateway/platforms/webhook.py": {
         "mode": "100644",
-        "sha256": "fedf6a00888ab5b764aac7aa08ccdc324ce09f7804b46f1ffc072f9de95f1a6f",
+        "sha256": "df3fa0f97342c40e81f41b169aa0246d0b3466cdf1be7937b18f75b8369dad38",
         "type": "blob"
       },
       "gateway/platforms/whatsapp_cloud.py": {
@@ -2132,42 +5022,42 @@
       },
       "gateway/relay/adapter.py": {
         "mode": "100644",
-        "sha256": "c2c9d4e0e10282d0305f50e9793b84771024b70843b611f0fa5062762bc7aee4",
+        "sha256": "62f13006ae6fa48a21ea165ae26d4bb20a76b047abcab374717710ea8e514a5d",
         "type": "blob"
       },
       "gateway/run.py": {
         "mode": "100644",
-        "sha256": "c2dc9e6bf9fa13629f298cbd78440262328233749b9838456844ec0589150b85",
+        "sha256": "bda2df94e18e34730f6f0dbb4a9bcb42a99e337383d95509c8768a242a832109",
         "type": "blob"
       },
       "gateway/session.py": {
         "mode": "100644",
-        "sha256": "00420f36fd04840eed1faea44cc812f88dcf9fdf86bf9d2b3e64b9e4a4a10fa9",
+        "sha256": "b00b3d7f4adb1b30f4e6e9c9576a5b4fa6399ac32d2bf46e4c15c4e23ef810b9",
         "type": "blob"
       },
       "gateway/slash_commands.py": {
         "mode": "100644",
-        "sha256": "0b62c538375853633273371ed4211c78ea10a2f0fc6e1d27ebf39a92b7c36b5d",
+        "sha256": "aed5621f0c6edbf2977a525d9fb5f6f62fb758f8f482b3bb3d4955a7db7d97d0",
         "type": "blob"
       },
       "gateway/stream_consumer.py": {
         "mode": "100644",
-        "sha256": "0a702c31cd18c0cd50f16cc8a203c79d63536270b031c24aea709c8e37ffda3d",
+        "sha256": "6ca235aaf25da1034455f5a56223f468a04f070c29f75bff687c45d233c533c9",
         "type": "blob"
       },
       "gateway/telegram_transaction_ledger.py": {
         "mode": "100644",
-        "sha256": "40bef50b5149177f09f5cd297f8e9b7e91af081429c98de3cba3201b98f9b1bf",
+        "sha256": "a01ac756068c3a4af7f692774f7924de01513e5890b3b0b696072e0af3a6241d",
         "type": "blob"
       },
       "hermes_cli/config_defaults.py": {
         "mode": "100644",
-        "sha256": "5a406c218ded615b9b73f762a3adcee77c6e2c298e715f64cab6d28bd93e9eed",
+        "sha256": "7e6b7675f9864c1d23467289c2c6d937ba4c5f4f38461ef13c51a13e3f92e125",
         "type": "blob"
       },
       "hermes_cli/gateway.py": {
         "mode": "100644",
-        "sha256": "3b48c03944b2d76cbbe0a21bc1c3fe4ff872dad216a054071d6698079ec97386",
+        "sha256": "3044169326761b0ae33e150741839c933c672f8d32a651522ea1a784f99ab525",
         "type": "blob"
       },
       "hermes_cli/gateway_windows.py": {
@@ -2175,54 +5065,79 @@
         "sha256": "3615792dd2f178167bf76b0e891e79d9ea3a87c716051250c9d5235120bd15c1",
         "type": "blob"
       },
+      "hermes_cli/oneshot.py": {
+        "mode": "100644",
+        "sha256": "700623a2bf6571c4e7486ec94caec3d0828944f17cc66f6be64709425dc8d634",
+        "type": "blob"
+      },
+      "hermes_cli/tools_config.py": {
+        "mode": "100644",
+        "sha256": "b8072f95039d79cf2335ac7cdcac538b79a185e4dbe8abcc8b301888d0adbd47",
+        "type": "blob"
+      },
       "hermes_state.py": {
         "mode": "100644",
-        "sha256": "f3fb690c4d1c9829f7fec70d7989004ac65189f1803e3c180c1099d76f05cdda",
+        "sha256": "331abca94f18ceba6323a1fe1f584d2f1bf66438a8962806e4170074ae3bd9bd",
         "type": "blob"
       },
       "model_tools.py": {
         "mode": "100644",
-        "sha256": "c3eb88eb97cda469a1824680f9f41cc4b3280e4570b727da31a12581397d9ca9",
+        "sha256": "fdc7392fde542b4ee81807d1c1d349d2331a7f71e68af291d31196583f034a0e",
         "type": "blob"
       },
       "plugins/platforms/discord/adapter.py": {
         "mode": "100644",
-        "sha256": "1ba9f006e59a43a2f09407dab9975acfeaadb2946664b7c3242cdc3b93306045",
+        "sha256": "a2dc928500f3ba7de3a6e2bc219ff766fc5cd58b0b9b6e8986facfe748ea3ddc",
         "type": "blob"
       },
       "plugins/platforms/feishu/adapter.py": {
         "mode": "100644",
-        "sha256": "9c1b898c926aede4c2c3f3837dfff9a9675f02aa47456cf13f43ea3650eb7dd6",
+        "sha256": "8e73c58c3bc5ecdc60f609d1365c309c354c41831d84e21300da29b89d8a7c8a",
         "type": "blob"
       },
       "plugins/platforms/matrix/adapter.py": {
         "mode": "100644",
-        "sha256": "1114484cc4fa77b029685664c229f88310068152b3d8bbb61adbf23780c078c2",
+        "sha256": "c64a0a6fdc15fde2aeb10ba1ed79a75205174a4bbc910f4754cd9e6a5a8f0e68",
         "type": "blob"
       },
       "plugins/platforms/slack/adapter.py": {
         "mode": "100644",
-        "sha256": "ef3d96d30b1ab7339fe2bad17282a5580464553561355f815412b1bb4143e7b2",
+        "sha256": "4f9e83b4d79715ab9fb38bc15c0b852cbef94ebbbba04500eb1693f941c7caee",
         "type": "blob"
       },
       "plugins/platforms/teams/adapter.py": {
         "mode": "100644",
-        "sha256": "c4f39d6b44f16516a69b429a8bb7d7bba22befce4d70250979161d961c6d8d5e",
+        "sha256": "6cbae011610c409838c32d1689c5ecd81c293a7623f13739af4c0590771dce0b",
         "type": "blob"
       },
       "plugins/platforms/telegram/adapter.py": {
         "mode": "100644",
-        "sha256": "ed5cdd7d2cbae926840e47f855ceb740b515890e2ef1d486d1bf4f5117cd71e5",
+        "sha256": "670dea93cab3a76d2bc43ab04812daa616edd29bc90372918bbb9d825d63561f",
         "type": "blob"
       },
       "run_agent.py": {
         "mode": "100644",
-        "sha256": "66d429a5c109f1a1c681eafa22cc8fafb3ced6222537b4ec5c26ef3f5200593f",
+        "sha256": "03d22f913ea75c585ba0bdca74c49c0d9efbbc212a7bd62dbe5e62a56ceb51ac",
+        "type": "blob"
+      },
+      "scripts/install.ps1": {
+        "mode": "100644",
+        "sha256": "144da34916454891f5f47e35e8ba4f3a11fc013c00950b9f0968989cf8e1facf",
+        "type": "blob"
+      },
+      "scripts/install.sh": {
+        "mode": "100755",
+        "sha256": "618099d04f4614ce7fcb85bd2ff9b7e03b27bef2f968bdcafc0b671464f93516",
         "type": "blob"
       },
       "tests/agent/test_intent_ack_continuation.py": {
         "mode": "100644",
         "sha256": "e77a25684bc8c45cce4805b86adc18248ffe882354d19457865aa66e34d58e79",
+        "type": "blob"
+      },
+      "tests/computer_use/test_existing_profile_launch_grant.py": {
+        "mode": "100644",
+        "sha256": "c539d8859c12ecb223927df75509cb2af87dbdda61eb160e9fe9593d45d54613",
         "type": "blob"
       },
       "tests/gateway/restart_test_helpers.py": {
@@ -2287,7 +5202,7 @@
       },
       "tests/gateway/test_multiplex_adapter_registry.py": {
         "mode": "100644",
-        "sha256": "e44593d82712bef4c5e93cd73c62e12dbcc6e1936a43e23ca535340955490cc7",
+        "sha256": "11144cb94a54c0fc6cef249a1002f244d017779f0304b40fc226ae0192cae195",
         "type": "blob"
       },
       "tests/gateway/test_platform_reconnect.py": {
@@ -2307,7 +5222,7 @@
       },
       "tests/gateway/test_restart_resume_pending.py": {
         "mode": "100644",
-        "sha256": "5d28b66f9ad148661c2a0ce3289ab6da67c5f03e690c611773fd4c76b5fd474e",
+        "sha256": "7cb34fb4e26903c1b1a60664255c05167009a05a11f65c8594ef78c893990412",
         "type": "blob"
       },
       "tests/gateway/test_run_cleanup_progress.py": {
@@ -2322,12 +5237,12 @@
       },
       "tests/gateway/test_run_progress_topics.py": {
         "mode": "100644",
-        "sha256": "c5f661c79a026e2b2465d31ee50e8d7f8906a3c5e8680a8beaface09caabd729",
+        "sha256": "15c65fa4cb7ed011052d8013d183b2e8d3a03daa01f4e2c3e0f39ce34654d00e",
         "type": "blob"
       },
       "tests/gateway/test_session_hygiene.py": {
         "mode": "100644",
-        "sha256": "a6998894aa92f3724726b759ecd09c4ac6c788b5aad22184b4d2786ca18ffd75",
+        "sha256": "eb7c5798188c69fa50e2a75f07eea47e50e0d98ef7e7990cc9226b3e7f09fa1f",
         "type": "blob"
       },
       "tests/gateway/test_slack_approval_buttons.py": {
@@ -2337,7 +5252,7 @@
       },
       "tests/gateway/test_stale_finalize_suppression.py": {
         "mode": "100644",
-        "sha256": "b179cd0950b879c6ad95e1e65469030844692efc4c7715c9179323e1e55fb7ba",
+        "sha256": "344308ac77578c0ce06779b671dd65619a007e34dc5ea7c408c161f711031b13",
         "type": "blob"
       },
       "tests/gateway/test_streaming_tts_gateway_regression.py": {
@@ -2365,19 +5280,29 @@
         "sha256": "e4092ca762123df669297f1c25e5c4c9e44d1cf76ccc2e7786e5704d879e659c",
         "type": "blob"
       },
+      "tests/run_agent/test_outcome_stop_guard.py": {
+        "mode": "100644",
+        "sha256": "ce83960cbfe4f4d1596ae9ce90101a751b928a86d92ec8bcf2ef1ea59d4229d9",
+        "type": "blob"
+      },
       "tests/run_agent/test_run_agent.py": {
         "mode": "100644",
-        "sha256": "a465a1a7605575abc352ae6bc784fa4c8c90a5c0f50f5e35ac608a6b9980cc4d",
+        "sha256": "ba780be345e40829fcb8625c7124310cb28c78db45b76a70ec6ff023f44df6a3",
         "type": "blob"
       },
       "tests/run_agent/test_tool_batch_segmentation.py": {
         "mode": "100644",
-        "sha256": "56f311a1893e05cecf3aa52fb1ab8f5bbb74f16b5f7b76d6c98b58642f2e5e29",
+        "sha256": "7590f6451beef19aa99a9a8e065f93c3550095c3668ea49571a50ba0a8e543d7",
         "type": "blob"
       },
       "tests/run_agent/test_tool_call_guardrail_runtime.py": {
         "mode": "100644",
-        "sha256": "17a2f9f8be5ae45496e7d4871ce11faa54071ca0ba8dbd7d1a55ae0c9f85a82e",
+        "sha256": "3dfb36d884529d7a74734cd5426f41dcd7fccd4702e177bdf08cca833d974f2e",
+        "type": "blob"
+      },
+      "tests/tools/test_browser_use_cli.py": {
+        "mode": "100644",
+        "sha256": "7ca61957167e278465703882f3c48de601ac32e43c102b36e5d8ca102293e45c",
         "type": "blob"
       },
       "tests/tools/test_clarify_gateway.py": {
@@ -2387,12 +5312,27 @@
       },
       "tests/tools/test_tool_search.py": {
         "mode": "100644",
-        "sha256": "6fdb99ac130cbe430f4318fb031b82ac33638e837a69f7797e0c4e2ee7dce4a1",
+        "sha256": "32e00353b12e2b3af9441026962d642d1724a68febcbf4a0d4f98e14451d9b1f",
+        "type": "blob"
+      },
+      "tools/browser_use_cli.py": {
+        "mode": "100644",
+        "sha256": "925a081d9c555df34f48b679a6d7dab02291ca78b33519e75f04821a41164bbe",
         "type": "blob"
       },
       "tools/clarify_gateway.py": {
         "mode": "100644",
         "sha256": "37a2fa1a9ec482274a2c06e33550075608f74c0b5861ee1cf4de261137acbc94",
+        "type": "blob"
+      },
+      "tools/computer_use/cua_backend.py": {
+        "mode": "100644",
+        "sha256": "9e002947ea1e0626458248ef911b09bed6e8287ca17e7be04bb1cc8d8aaea9ba",
+        "type": "blob"
+      },
+      "tools/delegate_tool.py": {
+        "mode": "100644",
+        "sha256": "a53c3ce7a1e499d9c66e5852e066dc8311bb41c5cb892ab01e846e49ea270b1b",
         "type": "blob"
       },
       "tools/golden_topic_recall.py": {
@@ -2412,12 +5352,12 @@
       },
       "tools/tts_tool.py": {
         "mode": "100644",
-        "sha256": "7f3bb1ad1eeef152022eae5181119fd8076619f26285a4cd2f04f07798ebed22",
+        "sha256": "80c001bddcaaa261122b3a8d2dc0fca4db8242cc4b86de5309b4f3145d5991ff",
         "type": "blob"
       }
     },
-    "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
-    "upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+    "golden_sha": "d1ff1e9ca6864ff2e1a687b5983b36623d8f2a51",
+    "upstream_sha": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
     "verified": true
   },
   "schema_version": 1

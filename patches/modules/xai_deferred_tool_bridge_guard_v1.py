@@ -116,52 +116,74 @@ TOOL_SEARCH_TESTS = '''
         assert "call 'session_search' directly" in err
         assert "Do not call tool_call again" in err
 
+    def test_scoped_direct_tool_wrapper_resolves_without_widening_scope(self):
+        from tools.tool_search import resolve_underlying_call
+
+        name, arguments, err = resolve_underlying_call(
+            {"name": "terminal", "arguments": {"command": "pwd"}},
+            scoped_names=frozenset({"terminal"}),
+        )
+        assert err is None
+        assert name == "terminal"
+        assert arguments == {"command": "pwd"}
+
+        _, _, excluded_err = resolve_underlying_call(
+            {"name": "write_file", "arguments": {}},
+            scoped_names=frozenset({"terminal"}),
+        )
+        assert excluded_err is not None
+        assert "Route correction required" in excluded_err
+
 '''
 
 GUARDRAIL_TEST_ANCHOR = (
     "\ndef test_relay_rewrite_precedes_sequential_policy_approval_checkpoint_and_dispatch():\n"
 )
 GUARDRAIL_TESTS = f'''
-def test_bridge_misroutes_are_blocked_before_dispatch_and_do_not_trip_same_tool_guardrail():
-    """{MARKER}: replay the mixed Enoch/Grok wrapper failure."""
+def test_scoped_direct_tool_wrappers_dispatch_as_the_real_tools():
+    """{MARKER}: recover the observed Enoch/Grok wrapper failure in scope."""
     agent = _make_agent(
-        "session_search",
-        "web_extract",
+        "terminal",
+        "write_file",
         "tool_search",
         "tool_describe",
         "tool_call",
         config=_hard_stop_config(),
     )
     requested = [
-        "session_search",
-        "web_extract",
-        "session_search",
-        "web_extract",
-        "tool_call",
-        "session_search",
-        "web_extract",
-        "tool_call",
+        ("terminal", {{"command": "pwd"}}),
+        ("write_file", {{"path": "/tmp/enoch-canary", "content": "ok"}}),
     ]
     calls = [
-        _mock_tool_call("tool_call", json.dumps({{"name": name}}), f"c-{{i}}")
-        for i, name in enumerate(requested)
+        _mock_tool_call(
+            "tool_call",
+            json.dumps({{"name": name, "arguments": arguments}}),
+            f"c-{{i}}",
+        )
+        for i, (name, arguments) in enumerate(requested)
     ]
     messages = []
 
-    with patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc:
+    with (
+        patch(
+            "agent.tool_executor._tool_search_scoped_names",
+            return_value=frozenset(name for name, _ in requested),
+        ),
+        patch("run_agent.handle_function_call", return_value='{{"ok": true}}') as mock_hfc,
+    ):
         agent._execute_tool_calls_concurrent(
-            SimpleNamespace(content="", tool_calls=calls),
-            messages,
-            "task-1",
+            SimpleNamespace(content="", tool_calls=calls), messages, "task-1"
         )
 
-    mock_hfc.assert_not_called()
+    assert [call.args[0] for call in mock_hfc.call_args_list] == [
+        name for name, _ in requested
+    ]
     assert agent._tool_guardrail_halt_decision is None
     assert len(messages) == len(calls)
-    assert all("Route correction required" in message["content"] for message in messages)
+    assert all('"ok": true' in message["content"] for message in messages)
 
 
-def test_single_bridge_misroute_is_blocked_before_sequential_dispatch():
+def test_out_of_scope_direct_tool_wrapper_is_still_blocked():
     agent = _make_agent("session_search", "tool_call", config=_hard_stop_config())
     call = _mock_tool_call(
         "tool_call",
@@ -170,11 +192,15 @@ def test_single_bridge_misroute_is_blocked_before_sequential_dispatch():
     )
     messages = []
 
-    with patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc:
+    with (
+        patch(
+            "agent.tool_executor._tool_search_scoped_names",
+            return_value=frozenset(),
+        ),
+        patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc,
+    ):
         agent._execute_tool_calls_sequential(
-            SimpleNamespace(content="", tool_calls=[call]),
-            messages,
-            "task-1",
+            SimpleNamespace(content="", tool_calls=[call]), messages, "task-1"
         )
 
     mock_hfc.assert_not_called()
@@ -249,7 +275,7 @@ def patch_tool_search_tests_text(source: str) -> str:
 
 
 def patch_guardrail_tests_text(source: str) -> str:
-    if "test_bridge_misroutes_are_blocked_before_dispatch" in source:
+    if "test_scoped_direct_tool_wrappers_dispatch_as_the_real_tools" in source:
         return source
     if source.count(GUARDRAIL_TEST_ANCHOR) != 1:
         raise RuntimeError("guardrail test anchor drift")

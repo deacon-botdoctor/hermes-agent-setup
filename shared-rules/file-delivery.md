@@ -12,6 +12,12 @@ Before sending:
    `[[audio_as_voice]]`.
 4. Verify the attachment actually arrived before claiming delivery.
 
+For lossless image masters such as logos, wordmarks, transparent PNGs, print
+exports, or assets whose exact pixels matter, force document delivery instead
+of the platform photo path. On Telegram, emit `[[as_document]]` once before the
+`MEDIA:<absolute-path>` attachment. Photo delivery may resize, recompress, or
+strip transparency and therefore cannot serve as proof of the master file.
+
 For a voice memo produced with `text_to_speech`, the audio is the reply. Return
 the generated `MEDIA:` directive without repeating the spoken prose as ordinary
 chat text. Use no companion text by default; one short context line is the

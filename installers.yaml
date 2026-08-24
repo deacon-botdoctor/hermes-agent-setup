@@ -18,27 +18,33 @@ installers:
   - name: install_runtime_health_tools
     owner_lane: baseline_wiring
     current_registry_entry: install_runtime_health_tools
-    description: Install the cross-platform local self-check, canary reconciler, and runtime summary probes used by the client health floor.
+    description: Install the cross-platform local self-check, canary reconciler, disk-retention guard, and runtime summary probes used by the client health floor.
     platforms: [linux, macos, windows]
     operation: copy_many
     sources:
       - bin/hermes-local-selfcheck.py
       - bin/hermes-canary-reconciler.py
-      - bin/tool-doctor.py
-      - source: recipes/tool-doctor/mcp-provisioning-v1.yaml
-        destination: "{hermes_home}/recipes/tool-doctor/mcp-provisioning-v1.yaml"
-        mode: "0644"
+      - bin/hermes-canary-reconciler.ps1
+      - bin/hermes-disk-retention.py
+      - bin/hermes-windows-capacity-containment.ps1
+      - bin/tool-readiness-probe.py
+      - bin/composio-remote-mcp-verify.py
+      - bin/composio-remote-mcp-with-env.sh
       - kit/bin/operator-status.py
+      - kit/bin/operator-handoff.py
       - kit/bin/telegram-polling-health-probe.py
     destination_dir: "{hermes_home}/bin"
     owner: preserve
     mode: "0755"
     post_install_check:
-      type: python_json
-      path: "{hermes_home}/bin/tool-doctor.py"
-      args: ["--self-test"]
-      expected:
-        status: pass
+      type: files_exist
+      paths:
+        - "{hermes_home}/bin/hermes-local-selfcheck.py"
+        - "{hermes_home}/bin/hermes-windows-capacity-containment.ps1"
+        - "{hermes_home}/bin/hermes-canary-reconciler.py"
+        - "{hermes_home}/bin/hermes-disk-retention.py"
+        - "{hermes_home}/bin/tool-readiness-probe.py"
+        - "{hermes_home}/bin/operator-handoff.py"
     rollback: restore per-file .bak-host-artifact-* backups
 
   - name: install_host_hygiene
@@ -212,6 +218,17 @@ installers:
     require_ready: false
     timeout_seconds: 960
     rollback: reinstall the prior approved version through the same native Hermes command; never edit OS permission databases
+
+  - name: ensure_browser_use_cli
+    owner_lane: baseline_wiring
+    current_registry_entry: native_browser_use_safety_v1
+    description: Install and receipt-bind Golden's exact Browser Use CLI in the active Hermes profile.
+    platforms: [linux, macos, windows]
+    operation: ensure_browser_use_cli
+    helper: kit/bin/ensure-browser-use-cli.py
+    contract: kit/config/browser-use-cli-release-v1.json
+    timeout_seconds: 3300
+    rollback: restore the prior browser-use-cli-install-v1.json receipt and versioned tool directory; the existing browser backend remains available
 
   - name: ensure_gateway_watchdog
     owner_lane: baseline_wiring

@@ -8,13 +8,14 @@ from pathlib import Path
 
 V1_MARKER = "HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1"
 MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2"
+REVISION_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2_r4"
 
 MARKER_ANCHOR = f"# {V1_MARKER}\n"
-MARKER_REPLACEMENT = f"# {V1_MARKER}\n# {MARKER}\n"
+MARKER_REPLACEMENT = f"# {V1_MARKER}\n# {MARKER}\n# {REVISION_MARKER}\n"
 
 START_ANCHOR = "        _notify_start = time.time()\n"
 START_REPLACEMENT = """        # Schedule checkpoints from a monotonic origin. Wall-clock movement and
-        # early wake-ups cannot turn the ten-minute milestone into "9 minutes".
+        # early wake-ups cannot turn a configured milestone into a near miss.
         _notify_start = time.monotonic()
 """
 
@@ -40,10 +41,88 @@ ELAPSED_REPLACEMENT = """                _elapsed_mins = _telegram_checkpoint_mi
 COMMENTARY_ANCHOR = """            clean = " ".join(piece.split())
             clean = _re.sub(r"^(?:[-*•>]\\s*|\\d+[.)]\\s*)+", "", clean).strip()
 """
-COMMENTARY_REPLACEMENT = """            clean = _sanitize_telegram_checkpoint_commentary_v2(piece)
+COMMENTARY_REPLACEMENT = """            clean = _telegram_checkpoint_commentary_bullet_v2(piece)
             if not clean:
                 continue
-            clean = _re.sub(r"^(?:[-*•>]\\s*|\\d+[.)]\\s*)+", "", clean).strip()
+"""
+
+PIECES_ANCHOR = """        pieces = [piece for piece in _re.split(r"\\n+|(?<=[.!?;])\\s+", text) if piece]
+"""
+PIECES_REPLACEMENT = """        pieces = [text]
+"""
+
+PENDING_ANCHOR = """                    with turn_ctx.model_checkpoint_lock:
+                        checkpoint_stop = len(turn_ctx.model_checkpoint_updates)
+                        tool_checkpoint_stop = len(
+                            turn_ctx.model_checkpoint_tool_completed
+                        )
+                        checkpoint_pending = list(
+                            turn_ctx.model_checkpoint_updates[
+                                turn_ctx.model_checkpoint_cursor[0]:checkpoint_stop
+                            ]
+                        )
+                        tool_checkpoint_pending = list(
+                            turn_ctx.model_checkpoint_tool_completed[
+                                turn_ctx.model_checkpoint_tool_cursor[0]:tool_checkpoint_stop
+                            ]
+                        )
+                        tool_checkpoint_current = list(
+                            turn_ctx.model_checkpoint_tool_current
+                        )
+"""
+PENDING_REPLACEMENT = """                    with turn_ctx.model_checkpoint_lock:
+                        checkpoint_start = turn_ctx.model_checkpoint_cursor[0]
+                        tool_checkpoint_start = turn_ctx.model_checkpoint_tool_cursor[0]
+                        checkpoint_stop = checkpoint_start
+                        checkpoint_pending = []
+                        while (
+                            checkpoint_stop < len(turn_ctx.model_checkpoint_updates)
+                            and len(checkpoint_pending) < 3
+                        ):
+                            checkpoint_value = _telegram_checkpoint_commentary_bullet_v2(
+                                turn_ctx.model_checkpoint_updates[checkpoint_stop]
+                            )
+                            checkpoint_stop += 1
+                            if checkpoint_value:
+                                checkpoint_pending.append(checkpoint_value)
+                        checkpoint_rejected_stop = (
+                            checkpoint_stop
+                            if not checkpoint_pending
+                            else checkpoint_start
+                        )
+                        tool_checkpoint_stop = min(
+                            len(turn_ctx.model_checkpoint_tool_completed),
+                            tool_checkpoint_start + max(0, 3 - len(checkpoint_pending)),
+                        )
+                        tool_checkpoint_pending = list(
+                            turn_ctx.model_checkpoint_tool_completed[
+                                tool_checkpoint_start:tool_checkpoint_stop
+                            ]
+                        )
+                        tool_checkpoint_current = list(
+                            turn_ctx.model_checkpoint_tool_current
+                        )
+"""
+
+EMPTY_HEARTBEAT_ANCHOR = """                    if not _heartbeat_text:
+                        # A malformed task label is a fail-closed condition.
+                        continue
+"""
+EMPTY_HEARTBEAT_REPLACEMENT = """                    if not _heartbeat_text:
+                        # A malformed task label is a fail-closed condition.
+                        with turn_ctx.model_checkpoint_lock:
+                            turn_ctx.model_checkpoint_cursor[0] = max(
+                                turn_ctx.model_checkpoint_cursor[0],
+                                checkpoint_rejected_stop,
+                            )
+                            # Tool lifecycle telemetry is never client copy.
+                            # Consume it instead of reconsidering the same
+                            # synthetic fallback at every scheduled interval.
+                            turn_ctx.model_checkpoint_tool_cursor[0] = max(
+                                turn_ctx.model_checkpoint_tool_cursor[0],
+                                tool_checkpoint_stop,
+                            )
+                        continue
 """
 
 HELPER_ANCHOR = "\ndef _format_telegram_model_checkpoint(\n"
@@ -81,6 +160,15 @@ def _sanitize_telegram_checkpoint_commentary_v2(value):
     if any(_re.search(pattern, text, flags=_re.IGNORECASE) for pattern in unsafe):
         return ""
     return text[:280].rstrip()
+
+
+def _telegram_checkpoint_commentary_bullet_v2(value):
+    import re as _re
+
+    clean = _sanitize_telegram_checkpoint_commentary_v2(value)
+    if not clean:
+        return ""
+    return _re.sub(r"^(?:[-*•>]\s*|\d+[.)]\s*)+", "", clean).strip()
 '''
 
 SEND_ANCHOR = """                    if not (_notify_res and getattr(_notify_res, "success", False)):
@@ -99,12 +187,46 @@ SEND_REPLACEMENT = """                    if (
                         _notify_res = await _notify_adapter.send(
 """
 
+CURSOR_ADVANCE_ANCHOR = """                    with turn_ctx.model_checkpoint_lock:
+                        turn_ctx.model_checkpoint_cursor[0] = max(
+                            turn_ctx.model_checkpoint_cursor[0],
+                            checkpoint_stop,
+                        )
+                        turn_ctx.model_checkpoint_tool_cursor[0] = max(
+                            turn_ctx.model_checkpoint_tool_cursor[0],
+                            tool_checkpoint_stop,
+                        )
+"""
+
+DELIVERY_ACK_ANCHOR = """                except Exception as _ne:
+                    logger.debug("Long-running notification error: %s", _ne)
+"""
+DELIVERY_ACK_REPLACEMENT = """                    if (
+                        source.platform == Platform.TELEGRAM
+                        and _notify_res
+                        and getattr(_notify_res, "success", False)
+                    ):
+                        with turn_ctx.model_checkpoint_lock:
+                            turn_ctx.model_checkpoint_cursor[0] = max(
+                                turn_ctx.model_checkpoint_cursor[0],
+                                checkpoint_stop,
+                            )
+                            turn_ctx.model_checkpoint_tool_cursor[0] = max(
+                                turn_ctx.model_checkpoint_tool_cursor[0],
+                                tool_checkpoint_stop,
+                            )
+                except Exception as _ne:
+                    logger.debug("Long-running notification error: %s", _ne)
+"""
+
 
 def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool:
     """Upgrade both clean and already-v1-patched runtimes to the v2 contract."""
     run_py = Path(hermes_dir) / "gateway/run.py"
     original = run_py.read_text(encoding="utf-8")
     if MARKER in original:
+        if REVISION_MARKER not in original:
+            raise RuntimeError("Telegram organic checkpoints stale v2 revision requires a clean candidate rebuild")
         return False
     if V1_MARKER not in original:
         raise RuntimeError("Telegram organic checkpoints v2 requires the v1 base")
@@ -114,9 +236,18 @@ def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool
         (START_ANCHOR, START_REPLACEMENT, "monotonic origin"),
         (SLEEP_ANCHOR, SLEEP_REPLACEMENT, "scheduled cadence"),
         (ELAPSED_ANCHOR, ELAPSED_REPLACEMENT, "scheduled milestone"),
+        (PENDING_ANCHOR, PENDING_REPLACEMENT, "bounded pending milestones"),
+        (
+            EMPTY_HEARTBEAT_ANCHOR,
+            EMPTY_HEARTBEAT_REPLACEMENT,
+            "rejected commentary cursor",
+        ),
+        (PIECES_ANCHOR, PIECES_REPLACEMENT, "atomic commentary updates"),
         (COMMENTARY_ANCHOR, COMMENTARY_REPLACEMENT, "commentary privacy"),
         (HELPER_ANCHOR, HELPER + HELPER_ANCHOR, "v2 helpers"),
+        (CURSOR_ADVANCE_ANCHOR, "", "delivery cursor ownership"),
         (SEND_ANCHOR, SEND_REPLACEMENT, "Telegram message reuse"),
+        (DELIVERY_ACK_ANCHOR, DELIVERY_ACK_REPLACEMENT, "delivery acknowledgement"),
     )
     patched = original
     for anchor, replacement, label in replacements:

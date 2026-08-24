@@ -96,6 +96,12 @@ EVIDENCE_TYPES = {
     "self_reflection",
     "weakness_miner",
 }
+SKILL_EVIDENCE_CLASSES = {
+    "client_rework",
+    "operator_correction",
+    "repeated_failure",
+    "repeated_success",
+}
 
 BEHAVIOR_HINTS: dict[str, tuple[str, ...]] = {
     "response_integrity": (
@@ -352,6 +358,27 @@ def _evidence_type(source: Any) -> str:
     return "self_reflection"
 
 
+def _has_trusted_skill_attribution(report: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    fields = ("skill_id", "skill_version", "skill_sha256")
+    if not any(candidate.get(field) not in (None, "") for field in fields):
+        return True
+    if candidate.get("evidence_class") not in SKILL_EVIDENCE_CLASSES:
+        return False
+    if candidate.get("skill_use_evidence") != "successful_load_within_window":
+        return False
+    metadata = report.get("self_reflection_meta")
+    inventory = metadata.get("recent_skill_usage") if isinstance(metadata, dict) else None
+    if not isinstance(inventory, list):
+        return False
+    expected = tuple(candidate.get(field) for field in fields)
+    return any(
+        isinstance(item, dict)
+        and tuple(item.get(field) for field in fields) == expected
+        and item.get("evidence") == "successful_load_within_window"
+        for item in inventory[:24]
+    )
+
+
 def build_envelope(
     report: dict[str, Any],
     candidate: dict[str, Any],
@@ -367,21 +394,27 @@ def build_envelope(
     behavior_signals = _matched_hints(text, BEHAVIOR_HINTS)
     route_signals = _matched_hints(text, ROUTE_HINTS)
     report_id_hash = _hash(report.get("report_id") or path.name)
-    finding_hash = _hash(
-        {
-            key: candidate.get(key)
-            for key in (
-                "draft_skill_name",
-                "title",
-                "pattern",
-                "recommendation",
-                "summary",
-                "trigger",
-                "why",
-                "reason",
-            )
+    finding_fields = {
+        key: candidate.get(key)
+        for key in (
+            "draft_skill_name",
+            "title",
+            "pattern",
+            "recommendation",
+            "summary",
+            "trigger",
+            "why",
+            "reason",
+        )
+    }
+    if candidate.get("skill_id"):
+        finding_fields["skill_attribution"] = {
+            "id": candidate.get("skill_id"),
+            "version": candidate.get("skill_version"),
+            "sha256": candidate.get("skill_sha256"),
+            "evidence_class": candidate.get("evidence_class"),
         }
-    )
+    finding_hash = _hash(finding_fields)
     task_contract_signature = _task_contract_signature(candidate)
     claimed_scope_id = scope_id or _config_scope(HOME)
     task_signature = {
@@ -390,6 +423,14 @@ def build_envelope(
         "tools": candidate.get("required_tools") or candidate.get("tools"),
         "deliverable": candidate.get("deliverable") or candidate.get("deliverable_type"),
     }
+    if candidate.get("skill_id"):
+        task_signature["skill_attribution"] = {
+            "id": candidate.get("skill_id"),
+            "version": candidate.get("skill_version"),
+            "sha256": candidate.get("skill_sha256"),
+            "evidence_class": candidate.get("evidence_class"),
+            "use_evidence": candidate.get("skill_use_evidence"),
+        }
     if task_contract_signature is not None:
         request_id = candidate.get("request_id")
         if not isinstance(request_id, str) or not request_id.strip():
@@ -425,7 +466,7 @@ def build_envelope(
         "task_signature_hash": task_signature_hash,
         "evidence_reference_id": _hash(f"report|{report_id_hash}|{index}")[:24],
         "content_hashes": {
-            "name": _hash(candidate.get("draft_skill_name") or candidate.get("title")),
+            "name": _hash(candidate.get("skill_id") or candidate.get("draft_skill_name") or candidate.get("title")),
             "pattern": _hash(candidate.get("pattern") or candidate.get("recommendation") or candidate.get("summary")),
             "reason": _hash(candidate.get("why") or candidate.get("trigger") or candidate.get("reason")),
         },
@@ -794,7 +835,7 @@ def _report_envelopes(scope_id: str):
         task_contract_candidates = task_contract_candidates[:task_contract_limit]
         candidates = reflection_candidates + task_contract_candidates
         for index, candidate in enumerate(candidates):
-            if isinstance(candidate, dict):
+            if isinstance(candidate, dict) and _has_trusted_skill_attribution(report, candidate):
                 try:
                     yield build_envelope(
                         report,

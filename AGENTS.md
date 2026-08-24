@@ -137,6 +137,8 @@ unit="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
   --definition "$unit"
 systemctl --user start "$(basename "$unit")"
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" \
+  "$HERMES_HOME/bin/hermes-local-selfcheck.py" --json
 ```
 
 On macOS, prove the exact native plist belongs to the current user and targets
@@ -156,6 +158,8 @@ label="$(HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" -c \
 launchctl kickstart "gui/$UID/$label"
 launchctl print "gui/$UID/$label"
 HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/hermes" gateway status
+HERMES_HOME="$HERMES_HOME" "$candidate/venv/bin/python" \
+  "$HERMES_HOME/bin/hermes-local-selfcheck.py" --json
 ```
 
 When it changes `.env`, the binder prints a backup path. That 0600 backup
@@ -213,8 +217,8 @@ if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "confi
   throw "Existing classification conflicts with the proven profile"
 }
 $Installer = Join-Path $env:TEMP "hermes-install.ps1"
-$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/3c27eb6234bf91b8ceee9e9071591b31e9b148cb/scripts/install.ps1"
-$ExpectedInstallerSha256 = "4dcbf2b665750cb578f69a6efa40770659e21821a463746f86da68af0d2bb31c"
+$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb/scripts/install.ps1"
+$ExpectedInstallerSha256 = "522941b9d678898392d31fc239cc229f6852a0f1bac8f266f7b81f8991f239d1"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
 $PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
@@ -285,6 +289,8 @@ try {
     --vbs-launcher $GatewayVbs --task-name $TaskName
   schtasks.exe /Run /TN $TaskName
   & "$Candidate\venv\Scripts\hermes.exe" gateway status
+  & "$Candidate\venv\Scripts\python.exe" `
+    "$LiveHome\bin\hermes-local-selfcheck.py" --json
 } finally {
   $env:HERMES_HOME = $PriorProcessHermesHome
   $env:HERMES_CODEX_401_CIRCUIT_STATE = $PriorProcessCodexCircuitState
@@ -522,6 +528,9 @@ Fail and roll back on any failed required check:
 
 - `bin/verify-release.py --runtime-dir <candidate>` passes;
 - `hermes doctor` has no unaccepted required failure;
+- the installed local self-check writes a current `machine_profile` and every
+  manifest-required capability/canary check passes or has an explicit recorded
+  exception;
 - process imports resolve only inside the candidate root;
 - the service definition, launcher, process, profile, and imported root all
   resolve to the same immutable candidate;

@@ -1,7 +1,7 @@
 # Single source of truth for the upstream Hermes version pinned by hermes-golden.
-# v0.20.0 is the immutable 2026-08-03 upstream release.
-tag: v2026.8.3
-commit: 3c27eb6234bf91b8ceee9e9071591b31e9b148cb
+# Exact post-v0.20.0 upstream main selected by the 2026-08-11 rehearsal.
+tag: main
+commit: 9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb
 hermes_version: 0.20.0
-pinned_at: 2026-08-03
+pinned_at: 2026-08-11
 source_repo: https://github.com/NousResearch/hermes-agent.git

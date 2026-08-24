@@ -293,6 +293,8 @@ def install_windows(
         "5",
         "/TR",
         action,
+        "/RL",
+        "HIGHEST",
         "/F",
     ]
     result = run_checked(command, dry_run=dry_run)

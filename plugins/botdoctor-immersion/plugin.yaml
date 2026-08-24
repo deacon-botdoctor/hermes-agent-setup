@@ -1,10 +1,11 @@
 name: botdoctor-immersion
 label: Bot Doctor Immersion
 kind: standalone
-version: 0.3.0
+version: 0.4.0
 description: >
   Bot Doctor request middleware that injects the canonical operating floor,
-  Westminster and Marque covenant, and full Truth-Over-Comfort doctrine exactly once.
+  Westminster and Marque covenant, Truth-Over-Comfort doctrine, and outcome
+  completion contract exactly once.
 author: Bot Doctor LLC
 provides_middleware:
   - llm_request

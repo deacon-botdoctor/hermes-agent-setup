@@ -1,0 +1,446 @@
+#!/usr/bin/env python3
+"""Fail-closed closeout gate for compiled visual artifacts."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import shutil
+import struct
+import subprocess
+import tempfile
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+KINDS = ("pdf", "html", "email-html", "newsletter", "social-frame", "deck")
+SCORE_WEIGHTS = {
+    "cognitive_load": 3,
+    "visual_coherence": 3,
+    "interaction_clarity": 3,
+    "context_fit": 2,
+    "restraint": 2,
+    "emotional_response": 1,
+}
+SCORE_FLOORS = {
+    "cognitive_load": 4,
+    "visual_coherence": 4,
+    "interaction_clarity": 3,
+    "context_fit": 4,
+    "restraint": 4,
+    "emotional_response": 3,
+}
+CRAFT_CHECKS = ("contrast", "spacing", "type", "coverage", "restraint", "channel_fit")
+REQUIRED_FRAMEWORKS = {"impeccable-craft-floor", "human-taste"}
+EMAIL_FORBIDDEN_FRAMEWORKS = {"design-taste-frontend", "gpt-taste"}
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def section(status: str = "PASS") -> dict[str, Any]:
+    return {"status": status, "checks": [], "failures": []}
+
+
+def add_check(target: dict[str, Any], name: str, passed: bool, detail: Any) -> None:
+    target["checks"].append({"name": name, "passed": passed, "detail": detail})
+    if not passed:
+        target["failures"].append(name)
+        if target["status"] == "PASS":
+            target["status"] = "FAIL"
+
+
+def image_dimensions(path: Path) -> tuple[int, int]:
+    with path.open("rb") as handle:
+        head = handle.read(32)
+        if head.startswith(b"\x89PNG\r\n\x1a\n") and len(head) >= 24:
+            return struct.unpack(">II", head[16:24])
+        if not head.startswith(b"\xff\xd8"):
+            raise ValueError("preview must be PNG or JPEG")
+        handle.seek(2)
+        while True:
+            marker = handle.read(1)
+            if not marker:
+                break
+            if marker != b"\xff":
+                continue
+            while marker == b"\xff":
+                marker = handle.read(1)
+            code = marker[0]
+            if code in {0xD8, 0xD9}:
+                continue
+            raw_length = handle.read(2)
+            if len(raw_length) != 2:
+                break
+            length = struct.unpack(">H", raw_length)[0]
+            if code in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                body = handle.read(length - 2)
+                if len(body) < 5:
+                    break
+                height, width = struct.unpack(">HH", body[1:5])
+                return width, height
+            handle.seek(length - 2, 1)
+    raise ValueError("JPEG dimensions are unavailable")
+
+
+def run(command: list[str], timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
+    try:
+        return subprocess.run(command, text=True, capture_output=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def inspect_structure(artifact: Path, kind: str) -> tuple[dict[str, Any], int | None]:
+    result = section()
+    expected_previews: int | None = None
+    if not artifact.is_file():
+        add_check(result, "artifact_regular_file", False, str(artifact))
+        return result, expected_previews
+    add_check(result, "artifact_regular_file", True, artifact.stat().st_size)
+    add_check(result, "artifact_nonempty", artifact.stat().st_size > 0, artifact.stat().st_size)
+    if artifact.stat().st_size == 0:
+        return result, expected_previews
+
+    if kind == "pdf":
+        add_check(result, "pdf_signature", artifact.read_bytes()[:5] == b"%PDF-", None)
+        pdfinfo = shutil.which("pdfinfo")
+        if not pdfinfo:
+            if result["status"] == "PASS":
+                result["status"] = "UNKNOWN"
+            result["failures"].append("pdfinfo_unavailable")
+        else:
+            completed = run([pdfinfo, str(artifact)])
+            match = re.search(r"(?m)^Pages:\s*(\d+)\s*$", completed.stdout if completed else "")
+            expected_previews = int(match.group(1)) if completed and completed.returncode == 0 and match else None
+            add_check(result, "pdf_page_count", bool(expected_previews), expected_previews)
+    elif kind == "deck":
+        slides: list[str] = []
+        try:
+            with zipfile.ZipFile(artifact) as archive:
+                slides = sorted(
+                    name for name in archive.namelist()
+                    if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)
+                )
+                expected_previews = len(slides)
+                valid = "ppt/presentation.xml" in archive.namelist() and expected_previews > 0
+        except (OSError, zipfile.BadZipFile):
+            valid = False
+        add_check(result, "pptx_structure", valid, {"slides": len(slides)})
+    elif kind in {"html", "email-html", "newsletter"}:
+        try:
+            text = artifact.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            text = ""
+        add_check(result, "html_utf8", bool(text), None)
+        add_check(result, "html_document", bool(re.search(r"(?is)<!doctype\s+html|<html\b", text)), None)
+        if kind in {"email-html", "newsletter"}:
+            add_check(result, "email_table_layout", bool(re.search(r"(?is)<table\b", text)), None)
+            add_check(
+                result,
+                "email_unsubscribe_placeholder",
+                "{{{RESEND_UNSUBSCRIBE_URL}}}" in text,
+                None,
+            )
+            image_sources = re.findall(
+                r"(?is)<img\b[^>]*\bsrc\s*=\s*['\"]([^'\"]+)['\"]",
+                text,
+            )
+            durable_images = all(
+                source.startswith("https://")
+                and not re.search(r"(?i)(?:localhost|127\.0\.0\.1|ngrok|trycloudflare)", source)
+                for source in image_sources
+            )
+            add_check(result, "email_durable_images", durable_images, image_sources)
+    elif kind == "social-frame":
+        try:
+            dimensions = image_dimensions(artifact)
+        except ValueError:
+            dimensions = None
+        add_check(result, "social_image", dimensions is not None, dimensions)
+        expected_previews = 1
+    return result, expected_previews
+
+
+def inspect_render(
+    previews: list[Path], kind: str, expected_count: int | None, expected_size: str
+) -> dict[str, Any]:
+    result = section()
+    result["previews"] = []
+    if not previews:
+        add_check(result, "rendered_preview_required", False, 0)
+        return result
+    for path in previews:
+        try:
+            dimensions = image_dimensions(path)
+            digest = sha256(path)
+            size = path.stat().st_size
+            valid = size > 0
+        except (OSError, ValueError):
+            dimensions, digest, size, valid = None, None, 0, False
+        result["previews"].append({
+            "path": str(path),
+            "sha256": digest,
+            "bytes": size,
+            "width": dimensions[0] if dimensions else None,
+            "height": dimensions[1] if dimensions else None,
+        })
+        add_check(result, f"preview:{path.name}", valid, dimensions)
+    if expected_count is not None:
+        add_check(result, "complete_render_coverage", len(previews) == expected_count, {
+            "expected": expected_count,
+            "observed": len(previews),
+        })
+    if kind in {"email-html", "newsletter"}:
+        widths = {row["width"] for row in result["previews"] if row["width"]}
+        add_check(result, "email_viewports", {680, 390}.issubset(widths), sorted(widths))
+    if kind == "social-frame":
+        try:
+            width_text, height_text = expected_size.lower().split("x", 1)
+            wanted = (int(width_text), int(height_text))
+        except (AttributeError, TypeError, ValueError):
+            wanted = None
+        observed = (
+            result["previews"][0]["width"], result["previews"][0]["height"]
+        ) if result["previews"] else None
+        add_check(result, "social_frame_size", wanted is not None and observed == wanted, {
+            "expected": wanted,
+            "observed": observed,
+        })
+    return result
+
+
+def parse_time(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(timezone.utc)
+
+
+def validate_review(
+    receipt_path: Path | None,
+    artifact_sha: str | None,
+    preview_shas: list[str],
+    brand_sha: str | None,
+    kind: str,
+) -> dict[str, Any]:
+    result = section("UNKNOWN")
+    result.update({"scores": {}, "weighted_score": None, "findings": []})
+    if receipt_path is None or not receipt_path.is_file():
+        result["failures"].append("review_receipt_required")
+        return result
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        result["failures"].append("review_receipt_unreadable")
+        return result
+    if not isinstance(receipt, dict):
+        result["failures"].append("review_receipt_not_object")
+        return result
+    result["status"] = "PASS"
+    result["reviewer"] = receipt.get("reviewer")
+    result["repair_round"] = receipt.get("repair_round")
+    result["frameworks"] = receipt.get("review_frameworks")
+    add_check(result, "schema_version", receipt.get("schema_version") == 1, receipt.get("schema_version"))
+    add_check(result, "artifact_binding", receipt.get("artifact_sha256") == artifact_sha, None)
+    observed_preview_shas = receipt.get("preview_sha256s")
+    preview_binding = (
+        isinstance(observed_preview_shas, list)
+        and sorted(observed_preview_shas) == sorted(preview_shas)
+        and len(observed_preview_shas) == len(preview_shas)
+    )
+    add_check(result, "preview_binding", preview_binding, None)
+    add_check(result, "brand_binding", receipt.get("brand_context_sha256") == brand_sha, None)
+    inspected = parse_time(receipt.get("inspected_at"))
+    age_seconds = (datetime.now(timezone.utc) - inspected).total_seconds() if inspected else None
+    add_check(result, "review_fresh", inspected is not None and 0 <= age_seconds <= 48 * 3600, age_seconds)
+    add_check(result, "reviewer_present", bool(str(receipt.get("reviewer") or "").strip()), None)
+    frameworks = receipt.get("review_frameworks")
+    framework_set = (
+        set(frameworks)
+        if isinstance(frameworks, list) and all(isinstance(x, str) for x in frameworks)
+        else set()
+    )
+    add_check(result, "review_frameworks", REQUIRED_FRAMEWORKS.issubset(framework_set), sorted(framework_set))
+    if kind in {"email-html", "newsletter"}:
+        add_check(
+            result,
+            "email_framework_scope",
+            not (framework_set & EMAIL_FORBIDDEN_FRAMEWORKS),
+            sorted(framework_set),
+        )
+    repair_round = receipt.get("repair_round")
+    add_check(result, "repair_round", type(repair_round) is int and 0 <= repair_round <= 2, repair_round)
+
+    scores = receipt.get("scores")
+    weighted_total = 0
+    valid_scores = True
+    for name, weight in SCORE_WEIGHTS.items():
+        item = scores.get(name) if isinstance(scores, dict) else None
+        score = item.get("score") if isinstance(item, dict) else None
+        evidence = str(item.get("evidence") or "").strip() if isinstance(item, dict) else ""
+        valid = type(score) is int and 1 <= score <= 5 and bool(evidence)
+        if valid:
+            weighted_total += score * weight
+        else:
+            valid_scores = False
+        result["scores"][name] = {"score": score, "evidence": evidence, "valid": valid}
+        add_check(result, f"score:{name}", valid and score >= SCORE_FLOORS[name], score)
+    weighted_score = round(weighted_total / sum(SCORE_WEIGHTS.values()), 2) if valid_scores else None
+    result["weighted_score"] = weighted_score
+    add_check(result, "weighted_score", weighted_score is not None and weighted_score >= 4.0, weighted_score)
+
+    craft = receipt.get("craft_floor")
+    for name in CRAFT_CHECKS:
+        item = craft.get(name) if isinstance(craft, dict) else None
+        passed = (
+            isinstance(item, dict)
+            and str(item.get("status") or "").upper() == "PASS"
+            and bool(str(item.get("evidence") or "").strip())
+        )
+        add_check(result, f"craft_floor:{name}", passed, item)
+
+    overlay = receipt.get("client_overlay")
+    overlay_checks = overlay.get("checks") if isinstance(overlay, dict) else None
+    overlay_passed = (
+        isinstance(overlay, dict)
+        and str(overlay.get("status") or "").upper() == "PASS"
+        and overlay.get("source_sha256") == brand_sha
+        and isinstance(overlay_checks, list)
+        and bool(overlay_checks)
+        and all(
+            isinstance(item, dict)
+            and str(item.get("status") or "").upper() == "PASS"
+            and bool(str(item.get("evidence") or "").strip())
+            for item in overlay_checks
+        )
+    )
+    add_check(result, "client_overlay", overlay_passed, overlay)
+    findings = receipt.get("findings")
+    findings_valid = isinstance(findings, list) and all(
+        isinstance(item, dict)
+        and str(item.get("severity") or "").lower() in {"critical", "major", "minor"}
+        and bool(str(item.get("text") or "").strip())
+        for item in findings
+    )
+    result["findings"] = findings if isinstance(findings, list) else []
+    blocking_findings = [
+        item for item in result["findings"]
+        if isinstance(item, dict) and str(item.get("severity") or "").lower() in {"critical", "major"}
+    ]
+    add_check(result, "findings_valid", findings_valid, len(result["findings"]))
+    add_check(result, "no_blocking_findings", findings_valid and not blocking_findings, len(blocking_findings))
+    add_check(result, "review_decision", str(receipt.get("decision") or "").upper() == "PASS", receipt.get("decision"))
+    return result
+
+
+def review_template(
+    artifact_sha: str | None, preview_shas: list[str], brand_sha: str | None
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "artifact_sha256": artifact_sha,
+        "preview_sha256s": preview_shas,
+        "brand_context_sha256": brand_sha,
+        "inspected_at": None,
+        "reviewer": None,
+        "review_frameworks": ["impeccable-craft-floor", "human-taste"],
+        "repair_round": 0,
+        "scores": {name: {"score": None, "evidence": ""} for name in SCORE_WEIGHTS},
+        "craft_floor": {name: {"status": "UNKNOWN", "evidence": ""} for name in CRAFT_CHECKS},
+        "client_overlay": {"status": "UNKNOWN", "source_sha256": brand_sha, "checks": []},
+        "findings": [],
+        "decision": "UNKNOWN",
+    }
+
+
+def atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def evaluate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
+    artifact = Path(args.artifact).expanduser().resolve()
+    previews = [Path(value).expanduser().resolve() for value in args.preview]
+    brand = Path(args.brand_context).expanduser().resolve() if args.brand_context else None
+    artifact_sha = sha256(artifact) if artifact.is_file() else None
+    brand_sha = sha256(brand) if brand and brand.is_file() else None
+    structure_result, expected_count = inspect_structure(artifact, args.kind)
+    render_result = inspect_render(previews, args.kind, expected_count, args.expected_size)
+    preview_shas = [row["sha256"] for row in render_result["previews"] if row.get("sha256")]
+    add_check(structure_result, "brand_context", brand_sha is not None, str(brand) if brand else None)
+    review_result = validate_review(
+        Path(args.review_receipt).expanduser().resolve() if args.review_receipt else None,
+        artifact_sha,
+        preview_shas,
+        brand_sha,
+        args.kind,
+    )
+    statuses = {structure_result["status"], render_result["status"], review_result["status"]}
+    verdict = "PASS" if statuses == {"PASS"} else ("FAIL" if "FAIL" in statuses else "UNKNOWN")
+    payload = {
+        "schema_version": 1,
+        "checked_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "artifact": {
+            "path": str(artifact),
+            "kind": args.kind,
+            "sha256": artifact_sha,
+            "bytes": artifact.stat().st_size if artifact.is_file() else None,
+        },
+        "brand_context": {"path": str(brand) if brand else None, "sha256": brand_sha},
+        "structure": structure_result,
+        "render": render_result,
+        "visual_review": review_result,
+        "verdict": verdict,
+    }
+    if args.write_review_template:
+        template_path = Path(args.write_review_template).expanduser().resolve()
+        atomic_json(template_path, review_template(artifact_sha, preview_shas, brand_sha))
+        payload["review_template_path"] = str(template_path)
+    report_path = (
+        Path(args.report).expanduser().resolve()
+        if args.report
+        else Path(str(artifact) + ".visual-qa.json")
+    )
+    payload["report_path"] = str(report_path)
+    atomic_json(report_path, payload)
+    return payload, 0 if verdict == "PASS" else 2
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("artifact")
+    parser.add_argument("--kind", required=True, choices=KINDS)
+    parser.add_argument("--preview", action="append", default=[])
+    parser.add_argument("--brand-context")
+    parser.add_argument("--review-receipt")
+    parser.add_argument("--write-review-template")
+    parser.add_argument("--expected-size", default="1080x1080")
+    parser.add_argument("--report")
+    args = parser.parse_args()
+    payload, returncode = evaluate(args)
+    print(json.dumps(payload, indent=2, sort_keys=True))
+    return returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -14,22 +14,29 @@ Private fleet health probes, host routes, and service adapters are deliberately
 not part of this public source manifest; native service tooling owns public
 installations.
 
-The `native_agent_continuity` entry in `release.json` is a narrow overlay with
-its own source commit, file inventory, modes, and package digest. It deliberately
-does not change the older general-runtime Golden or upstream pins. Its activation
-is manifest-driven: managed provisioning opts a new tenant in, while an existing
+The `native_agent_continuity` entry in `release.json` remains a narrow overlay
+with its own source commit, file inventory, modes, and package digest. The
+general runtime now advances independently to the exact Golden and upstream
+pins recorded in the same release. Continuity activation remains
+manifest-driven: managed provisioning opts a new tenant in, while an existing
 or manual installation without that tenant manifest remains untouched.
 
 ## What changed in this release
 
-- The canary reconciler now accepts only an exact active native-scheduler
-  command or the exact canonical cron line, removes its owned duplicate cron
-  entry after native-scheduler proof, and fails closed when crontab inspection
-  fails. The retired per-host Codex-exec health actor is now removed instead of
-  being recreated; the contract-derived fleet pulse and lane guardian remain
-  the health authorities. The Hermes pin, runtime payload, and assembled
-  fingerprint are unchanged; their exact identities remain owned by
-  `release.json`.
+- Fresh and existing profiles receive the same cross-platform capacity,
+  disk-retention, canary-reconciliation, and tool-readiness floor. The local
+  self-check emits a bounded `machine_profile` for disk, memory, process, and
+  swap evidence; agents inspect pressure and explain headroom without using it
+  as an automatic veto on requested large work.
+- Routine cron script, configuration, runtime, timeout, and execution failures
+  now receive one non-recursive repair turn in the owning runtime after the
+  original receipt is saved. The result is verified and appended before human
+  delivery. Successful script jobs remain model-free, and safety, auth,
+  billing, permission, destructive-data, provider-limit, interruption, and
+  uncertain-side-effect boundaries do not enter automatic mutation.
+- The canary reconciler accepts only an exact active native-scheduler command
+  or the exact canonical cron line, removes its owned duplicate cron entry
+  after native-scheduler proof, and fails closed when crontab inspection fails.
 - New managed clients declare native-agent continuity by default. Existing
   self-heal runs the GBrain baseline once, reconciles supported native coding
   agents, then exports, syncs, and cards new sessions on each normal heartbeat.
@@ -88,6 +95,12 @@ or manual installation without that tenant manifest remains untouched.
   over low-fidelity local compositing.
 - Runtime health checks now share one portable floor for SQLite/WAL pressure,
   Telegram delivery, safe restart, active runtime identity, and canary state.
+- Host-capacity checks distinguish allocated swap from active swap churn,
+  inventory top-memory and oldest processes, and route sustained pressure for
+  independent health review without killing unknown work or rebooting a host.
+- Scheduled jobs self-remediate routine local failures once before escalation;
+  their delivery contract rejects operator-directed repair instructions and
+  keeps full paths, logs, IDs, and raw errors in the saved receipt.
 - Golden no longer rewrites Hermes defaults already owned upstream; retired
   policy leaves are removed only when they still equal Golden's former value.
 
@@ -144,6 +157,12 @@ values only when they still exactly match the old defaults.
 - **Recurring coherence receipt:** a release-pinned host scheduler rechecks the
   exact runtime root, Python, and assembled initializer contract without
   restarting Hermes or reading conversations.
+- **Machine-aware execution:** the local self-check publishes current capacity,
+  process, disk, and swap evidence. Large jobs use that evidence for staging,
+  checkpoint, and cleanup decisions rather than being categorically blocked.
+- **Bounded cron recovery:** repairable local cron failures get one owning-
+  runtime repair-and-verify attempt; recursive repair and unsafe authority
+  expansion are rejected.
 - **Telegram transaction proof:** a local ledger can join exact ingress to final
   delivery for canaries and incident diagnosis.
 - **Version-aware media delivery:** replacing an attachment at the same path
@@ -183,7 +202,7 @@ values only when they still exactly match the old defaults.
   leave no persistent GBrain server process.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 26
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 33
 cohesive registry entries in this release.
 
 ## Profile additions

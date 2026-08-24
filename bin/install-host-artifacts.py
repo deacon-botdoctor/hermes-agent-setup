@@ -122,24 +122,51 @@ def backup_path(path: Path) -> Path:
     return path.with_name(f"{path.name}.bak-host-artifact-{ts}")
 
 
+def prune_host_artifact_backups(path: Path, *, keep: Path | None = None) -> tuple[Path | None, list[str]]:
+    """Keep one newest rollback copy for the current destination."""
+    candidates = sorted(
+        path.parent.glob(f"{path.name}.bak-host-artifact-*"),
+        key=lambda candidate: (candidate.stat().st_mtime_ns, candidate.name),
+        reverse=True,
+    )
+    retained = keep or (candidates[0] if candidates else None)
+    pruned: list[str] = []
+    for candidate in candidates:
+        if candidate == retained or not (candidate.is_file() or candidate.is_symlink()):
+            continue
+        candidate.unlink()
+        pruned.append(str(candidate))
+    return retained, sorted(pruned)
+
+
 def copy_file(src: Path, dst: Path, *, mode: Any, dry_run: bool) -> tuple[str, dict[str, Any]]:
     src_bytes = src.read_bytes()
     src_sha = sha256_bytes(src_bytes)
     if dst.exists() and sha256_bytes(dst.read_bytes()) == src_sha:
-        return STATUS_IDEMPOTENT, {"source_sha256": src_sha, "destination": str(dst)}
+        retained, pruned = (None, []) if dry_run else prune_host_artifact_backups(dst)
+        return STATUS_IDEMPOTENT, {
+            "source_sha256": src_sha,
+            "destination": str(dst),
+            "backup": str(retained) if retained is not None else None,
+            "pruned_backups": pruned,
+        }
     before_sha = sha256_bytes(dst.read_bytes()) if dst.exists() else None
-    backup = str(backup_path(dst)) if dst.exists() else None
+    backup = backup_path(dst) if dst.exists() else None
+    pruned_backups: list[str] = []
     if not dry_run:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if dst.exists():
             shutil.copy2(dst, backup)
         dst.write_bytes(src_bytes)
         set_mode(dst, mode, src)
+        if backup is not None:
+            _, pruned_backups = prune_host_artifact_backups(dst, keep=backup)
     return STATUS_INSTALLED, {
         "source_sha256": src_sha,
         "previous_sha256": before_sha,
         "destination": str(dst),
-        "backup": backup,
+        "backup": str(backup) if backup is not None else None,
+        "pruned_backups": pruned_backups,
     }
 
 
@@ -242,20 +269,31 @@ def apply_insert(
     text = dst.read_text(encoding="utf-8")
     marker = entry.get("already_present")
     if marker and marker in text:
-        return STATUS_IDEMPOTENT, {"destination": str(dst)}
+        retained, pruned = (None, []) if dry_run else prune_host_artifact_backups(dst)
+        return STATUS_IDEMPOTENT, {
+            "destination": str(dst),
+            "backup": str(retained) if retained is not None else None,
+            "pruned_backups": pruned,
+        }
     anchor = entry["anchor_text"]
     if anchor not in text:
         return STATUS_ANCHOR_MISS, {"reason": "anchor not found", "destination": str(dst), "anchor": anchor}
     fragment = source_path(entry["source"], repo).read_text(encoding="utf-8").rstrip() + "\n\n"
     new_text = text.replace(anchor, fragment + anchor, 1)
-    backup = str(backup_path(dst))
+    backup = backup_path(dst)
+    pruned_backups: list[str] = []
     if not dry_run:
         shutil.copy2(dst, backup)
         dst.write_text(new_text, encoding="utf-8")
         set_mode(dst, entry.get("mode"), None)
         if dst.suffix == ".sh":
             subprocess.run(["bash", "-n", str(dst)], check=True, capture_output=True, text=True)
-    return STATUS_INSTALLED, {"destination": str(dst), "backup": backup}
+        _, pruned_backups = prune_host_artifact_backups(dst, keep=backup)
+    return STATUS_INSTALLED, {
+        "destination": str(dst),
+        "backup": str(backup),
+        "pruned_backups": pruned_backups,
+    }
 
 
 def apply_replace_block(
@@ -272,7 +310,12 @@ def apply_replace_block(
     text = dst.read_text(encoding="utf-8")
     marker = entry.get("already_present")
     if marker and marker in text:
-        return STATUS_IDEMPOTENT, {"destination": str(dst)}
+        retained, pruned = (None, []) if dry_run else prune_host_artifact_backups(dst)
+        return STATUS_IDEMPOTENT, {
+            "destination": str(dst),
+            "backup": str(retained) if retained is not None else None,
+            "pruned_backups": pruned,
+        }
     anchor = entry["anchor_text"]
     start = text.find(anchor)
     if start < 0:
@@ -283,14 +326,20 @@ def apply_replace_block(
     end += len("\n}\n")
     fragment = source_path(entry["source"], repo).read_text(encoding="utf-8").rstrip() + "\n"
     new_text = text[:start] + fragment + text[end:]
-    backup = str(backup_path(dst))
+    backup = backup_path(dst)
+    pruned_backups: list[str] = []
     if not dry_run:
         shutil.copy2(dst, backup)
         dst.write_text(new_text, encoding="utf-8")
         set_mode(dst, entry.get("mode"), None)
         if dst.suffix == ".sh":
             subprocess.run(["bash", "-n", str(dst)], check=True, capture_output=True, text=True)
-    return STATUS_INSTALLED, {"destination": str(dst), "backup": backup}
+        _, pruned_backups = prune_host_artifact_backups(dst, keep=backup)
+    return STATUS_INSTALLED, {
+        "destination": str(dst),
+        "backup": str(backup),
+        "pruned_backups": pruned_backups,
+    }
 
 
 def apply_ensure_cua_driver(
@@ -351,6 +400,82 @@ def apply_ensure_cua_driver(
     return status, {
         "hermes_python": str(python),
         "driver_receipt": receipt,
+    }
+
+
+def apply_ensure_browser_use_cli(
+    entry: dict[str, Any],
+    *,
+    repo: Path,
+    hermes_home: Path,
+    hermes_dir: Path,
+    hermes_python: Path | None,
+    dry_run: bool,
+) -> tuple[str, dict[str, Any]]:
+    helper = source_path(entry["helper"], repo)
+    contract = source_path(entry["contract"], repo)
+    if not helper.is_file() or not contract.is_file():
+        missing = [str(path) for path in (helper, contract) if not path.is_file()]
+        return STATUS_FAILED, {"reason": "Browser Use payload missing", "missing": missing}
+    python = resolve_hermes_python(hermes_dir, hermes_python)
+    command = [
+        sys.executable,
+        str(helper),
+        "--hermes-python",
+        str(python),
+        "--hermes-home",
+        str(hermes_home),
+        "--contract",
+        str(contract),
+    ]
+    if dry_run:
+        command.append("--dry-run")
+    timeout_seconds = int(entry.get("timeout_seconds", 960))
+    try:
+        proc = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout_seconds,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return STATUS_FAILED, {
+            "reason": "Browser Use helper timed out",
+            "error_code": "browser_use_helper_timeout",
+            "timeout_seconds": timeout_seconds,
+            "hermes_python": str(python),
+        }
+    try:
+        receipt = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return STATUS_FAILED, {
+            "reason": "Browser Use helper returned invalid JSON",
+            "returncode": proc.returncode,
+            "stderr": proc.stderr.strip()[-500:],
+        }
+    if not isinstance(receipt, dict):
+        return STATUS_FAILED, {
+            "reason": "Browser Use helper returned invalid receipt",
+            "returncode": proc.returncode,
+            "stderr": proc.stderr.strip()[-500:],
+        }
+    helper_status = receipt.get("status")
+    if helper_status not in {"installed", "idempotent", "would_install"}:
+        status = STATUS_FAILED
+    elif proc.returncode != 0 or receipt.get("ok") is not True:
+        status = STATUS_FAILED
+    elif helper_status == "idempotent":
+        status = STATUS_IDEMPOTENT
+    elif helper_status == "would_install":
+        status = STATUS_SKIPPED
+    elif helper_status == "installed":
+        status = STATUS_INSTALLED
+    return status, {
+        "hermes_python": str(python),
+        "browser_use_receipt": receipt,
     }
 
 
@@ -589,6 +714,15 @@ def apply_entry(
         return apply_replace_block(entry, repo=repo, hermes_home=hermes_home, hermes_dir=hermes_dir, dry_run=dry_run)
     if op == "ensure_cua_driver":
         return apply_ensure_cua_driver(
+            entry,
+            repo=repo,
+            hermes_home=hermes_home,
+            hermes_dir=hermes_dir,
+            hermes_python=hermes_python,
+            dry_run=dry_run,
+        )
+    if op == "ensure_browser_use_cli":
+        return apply_ensure_browser_use_cli(
             entry,
             repo=repo,
             hermes_home=hermes_home,

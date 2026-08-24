@@ -348,7 +348,9 @@ def _capture_telegram_tool_checkpoint(ctx, event_type, tool_name, preview, kwarg
                 except ValueError:
                     pass
             if kwargs.get("is_error"):
-                done = "A work step hit a problem; I’m resolving it"
+                # Tool failures are control-plane facts, not agent-authored
+                # client copy. Keep them off the conversational surface.
+                done = ""
             if done:
                 ctx.model_checkpoint_tool_completed.append(done)
                 del ctx.model_checkpoint_tool_completed[:-16]
@@ -380,11 +382,13 @@ def _format_telegram_model_checkpoint(
     current=None,
     activity=None,
 ):
-    """Merge real commentary with specific factual lifecycle progress.
+    """Render the latest real model commentary in the agent's own voice.
 
     An empty string is intentional: the caller skips that scheduled update and
-    preserves the cursor until real commentary or an observable milestone is
-    available. A silent interval is preferable to fake specificity.
+    preserves the cursor until real commentary is available. Tool lifecycle
+    labels are accepted only for call-site compatibility; they must never
+    synthesize client-facing prose. A silent interval is preferable to an
+    update that impersonates the agent.
     """
     import re as _re
 
@@ -403,32 +407,15 @@ def _format_telegram_model_checkpoint(
             if clean and clean not in candidates:
                 candidates.append(clean)
 
-    bullets = candidates[-4:]
-    for item in completed or []:
-        clean = " ".join(str(item or "").split()).rstrip(".")
-        if clean and clean not in bullets and len(bullets) < 4:
-            bullets.append(clean)
-    current_label = ""
-    for item in reversed(current or []):
-        current_label = " ".join(str(item or "").split()).rstrip(".")
-        if current_label:
-            break
-    if not current_label:
-        current_label = _telegram_checkpoint_activity_label(activity).rstrip(".")
-    if current_label and current_label not in bullets:
-        if len(bullets) >= 4:
-            bullets = bullets[-3:]
-        bullets.append(f"Now: {{current_label}}")
+    if not candidates:
+        return ""
     minutes = max(0, int(elapsed_mins or 0))
     task_label = " ".join(str(task or "").split())[:160]
     if task_label:
-        lines = [f"{{minutes}} minutes in on {{task_label}} — quick update:"]
+        header = f"{{minutes}} minutes in on {{task_label}}"
     else:
-        lines = [f"{{minutes}} minutes in — quick update:"]
-    if not bullets:
-        return ""
-    lines.extend(f"• {{bullet}}" for bullet in bullets)
-    return "\\n".join(lines)[:1200]
+        header = f"{{minutes}} minutes in"
+    return f"{{header}}\\n\\n{{candidates[-1]}}"[:1200]
 '''
 
 

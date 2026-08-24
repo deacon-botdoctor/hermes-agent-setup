@@ -1,10 +1,10 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
-    "file_count": 82
+    "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
+    "file_count": 93
   },
-  "baseline_wiring_digest": "b4926a439c825765591e7b0cd5c77d736b3b947bd82313744b3031f0c2485e4e",
-  "canonical_upstream_sha": "3c27eb6234bf91b8ceee9e9071591b31e9b148cb",
+  "baseline_wiring_digest": "c43951d5bb638aaf7af6e76f75e3f230991c35b6ca77cbd6cf20571a442f966d",
+  "canonical_upstream_sha": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
     "contract": {
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.14.2",
     "version": "0.14.2"
   },
-  "deployment_digest": "f75aeb4c45860f9bc712e28c77dea1a302f7a8c958d7519436f7f6c8ed45338d",
-  "golden_sha": "70b7450261729e76e60a49cecd696e72cc2f500e",
+  "deployment_digest": "efd9ec47e3ea8b9424ca799e892458b5c1cb28859d616f3ec928041c99ce280a",
+  "golden_sha": "d1ff1e9ca6864ff2e1a687b5983b36623d8f2a51",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -32,7 +32,7 @@
     "platforms": ["linux", "macos", "windows"],
     "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
   },
-  "release": "botdoctor-hermes-2026.08.23-continuity-3408573b",
+  "release": "botdoctor-hermes-2026.08.24-golden-d1ff1e9c",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -52,14 +52,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "124947c5aa827ffc24d212af69f04dd59dc98d3255a570e3a79098c95fabddbf",
+  "runtime_payload_digest": "f14a0056e4963b933ea560d27cdc90fcb5beee1d65285267314401692ec6a6b6",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "current",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "28/28 patches applied on pinned upstream; no anchor miss, failure, or not-run",
-    "golden_suite": "native continuity suite 67/67 plus adjacent setup suite 49/49; macOS and Linux isolated baseline canaries passed; Windows path and Joe/Michael regressions passed"
+    "clean_upstream_rehearsal": "33/33 patches applied on pinned upstream; compile and assembly gates passed; exact 93-file public runtime fingerprint reproduced",
+    "golden_suite": "public suite 86/86; Golden 66 focused tests, 107 related tests, eight preflight tests, Ruff, pinned/latest assembly, idempotence, deterministic double assembly, and zero-finding security gate passed"
   }
 }

@@ -61,10 +61,46 @@ def pid_alive(pid: Any) -> bool:
         value = int(pid)
         if value <= 0:
             return False
+        if os.name == "nt":
+            return windows_pid_alive(value)
         os.kill(value, 0)
         return True
     except (OSError, TypeError, ValueError):
         return False
+
+
+def windows_pid_alive(pid: int, kernel32: Any | None = None) -> bool:
+    """Check a Windows PID without using ``os.kill(pid, 0)``.
+
+    Unlike POSIX, CPython's Windows ``os.kill`` implementation can route signal
+    0 through ``TerminateProcess``. Querying the process handle and exit code
+    gives the watchdog a genuinely non-destructive liveness check instead.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    api = kernel32
+    if api is None:
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        api.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        api.OpenProcess.restype = wintypes.HANDLE
+        api.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        api.GetExitCodeProcess.restype = wintypes.BOOL
+        api.CloseHandle.argtypes = [wintypes.HANDLE]
+        api.CloseHandle.restype = wintypes.BOOL
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    handle = api.OpenProcess(process_query_limited_information, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = wintypes.DWORD()
+        if not api.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return False
+        return exit_code.value == still_active
+    finally:
+        api.CloseHandle(handle)
 
 
 def telegram_heartbeat(state: dict[str, Any]) -> str | None:
@@ -91,7 +127,11 @@ def classify_gateway(
     elif not alive:
         health, reason = "outage", "gateway_process_missing"
     elif gateway_state != "running":
-        health, reason = "outage", f"gateway_state_{gateway_state}"
+        # A live gateway may report a transitional state while its owning
+        # supervisor is already stopping/reloading it. A second watchdog must
+        # not convert that graceful transition into a forceful duplicate
+        # restart. Only a missing/dead process is restart-eligible.
+        health, reason = "degraded", f"gateway_state_{gateway_state}"
     elif heartbeat_age is None or heartbeat_age > heartbeat_max_age:
         health, reason = "degraded", "telegram_heartbeat_stale"
     else:
@@ -137,6 +177,7 @@ def run_watchdog(
     observed_at = now or datetime.now(UTC)
     state_path = hermes_home / "gateway_state.json"
     incident_path = hermes_home / "state" / "gateway-watchdog-incident.json"
+    intent_path = hermes_home / "state" / "gateway-restart-intent.json"
     receipt_path = hermes_home / "state" / "gateway-watchdog-client.json"
     gateway = load_json(state_path, {})
     observation = classify_gateway(
@@ -151,6 +192,7 @@ def run_watchdog(
         "succeeded": None,
         "detail": None,
     }
+    restart_intent = load_json(intent_path, {})
 
     if observation["health"] == "healthy":
         incident = {}
@@ -173,13 +215,39 @@ def run_watchdog(
         }
         if not already_attempted:
             command = restart_command(supervisor_kind, supervisor_unit)
-            result = command_runner(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=45,
-                check=False,
-            )
+            restart_intent = {
+                "schema": "hermes-gateway-restart-intent/v1",
+                "status": "in_flight",
+                "created_at": utc_now(),
+                "owner": "canonical_gateway_watchdog",
+                "supervisor": {
+                    "kind": supervisor_kind,
+                    "unit": supervisor_unit,
+                },
+                "reason": observation["reason"],
+                "observed_pid": observation.get("pid"),
+                "incident_signature": signature,
+            }
+            atomic_json(intent_path, restart_intent)
+            try:
+                result = command_runner(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=45,
+                    check=False,
+                )
+            except Exception as exc:
+                restart_intent.update(
+                    {
+                        "status": "failed",
+                        "completed_at": utc_now(),
+                        "succeeded": False,
+                        "detail": type(exc).__name__,
+                    }
+                )
+                atomic_json(intent_path, restart_intent)
+                raise
             restart.update(
                 {
                     "attempted": True,
@@ -187,6 +255,15 @@ def run_watchdog(
                     "detail": (result.stdout or result.stderr or "").strip()[:240],
                 }
             )
+            restart_intent.update(
+                {
+                    "status": "completed",
+                    "completed_at": utc_now(),
+                    "succeeded": restart["succeeded"],
+                    "detail": restart["detail"],
+                }
+            )
+            atomic_json(intent_path, restart_intent)
             incident["restart_attempted"] = True
             incident["restart_attempted_at"] = utc_now()
             incident["restart_succeeded"] = restart["succeeded"]
@@ -202,6 +279,7 @@ def run_watchdog(
         "supervisor": {"kind": supervisor_kind, "unit": supervisor_unit},
         "observation": observation,
         "restart": restart,
+        "restart_intent": restart_intent,
         "incident": incident,
     }
     atomic_json(receipt_path, receipt)

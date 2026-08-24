@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,12 +23,45 @@ DISK_WARN_PERCENT = int(os.environ.get("HERMES_DISK_WARN_PERCENT", "85"))
 DISK_FAIL_PERCENT = int(os.environ.get("HERMES_DISK_FAIL_PERCENT", "92"))
 DISK_WARN_FREE_BYTES = int(os.environ.get("HERMES_DISK_WARN_FREE_BYTES", str(15 * 1024**3)))
 DISK_FAIL_FREE_BYTES = int(os.environ.get("HERMES_DISK_FAIL_FREE_BYTES", str(5 * 1024**3)))
-GATEWAY_FD_WARN = int(os.environ.get("HERMES_GATEWAY_FD_WARN", "128"))
-GATEWAY_FD_FAIL = int(os.environ.get("HERMES_GATEWAY_FD_FAIL", "512"))
+
+
+def _gateway_descriptor_defaults(platform_name):
+    # Windows HandleCount includes events, registry keys, pipes, and MCP child
+    # plumbing; a healthy tool-rich gateway routinely exceeds Unix fd limits.
+    return (1024, 4096) if platform_name == "nt" else (128, 512)
+
+
+_GATEWAY_FD_WARN_DEFAULT, _GATEWAY_FD_FAIL_DEFAULT = _gateway_descriptor_defaults(os.name)
+GATEWAY_FD_WARN = int(os.environ.get("HERMES_GATEWAY_FD_WARN", str(_GATEWAY_FD_WARN_DEFAULT)))
+GATEWAY_FD_FAIL = int(os.environ.get("HERMES_GATEWAY_FD_FAIL", str(_GATEWAY_FD_FAIL_DEFAULT)))
 GATEWAY_STATE_DB_HANDLE_WARN = int(os.environ.get("HERMES_GATEWAY_STATE_DB_HANDLE_WARN", "24"))
 GATEWAY_STATE_DB_HANDLE_FAIL = int(os.environ.get("HERMES_GATEWAY_STATE_DB_HANDLE_FAIL", "96"))
 GATEWAY_RSS_WARN_BYTES = int(os.environ.get("HERMES_GATEWAY_RSS_WARN_BYTES", str(4 * 1024**3)))
 GATEWAY_RSS_FAIL_BYTES = int(os.environ.get("HERMES_GATEWAY_RSS_FAIL_BYTES", str(8 * 1024**3)))
+TELEGRAM_POLL_MAX_AGE_S = int(os.environ.get("HERMES_TELEGRAM_POLL_MAX_AGE_SECONDS", "180"))
+HOST_VIRTUAL_FREE_WARN_PERCENT = float(os.environ.get("HERMES_HOST_VIRTUAL_FREE_WARN_PERCENT", "20"))
+HOST_VIRTUAL_FREE_FAIL_PERCENT = float(os.environ.get("HERMES_HOST_VIRTUAL_FREE_FAIL_PERCENT", "10"))
+HOST_SWAP_ALLOCATED_WARN_PERCENT = float(
+    os.environ.get("HERMES_HOST_SWAP_ALLOCATED_WARN_PERCENT", "75")
+)
+HOST_SWAP_ACTIVE_WARN_BYTES_PER_MINUTE = int(
+    os.environ.get("HERMES_HOST_SWAP_ACTIVE_WARN_BYTES_PER_MINUTE", str(64 * 1024**2))
+)
+HOST_SWAP_ACTIVE_FAIL_BYTES_PER_MINUTE = int(
+    os.environ.get("HERMES_HOST_SWAP_ACTIVE_FAIL_BYTES_PER_MINUTE", str(256 * 1024**2))
+)
+HOST_SWAP_RATE_MIN_WINDOW_SECONDS = 30
+HOST_SWAP_RATE_MAX_WINDOW_SECONDS = 2 * 60 * 60
+HOST_PROCESS_WARN = int(os.environ.get("HERMES_HOST_PROCESS_WARN", "500"))
+HOST_PROCESS_FAIL = int(os.environ.get("HERMES_HOST_PROCESS_FAIL", "800"))
+HOST_POWERSHELL_WARN = int(os.environ.get("HERMES_HOST_POWERSHELL_WARN", "25"))
+HOST_SSH_SESSION_WARN = int(os.environ.get("HERMES_HOST_SSH_SESSION_WARN", "20"))
+HOST_PROCESS_HANDLE_FAIL = int(os.environ.get("HERMES_HOST_PROCESS_HANDLE_FAIL", "50000"))
+LARGE_JOB_ESTIMATE_BYTES = int(os.environ.get("HERMES_LARGE_JOB_ESTIMATE_BYTES", str(5 * 1024**3)))
+DISK_WARN_NEW_PAYLOAD_LIMIT_BYTES = int(
+    os.environ.get("HERMES_DISK_WARN_NEW_PAYLOAD_LIMIT_BYTES", str(1024**3))
+)
+MAX_CONCURRENT_LARGE_JOBS = int(os.environ.get("HERMES_MAX_CONCURRENT_LARGE_JOBS", "1"))
 
 
 def iso():
@@ -51,6 +86,56 @@ def parse_dt(v):
         return None
 
 
+def _scaled_bytes(value, unit):
+    multipliers = {
+        "B": 1,
+        "K": 1024,
+        "M": 1024**2,
+        "G": 1024**3,
+        "T": 1024**4,
+    }
+    try:
+        return round(float(value) * multipliers[str(unit).upper()])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _counter_rate_bytes_per_minute(current, previous, page_size, window_seconds):
+    if not all(isinstance(item, int) for item in (current, previous, page_size)):
+        return None
+    if not isinstance(window_seconds, (int, float)):
+        return None
+    if not HOST_SWAP_RATE_MIN_WINDOW_SECONDS <= window_seconds <= HOST_SWAP_RATE_MAX_WINDOW_SECONDS:
+        return None
+    if current < previous or page_size <= 0:
+        return None
+    return round((current - previous) * page_size * 60 / window_seconds)
+
+
+def _elapsed_seconds(raw):
+    text = str(raw or "").strip()
+    days = 0
+    if "-" in text:
+        day_text, text = text.split("-", 1)
+        try:
+            days = int(day_text)
+        except ValueError:
+            return None
+    try:
+        parts = [int(item) for item in text.split(":")]
+    except ValueError:
+        return None
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+    elif len(parts) == 2:
+        hours, minutes, seconds = 0, parts[0], parts[1]
+    elif len(parts) == 1:
+        hours, minutes, seconds = 0, 0, parts[0]
+    else:
+        return None
+    return days * 86400 + hours * 3600 + minutes * 60 + seconds
+
+
 def run(cmd, timeout=8):
     try:
         return subprocess.run(cmd, text=True, capture_output=True, timeout=timeout, check=False)
@@ -64,6 +149,18 @@ def run(cmd, timeout=8):
         return Result()
 
 
+def pid_is_alive(pid: int) -> bool:
+    """Use a Windows-native process lookup; ``os.kill(pid, 0)`` is unreliable there."""
+    if os.name == "nt":
+        result = run(["tasklist", "/FI", f"PID eq {pid}", "/NH"], timeout=5)
+        return result.returncode == 0 and re.search(rf"\b{pid}\b", result.stdout or "") is not None
+    try:
+        os.kill(pid, 0)
+        return True
+    except (OSError, SystemError):
+        return False
+
+
 def check_config():
     p = HERMES / "config.yaml"
     return {"name": "config", "status": "pass" if p.exists() and p.stat().st_size > 0 else "fail", "detail": str(p)}
@@ -72,6 +169,18 @@ def check_config():
 def check_client_context():
     p = HERMES / "CLIENT_CONTEXT.md"
     return {"name": "client_context", "status": "pass" if p.exists() else "warn", "detail": str(p)}
+
+
+def telegram_transport_expected():
+    """Return False only for an explicit ``platforms.telegram.enabled: false``."""
+    try:
+        import yaml
+
+        config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8")) or {}
+    except Exception:
+        return True
+    telegram = ((config.get("platforms") or {}).get("telegram") or {})
+    return not (isinstance(telegram, dict) and telegram.get("enabled") is False)
 
 
 def check_gateway_state():
@@ -84,25 +193,51 @@ def check_gateway_state():
     for p in candidates:
         d = load_json(p, {})
         if d:
-            raw = json.dumps(d).lower()
             state = str(d.get("gateway_state") or d.get("state") or d.get("status") or "").lower()
             ts = parse_dt(d.get("updated_at") or d.get("generated_at") or d.get("ts"))
             age = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else None
-            ok = "running" in state or "connected" in raw or "healthy" in raw or state in {"ok", "active"}
-            if ok and age is not None and age > 7200:
-                proc = run(["pgrep", "-f", str(HERMES)], timeout=5)
-                if proc.returncode == 0 and proc.stdout.strip():
-                    return {
-                        "name": "gateway_state",
-                        "status": "pass",
-                        "detail": f"{p.name} state={state or 'unknown'} age={age} process_alive=true pids="
-                        + ",".join(proc.stdout.split()[:5]),
-                    }
-                ok = False
+            pid = d.get("pid")
+            try:
+                pid = int(pid)
+            except (TypeError, ValueError):
+                pid = None
+            pid_alive = pid_is_alive(pid) if pid else False
+            telegram = ((d.get("platforms") or {}).get("telegram") or {})
+            telegram_state = str(telegram.get("state") or "").lower()
+            poll_at = parse_dt(telegram.get("last_successful_poll_at"))
+            poll_age = (
+                int((datetime.now(timezone.utc) - poll_at).total_seconds())
+                if poll_at
+                else None
+            )
+            telegram_expected = telegram_transport_expected()
+            telegram_ok = (
+                telegram_state == "connected"
+                and poll_age is not None
+                and 0 <= poll_age <= TELEGRAM_POLL_MAX_AGE_S
+            )
+            ok = (
+                state == "running"
+                and pid_alive
+                and (telegram_ok or not telegram_expected)
+            )
             return {
                 "name": "gateway_state",
                 "status": "pass" if ok else "fail",
-                "detail": f"{p.name} state={state or 'unknown'} age={age}",
+                "severity": "P1",
+                "fix_class": "gateway_liveness",
+                "detail": (
+                    f"{p.name} state={state or 'unknown'} age={age} pid={pid} "
+                    f"telegram_expected={str(telegram_expected).lower()} "
+                    f"pid_alive={str(pid_alive).lower()} telegram={telegram_state or 'unknown'} "
+                    f"poll_age={poll_age} poll_max={TELEGRAM_POLL_MAX_AGE_S}"
+                ),
+                "gateway_pid": pid,
+                "pid_alive": pid_alive,
+                "telegram_state": telegram_state or "unknown",
+                "telegram_expected": telegram_expected,
+                "last_successful_poll_at": telegram.get("last_successful_poll_at"),
+                "poll_age_seconds": poll_age,
             }
     proc = run(["pgrep", "-f", str(HERMES)], timeout=5)
     ok = proc.returncode == 0 and bool(proc.stdout.strip())
@@ -132,13 +267,7 @@ def gateway_runtime_binding():
         pid = int(pid)
     except (TypeError, ValueError):
         pid = None
-    process_alive = False
-    if pid:
-        try:
-            os.kill(pid, 0)
-            process_alive = True
-        except OSError:
-            process_alive = False
+    process_alive = pid_is_alive(pid) if pid else False
     argv = data.get("argv") if isinstance(data.get("argv"), list) else []
     runtime_root = ""
     if argv:
@@ -151,6 +280,88 @@ def gateway_runtime_binding():
         "process_alive": process_alive,
         "runtime_root": runtime_root,
         "argv": [str(value) for value in argv[:8]],
+    }
+
+
+def check_active_client_capabilities():
+    """Verify client-overlay bytes against the active rollout binding."""
+    binding_path = HERMES / "state/runtime-binding.json"
+    binding = load_json(binding_path, {})
+    overlay = binding.get("client_overlay")
+    if not isinstance(overlay, dict):
+        return {
+            "name": "active_client_capabilities",
+            "status": "fail",
+            "severity": "P1",
+            "fix_class": "restart_or_redeploy",
+            "detail": "active runtime has no client overlay capability contract",
+        }
+    proof = overlay.get("capability_contract")
+    files = proof.get("files") if isinstance(proof, dict) else None
+    composition_mode = str(overlay.get("composition_mode") or "").strip()
+    preservation_proof = overlay.get("proof")
+    runtime_raw = str(binding.get("runtime_root") or "").strip()
+    runtime_python_raw = str(binding.get("runtime_python") or "").strip()
+    runtime = Path(runtime_raw).expanduser()
+    failures = []
+    checked = []
+    if binding.get("kind") != "botdoctor_runtime_binding" or binding.get("status") != "active":
+        failures.append("active runtime binding is invalid")
+    if not runtime_raw or not runtime.is_dir():
+        failures.append("active runtime root is missing")
+    if not runtime_python_raw or not Path(runtime_python_raw).expanduser().is_file():
+        failures.append("active runtime Python is missing")
+    if not overlay.get("repo") or not re.fullmatch(r"[0-9a-f]{40}", str(overlay.get("sha") or "")):
+        failures.append("client overlay source identity is incomplete")
+    external_state_only = composition_mode == "preserved_external_state"
+    if external_state_only:
+        if not isinstance(preservation_proof, dict) or not all(
+            preservation_proof.get(key) is True
+            for key in ("immutable_runtime_switch", "client_home_unchanged")
+        ):
+            failures.append("external-state preservation proof is incomplete")
+    elif not isinstance(proof, dict) or proof.get("status") != "pass" or not isinstance(files, dict) or not files:
+        failures.append("client capability proof is missing")
+    elif runtime.is_dir():
+        root = runtime.resolve()
+        for relative, expected_sha in sorted(files.items()):
+            relative_path = Path(str(relative))
+            if relative_path.is_absolute() or ".." in relative_path.parts:
+                failures.append(f"unsafe capability path: {relative}")
+                continue
+            path = runtime / relative_path
+            try:
+                resolved = path.resolve(strict=True)
+                if not resolved.is_relative_to(root) or path.is_symlink() or not path.is_file():
+                    raise OSError("not a regular in-runtime file")
+                actual_sha = hashlib.sha256(path.read_bytes()).hexdigest()
+            except (OSError, RuntimeError):
+                failures.append(f"capability file missing or unsafe: {relative}")
+                continue
+            if actual_sha != expected_sha:
+                failures.append(f"capability hash mismatch: {relative}")
+            checked.append(str(relative))
+    live_root = str(gateway_runtime_binding().get("runtime_root") or "")
+    if runtime_raw and live_root and Path(live_root) != runtime:
+        failures.append(f"live runtime mismatch live={live_root} bound={runtime}")
+    return {
+        "name": "active_client_capabilities",
+        "status": "fail" if failures else "pass",
+        "severity": "P1",
+        "fix_class": "restart_or_redeploy",
+        "detail": (
+            "; ".join(failures)
+            if failures
+            else (
+                f"repo={overlay.get('repo')} sha={overlay.get('sha')} "
+                f"composition_mode={composition_mode or 'runtime_overlay'} "
+                f"files={','.join(checked)} runtime_python={runtime_python_raw}"
+            )
+        ),
+        "client_overlay_repo": overlay.get("repo"),
+        "client_overlay_sha": overlay.get("sha"),
+        "runtime_python": runtime_python_raw,
+        "checked_files": checked,
     }
 
 
@@ -219,6 +430,30 @@ def _nested_block(block: str | None, key: str, indent: int = 2) -> str | None:
             break
         end += len(line)
     return block[start:end]
+
+
+def _nested_list_items(block: str | None, key: str, indent: int = 2) -> set[str]:
+    """Read a nested YAML list, including safe_dump's indentless sequence form."""
+    if block is None:
+        return set()
+    lines = block.splitlines()
+    key_line = " " * indent + key + ":"
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() and line.rstrip() == key_line)
+    except StopIteration:
+        return set()
+    items: set[str] = set()
+    for line in lines[start + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        leading = len(line) - len(line.lstrip(" "))
+        match = re.match(r"^\s*-\s*([A-Za-z0-9_-]+)\s*$", line)
+        if match and leading >= indent:
+            items.add(match.group(1))
+            continue
+        if leading <= indent:
+            break
+    return items
 
 
 def _scalar_from_block(block: str | None, key: str, indent: int = 2):
@@ -332,6 +567,14 @@ def _process_started_at(pid: int):
         return None
 
 
+def _overlay_config_exemptions() -> set[str]:
+    manifest = load_json(HERMES / "runtime-manifest.json", {})
+    exemptions = manifest.get("overlay_config_exemptions")
+    if not isinstance(exemptions, list):
+        return set()
+    return {str(value) for value in exemptions}
+
+
 def check_telegram_organic_checkpoints():
     """Prove the effective v3 contract from the active immutable runtime."""
     config_path = HERMES / "config.yaml"
@@ -350,12 +593,16 @@ def check_telegram_organic_checkpoints():
     interval = _scalar_from_block(agent, "gateway_notify_interval")
     global_enabled = _scalar_from_block(display, "long_running_notifications")
     telegram_enabled = _scalar_from_block(telegram, "long_running_notifications", indent=6)
-    if interval != 600:
-        failures.append(f"interval={interval!r} expected=600")
-    if global_enabled is not False:
+    telegram_cleanup = _scalar_from_block(telegram, "cleanup_progress", indent=6)
+    exemptions = _overlay_config_exemptions()
+    if "agent.gateway_notify_interval" not in exemptions and interval != 300:
+        failures.append(f"interval={interval!r} expected=300")
+    if "display.long_running_notifications" not in exemptions and global_enabled is not False:
         failures.append(f"global={global_enabled!r} expected=False")
-    if telegram_enabled is not True:
+    if "display.platforms.telegram.long_running_notifications" not in exemptions and telegram_enabled is not True:
         failures.append(f"telegram={telegram_enabled!r} expected=True")
+    if "display.platforms.telegram.cleanup_progress" not in exemptions and telegram_cleanup is not True:
+        failures.append(f"cleanup={telegram_cleanup!r} expected=True")
 
     binding = load_json(binding_path, {})
     runtime_raw = str(binding.get("runtime_root") or "").strip()
@@ -397,6 +644,8 @@ def check_telegram_organic_checkpoints():
 
     detail = (
         f"interval={interval!r} global={global_enabled!r} telegram={telegram_enabled!r} "
+        f"cleanup={telegram_cleanup!r} "
+        f"exemptions={','.join(sorted(exemptions)) or 'none'} "
         f"runtime={runtime_root} marker_sha256={marker_hash or 'missing'} "
         f"process_started={process_started.isoformat() if process_started else 'unknown'}"
     )
@@ -513,14 +762,74 @@ def check_tool_readiness():
     d = load_json(p, {})
     ts = parse_dt(d.get("timestamp") or d.get("generated_at") or d.get("checked_at"))
     age = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else 10**9
-    core = {"api_key_validity", "email"}
-    broken = []
+    core = {"api_key_validity", "firecrawl", "browser", "email", "mcp_servers"}
+    unhealthy = []
     for name, body in (d.get("tools") or {}).items():
         st = str((body or {}).get("status") or "")
-        if name in core and st == "broken":
-            broken.append(name)
-    status = "fail" if age > 12 * 3600 or broken else "pass"
-    return {"name": "tool_readiness", "status": status, "detail": f"age={age}s core_broken={broken[:8]}"}
+        if name in core and st in {"broken", "degraded", "error"}:
+            unhealthy.append(f"{name}:{st}")
+    firecrawl_smoke = str((((d.get("tools") or {}).get("firecrawl") or {}).get("smoke") or "missing"))
+    status = "fail" if age > 2 * 3600 or unhealthy else "pass"
+    return {
+        "name": "tool_readiness",
+        "status": status,
+        "detail": f"age={age}s firecrawl_smoke={firecrawl_smoke} core_unhealthy={unhealthy[:8]}",
+    }
+
+
+def check_workspace_write():
+    workspace = HERMES / "workspace"
+    try:
+        workspace.mkdir(parents=True, exist_ok=True)
+        fd, raw_path = tempfile.mkstemp(prefix=".selfcheck-write-", dir=str(workspace))
+        path = Path(raw_path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write("workspace-write-proof\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        finally:
+            path.unlink(missing_ok=True)
+        return {"name": "workspace_write", "status": "pass", "detail": f"create_remove_ok={workspace}"}
+    except Exception as exc:
+        return {
+            "name": "workspace_write",
+            "status": "fail",
+            "detail": f"create/remove failed at {workspace}: {type(exc).__name__}: {str(exc)[:120]}",
+        }
+
+
+def check_image_quality_surface():
+    """Verify image guidance is backed by an executable Telegram tool lane."""
+    config_path = HERMES / "config.yaml"
+    if not config_path.is_file():
+        return {
+            "name": "image_quality_surface",
+            "status": "fail",
+            "detail": f"missing config: {config_path}",
+        }
+    text = config_path.read_text(encoding="utf-8-sig", errors="replace")
+    image_gen = _top_level_block(text, "image_gen")
+    provider = str(_scalar_from_block(image_gen, "provider") or "").strip()
+    model = str(_scalar_from_block(image_gen, "model") or "").strip()
+    platform_toolsets = _top_level_block(text, "platform_toolsets")
+    required_tools = {"image_gen", "skills", "vision"}
+    present_tools = _nested_list_items(platform_toolsets, "telegram")
+    missing_tools = sorted(required_tools - present_tools)
+    required_paths = {
+        "routing_rule": HERMES / "shared-rules/image-generation-routing.md",
+        "creative_skill": HERMES / "skills/internal/creative-output-escalation/SKILL.md",
+    }
+    missing_paths = [name for name, path in required_paths.items() if not path.is_file()]
+    ok = bool(provider and model) and not missing_tools and not missing_paths
+    return {
+        "name": "image_quality_surface",
+        "status": "pass" if ok else "fail",
+        "detail": (
+            f"provider={provider or 'missing'} model={model or 'missing'} "
+            f"missing_tools={missing_tools} missing_paths={missing_paths}"
+        ),
+    }
 
 
 def check_document_visual_delivery():
@@ -571,7 +880,13 @@ def check_document_visual_delivery():
 def check_canary_reconciler():
     p = HERMES / "state/canary-reconciler-latest.json"
     if not p.exists():
-        return {"name": "canary_reconciler", "status": "warn", "detail": "no canary reconciler state yet"}
+        return {
+            "name": "canary_reconciler",
+            "status": "fail",
+            "severity": "P1",
+            "fix_class": "restart_or_redeploy",
+            "detail": "required canary reconciler state is missing",
+        }
     d = load_json(p, {})
     ts = parse_dt(d.get("checked_at") or d.get("timestamp") or d.get("generated_at"))
     age = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else 10**9
@@ -581,12 +896,86 @@ def check_canary_reconciler():
         canary = c.get("canary") or {}
         if canary.get("status") == "inventory_only":
             inventory.append(c.get("id"))
-    status = "warn" if age > 7200 or missing else "pass"
+    raw_reconciler_ok = d.get("ok") is True
+    failed_actions = d.get("failed_actions") or []
+    # The reconciler runs this self-check as one of its canaries. If the last
+    # reconciler cycle failed only because this self-check observed the prior
+    # red reconciler state, treating that action as a fresh P1 creates a
+    # permanent false-red feedback loop. The current self-check invocation is
+    # authoritative for local_selfcheck; all other failed actions still block.
+    local_selfcheck_failures = [
+        action
+        for action in failed_actions
+        if action.get("canary") == "local_selfcheck"
+    ]
+    blocking_failed_actions = [
+        action
+        for action in failed_actions
+        if action.get("canary") != "local_selfcheck"
+    ]
+    selfcheck_only_latch = (
+        not raw_reconciler_ok
+        and bool(local_selfcheck_failures)
+        and not blocking_failed_actions
+        and not missing
+    )
+    reconciler_ok = raw_reconciler_ok or selfcheck_only_latch
+    status = (
+        "fail"
+        if missing or not reconciler_ok or blocking_failed_actions
+        else "warn"
+        if age > 7200
+        else "pass"
+    )
     detail = (
         f"age={age}s capabilities={len(d.get('capabilities') or [])} "
-        f"missing={len(missing)} inventory_only={inventory[:8]}"
+        f"missing={len(missing)} failed_actions={len(blocking_failed_actions)} "
+        f"ignored_local_selfcheck_failures={len(local_selfcheck_failures)} ok={reconciler_ok} "
+        f"inventory_only={inventory[:8]}"
     )
-    return {"name": "canary_reconciler", "status": status, "detail": detail}
+    result = {
+        "name": "canary_reconciler",
+        "status": status,
+        "detail": detail,
+    }
+    if status == "fail":
+        result.update({"severity": "P1", "fix_class": "restart_or_redeploy"})
+    return result
+
+
+def check_disk_retention():
+    path = HERMES / "state/disk-retention-last.json"
+    if not path.exists():
+        return {
+            "name": "disk_retention",
+            "status": "warn",
+            "detail": "no disk-retention receipt yet",
+        }
+    payload = load_json(path, {})
+    timestamp = parse_dt(
+        payload.get("checked_at")
+        or payload.get("timestamp")
+        or payload.get("generated_at")
+    )
+    age = int((datetime.now(timezone.utc) - timestamp).total_seconds()) if timestamp else 10**9
+    retention_status = str(payload.get("status") or "unknown")
+    errors = payload.get("errors") or []
+    referenced = ((payload.get("runtime_protection") or {}).get("referenced") or [])
+    status = "pass"
+    if retention_status in {"error", "block"} or errors:
+        status = "fail"
+    elif age > 172800 or retention_status != "pass":
+        status = "warn"
+    return {
+        "name": "disk_retention",
+        "status": status,
+        "detail": (
+            f"age={age}s retention_status={retention_status} errors={len(errors)} "
+            f"referenced_runtime_dependencies={len(referenced)} "
+            f"deleted={len(payload.get('deleted') or [])} "
+            f"free_after_bytes={payload.get('free_after_bytes')}"
+        ),
+    }
 
 
 def _read_env_keys():
@@ -621,8 +1010,9 @@ def _keychain_has_env_key(key):
 def _sqlite(path: Path, query: str, params=()):
     import sqlite3
 
-    con = sqlite3.connect(path)
+    con = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
     try:
+        con.execute("PRAGMA query_only = ON")
         return con.execute(query, params).fetchall()
     finally:
         con.close()
@@ -807,6 +1197,15 @@ CHECK_METADATA = {
             "Refresh the local tool readiness probe and repair broken core tools before client-visible use."
         ),
     },
+    "image_quality_surface": {
+        "title": "Native image-quality lane unavailable",
+        "severity": "P1",
+        "fix_class": "image_quality_surface",
+        "recommended_action": (
+            "Restore image_gen provider/model, Telegram image_gen/skills/vision exposure, "
+            "and the Golden image routing rule plus creative skill before image work."
+        ),
+    },
     "document_visual_delivery": {
         "title": "Telegram document visual-delivery lane unavailable",
         "severity": "P1",
@@ -842,21 +1241,18 @@ def enrich_check(check):
 
 
 def check_disk():
-    p = run(["df", "-Pk", str(HERMES)], timeout=5)
-    if p.returncode != 0:
-        return {"name": "disk", "status": "warn", "detail": (p.stderr or p.stdout)[:120]}
-    lines = p.stdout.splitlines()
-    if len(lines) < 2:
-        return {"name": "disk", "status": "warn", "detail": "df parse failed"}
-    parts = lines[-1].split()
-    if len(parts) < 6:
-        return {"name": "disk", "status": "warn", "detail": "df parse failed"}
-    used = parts[4]
     try:
-        pct = int(used.rstrip("%"))
-        free_bytes = int(parts[3]) * 1024
-    except Exception:
-        return {"name": "disk", "status": "warn", "detail": "df parse failed"}
+        usage = shutil.disk_usage(HERMES)
+        if usage.total <= 0:
+            raise ValueError("disk total is zero")
+        pct = int(usage.used * 100 / usage.total)
+        free_bytes = int(usage.free)
+    except (OSError, ValueError) as exc:
+        return {
+            "name": "disk",
+            "status": "warn",
+            "detail": f"{type(exc).__name__}: {str(exc)[:100]}",
+        }
     if (
         pct >= 95
         or free_bytes < DISK_FAIL_FREE_BYTES
@@ -870,7 +1266,15 @@ def check_disk():
     return {
         "name": "disk",
         "status": status,
-        "detail": f"used={used} free_bytes={free_bytes}",
+        "detail": f"used={pct}% free_bytes={free_bytes}",
+        "total_bytes": int(usage.total),
+        "used_bytes": int(usage.used),
+        "free_bytes": free_bytes,
+        "used_pct": pct,
+        "warn_percent": DISK_WARN_PERCENT,
+        "fail_percent": DISK_FAIL_PERCENT,
+        "warn_free_bytes": DISK_WARN_FREE_BYTES,
+        "fail_free_bytes": DISK_FAIL_FREE_BYTES,
     }
 
 
@@ -990,6 +1394,471 @@ def check_gateway_resource_pressure():
     }
 
 
+def _host_capacity_metrics():
+    if os.name == "nt":
+        script = r"""
+$ErrorActionPreference='Stop'
+$os=Get-CimInstance Win32_OperatingSystem
+$procs=@(Get-Process -ErrorAction Stop)
+$pageFiles=@(Get-CimInstance Win32_PageFileUsage -ErrorAction SilentlyContinue)
+$memoryPerf=Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory -ErrorAction SilentlyContinue
+$now=Get-Date
+$counts=@{}
+foreach($name in @('powershell','pwsh','cmd','conhost','sshd')) {
+  $counts[$name]=@($procs | Where-Object { $_.ProcessName -ieq $name }).Count
+}
+$maxHandles=0
+$maxHandlePid=$null
+foreach($proc in $procs) {
+  try {
+    if([int64]$proc.HandleCount -gt $maxHandles) {
+      $maxHandles=[int64]$proc.HandleCount
+      $maxHandlePid=[int]$proc.Id
+    }
+} catch {}
+}
+$cdpRoots=0
+try {
+  $cdpRoots=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object {
+    $_.Name -ieq 'brave.exe' -and $_.CommandLine -like '*--remote-debugging-port=9222*'
+  }).Count
+} catch {}
+$topMemory=@($procs | Sort-Object WorkingSet64 -Descending | Select-Object -First 5 | ForEach-Object {
+  $age=$null
+  try { $age=[int]($now-$_.StartTime).TotalSeconds } catch {}
+  [ordered]@{pid=[int]$_.Id; rss_bytes=[int64]$_.WorkingSet64; age_seconds=$age; command=[string]$_.ProcessName}
+})
+$oldest=@($procs | ForEach-Object {
+  try {
+    [ordered]@{
+      pid=[int]$_.Id
+      rss_bytes=[int64]$_.WorkingSet64
+      age_seconds=[int]($now-$_.StartTime).TotalSeconds
+      command=[string]$_.ProcessName
+    }
+  } catch {}
+} | Sort-Object age_seconds -Descending | Select-Object -First 5)
+[ordered]@{
+  process_count=$procs.Count
+  powershell_count=([int]$counts['powershell']+[int]$counts['pwsh'])
+  cmd_count=[int]$counts['cmd']
+  conhost_count=[int]$counts['conhost']
+  ssh_session_count=[int]$counts['sshd']
+  cdp_browser_root_count=[int]$cdpRoots
+  max_process_handles=$maxHandles
+  max_handle_pid=$maxHandlePid
+  physical_total_bytes=([int64]$os.TotalVisibleMemorySize*1024)
+  physical_free_bytes=([int64]$os.FreePhysicalMemory*1024)
+  virtual_total_bytes=([int64]$os.TotalVirtualMemorySize*1024)
+  virtual_free_bytes=([int64]$os.FreeVirtualMemory*1024)
+  swap_total_bytes=([int64](($pageFiles | Measure-Object -Property AllocatedBaseSize -Sum).Sum)*1MB)
+  swap_used_bytes=([int64](($pageFiles | Measure-Object -Property CurrentUsage -Sum).Sum)*1MB)
+  swap_in_bytes_per_minute=([int64]$memoryPerf.PagesInputPerSec*4096*60)
+  swap_out_bytes_per_minute=([int64]$memoryPerf.PagesOutputPerSec*4096*60)
+  top_memory_processes=$topMemory
+  oldest_processes=$oldest
+} | ConvertTo-Json -Compress -Depth 4
+"""
+        proc = run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            timeout=12,
+        )
+        if proc.returncode != 0:
+            return {"error": (proc.stderr or proc.stdout or "capacity probe failed")[:240]}
+        try:
+            return json.loads(proc.stdout.strip().splitlines()[-1])
+        except Exception as exc:
+            return {"error": f"capacity JSON invalid: {type(exc).__name__}"}
+
+    metrics = {
+        "process_count": None,
+        "powershell_count": 0,
+        "cmd_count": 0,
+        "conhost_count": 0,
+        "ssh_session_count": 0,
+        "cdp_browser_root_count": 0,
+        "max_process_handles": None,
+        "max_handle_pid": None,
+        "physical_total_bytes": None,
+        "physical_free_bytes": None,
+        "virtual_total_bytes": None,
+        "virtual_free_bytes": None,
+        "swap_total_bytes": None,
+        "swap_used_bytes": None,
+        "swap_in_pages_total": None,
+        "swap_out_pages_total": None,
+        "swap_page_size_bytes": None,
+        "top_memory_processes": [],
+        "oldest_processes": [],
+        "absolute_process_limit_enabled": True,
+    }
+    proc = run(
+        ["ps", "-u", str(os.getuid()), "-o", "pid=,ppid=,etime=,rss=,comm="],
+        timeout=8,
+    )
+    if proc.returncode == 0:
+        rows = []
+        for line in proc.stdout.splitlines():
+            parts = line.strip().split(None, 4)
+            if len(parts) != 5:
+                continue
+            try:
+                pid, ppid, elapsed, rss_kb = (
+                    int(parts[0]),
+                    int(parts[1]),
+                    _elapsed_seconds(parts[2]),
+                    int(parts[3]),
+                )
+            except ValueError:
+                continue
+            if elapsed is None:
+                continue
+            rows.append(
+                {
+                    "pid": pid,
+                    "ppid": ppid,
+                    "age_seconds": elapsed,
+                    "rss_bytes": rss_kb * 1024,
+                    "command": Path(parts[4]).name[:80],
+                }
+            )
+        names = [str(row["command"]).lower() for row in rows]
+        metrics["process_count"] = len(names)
+        metrics["powershell_count"] = sum(name in {"powershell", "pwsh"} for name in names)
+        metrics["cmd_count"] = sum(name in {"cmd", "cmd.exe"} for name in names)
+        metrics["conhost_count"] = sum(name in {"conhost", "conhost.exe"} for name in names)
+        metrics["ssh_session_count"] = sum(name.startswith("sshd") for name in names)
+        public_keys = ("pid", "age_seconds", "rss_bytes", "command")
+        metrics["top_memory_processes"] = [
+            {key: row[key] for key in public_keys}
+            for row in sorted(rows, key=lambda item: item["rss_bytes"], reverse=True)[:5]
+        ]
+        metrics["oldest_processes"] = [
+            {key: row[key] for key in public_keys}
+            for row in sorted(rows, key=lambda item: item["age_seconds"], reverse=True)[:5]
+        ]
+    if sys.platform.startswith("linux"):
+        try:
+            meminfo = {}
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                key, _, raw = line.partition(":")
+                match = re.match(r"\s*(\d+)", raw)
+                if match:
+                    meminfo[key] = int(match.group(1)) * 1024
+            metrics["physical_total_bytes"] = meminfo.get("MemTotal")
+            metrics["physical_free_bytes"] = meminfo.get("MemAvailable") or meminfo.get("MemFree")
+            # Linux CommitLimit/Committed_AS is an overcommit accounting view,
+            # not available host capacity; Committed_AS can legitimately exceed
+            # CommitLimit and would create a false 0%-free incident. Use the
+            # reclaimable physical+swap pool as the cross-platform analogue.
+            memory_total = meminfo.get("MemTotal")
+            memory_free = meminfo.get("MemAvailable") or meminfo.get("MemFree")
+            if memory_total is not None and memory_free is not None:
+                metrics["virtual_total_bytes"] = memory_total + int(meminfo.get("SwapTotal") or 0)
+                metrics["virtual_free_bytes"] = memory_free + int(meminfo.get("SwapFree") or 0)
+            metrics["swap_total_bytes"] = meminfo.get("SwapTotal")
+            swap_free = meminfo.get("SwapFree")
+            if isinstance(metrics["swap_total_bytes"], int) and isinstance(swap_free, int):
+                metrics["swap_used_bytes"] = max(0, metrics["swap_total_bytes"] - swap_free)
+            vmstat = {}
+            for line in Path("/proc/vmstat").read_text().splitlines():
+                key, _, raw = line.partition(" ")
+                if key in {"pswpin", "pswpout"}:
+                    vmstat[key] = int(raw.strip())
+            metrics["swap_in_pages_total"] = vmstat.get("pswpin")
+            metrics["swap_out_pages_total"] = vmstat.get("pswpout")
+            metrics["swap_page_size_bytes"] = int(os.sysconf("SC_PAGE_SIZE"))
+        except Exception:
+            pass
+    elif sys.platform == "darwin":
+        # A full macOS GUI login legitimately owns hundreds of per-user XPC and
+        # app-helper processes. Use the OS pressure oracle and process growth;
+        # an absolute user-process threshold alone is not a capacity signal.
+        metrics["absolute_process_limit_enabled"] = False
+        total = run(["sysctl", "-n", "hw.memsize"], timeout=5)
+        pressure = run(["memory_pressure", "-Q"], timeout=8)
+        if total.returncode == 0 and pressure.returncode == 0:
+            total_match = re.search(r"(\d+)", total.stdout or "")
+            free_match = re.search(r"System-wide memory free percentage:\s*(\d+)%", pressure.stdout or "")
+            if total_match and free_match:
+                total_bytes = int(total_match.group(1))
+                free_bytes = round(total_bytes * int(free_match.group(1)) / 100)
+                metrics["physical_total_bytes"] = total_bytes
+                metrics["physical_free_bytes"] = free_bytes
+                metrics["virtual_total_bytes"] = total_bytes
+                metrics["virtual_free_bytes"] = free_bytes
+        swap = run(["sysctl", "-n", "vm.swapusage"], timeout=5)
+        if swap.returncode == 0:
+            total_match = re.search(r"total\s*=\s*([0-9.]+)([KMGTP])", swap.stdout or "", re.I)
+            used_match = re.search(r"used\s*=\s*([0-9.]+)([KMGTP])", swap.stdout or "", re.I)
+            if total_match:
+                metrics["swap_total_bytes"] = _scaled_bytes(*total_match.groups())
+            if used_match:
+                metrics["swap_used_bytes"] = _scaled_bytes(*used_match.groups())
+        vmstat = run(["vm_stat"], timeout=8)
+        if vmstat.returncode == 0:
+            page_size_match = re.search(r"page size of\s+(\d+) bytes", vmstat.stdout or "", re.I)
+            swap_in_match = re.search(r"(?:swapins|pages swapped in):\s*(\d+)", vmstat.stdout or "", re.I)
+            swap_out_match = re.search(r"(?:swapouts|pages swapped out):\s*(\d+)", vmstat.stdout or "", re.I)
+            if page_size_match:
+                metrics["swap_page_size_bytes"] = int(page_size_match.group(1))
+            if swap_in_match:
+                metrics["swap_in_pages_total"] = int(swap_in_match.group(1))
+            if swap_out_match:
+                metrics["swap_out_pages_total"] = int(swap_out_match.group(1))
+    return metrics
+
+
+def check_host_capacity():
+    metrics = _host_capacity_metrics()
+    if metrics.get("error"):
+        return {"name": "host_capacity", "status": "warn", "detail": metrics["error"]}
+    virtual_total = metrics.get("virtual_total_bytes")
+    virtual_free = metrics.get("virtual_free_bytes")
+    virtual_free_pct = (
+        round(virtual_free / virtual_total * 100, 1)
+        if isinstance(virtual_total, int) and virtual_total > 0 and isinstance(virtual_free, int)
+        else None
+    )
+    prior = load_json(HERMES / "state/local-selfcheck-latest.json", {})
+    prior_check = next(
+        (
+            row for row in prior.get("checks", [])
+            if isinstance(row, dict) and row.get("name") == "host_capacity"
+        ),
+        {},
+    )
+    checked_at = parse_dt(prior.get("checked_at"))
+    observation_window_seconds = (
+        (datetime.now(timezone.utc) - checked_at).total_seconds()
+        if checked_at
+        else None
+    )
+    page_size = metrics.get("swap_page_size_bytes")
+    swap_in_bytes_per_minute = metrics.get("swap_in_bytes_per_minute")
+    if not isinstance(swap_in_bytes_per_minute, (int, float)):
+        swap_in_bytes_per_minute = _counter_rate_bytes_per_minute(
+            metrics.get("swap_in_pages_total"),
+            prior_check.get("swap_in_pages_total"),
+            page_size,
+            observation_window_seconds,
+        )
+    swap_out_bytes_per_minute = metrics.get("swap_out_bytes_per_minute")
+    if not isinstance(swap_out_bytes_per_minute, (int, float)):
+        swap_out_bytes_per_minute = _counter_rate_bytes_per_minute(
+            metrics.get("swap_out_pages_total"),
+            prior_check.get("swap_out_pages_total"),
+            page_size,
+            observation_window_seconds,
+        )
+    swap_total = metrics.get("swap_total_bytes")
+    swap_used = metrics.get("swap_used_bytes")
+    swap_used_pct = (
+        round(swap_used / swap_total * 100, 1)
+        if isinstance(swap_total, int) and swap_total > 0 and isinstance(swap_used, int)
+        else None
+    )
+    process_count = metrics.get("process_count")
+    absolute_process_limit_enabled = metrics.get("absolute_process_limit_enabled", True) is not False
+    process_growth = (
+        process_count - prior_check.get("process_count")
+        if isinstance(process_count, int) and isinstance(prior_check.get("process_count"), int)
+        else None
+    )
+    powershell_count = int(metrics.get("powershell_count") or 0)
+    powershell_growth = (
+        powershell_count - prior_check.get("powershell_count")
+        if isinstance(prior_check.get("powershell_count"), int)
+        else None
+    )
+    swap_active_fail = (
+        isinstance(swap_out_bytes_per_minute, (int, float))
+        and (
+            swap_out_bytes_per_minute >= HOST_SWAP_ACTIVE_FAIL_BYTES_PER_MINUTE
+            or (
+                swap_out_bytes_per_minute >= HOST_SWAP_ACTIVE_WARN_BYTES_PER_MINUTE
+                and virtual_free_pct is not None
+                and virtual_free_pct < HOST_VIRTUAL_FREE_FAIL_PERCENT
+            )
+        )
+    )
+    swap_active_warn = (
+        isinstance(swap_out_bytes_per_minute, (int, float))
+        and swap_out_bytes_per_minute >= HOST_SWAP_ACTIVE_WARN_BYTES_PER_MINUTE
+    )
+    swap_allocated_warn = (
+        swap_used_pct is not None and swap_used_pct >= HOST_SWAP_ALLOCATED_WARN_PERCENT
+    )
+    prior_swap_used_pct = prior_check.get("swap_used_pct")
+    if swap_allocated_warn:
+        prior_allocation_observations = prior_check.get("swap_allocation_observations")
+        swap_allocation_observations = (
+            min(
+                2,
+                max(
+                    1,
+                    prior_allocation_observations
+                    if isinstance(prior_allocation_observations, int)
+                    else 1,
+                )
+                + 1,
+            )
+            if isinstance(prior_swap_used_pct, (int, float))
+            and prior_swap_used_pct >= HOST_SWAP_ALLOCATED_WARN_PERCENT
+            else 1
+        )
+    else:
+        swap_allocation_observations = 0
+    fail = (
+        (virtual_free_pct is not None and virtual_free_pct < HOST_VIRTUAL_FREE_FAIL_PERCENT)
+        or (
+            absolute_process_limit_enabled
+            and isinstance(process_count, int)
+            and process_count > HOST_PROCESS_FAIL
+        )
+        or int(metrics.get("max_process_handles") or 0) > HOST_PROCESS_HANDLE_FAIL
+        or int(metrics.get("cdp_browser_root_count") or 0) > 2
+        or swap_active_fail
+    )
+    warn = (
+        (virtual_free_pct is not None and virtual_free_pct < HOST_VIRTUAL_FREE_WARN_PERCENT)
+        or (
+            absolute_process_limit_enabled
+            and isinstance(process_count, int)
+            and process_count > HOST_PROCESS_WARN
+        )
+        or powershell_count > HOST_POWERSHELL_WARN
+        or int(metrics.get("ssh_session_count") or 0) > HOST_SSH_SESSION_WARN
+        or (isinstance(process_growth, int) and process_growth >= 100)
+        or (isinstance(powershell_growth, int) and powershell_growth >= 10)
+        or swap_active_warn
+        or swap_allocated_warn
+    )
+    status = "fail" if fail else ("warn" if warn else "pass")
+    swap_pressure_status = (
+        "fail"
+        if swap_active_fail
+        else ("warn" if swap_active_warn or swap_allocated_warn else "pass")
+    )
+    return {
+        "name": "host_capacity",
+        "status": status,
+        "severity": "P1" if fail else "P2",
+        "fix_class": "host_capacity",
+        "detail": (
+            f"virtual_free_pct={virtual_free_pct} process_count={process_count} "
+            f"powershell={powershell_count} cmd={metrics.get('cmd_count')} "
+            f"conhost={metrics.get('conhost_count')} ssh_sessions={metrics.get('ssh_session_count')} "
+            f"cdp_browser_roots={metrics.get('cdp_browser_root_count')} "
+            f"max_handles={metrics.get('max_process_handles')} process_growth={process_growth} "
+            f"powershell_growth={powershell_growth} swap_used_pct={swap_used_pct} "
+            f"swap_out_bytes_per_minute={swap_out_bytes_per_minute}"
+        ),
+        **metrics,
+        "virtual_free_pct": virtual_free_pct,
+        "process_growth": process_growth,
+        "powershell_growth": powershell_growth,
+        "swap_used_pct": swap_used_pct,
+        "swap_allocation_observations": swap_allocation_observations,
+        "swap_in_bytes_per_minute": swap_in_bytes_per_minute,
+        "swap_out_bytes_per_minute": swap_out_bytes_per_minute,
+        "swap_activity_window_seconds": round(observation_window_seconds)
+        if isinstance(observation_window_seconds, (int, float))
+        else None,
+        "swap_pressure_status": swap_pressure_status,
+        "large_job_posture": "inspect" if status in {"warn", "fail"} else "normal",
+    }
+
+
+def atomic_write_json(path: Path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    temporary = Path(raw_path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def build_machine_profile(checks):
+    """Build the bounded host contract agents and the control plane may consume."""
+    by_name = {
+        row.get("name"): row
+        for row in checks
+        if isinstance(row, dict) and isinstance(row.get("name"), str)
+    }
+    disk = by_name.get("disk") or {}
+    capacity = by_name.get("host_capacity") or {}
+    storage = {
+        key: disk.get(key)
+        for key in (
+            "total_bytes",
+            "used_bytes",
+            "free_bytes",
+            "used_pct",
+            "warn_percent",
+            "fail_percent",
+            "warn_free_bytes",
+            "fail_free_bytes",
+        )
+    }
+    memory = {
+        key: capacity.get(key)
+        for key in (
+            "physical_total_bytes",
+            "physical_free_bytes",
+            "virtual_total_bytes",
+            "virtual_free_bytes",
+            "virtual_free_pct",
+        )
+    }
+    pressure = {
+        key: capacity.get(key)
+        for key in (
+            "swap_total_bytes",
+            "swap_used_bytes",
+            "swap_used_pct",
+            "swap_allocation_observations",
+            "swap_in_bytes_per_minute",
+            "swap_out_bytes_per_minute",
+            "swap_activity_window_seconds",
+            "swap_pressure_status",
+            "large_job_posture",
+            "top_memory_processes",
+            "oldest_processes",
+        )
+    }
+    storage_observed = all(
+        isinstance(storage.get(key), (int, float))
+        for key in ("total_bytes", "free_bytes", "used_pct")
+    )
+    return {
+        "schema_version": 2,
+        "status": "ready" if storage_observed else "degraded",
+        "source": "local_selfcheck",
+        "platform": sys.platform,
+        "hostname": (
+            os.uname().nodename
+            if hasattr(os, "uname")
+            else os.environ.get("COMPUTERNAME", "unknown")
+        ),
+        "hermes_home": str(HERMES),
+        "storage": storage,
+        "memory": memory,
+        "pressure": pressure,
+        "limits": {
+            "max_concurrent_large_jobs": MAX_CONCURRENT_LARGE_JOBS,
+            "large_job_estimate_bytes": LARGE_JOB_ESTIMATE_BYTES,
+            "disk_warn_new_payload_limit_bytes": DISK_WARN_NEW_PAYLOAD_LIMIT_BYTES,
+        },
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--agent-id", default=os.environ.get("HERMES_AGENT_ID", "unknown"))
@@ -1001,6 +1870,7 @@ def main():
         check_config,
         check_client_context,
         check_gateway_state,
+        check_active_client_capabilities,
         check_local_brain,
         check_topic_session_bindings,
         check_advertised_tool_env,
@@ -1010,11 +1880,15 @@ def main():
         check_telegram_organic_checkpoints,
         check_agent_probe,
         check_logs,
+        check_workspace_write,
         check_tool_readiness,
+        check_image_quality_surface,
         check_document_visual_delivery,
         check_canary_reconciler,
+        check_disk_retention,
         check_disk,
         check_gateway_resource_pressure,
+        check_host_capacity,
     ]
     for fn in check_functions:
         try:
@@ -1031,13 +1905,14 @@ def main():
     failures = [c for c in checks if c["status"] == "fail"]
     warnings = [c for c in checks if c["status"] == "warn"]
     payload = {
-        "schema_version": 3,
+        "schema_version": 4,
         "agent_id": args.agent_id,
         "agent_name": args.agent_name,
         "hermes_home": str(HERMES),
         "host": (os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "unknown")),
         "checked_at": iso(),
         "gateway_runtime": gateway_runtime_binding(),
+        "machine_profile": build_machine_profile(checks),
         "status": "fail" if failures else "pass",
         "checks": checks,
         "failures": failures,
@@ -1045,8 +1920,7 @@ def main():
     }
     state = HERMES / "state/local-selfcheck-latest.json"
     try:
-        state.parent.mkdir(parents=True, exist_ok=True)
-        state.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        atomic_write_json(state, payload)
         (HERMES / "logs/local-selfcheck.log").open("a", encoding="utf-8").write(
             f"{payload['checked_at']} status={payload['status']} failures={len(failures)}\n"
         )

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report side-effect-ambiguous interrupted turns without replaying them."""
+"""Keep side-effect-ambiguous interrupted turns pending without client noise."""
 
 from __future__ import annotations
 
@@ -11,9 +11,11 @@ LEGACY_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v1"
 OLDER_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v2"
 PRIOR_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v3"
 SILENT_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v4"
-MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v5"
+CONTEXTUAL_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v5"
+FILTERED_CONTEXTUAL_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v6"
+MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v7"
 SHUTDOWN_NOTICE_MARKER = "HERMES_RESTART_NOTICE_NO_FALSE_CHECKIN_v1"
-BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v5"
+BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v7"
 METHOD_ANCHOR = "    def _schedule_resume_pending_sessions(self, platform=None) -> int:\n"
 SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessions after startup.
 
@@ -25,12 +27,12 @@ SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessio
         injection path owns the wording and we never double up.
 
 '''
-SCHEDULER_DOC_NEW = '''        """Send one contextual status for fresh restart-interrupted sessions.
+SCHEDULER_DOC_NEW = '''        """Keep fresh restart-interrupted sessions pending without a notice.
 
         Durable inbound replay is owned separately by the drain inbox. An
-        already-running turn may have uncertain external side effects, so it is
-        never blindly repeated. The runtime reports the interruption once and
-        lets the client decide whether the work should continue.
+        already-running turn may have uncertain external side effects, so it
+        stays ``resume_pending`` for the next real client turn instead of being
+        blindly repeated or narrated with control-plane vocabulary.
 
 '''
 SCHEDULE_BLOCK = """            # Claim the session slot *before* spawning the task so that an
@@ -152,7 +154,15 @@ V3_CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3] Cla
                 tasks.append(task)
             scheduled += 1
 """
-CHECKIN_BLOCK = V3_CHECKIN_BLOCK.replace(PRIOR_MARKER, MARKER)
+CHECKIN_BLOCK = SILENT_CHECKIN_BLOCK.replace(SILENT_MARKER, MARKER)
+CONTEXTUAL_CHECKIN_BLOCK = V3_CHECKIN_BLOCK.replace(
+    PRIOR_MARKER,
+    CONTEXTUAL_MARKER,
+)
+FILTERED_CONTEXTUAL_CHECKIN_BLOCK = V3_CHECKIN_BLOCK.replace(
+    PRIOR_MARKER,
+    FILTERED_CONTEXTUAL_MARKER,
+)
 RETAINING_V1_CHECKIN_BLOCK = V3_CHECKIN_BLOCK.replace(PRIOR_MARKER, LEGACY_MARKER)
 LEGACY_CHECKIN_BLOCK = """            # [HERMES_RESTART_INTERRUPTION_CHECKIN_v1] Clear the durable
             # marker before the send.  A crash during delivery can lose this
@@ -197,6 +207,13 @@ HELPER_PREFIX = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3]
                 continue
             summary = " ".join(content.split())
             if summary:
+                if summary.startswith((
+                    "[CONTEXT COMPACTION",
+                    "[CONTEXT SUMMARY]",
+                    "[PRIOR CONTEXT",
+                    "[INTERNAL_CONTINUITY",
+                )):
+                    continue
                 summary = _redact_gateway_user_facing_secrets(summary)
                 summary = re.sub(
                     r"(?i)\\b(api[_-]?key|access[_-]?token|auth[_-]?token|secret|password|passwd|token)\\s*([=:])\\s*[^\\s,;]+",
@@ -215,7 +232,22 @@ HELPER_PREFIX = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3]
             "confirm the last step. I didn’t repeat it. Do you still need me to finish it?"
         )
 '''
-CONTEXTUAL_HELPER_PREFIX = HELPER_PREFIX.replace(PRIOR_MARKER, MARKER)
+INTERNAL_HANDOFF_FILTER = '''                if summary.startswith((
+                    "[CONTEXT COMPACTION",
+                    "[CONTEXT SUMMARY]",
+                    "[PRIOR CONTEXT",
+                    "[INTERNAL_CONTINUITY",
+                )):
+                    continue
+'''
+V5_HELPER_PREFIX = HELPER_PREFIX.replace(INTERNAL_HANDOFF_FILTER, "").replace(
+    PRIOR_MARKER,
+    CONTEXTUAL_MARKER,
+)
+FILTERED_CONTEXTUAL_HELPER_PREFIX = HELPER_PREFIX.replace(
+    PRIOR_MARKER,
+    FILTERED_CONTEXTUAL_MARKER,
+)
 SILENT_HELPER = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v4]
     async def _send_restart_interruption_checkin(self, adapter, source, entry) -> None:
         """Keep ambiguous interrupted work pending without a client notice."""
@@ -374,7 +406,9 @@ FACADE_RETRY_SEND_TAIL = RETRY_SEND_TAIL.replace(
     """            await self.async_session_store.clear_resume_pending(entry.session_key)
 """,
 )
-HELPER = CONTEXTUAL_HELPER_PREFIX + RETRY_SEND_TAIL
+HELPER = SILENT_HELPER.replace(SILENT_MARKER, MARKER)
+V5_HELPER = V5_HELPER_PREFIX + RETRY_SEND_TAIL
+FILTERED_CONTEXTUAL_HELPER = FILTERED_CONTEXTUAL_HELPER_PREFIX + RETRY_SEND_TAIL
 
 DURABLE_DRAIN_METHOD_ANCHOR = "    def _schedule_post_startup_drain(self) -> None:\n"
 POST_STARTUP_DRAIN_BLOCK = """    def _schedule_post_startup_drain(self) -> None:
@@ -845,6 +879,44 @@ async def test_restart_checkin_never_runs_interrupted_agent():
 }
 
 
+def _silent_pending_runtime_test(name: str) -> str:
+    return f'''@pytest.mark.asyncio
+async def {name}():
+    runner, adapter = make_restart_runner()
+    source = make_restart_source(chat_id="silent-recovery-chat")
+    pending_entry = SessionEntry(
+        session_key="agent:main:telegram:dm:silent-recovery-chat",
+        session_id="sid",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        origin=source,
+        platform=Platform.TELEGRAM,
+        chat_type="dm",
+        resume_pending=True,
+        resume_reason="restart_interrupted",
+        last_resume_marked_at=datetime.now(),
+    )
+    runner.session_store._entries = {{pending_entry.session_key: pending_entry}}
+    adapter.handle_message = AsyncMock()
+
+    assert runner._schedule_resume_pending_sessions() == 1
+    await asyncio.gather(*list(runner._background_tasks))
+
+    assert adapter.sent == []
+    adapter.handle_message.assert_not_awaited()
+    assert pending_entry.resume_pending is True
+'''
+
+
+# Patch upstream's scheduler-specific tests to the independent product policy:
+# durable inbound replay stays automatic elsewhere, while an already-running
+# side-effect-ambiguous turn neither emits infrastructure copy nor blindly
+# re-runs.
+for _old_test_name, _replacement in list(TEST_REPLACEMENTS.items()):
+    _new_test_name = ast.parse(_replacement).body[0].name
+    TEST_REPLACEMENTS[_old_test_name] = _silent_pending_runtime_test(_new_test_name)
+
+
 OPTIONAL_COMPOSITION_TESTS = frozenset(
     {
         # Upstream's v0.19.1 test-pruning pass removed these direct scheduler
@@ -1024,7 +1096,20 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
         if HELPER not in original or CHECKIN_BLOCK not in original:
             raise RuntimeError("current restart interruption status anchors drifted")
     else:
-        if SILENT_MARKER in original:
+        if FILTERED_CONTEXTUAL_MARKER in original:
+            if (
+                FILTERED_CONTEXTUAL_HELPER not in original
+                or FILTERED_CONTEXTUAL_CHECKIN_BLOCK not in original
+            ):
+                raise RuntimeError("filtered contextual restart recovery upgrade anchors drifted")
+            patched = patched.replace(FILTERED_CONTEXTUAL_HELPER, HELPER, 1)
+            patched = patched.replace(FILTERED_CONTEXTUAL_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
+        elif CONTEXTUAL_MARKER in original:
+            if V5_HELPER not in original or CONTEXTUAL_CHECKIN_BLOCK not in original:
+                raise RuntimeError("contextual restart recovery upgrade anchors drifted")
+            patched = patched.replace(V5_HELPER, HELPER, 1)
+            patched = patched.replace(CONTEXTUAL_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
+        elif SILENT_MARKER in original:
             if SILENT_HELPER not in original or SILENT_CHECKIN_BLOCK not in original:
                 raise RuntimeError("silent restart recovery upgrade anchors drifted")
             patched = patched.replace(SILENT_HELPER, HELPER, 1)

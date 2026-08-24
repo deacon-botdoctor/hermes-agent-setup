@@ -45,6 +45,8 @@ class _AuxRequestState:
     session_id: str = ""
     turn_id: str = ""
     platform: str = ""
+    provenance_kind: str = ""
+    provenance_ref: str = ""
     sequence: int = 0
     previous_route: tuple[str, str] | None = None
     previous_error: str | None = None
@@ -178,6 +180,50 @@ def _provider_request_id(value: Any) -> tuple[str, str]:
     return "id_unavailable", "unavailable"
 
 
+def _openrouter_generation_id(value: Any) -> tuple[str, str]:
+    """Return an explicit OpenRouter generation ID, never a generic request ID."""
+    headers = _headers(value)
+    candidate = headers.get("x-generation-id")
+    if candidate:
+        return str(candidate), "header:x-generation-id"
+    candidate = _obj_get(value, "id")
+    if isinstance(candidate, str) and candidate.startswith("gen-"):
+        return candidate, "id:gen"
+    return "id_unavailable", "unavailable"
+
+
+def _is_openrouter(provider: str, base_url: str) -> bool:
+    return str(provider or "").lower() == "openrouter" or _base_url_host(base_url) == "openrouter.ai"
+
+
+def _provenance(
+    *,
+    surface: str,
+    task: str,
+    session_id: str,
+    turn_id: str,
+    explicit_kind: str = "",
+    explicit_ref: str = "",
+) -> tuple[str, str]:
+    kind = str(explicit_kind or "").strip()
+    ref = str(explicit_ref or "").strip()
+    if kind and ref:
+        return kind, ref
+    if str(session_id).startswith("cron_"):
+        return "cron_run", str(session_id)
+    if turn_id:
+        return "chat_turn", str(turn_id)
+    if session_id:
+        return "session", str(session_id)
+    if surface == "auxiliary" and task and task != "unclassified":
+        return "tool", str(task)
+    return "unlinked", "id_unavailable"
+
+
+class UnaccountableOpenRouterCall(RuntimeError):
+    """Raised before network dispatch when paid work has no durable owner."""
+
+
 def _status_code(error: BaseException) -> Optional[int]:
     for source in (error, _obj_get(error, "response")):
         raw = _obj_get(source, "status_code")
@@ -298,13 +344,13 @@ def _usage_payload(
     base_url: str,
     api_mode: str,
     api_key: Any,
-    provider_request_id: str,
+    openrouter_generation_id: str,
 ) -> dict[str, Any]:
     raw_usage = _obj_get(response, "usage")
     route_host = _base_url_host(base_url)
     if (
         str(provider or "").lower() == "openrouter" or route_host == "openrouter.ai"
-    ) and provider_request_id != "id_unavailable":
+    ) and openrouter_generation_id != "id_unavailable":
         token_hint = 0
         for name in (
             "prompt_tokens",
@@ -318,7 +364,7 @@ def _usage_payload(
             except (TypeError, ValueError):
                 continue
         if raw_usage is None or token_hint == 0:
-            metadata = _openrouter_generation_usage(api_key, provider_request_id)
+            metadata = _openrouter_generation_usage(api_key, openrouter_generation_id)
             if metadata is not None:
                 return _openrouter_usage_payload(metadata)
     if raw_usage is None:
@@ -418,6 +464,8 @@ class Attempt:
     session_id: str = ""
     turn_id: str = ""
     platform: str = ""
+    provenance_kind: str = ""
+    provenance_ref: str = ""
     attempt_kind: str = "initial"
     fallback_cause: Optional[str] = None
     api_key: Any = None
@@ -428,6 +476,18 @@ class Attempt:
 
     def start(self) -> None:
         fingerprint, algorithm = _key_fingerprint(self.api_key)
+        provenance_kind, provenance_ref = _provenance(
+            surface=self.surface,
+            task=self.task,
+            session_id=self.session_id,
+            turn_id=self.turn_id,
+            explicit_kind=self.provenance_kind,
+            explicit_ref=self.provenance_ref,
+        )
+        if _is_openrouter(self.provider, self.base_url) and provenance_kind == "unlinked":
+            raise UnaccountableOpenRouterCall(
+                "OpenRouter request refused before dispatch: accountable provenance required"
+            )
         _append(
             {
                 "schema_version": SCHEMA_VERSION,
@@ -444,6 +504,8 @@ class Attempt:
                 "session_id": self.session_id,
                 "turn_id": self.turn_id,
                 "platform": self.platform,
+                "provenance_kind": provenance_kind,
+                "provenance_ref": provenance_ref,
                 "attempt_kind": self.attempt_kind,
                 "fallback_cause": self.fallback_cause,
                 "key_fingerprint": fingerprint,
@@ -465,6 +527,15 @@ class Attempt:
         response = response if response is not None else self._last_response
         ended_at = time.time()
         request_id, request_id_source = _provider_request_id(response or error)
+        generation_id, generation_id_source = _openrouter_generation_id(response or error)
+        provenance_kind, provenance_ref = _provenance(
+            surface=self.surface,
+            task=self.task,
+            session_id=self.session_id,
+            turn_id=self.turn_id,
+            explicit_kind=self.provenance_kind,
+            explicit_ref=self.provenance_ref,
+        )
         fingerprint, fingerprint_algorithm = _key_fingerprint(self.api_key)
         resolved_model = str(_obj_get(response, "model") or self.model or "unknown")
         payload = {
@@ -482,6 +553,8 @@ class Attempt:
             "session_id": self.session_id,
             "turn_id": self.turn_id,
             "platform": self.platform,
+            "provenance_kind": provenance_kind,
+            "provenance_ref": provenance_ref,
             "attempt_kind": self.attempt_kind,
             "fallback_cause": self.fallback_cause,
             "outcome": outcome,
@@ -489,6 +562,8 @@ class Attempt:
             "status_code": _status_code(error) if error is not None else None,
             "provider_request_id": request_id,
             "provider_request_id_source": request_id_source,
+            "openrouter_generation_id": generation_id,
+            "openrouter_generation_id_source": generation_id_source,
             "key_fingerprint": fingerprint,
             "key_fingerprint_method": fingerprint_algorithm,
             "started_at": self.started_at,
@@ -503,7 +578,7 @@ class Attempt:
                 base_url=self.base_url,
                 api_mode=self.api_mode,
                 api_key=self.api_key,
-                provider_request_id=request_id,
+                openrouter_generation_id=generation_id,
             )
         )
         _append_terminal(payload)
@@ -527,6 +602,8 @@ def auxiliary_request(
     session_id: str = "",
     turn_id: str = "",
     platform: str = "",
+    provenance_kind: str = "",
+    provenance_ref: str = "",
 ):
     state = _AuxRequestState(
         logical_request_id=f"aux:{uuid.uuid4().hex}",
@@ -536,6 +613,8 @@ def auxiliary_request(
         session_id=session_id,
         turn_id=turn_id,
         platform=platform,
+        provenance_kind=provenance_kind,
+        provenance_ref=provenance_ref,
     )
     token = _AUX_REQUEST.set(state)
     try:
@@ -586,6 +665,8 @@ def _new_aux_attempt(
         session_id=state.session_id,
         turn_id=state.turn_id,
         platform=state.platform,
+        provenance_kind=state.provenance_kind,
+        provenance_ref=state.provenance_ref,
         attempt_kind=kind,
         fallback_cause=cause,
         api_key=getattr(client, "api_key", None),
@@ -1128,6 +1209,10 @@ def reconcile_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             "outcome",
             "provider_request_id",
             "provider_request_id_source",
+            "openrouter_generation_id",
+            "openrouter_generation_id_source",
+            "provenance_kind",
+            "provenance_ref",
             "cost_status",
             "key_fingerprint",
             "key_fingerprint_method",

@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import time
@@ -14,6 +16,18 @@ from pathlib import Path
 from typing import Any
 
 _CURRENT: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar("telegram_transaction", default=None)
+_PROGRESS_CLEANUP_ALLOWED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "telegram_progress_cleanup_allowed",
+    default=False,
+)
+_PROGRESS_CLEANUP_STATE: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "telegram_progress_cleanup_state",
+    default=None,
+)
+_DELIVERY_FAILURE: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "telegram_delivery_failure",
+    default=None,
+)
 _GENERIC_AGENT_ERROR = "sorry, i encountered an unexpected error"
 
 
@@ -34,6 +48,7 @@ def _connect() -> sqlite3.Connection:
         );
         CREATE UNIQUE INDEX IF NOT EXISTS one_receipt ON events(transaction_id) WHERE event_type='received';
         CREATE UNIQUE INDEX IF NOT EXISTS one_run_start ON events(transaction_id) WHERE event_type='run_started';
+        CREATE UNIQUE INDEX IF NOT EXISTS one_model_finish ON events(transaction_id) WHERE event_type='model_finished';
         CREATE UNIQUE INDEX IF NOT EXISTS one_terminal_run ON events(transaction_id) WHERE event_type IN ('run_finished','failed');
         CREATE UNIQUE INDEX IF NOT EXISTS one_acceptance ON events(transaction_id) WHERE event_type='telegram_accepted';
         CREATE TRIGGER IF NOT EXISTS events_immutable_update BEFORE UPDATE ON events BEGIN SELECT RAISE(ABORT,'immutable ledger'); END;
@@ -45,6 +60,9 @@ def _connect() -> sqlite3.Connection:
 def _append(tx: str, kind: str, **values: Any) -> bool:
     payload = values.pop("detail", {})
     event_id = hashlib.sha256(f"{tx}:{kind}".encode()).hexdigest()
+    occurred_at = values.get("occurred_at")
+    if occurred_at is None:
+        occurred_at = time.time()
     try:
         with _connect() as db:
             db.execute(
@@ -53,7 +71,7 @@ def _append(tx: str, kind: str, **values: Any) -> bool:
                     event_id,
                     tx,
                     kind,
-                    time.time(),
+                    occurred_at,
                     values.get("run_id"),
                     values.get("inbound_update_id"),
                     values.get("outbound_message_id"),
@@ -69,6 +87,9 @@ def _append(tx: str, kind: str, **values: Any) -> bool:
 
 def begin(event: Any, agent_id: str) -> str | None:
     _CURRENT.set(None)
+    _PROGRESS_CLEANUP_ALLOWED.set(False)
+    _PROGRESS_CLEANUP_STATE.set(None)
+    _DELIVERY_FAILURE.set(None)
     source = getattr(event, "source", None)
     platform = str(getattr(getattr(source, "platform", None), "value", getattr(source, "platform", ""))).lower()
     update_id = getattr(event, "platform_update_id", None)
@@ -91,13 +112,32 @@ def begin(event: Any, agent_id: str) -> str | None:
     if not _append(tx, "run_started", run_id=run_id):
         return None
     _CURRENT.set((tx, run_id))
+    try:
+        owner = asyncio.current_task()
+    except RuntimeError:
+        owner = None
+    _PROGRESS_CLEANUP_STATE.set({"decision": None, "future": None, "owner": owner})
     return tx
 
 
 def finish(*, failed: bool = False, error: Any = None) -> None:
     current = _CURRENT.get()
     if current:
+        delivery_error = _DELIVERY_FAILURE.get()
+        if not failed and delivery_error is not None:
+            failed = True
+            error = delivery_error
         tx, run_id = current
+        if failed:
+            # A processing hook can fail after the immutable terminal success
+            # receipt was written. Keep that later failure monotonic instead of
+            # letting the terminal uniqueness constraint hide it.
+            _append(
+                tx,
+                "run_failure_observed",
+                run_id=run_id,
+                detail={"error": str(error)[:1000]} if error else {},
+            )
         _append(
             tx,
             "failed" if failed else "run_finished",
@@ -111,11 +151,152 @@ def is_error_envelope(response: Any) -> bool:
     return str(response or "").strip().lower().startswith(_GENERIC_AGENT_ERROR)
 
 
+def model_finished() -> None:
+    """Record that the current run finished producing its response."""
+    current = _CURRENT.get()
+    if current:
+        tx, run_id = current
+        _append(tx, "model_finished", run_id=run_id)
+
+
 def accepted(message_id: Any) -> None:
     current = _CURRENT.get()
     if current and message_id not in (None, "", "__no_edit__"):
         tx, run_id = current
         _append(tx, "telegram_accepted", run_id=run_id, outbound_message_id=str(message_id))
+        # Delivery attempts are ordered: a later accepted result is the native
+        # fallback/primary outcome and supersedes an earlier attempt failure.
+        _DELIVERY_FAILURE.set(None)
+
+
+def external_accepted(
+    *,
+    chat_id: Any,
+    thread_id: Any,
+    message_id: Any,
+    source: str,
+    occurred_at: Any,
+) -> bool:
+    """Record a Telegram send completed by a gateway-owned tool.
+
+    This reuses the immutable transaction ledger so downstream closeout checks
+    can prove the provider accepted the exact message. It is intentionally not
+    a second delivery system and does not send or retry anything.
+    """
+    if chat_id in (None, "") or message_id in (None, "", "__no_edit__"):
+        return False
+    try:
+        accepted_at = float(occurred_at)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(accepted_at) or accepted_at <= 0:
+        return False
+    normalized_thread = "" if thread_id in (None, "", "None") else str(thread_id)
+    tx = hashlib.sha256(
+        f"external:telegram:{chat_id}:{normalized_thread}:{message_id}".encode()
+    ).hexdigest()
+    return _append(
+        tx,
+        "external_telegram_accepted",
+        outbound_message_id=str(message_id),
+        chat_id=str(chat_id),
+        thread_id=normalized_thread,
+        occurred_at=accepted_at,
+        detail={"source": str(source or "gateway_tool")[:120]},
+    )
+
+
+def delivery_failed(error: Any = None) -> None:
+    """Hold an attempt failure until the native turn reaches its terminal boundary."""
+    current = _CURRENT.get()
+    if current:
+        tx, run_id = current
+        _DELIVERY_FAILURE.set(error or "delivery failed")
+        _append(
+            tx,
+            "delivery_failure_observed",
+            run_id=run_id,
+            detail={"error": str(error)[:1000]} if error else {},
+        )
+
+
+def _resolve_progress_cleanup(state: dict[str, Any] | None, allowed: bool) -> None:
+    if state is None:
+        return
+    if state["decision"] is None:
+        state["decision"] = allowed
+    future = state["future"]
+    if future is not None and not future.done():
+        future.set_result(bool(state["decision"]))
+
+
+def defer_progress_cleanup() -> bool:
+    state = _PROGRESS_CLEANUP_STATE.get()
+    if _CURRENT.get() is None or state is None:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    if state["future"] is None:
+        state["future"] = loop.create_future()
+    owner = state.pop("owner", None)
+    if owner is not None:
+        owner.add_done_callback(
+            lambda _task, pending=state: _resolve_progress_cleanup(pending, False)
+        )
+    return True
+
+
+async def wait_for_progress_cleanup() -> bool:
+    state = _PROGRESS_CLEANUP_STATE.get()
+    if state is None:
+        return False
+    decision = state["decision"]
+    if decision is not None:
+        return bool(decision)
+    future = state["future"]
+    if future is None:
+        return False
+    return bool(await asyncio.shield(future))
+
+
+def abort_progress_cleanup() -> None:
+    state = _PROGRESS_CLEANUP_STATE.get()
+    _CURRENT.set(None)
+    _PROGRESS_CLEANUP_ALLOWED.set(False)
+    _resolve_progress_cleanup(state, False)
+
+
+def finalize_progress_cleanup() -> bool:
+    allowed = False
+    current = _CURRENT.get()
+    state = _PROGRESS_CLEANUP_STATE.get()
+    if current:
+        tx, run_id = current
+        try:
+            with _connect() as db:
+                kinds = {
+                    str(row[0])
+                    for row in db.execute(
+                        "SELECT event_type FROM events WHERE transaction_id=? AND run_id=?",
+                        (tx, run_id),
+                    )
+                }
+            allowed = (
+                {"model_finished", "telegram_accepted", "run_finished"} <= kinds
+                and not {"failed", "run_failure_observed"} & kinds
+            )
+        except (OSError, sqlite3.Error):
+            allowed = False
+    _CURRENT.set(None)
+    _PROGRESS_CLEANUP_ALLOWED.set(allowed)
+    _resolve_progress_cleanup(state, allowed)
+    return allowed
+
+
+def progress_cleanup_allowed() -> bool:
+    return _PROGRESS_CLEANUP_ALLOWED.get()
 
 
 def _session_snapshot(session_store: Any, session_key: str) -> dict[str, Any] | None:
@@ -226,7 +407,7 @@ def slash_confirm_resolved(
 
 
 def clear() -> None:
-    _CURRENT.set(None)
+    abort_progress_cleanup()
 
 
 def classify(transaction_id: str) -> dict[str, Any]:
@@ -239,5 +420,11 @@ def classify(transaction_id: str) -> dict[str, Any]:
             )
         ]
     kinds = {row["event_type"] for row in rows}
-    status = "Failed" if "failed" in kinds else "Replied" if "telegram_accepted" in kinds else "Pending"
+    status = (
+        "Failed"
+        if {"failed", "run_failure_observed"} & kinds
+        else "Replied"
+        if "telegram_accepted" in kinds
+        else "Pending"
+    )
     return {"transaction_id": transaction_id, "status": status, "events": rows}

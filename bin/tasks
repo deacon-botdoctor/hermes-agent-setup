@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+"""
+tasks - CLI for the Hermes task ledger
+
+Usage:
+  tasks                       # show open + in_progress + blocked
+  tasks done                  # show tasks closed in last 24h
+  tasks all                   # show everything (last 50)
+  tasks <id>                  # show one task in detail
+  tasks close <id>            # mark a task abandoned
+  tasks kill <id>             # delete a task
+  tasks add "<ask>" "<expected>"   # manually add a task
+  tasks done <id> --artifact-path=<proof> --artifact-verified=true
+                  --status-note=<summary> --acceptance-evidence=<proof>
+                  --completion-stage=verified
+  tasks block <id> "<reason>" --blocker-attempt=<attempt>
+                              --resume-condition=<condition>
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import sys
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+DB_PATH = Path.home() / ".hermes" / "data" / "task-ledger.db"
+VALID_STATUSES = {"open", "in_progress", "blocked", "done", "abandoned", "dormant"}
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+def ensure_columns(conn: sqlite3.Connection) -> None:
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    completion_stage_added = "completion_stage" not in existing
+    wanted = {
+        "client_slug": "TEXT",
+        "change_record_required": "INTEGER DEFAULT 0",
+        "change_recorded": "INTEGER DEFAULT 0",
+        "change_record_status": "TEXT DEFAULT 'not_required'",
+        "change_record_ref": "TEXT",
+        "change_record_error": "TEXT",
+        "acceptance_criteria": "TEXT",
+        "acceptance_evidence": "TEXT",
+        "delivery_required": "INTEGER DEFAULT 0",
+        "delivery_target": "TEXT",
+        "completion_stage": "TEXT",
+        "delivery_receipt": "TEXT",
+        "blocker_attempts": "TEXT",
+        "resume_condition": "TEXT",
+    }
+    for column, ddl in wanted.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE tasks ADD COLUMN {column} {ddl}")
+    conn.execute("UPDATE tasks SET change_record_required=0 WHERE change_record_required IS NULL")
+    conn.execute("UPDATE tasks SET change_recorded=0 WHERE change_recorded IS NULL")
+    conn.execute(
+        "UPDATE tasks SET change_record_status='not_required' "
+        "WHERE change_record_status IS NULL OR TRIM(change_record_status)=''"
+    )
+    conn.execute("UPDATE tasks SET delivery_required=0 WHERE delivery_required IS NULL")
+    if completion_stage_added:
+        conn.execute(
+            "UPDATE tasks SET completion_stage="
+            "CASE WHEN status='done' AND artifact_verified=1 THEN 'verified' ELSE 'authorized' END"
+        )
+    conn.commit()
+
+
+def _conn():
+    if not DB_PATH.exists():
+        print("No task ledger yet. Ask an agent to do something first.")
+        sys.exit(0)
+    c = sqlite3.connect(str(DB_PATH))
+    c.row_factory = sqlite3.Row
+    ensure_columns(c)
+    return c
+
+
+def _bool_flag(value: str | None) -> int:
+    return 1 if str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"} else 0
+
+
+def _parse_meta_args(args: list[str]) -> dict:
+    meta = {
+        "agent": "deacon",
+        "requested_by": "Deacon",
+        "chat_id": "",
+        "thread_id": "",
+        "platform": "",
+        "session_id": "",
+        "client_slug": "",
+        "change_record_required": 0,
+        "status_note": "",
+        "artifact_path": "",
+        "artifact_verified": 0,
+        "blocker_reason": "",
+        "acceptance_criteria": [],
+        "acceptance_evidence": [],
+        "completion_stage": "",
+        "blocker_attempts": [],
+        "resume_condition": "",
+    }
+    for token in args:
+        if not token.startswith("--") or "=" not in token:
+            continue
+        key, value = token[2:].split("=", 1)
+        if key in {"change-record-required", "artifact-verified"}:
+            dest = key.replace("-", "_")
+            meta[dest] = _bool_flag(value)
+        elif key == "acceptance-criterion":
+            meta["acceptance_criteria"].append(value)
+        elif key == "acceptance-evidence":
+            meta["acceptance_evidence"].append(value)
+        elif key == "blocker-attempt":
+            meta["blocker_attempts"].append(value)
+        elif key in {
+            "agent",
+            "requested-by",
+            "chat-id",
+            "thread-id",
+            "platform",
+            "session-id",
+            "client-slug",
+            "status-note",
+            "artifact-path",
+            "blocker-reason",
+            "completion-stage",
+            "resume-condition",
+        }:
+            meta[key.replace("-", "_")] = value
+    return meta
+
+
+def _stored_lines(value: str | None) -> list[str]:
+    try:
+        decoded = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    if (
+        not isinstance(decoded, list)
+        or not decoded
+        or any(not isinstance(item, str) or not item.strip() for item in decoded)
+    ):
+        return []
+    return [item.strip() for item in decoded]
+
+
+def _verify_artifact(value: str) -> bool:
+    if value.startswith("http://") or value.startswith("https://"):
+        return True
+    if value.startswith("/") or value.startswith("~"):
+        path = Path(value).expanduser()
+        return path.exists() and path.stat().st_size > 0
+    return False
+
+
+def _set_status(
+    c: sqlite3.Connection,
+    task_id: str,
+    status: str,
+    note: str = "",
+    artifact_path: str = "",
+    artifact_verified: int | None = None,
+    blocker_reason: str = "",
+    acceptance_evidence: list[str] | None = None,
+    completion_stage: str = "",
+    blocker_attempts: list[str] | None = None,
+    resume_condition: str = "",
+) -> None:
+    if status not in VALID_STATUSES:
+        raise SystemExit(f"Invalid status: {status}")
+    row = c.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+    if not row:
+        raise SystemExit(f"No task {task_id}")
+    now = _utc_now()
+    next_note = note if note else (row["status_note"] or "")
+    next_artifact = artifact_path if artifact_path else (row["artifact_path"] or "")
+    next_verified = row["artifact_verified"] if artifact_verified is None else int(bool(artifact_verified))
+    next_blocker = blocker_reason if blocker_reason else (row["blocker_reason"] or "")
+    legacy = row["acceptance_criteria"] is None and row["completion_stage"] == "authorized"
+    next_evidence = row["acceptance_evidence"]
+    next_stage = row["completion_stage"] or "authorized"
+    next_attempts = row["blocker_attempts"]
+    next_resume = row["resume_condition"]
+    if status == "done":
+        evidence = [item.strip() for item in acceptance_evidence or [] if item.strip()]
+        if not legacy:
+            criteria = _stored_lines(row["acceptance_criteria"])
+            if not criteria:
+                raise SystemExit(f"Task {task_id} has a missing or malformed outcome contract.")
+            if len(evidence) != len(criteria):
+                raise SystemExit(
+                    f"Task {task_id} requires {len(criteria)} acceptance evidence item(s)."
+                )
+            if not note:
+                raise SystemExit(f"Task {task_id} requires a completion status note.")
+            if not next_artifact or not next_verified or not _verify_artifact(next_artifact):
+                raise SystemExit(f"Task {task_id} requires a verified artifact.")
+            if row["delivery_required"]:
+                raise SystemExit(
+                    f"Task {task_id} requires transport-owned delivery verification via task_done."
+                )
+            if completion_stage != "verified":
+                raise SystemExit(f"Task {task_id} must close with completion_stage=verified.")
+            if (str(row["client_slug"] or "").strip() or row["change_record_required"]) and not (
+                row["change_recorded"]
+                and row["change_record_status"] == "recorded"
+                and str(row["change_record_ref"] or "").strip()
+            ):
+                raise SystemExit(
+                    f"Task {task_id} requires the canonical change record before CLI closeout."
+                )
+            next_evidence = json.dumps(evidence, ensure_ascii=False)
+            next_stage = completion_stage
+        elif completion_stage:
+            next_stage = completion_stage
+        elif next_verified:
+            next_stage = "verified"
+    if status == "blocked":
+        attempts = [item.strip() for item in blocker_attempts or [] if item.strip()]
+        if not legacy:
+            if not attempts:
+                raise SystemExit(f"Task {task_id} requires at least one blocker attempt.")
+            if not resume_condition.strip():
+                raise SystemExit(f"Task {task_id} requires an exact resume condition.")
+            next_attempts = json.dumps(attempts, ensure_ascii=False)
+            next_resume = resume_condition.strip()
+    closed_at = now if status in {"done", "abandoned"} else None
+    c.execute(
+        """
+        UPDATE tasks
+           SET status=?, status_note=?, artifact_path=?, artifact_verified=?, blocker_reason=?,
+               acceptance_evidence=?, completion_stage=?, blocker_attempts=?, resume_condition=?,
+               updated_at=?, closed_at=?
+         WHERE id=?
+        """,
+        (
+            status,
+            next_note,
+            next_artifact,
+            next_verified,
+            next_blocker,
+            next_evidence,
+            next_stage,
+            next_attempts,
+            next_resume,
+            now,
+            closed_at,
+            task_id,
+        ),
+    )
+    c.commit()
+
+
+def _fmt(rows):
+    if not rows:
+        print("No tasks.")
+        return
+    for r in rows:
+        status = r["status"]
+        icon = {"open": "o", "in_progress": "*", "blocked": "!", "done": "+", "abandoned": "x", "dormant": "z"}.get(
+            status, "?"
+        )
+        if status == "done" and (
+            not r["artifact_verified"]
+            or (r["change_record_required"] and not r["change_recorded"])
+        ):
+            icon = "!"
+        print(f"{icon} [{status:11}] {r['id']}  [{r['agent']:5}] {r['ask'][:70]}")
+        if status in ("open", "in_progress", "blocked"):
+            print(f"              expected: {(r['expected_artifact'] or '')[:80]}")
+            print(f"              opened {r['opened_at']}")
+            if r["change_record_required"]:
+                print("              change-record required")
+        if status == "blocked":
+            print(f"              BLOCKED {r['blocker_reason']}")
+        if status == "done":
+            print(f"              -> {r['artifact_path']}")
+            if r["status_note"]:
+                print(f"              {r['status_note'][:100]}")
+            verify_label = "verified" if r["artifact_verified"] else "UNVERIFIED"
+            print(f"              artifact: {verify_label}")
+            if r["change_record_required"]:
+                record_label = "recorded" if r["change_recorded"] else f"MISSING ({r['change_record_status']})"
+                print(f"              change-record: {record_label}")
+                if r["change_record_error"]:
+                    print(f"              change-record-error: {r['change_record_error']}")
+
+
+def main():
+    args = sys.argv[1:]
+
+    if not args:
+        c = _conn()
+        rows = c.execute(
+            "SELECT * FROM tasks WHERE status IN ('open','in_progress','blocked','dormant') "
+            "ORDER BY opened_at DESC LIMIT 50"
+        ).fetchall()
+        _fmt(rows)
+        return
+
+    cmd = args[0]
+
+    if cmd == "done" and len(args) == 1:
+        c = _conn()
+        rows = c.execute(
+            "SELECT * FROM tasks WHERE status='done' AND closed_at > datetime('now','-24 hours') "
+            "ORDER BY closed_at DESC LIMIT 50"
+        ).fetchall()
+        _fmt(rows)
+    elif cmd == "all":
+        c = _conn()
+        rows = c.execute("SELECT * FROM tasks ORDER BY opened_at DESC LIMIT 50").fetchall()
+        _fmt(rows)
+    elif cmd == "close" and len(args) == 2:
+        c = _conn()
+        _set_status(c, args[1], "abandoned")
+        print(f"Task {args[1]} marked abandoned.")
+    elif cmd == "kill" and len(args) == 2:
+        c = _conn()
+        c.execute("BEGIN IMMEDIATE")
+        deleted = c.execute(
+            "DELETE FROM tasks WHERE id=? "
+            "AND (delivery_receipt IS NULL OR TRIM(delivery_receipt)='')",
+            (args[1],),
+        )
+        if deleted.rowcount == 0:
+            row = c.execute("SELECT delivery_receipt FROM tasks WHERE id=?", (args[1],)).fetchone()
+            c.rollback()
+            if not row:
+                raise SystemExit(f"No task {args[1]}")
+            raise SystemExit(f"Task {args[1]} owns a delivery receipt and cannot be deleted.")
+        c.commit()
+        print(f"Task {args[1]} deleted.")
+    elif cmd == "add" and len(args) >= 3:
+        c = _conn()
+        tid = f"t_{uuid.uuid4().hex[:12]}"
+        now = _utc_now()
+        meta = _parse_meta_args(args[3:])
+        criteria = meta["acceptance_criteria"] or [args[2]]
+        if not criteria or any(not isinstance(item, str) or not item.strip() for item in criteria):
+            raise SystemExit("Acceptance criteria must be nonblank strings.")
+        criteria = [item.strip() for item in criteria]
+        change_record_required = int(
+            bool(meta["client_slug"]) or bool(meta["change_record_required"])
+        )
+        change_record_status = "pending" if change_record_required else "not_required"
+        c.execute(
+            """
+            INSERT INTO tasks
+                (id, agent, chat_id, thread_id, platform, requested_by, ask, expected_artifact, status,
+                 status_note, artifact_path, artifact_verified, blocker_reason, opened_at, updated_at,
+                 session_id, client_slug, change_record_required, change_recorded, change_record_status,
+                 acceptance_criteria, delivery_required, completion_stage)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?,
+                    ?, 0, 'authorized')
+            """,
+            (
+                tid,
+                meta["agent"],
+                meta["chat_id"],
+                meta["thread_id"],
+                meta["platform"],
+                meta["requested_by"],
+                args[1],
+                args[2],
+                meta["status_note"],
+                meta["artifact_path"],
+                meta["artifact_verified"],
+                meta["blocker_reason"],
+                now,
+                now,
+                meta["session_id"],
+                meta["client_slug"],
+                change_record_required,
+                change_record_status,
+                json.dumps(criteria, ensure_ascii=False),
+            ),
+        )
+        c.commit()
+        print(f"Opened {tid}: {args[1]}")
+    elif cmd == "start" and len(args) >= 2:
+        c = _conn()
+        note = args[2] if len(args) >= 3 and not args[2].startswith("--") else ""
+        _set_status(c, args[1], "in_progress", note=note)
+        print(f"Task {args[1]} marked in_progress.")
+    elif cmd == "block" and len(args) >= 3:
+        c = _conn()
+        meta = _parse_meta_args(args[3:])
+        _set_status(
+            c,
+            args[1],
+            "blocked",
+            blocker_reason=args[2],
+            note=args[2],
+            blocker_attempts=meta["blocker_attempts"],
+            resume_condition=meta["resume_condition"],
+        )
+        print(f"Task {args[1]} marked blocked.")
+    elif cmd == "done" and len(args) >= 2 and args[1].startswith("t_"):
+        c = _conn()
+        meta = _parse_meta_args(args[2:])
+        _set_status(
+            c,
+            args[1],
+            "done",
+            note=meta["status_note"],
+            artifact_path=meta["artifact_path"],
+            artifact_verified=meta["artifact_verified"],
+            acceptance_evidence=meta["acceptance_evidence"],
+            completion_stage=meta["completion_stage"],
+        )
+        print(f"Task {args[1]} marked done.")
+    elif cmd.startswith("t_"):
+        c = _conn()
+        r = c.execute("SELECT * FROM tasks WHERE id=?", (cmd,)).fetchone()
+        if not r:
+            print(f"No task {cmd}")
+            return
+        for k in r.keys():
+            print(f"  {k:20}: {r[k]}")
+    else:
+        print(__doc__)
+
+
+if __name__ == "__main__":
+    main()

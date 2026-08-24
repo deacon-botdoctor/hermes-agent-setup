@@ -1,7 +1,7 @@
 id: semantic-computer-control-guard
 name: semantic-computer-control-guard
-version: 3.1.0
-description: Semantic desktop sequencing with an exact dedicated-principal posture.
+version: 3.2.0
+description: Semantic desktop sequencing with source-surface re-entry protection.
 provides_hooks:
   - pre_tool_call
   - post_tool_call

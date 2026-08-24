@@ -40,10 +40,15 @@ NORMAL_FINISH_WITHOUT_SEMANTIC = NORMAL_FINISH_BLOCK.replace(
 BASE_IMPORT = "import asyncio\n"
 BASE_IMPORT_BLOCK = f"import asyncio\n\n# {MARKER}\nfrom gateway import telegram_transaction_ledger as _telegram_tx\n"
 NORMAL_DELIVERY = '            if getattr(result, "success", False):\n                delivery_succeeded = True\n'
-NORMAL_DELIVERY_BLOCK = NORMAL_DELIVERY + (
+NORMAL_DELIVERY_BLOCK_V1 = NORMAL_DELIVERY + (
     '                _telegram_tx.accepted(getattr(result, "message_id", None))\n'
     "            else:\n"
     '                _telegram_tx.finish(failed=True, error=getattr(result, "error", "delivery failed"))\n'
+)
+NORMAL_DELIVERY_BLOCK = NORMAL_DELIVERY + (
+    '                _telegram_tx.accepted(getattr(result, "message_id", None))\n'
+    "            else:\n"
+    '                _telegram_tx.delivery_failed(getattr(result, "error", "delivery failed"))\n'
 )
 NORMAL_CANCEL = "        except asyncio.CancelledError:\n            current_task = asyncio.current_task()\n"
 NORMAL_CANCEL_BLOCK = (
@@ -60,12 +65,31 @@ NORMAL_EXCEPTION_BLOCK = (
     "            _telegram_tx.finish(failed=True, error=e)\n"
     '            await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)\n'
 )
+NORMAL_MODEL_FINISHED = "            response, _ephemeral_ttl = self._unwrap_ephemeral(response)\n"
+NORMAL_MODEL_FINISHED_BLOCK = NORMAL_MODEL_FINISHED + "            _telegram_tx.model_finished()\n"
 STREAM_IMPORT = "from gateway.platforms.base import MEDIA_TAG_CLEANUP_RE\n"
 STREAM_IMPORT_BLOCK = STREAM_IMPORT + "from gateway import telegram_transaction_ledger as _telegram_tx\n"
+STREAM_MODEL_FINISHED = (
+    "                        if item is _DONE:\n"
+    "                            got_done = True\n"
+)
+STREAM_MODEL_FINISHED_BLOCK = (
+    "                        if item is _DONE:\n"
+    "                            _telegram_tx.model_finished()\n"
+    "                            got_done = True\n"
+)
 STREAM_FINAL = (
     '        except Exception as e:\n            logger.error("Stream consumer error: %s", e)\n\n    # Strip MEDIA:'
 )
 STREAM_FINAL_BLOCK = (
+    '        except Exception as e:\n            logger.error("Stream consumer error: %s", e)\n'
+    "        finally:\n"
+    '            if (getattr(self, "_final_response_sent", False)\n'
+    '                    or getattr(self, "final_response_sent", False)):\n'
+    '                _telegram_tx.accepted(getattr(self, "_message_id", None))\n\n'
+    "    # Strip MEDIA:"
+)
+STREAM_FINAL_BLOCK_V1 = (
     '        except Exception as e:\n            logger.error("Stream consumer error: %s", e)\n'
     "        finally:\n"
     '            if (getattr(self, "_final_response_sent", False)\n'
@@ -79,11 +103,38 @@ STREAM_NATIVE_FINALLY = "        finally:\n            # Safety net: if run() ex
 STREAM_NATIVE_FINALLY_BLOCK = (
     "        finally:\n"
     '            if (getattr(self, "_final_response_sent", False)\n'
+    '                    or getattr(self, "final_response_sent", False)):\n'
+    '                _telegram_tx.accepted(getattr(self, "_message_id", None))\n'
+    "            # Safety net: if run() exits (normal return, cancellation, or\n"
+)
+STREAM_NATIVE_FINALLY_BLOCK_V1 = (
+    "        finally:\n"
+    '            if (getattr(self, "_final_response_sent", False)\n'
     '                    or getattr(self, "final_response_sent", False)\n'
     '                    or getattr(self, "_final_content_delivered", False)\n'
     '                    or getattr(self, "final_content_delivered", False)):\n'
     '                _telegram_tx.accepted(getattr(self, "_message_id", None))\n'
     "            # Safety net: if run() exits (normal return, cancellation, or\n"
+)
+STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK = STREAM_FINAL_BLOCK.replace(
+    "        finally:\n",
+    "        finally:\n            _telegram_tx.model_finished()\n",
+    1,
+)
+STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK = STREAM_NATIVE_FINALLY_BLOCK.replace(
+    "        finally:\n",
+    "        finally:\n            _telegram_tx.model_finished()\n",
+    1,
+)
+STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK_V1 = STREAM_FINAL_BLOCK_V1.replace(
+    "        finally:\n",
+    "        finally:\n            _telegram_tx.model_finished()\n",
+    1,
+)
+STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK_V1 = STREAM_NATIVE_FINALLY_BLOCK_V1.replace(
+    "        finally:\n",
+    "        finally:\n            _telegram_tx.model_finished()\n",
+    1,
 )
 BYPASS_RESET_BEGIN = (
     "        logger.debug(\n"
@@ -123,6 +174,7 @@ RESET_SETUP_BLOCK = (
 BYPASS_RESET_ACCEPT = "                if _eph_ttl > 0 and _r.success and _r.message_id:\n"
 BYPASS_RESET_RESPONSE = "            _text, _eph_ttl = self._unwrap_ephemeral(response)\n"
 BYPASS_RESET_RESPONSE_BLOCK = BYPASS_RESET_RESPONSE + (
+    "            _telegram_tx.model_finished()\n"
     '            if _telegram_tx.is_error_envelope(_text):\n                _tx_error = "agent error envelope"\n'
 )
 BYPASS_RESET_ACCEPT_BLOCK_V1 = (
@@ -208,6 +260,7 @@ BYPASS_DIRECT_BEGIN_BLOCK = (
 BYPASS_DIRECT_ACCEPT = "                        if _eph_ttl > 0 and _r.success and _r.message_id:\n"
 BYPASS_DIRECT_RESPONSE = "                    _text, _eph_ttl = self._unwrap_ephemeral(response)\n"
 BYPASS_DIRECT_RESPONSE_BLOCK = BYPASS_DIRECT_RESPONSE + (
+    "                    _telegram_tx.model_finished()\n"
     "                    if _telegram_tx.is_error_envelope(_text):\n"
     '                        _tx_error = "agent error envelope"\n'
 )
@@ -301,14 +354,22 @@ NORMAL_BEGIN = (
 )
 NORMAL_BEGIN_BLOCK = NORMAL_BEGIN + '        _telegram_tx.begin(event, getattr(self, "name", "hermes"))\n'
 PINNED_CLEAR = "        finally:\n            # Stop typing before any deferred callback work."
-PINNED_CLEAR_BLOCK = (
-    "        finally:\n            _telegram_tx.clear()\n            # Stop typing before any deferred callback work."
+LEGACY_PINNED_CLEAR_BLOCK = (
+    "        finally:\n            _telegram_tx.finalize_progress_cleanup()\n            # Stop typing before any deferred callback work."
 )
 OVERLAY_CLEAR = "        finally:\n            # Fire any one-shot post-delivery callback registered for this\n"
-OVERLAY_CLEAR_BLOCK = (
+LEGACY_OVERLAY_CLEAR_BLOCK = (
     "        finally:\n"
-    "            _telegram_tx.clear()\n"
+    "            _telegram_tx.finalize_progress_cleanup()\n"
     "            # Fire any one-shot post-delivery callback registered for this\n"
+)
+CLEANUP_FINALIZE_BLOCK = (
+    "            except BaseException as _cleanup_error:\n"
+    "                _telegram_tx.finish(failed=True, error=_cleanup_error)\n"
+    "                _telegram_tx.abort_progress_cleanup()\n"
+    "                raise\n"
+    "            else:\n"
+    "                _telegram_tx.finalize_progress_cleanup()\n"
 )
 
 
@@ -475,7 +536,13 @@ def _with_reset_hooks(text: str) -> str:
         "reset bypass setup",
         (_without_line(RESET_SETUP_BLOCK, "_telegram_tx.begin"),),
     )
-    text = _ensure(text, BYPASS_RESET_RESPONSE, BYPASS_RESET_RESPONSE_BLOCK, "reset bypass response")
+    text = _ensure(
+        text,
+        BYPASS_RESET_RESPONSE,
+        BYPASS_RESET_RESPONSE_BLOCK,
+        "reset bypass response",
+        (_without_line(BYPASS_RESET_RESPONSE_BLOCK, "_telegram_tx.model_finished"),),
+    )
     text = _ensure(
         text,
         BYPASS_RESET_ACCEPT,
@@ -516,7 +583,13 @@ def _with_direct_hooks(text: str) -> str:
         "direct bypass begin",
         (_without_line(BYPASS_DIRECT_BEGIN_BLOCK, "_telegram_tx.begin"),),
     )
-    text = _ensure(text, BYPASS_DIRECT_RESPONSE, BYPASS_DIRECT_RESPONSE_BLOCK, "direct bypass response")
+    text = _ensure(
+        text,
+        BYPASS_DIRECT_RESPONSE,
+        BYPASS_DIRECT_RESPONSE_BLOCK,
+        "direct bypass response",
+        (_without_line(BYPASS_DIRECT_RESPONSE_BLOCK, "_telegram_tx.model_finished"),),
+    )
     text = _ensure(
         text,
         BYPASS_DIRECT_ACCEPT,
@@ -628,29 +701,78 @@ def _slash_confirm_hook_current(text: str) -> bool:
 def _with_clear_hook(text: str) -> str:
     if _normal_clear_current(text):
         return text
-    if PINNED_CLEAR in text:
-        return _once(
-            text,
-            PINNED_CLEAR,
-            PINNED_CLEAR_BLOCK,
-            "clear",
-        )
-    return _once(
-        text,
-        OVERLAY_CLEAR,
-        OVERLAY_CLEAR_BLOCK,
-        "clear",
+    for legacy in (LEGACY_PINNED_CLEAR_BLOCK, LEGACY_OVERLAY_CLEAR_BLOCK):
+        if legacy in text:
+            text = text.replace(
+                "            _telegram_tx.finalize_progress_cleanup()\n",
+                "",
+                1,
+            )
+            break
+    if PINNED_CLEAR not in text and OVERLAY_CLEAR not in text:
+        raise RuntimeError("clear: anchor drift")
+    return _wrap_finally_cleanup(text)
+
+
+def _core_finally(text: str) -> ast.Try:
+    tree = ast.parse("class _Canary:\n" + text)
+    class_node = tree.body[0]
+    if not isinstance(class_node, ast.ClassDef) or len(class_node.body) != 1:
+        raise RuntimeError("clear: method boundary drift")
+    method = class_node.body[0]
+    if not isinstance(method, ast.AsyncFunctionDef):
+        raise RuntimeError("clear: method boundary drift")
+    matches = [node for node in method.body if isinstance(node, ast.Try) and node.finalbody]
+    if len(matches) != 1:
+        raise RuntimeError("clear: finally boundary drift")
+    return matches[0]
+
+
+def _wrap_finally_cleanup(text: str) -> str:
+    final_try = _core_finally(text)
+    lines = text.splitlines(keepends=True)
+    first_body_line = final_try.finalbody[0].lineno - 2
+    finally_line = next(
+        (
+            index
+            for index in range(first_body_line, final_try.lineno - 2, -1)
+            if lines[index].strip() == "finally:"
+        ),
+        None,
     )
+    if finally_line is None or final_try.finalbody[-1].end_lineno is None:
+        raise RuntimeError("clear: finally boundary drift")
+    body_end = final_try.finalbody[-1].end_lineno - 1
+    body_indent = lines[finally_line][: -len(lines[finally_line].lstrip())] + "    "
+    original_body = lines[finally_line + 1 : body_end]
+    wrapped_body = [f"{body_indent}try:\n"]
+    wrapped_body.extend(
+        f"    {line}" if line.strip() else line for line in original_body
+    )
+    wrapped_body.extend(CLEANUP_FINALIZE_BLOCK.splitlines(keepends=True))
+    return "".join(lines[: finally_line + 1] + wrapped_body + lines[body_end:])
+
+
+def _unwrap_finally_cleanup(text: str) -> str:
+    final_try = _core_finally(text)
+    if len(final_try.finalbody) != 1 or not isinstance(final_try.finalbody[0], ast.Try):
+        raise RuntimeError("historical clear rollback: anchor drift")
+    cleanup_try = final_try.finalbody[0]
+    if cleanup_try.end_lineno is None or not cleanup_try.body or cleanup_try.body[-1].end_lineno is None:
+        raise RuntimeError("historical clear rollback: anchor drift")
+    lines = text.splitlines(keepends=True)
+    start = cleanup_try.lineno - 2
+    body_end = cleanup_try.body[-1].end_lineno - 1
+    end = cleanup_try.end_lineno - 1
+    original_body = [
+        line[4:] if line.startswith("    ") else line
+        for line in lines[start + 1 : body_end]
+    ]
+    return "".join(lines[:start] + original_body + lines[end:])
 
 
 def _normal_clear_current(text: str) -> bool:
-    return any(
-        anchor in text
-        for anchor in (
-            PINNED_CLEAR_BLOCK,
-            OVERLAY_CLEAR_BLOCK,
-        )
-    )
+    return CLEANUP_FINALIZE_BLOCK in text
 
 
 def _core_hooks_current(text: str) -> bool:
@@ -666,6 +788,7 @@ def _core_hooks_current(text: str) -> bool:
                 NORMAL_BEGIN_BLOCK,
                 NORMAL_DELIVERY_BLOCK,
                 NORMAL_FINISH_BLOCK,
+                NORMAL_MODEL_FINISHED_BLOCK,
                 NORMAL_CANCEL_BLOCK,
                 NORMAL_EXCEPTION_BLOCK,
             )
@@ -701,10 +824,18 @@ def _with_core_method_hooks(text: str) -> str:
     )
     text = _ensure(
         text,
+        NORMAL_MODEL_FINISHED,
+        NORMAL_MODEL_FINISHED_BLOCK,
+        "model finished",
+        (_without_line(NORMAL_MODEL_FINISHED_BLOCK, "_telegram_tx.model_finished"),),
+    )
+    text = _ensure(
+        text,
         NORMAL_DELIVERY,
         NORMAL_DELIVERY_BLOCK,
         "delivery",
         (
+            NORMAL_DELIVERY_BLOCK_V1,
             _without_line(NORMAL_DELIVERY_BLOCK, "_telegram_tx.accepted"),
             _without_line(NORMAL_DELIVERY_BLOCK, "_telegram_tx.finish"),
             _without_line(
@@ -748,7 +879,11 @@ def _stream_hooks_current(text: str) -> bool:
         STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0],
         STREAM_NATIVE_FINALLY_BLOCK,
     )
-    return any(block in run for block in stream_run_blocks) and _has_ledger_alias(tree)
+    return (
+        any(block in run for block in stream_run_blocks)
+        and STREAM_MODEL_FINISHED_BLOCK in run
+        and _has_ledger_alias(tree)
+    )
 
 
 def _with_stream_hooks(text: str) -> str:
@@ -770,48 +905,120 @@ def _with_stream_hooks(text: str) -> str:
 def _with_stream_method_hooks(text: str) -> str:
     old = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
     new = STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
-    if STREAM_NATIVE_FINALLY_BLOCK in text or new in text:
-        return text
+    for prior, current in (
+        (STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK_V1, STREAM_NATIVE_FINALLY_BLOCK),
+        (STREAM_NATIVE_FINALLY_BLOCK_V1, STREAM_NATIVE_FINALLY_BLOCK),
+        (
+            STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK_V1.split("\n\n    # Strip MEDIA:", 1)[0],
+            new,
+        ),
+        (STREAM_FINAL_BLOCK_V1.split("\n\n    # Strip MEDIA:", 1)[0], new),
+    ):
+        if prior in text:
+            text = _once(
+                text,
+                prior,
+                current,
+                "stream finalization receipt upgrade",
+            )
+            break
+    prior_native = STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK
     damaged_native = _without_line(
         STREAM_NATIVE_FINALLY_BLOCK,
         "_telegram_tx.accepted",
     )
-    if damaged_native in text:
-        return _once(
+    damaged_prior_native = _without_line(
+        prior_native,
+        "_telegram_tx.accepted",
+    )
+    if prior_native in text:
+        text = _once(
+            text,
+            prior_native,
+            STREAM_NATIVE_FINALLY_BLOCK,
+            "stream native-finally ordering upgrade",
+        )
+    elif damaged_prior_native in text:
+        text = _once(
+            text,
+            damaged_prior_native,
+            STREAM_NATIVE_FINALLY_BLOCK,
+            "stream native-finally ordering repair",
+        )
+    elif damaged_native in text:
+        text = _once(
             text,
             damaged_native,
             STREAM_NATIVE_FINALLY_BLOCK,
             "stream native-finally repair",
         )
-    if STREAM_NATIVE_FINALLY in text:
-        return _once(
-            text,
-            STREAM_NATIVE_FINALLY,
-            STREAM_NATIVE_FINALLY_BLOCK,
-            "stream native-finally",
-        )
+    elif STREAM_NATIVE_FINALLY_BLOCK not in text:
+        if STREAM_NATIVE_FINALLY in text:
+            text = _once(
+                text,
+                STREAM_NATIVE_FINALLY,
+                STREAM_NATIVE_FINALLY_BLOCK,
+                "stream native-finally",
+            )
+        else:
+            prior_legacy = STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK.split(
+                "\n\n    # Strip MEDIA:", 1
+            )[0]
+            text = _ensure(
+                text,
+                old,
+                new,
+                "stream final",
+                (
+                    _without_line(new, "_telegram_tx.accepted"),
+                    prior_legacy,
+                    _without_line(prior_legacy, "_telegram_tx.accepted"),
+                ),
+            )
     return _ensure(
         text,
-        old,
-        new,
-        "stream final",
-        (_without_line(new, "_telegram_tx.accepted"),),
+        STREAM_MODEL_FINISHED,
+        STREAM_MODEL_FINISHED_BLOCK,
+        "stream model finished",
     )
 
 
 def _without_stream_method_hooks(text: str) -> str:
+    if STREAM_MODEL_FINISHED_BLOCK in text:
+        text = _once(
+            text,
+            STREAM_MODEL_FINISHED_BLOCK,
+            STREAM_MODEL_FINISHED,
+            "historical stream model-finished rollback",
+        )
     legacy_new = STREAM_FINAL_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
     legacy_old = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
-    if STREAM_NATIVE_FINALLY_BLOCK in text:
+    native_blocks = (
+        STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK,
+        STREAM_NATIVE_FINALLY_BLOCK,
+        STREAM_NATIVE_EXIT_MODEL_FINISHED_BLOCK_V1,
+        STREAM_NATIVE_FINALLY_BLOCK_V1,
+    )
+    installed_native = next((block for block in native_blocks if block in text), None)
+    if installed_native is not None:
         return _once(
             text,
-            STREAM_NATIVE_FINALLY_BLOCK,
+            installed_native,
             STREAM_NATIVE_FINALLY,
             "historical native stream final rollback",
         )
+    legacy_blocks = (
+        STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0],
+        legacy_new,
+        STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK_V1.split("\n\n    # Strip MEDIA:", 1)[0],
+        STREAM_FINAL_BLOCK_V1.split("\n\n    # Strip MEDIA:", 1)[0],
+    )
+    installed_legacy = next((block for block in legacy_blocks if block in text), None)
+    if installed_legacy is None:
+        raise RuntimeError("historical stream final rollback: anchor drift")
     return _once(
         text,
-        legacy_new,
+        installed_legacy,
         legacy_old,
         "historical stream final rollback",
     )
@@ -949,8 +1156,12 @@ def _validate_pre_canary_text(text: str, kind: str, label: str) -> None:
             legacy_tail = STREAM_FINAL.split("\n\n    # Strip MEDIA:", 1)[0]
             has_native_tail = run.count(STREAM_NATIVE_FINALLY) == 1
             has_legacy_tail = not has_native_tail and run.count(legacy_tail) == 1
-            if not (has_native_tail or has_legacy_tail) or not _has_import(
-                tree, "gateway.platforms.base", "MEDIA_TAG_CLEANUP_RE"
+            if (
+                run.count(STREAM_MODEL_FINISHED) != 1
+                or not (has_native_tail or has_legacy_tail)
+                or not _has_import(
+                    tree, "gateway.platforms.base", "MEDIA_TAG_CLEANUP_RE"
+                )
             ):
                 raise RuntimeError
         elif kind == "telegram":
@@ -998,6 +1209,13 @@ def _validate_pre_canary(path: Path, kind: str, *, backup: bool = False) -> None
 
 def _without_historical_core_hooks(method: str) -> str:
     method = _once(method, NORMAL_BEGIN_BLOCK, NORMAL_BEGIN, "historical begin rollback")
+    if NORMAL_MODEL_FINISHED_BLOCK in method:
+        method = _once(
+            method,
+            NORMAL_MODEL_FINISHED_BLOCK,
+            NORMAL_MODEL_FINISHED,
+            "historical model-finished rollback",
+        )
     method = _once(
         method,
         NORMAL_DELIVERY_BLOCK,
@@ -1025,16 +1243,9 @@ def _without_historical_core_hooks(method: str) -> str:
         NORMAL_EXCEPTION,
         "historical exception rollback",
     )
-    clear_blocks = [block for block in (PINNED_CLEAR_BLOCK, OVERLAY_CLEAR_BLOCK) if block in method]
-    if len(clear_blocks) != 1:
+    if not _normal_clear_current(method):
         raise RuntimeError("historical clear rollback: anchor drift")
-    clear_original = PINNED_CLEAR if clear_blocks[0] == PINNED_CLEAR_BLOCK else OVERLAY_CLEAR
-    return _once(
-        method,
-        clear_blocks[0],
-        clear_original,
-        "historical clear rollback",
-    )
+    return _unwrap_finally_cleanup(method)
 
 
 def _recover_historical_pre_canary(installed_text: str, kind: str) -> str:

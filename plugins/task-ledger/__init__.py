@@ -1,13 +1,8 @@
-"""
-task-ledger — Hermes plugin
-Persistent task tracking for work items from chats.
+"""Durable Hermes task tracking with evidence-backed terminal states.
 
-Tools exposed to agents:
-  task_open   — register a new work item when user asks for something
-  task_update — mark task as in-progress with status note
-  task_done   — mark task done with artifact reference
-  task_block  — mark task blocked with reason
-  task_list   — list open/recent tasks
+The tool schemas in :mod:`.tools` own the exact contracts. In brief, agents can
+open and update durable work, close it only after acceptance reconciliation and
+required delivery proof, record an evidence-backed blocker, and list tasks.
 """
 
 from .tools import register
