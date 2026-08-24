@@ -14,9 +14,21 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
+
+try:
+    import fcntl as _fcntl
+except ImportError:
+    _fcntl = None
+
+try:
+    import msvcrt as _msvcrt
+except ImportError:
+    _msvcrt = None
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +37,7 @@ HERMES_HOME = Path(
 ).expanduser()
 DB_PATH = HERMES_HOME / "data" / "task-ledger.db"
 CHANGE_RECORDS_PATH = HERMES_HOME / "state" / "task-ledger-change-records.jsonl"
+TELEGRAM_TRANSACTION_PATH = HERMES_HOME / "state" / "telegram-transactions.sqlite3"
 AGENT_NAME = os.environ.get("HERMES_AGENT_NAME") or os.environ.get("AGENT_NAME") or "agent"
 CHANGELOG_DIR = Path.home() / ".shared-agent-memory"
 
@@ -44,7 +57,7 @@ _TURN_CONTEXT_TTL_SECONDS = 4 * 60 * 60
 _LEDGER_TOOLS = {"task_open", "task_update", "task_done", "task_block", "task_list"}
 _ASYNC_COMPLETION_PREFIX = "[ASYNC DELEGATION"
 _ASYNC_DISPATCHED_RE = re.compile(
-    r"^Dispatched:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})(?:\s|$)",
+    r"^Dispatched:\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d{1,6})(?:\s|$)",
     re.MULTILINE,
 )
 
@@ -63,6 +76,7 @@ _session_sources: dict[str, tuple[float, dict[str, str]]] = {}
 
 def _ensure_task_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    completion_stage_added = "completion_stage" not in existing
     wanted = {
         "client_slug": "TEXT",
         "change_record_required": "INTEGER DEFAULT 0",
@@ -71,6 +85,14 @@ def _ensure_task_columns(conn: sqlite3.Connection) -> None:
         "change_record_ref": "TEXT",
         "change_record_error": "TEXT",
         "capture_key": "TEXT",
+        "acceptance_criteria": "TEXT",
+        "acceptance_evidence": "TEXT",
+        "delivery_required": "INTEGER DEFAULT 0",
+        "delivery_target": "TEXT",
+        "completion_stage": "TEXT",
+        "delivery_receipt": "TEXT",
+        "blocker_attempts": "TEXT",
+        "resume_condition": "TEXT",
     }
     for column, ddl in wanted.items():
         if column not in existing:
@@ -81,6 +103,12 @@ def _ensure_task_columns(conn: sqlite3.Connection) -> None:
         "UPDATE tasks SET change_record_status='not_required' "
         "WHERE change_record_status IS NULL OR TRIM(change_record_status)=''"
     )
+    conn.execute("UPDATE tasks SET delivery_required=0 WHERE delivery_required IS NULL")
+    if completion_stage_added:
+        conn.execute(
+            "UPDATE tasks SET completion_stage="
+            "CASE WHEN status='done' AND artifact_verified=1 THEN 'verified' ELSE 'authorized' END"
+        )
 
 
 def get_db() -> sqlite3.Connection:
@@ -133,7 +161,24 @@ def get_db() -> sqlite3.Connection:
 
 
 def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return datetime.now(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
+
+
+def _timestamp_microseconds(value: str) -> int | None:
+    try:
+        parsed = datetime.fromisoformat(_clean_text(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.astimezone(timezone.utc)
+        return (
+            (parsed.toordinal() - datetime(1970, 1, 1).toordinal()) * 86_400_000_000
+            + parsed.hour * 3_600_000_000
+            + parsed.minute * 60_000_000
+            + parsed.second * 1_000_000
+            + parsed.microsecond
+        )
+    except (AttributeError, TypeError, ValueError):
+        return None
 
 
 def _truthy(value) -> bool:
@@ -161,6 +206,20 @@ def _normalize_lines(items) -> list[str]:
         if value:
             normalized.append(value)
     return normalized
+
+
+def _stored_lines(value: str | None) -> list[str]:
+    try:
+        decoded = json.loads(value or "[]")
+    except (TypeError, ValueError):
+        return []
+    if (
+        not isinstance(decoded, list)
+        or not decoded
+        or any(not isinstance(item, str) or not item.strip() for item in decoded)
+    ):
+        return []
+    return [item.strip() for item in decoded]
 
 
 def _extract_chat_context(session_id: str, platform: str) -> dict:
@@ -260,8 +319,26 @@ def _async_dispatched_at(user_message: str) -> str:
     if not match:
         return ""
     try:
-        local_struct = time.strptime(match.group(1), "%Y-%m-%d %H:%M:%S")
-        return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.mktime(local_struct)))
+        local_time = datetime.strptime(match.group(1), "%Y-%m-%d %H:%M:%S.%f")
+        candidates = set()
+        wall_time = (
+            local_time.year,
+            local_time.month,
+            local_time.day,
+            local_time.hour,
+            local_time.minute,
+            local_time.second,
+        )
+        for is_dst in (0, 1):
+            epoch = int(time.mktime((*wall_time, -1, -1, is_dst)))
+            if time.localtime(epoch)[:6] == wall_time:
+                candidates.add(epoch)
+        if len(candidates) != 1:
+            return ""
+        dispatched_at = datetime.fromtimestamp(candidates.pop(), timezone.utc).replace(
+            microsecond=local_time.microsecond
+        )
+        return dispatched_at.isoformat(timespec="microseconds").replace("+00:00", "Z")
     except (OverflowError, ValueError):
         return ""
 
@@ -284,21 +361,26 @@ def _active_task_for_source(source: dict[str, str], *, active_at: str = "") -> s
     if platform:
         predicates.append("platform=?")
         values.append(platform)
-    if active_at:
-        # A completion may arrive after newer work has started in the same
-        # topic. Exclude rows that did not exist when this batch dispatched.
-        predicates.append("opened_at<=?")
-        values.append(active_at)
+    active_at_us = _timestamp_microseconds(active_at) if active_at else None
+    if active_at and active_at_us is None:
+        return ""
 
     db = get_db()
     with _db_lock:
-        row = db.execute(
-            "SELECT id FROM tasks WHERE "
-            + " AND ".join(predicates)
-            + " ORDER BY opened_at DESC, updated_at DESC, id DESC LIMIT 1",
+        rows = db.execute(
+            "SELECT id, opened_at, updated_at FROM tasks WHERE " + " AND ".join(predicates),
             tuple(values),
-        ).fetchone()
-    return str(row["id"]) if row else ""
+        ).fetchall()
+    candidates = []
+    for row in rows:
+        opened_at_us = _timestamp_microseconds(row["opened_at"])
+        updated_at_us = _timestamp_microseconds(row["updated_at"])
+        if opened_at_us is None or updated_at_us is None:
+            continue
+        if active_at_us is not None and opened_at_us > active_at_us:
+            continue
+        candidates.append((opened_at_us, updated_at_us, str(row["id"])))
+    return max(candidates)[2] if candidates else ""
 
 
 def _before_llm_call(
@@ -337,10 +419,8 @@ def _before_llm_call(
     if not async_completion:
         return None
 
-    task_id = _active_task_for_source(
-        source,
-        active_at=_async_dispatched_at(user_message),
-    )
+    dispatched_at = _async_dispatched_at(user_message)
+    task_id = _active_task_for_source(source, active_at=dispatched_at) if dispatched_at else ""
     state = _TurnContext(
         turn_id=clean_turn_id,
         task_id=task_id,
@@ -396,13 +476,79 @@ def _fallback_reflection_entry(**kwargs) -> dict:
     }
 
 
-def _fallback_record_change(**kwargs) -> dict[str, str]:
-    """Persist a required record without an operator-only Python module.
+def _semantic_change_record(record: dict) -> dict:
+    semantic = {
+        key: value
+        for key, value in record.items()
+        if key not in {"schema_version", "recorded_at", "idempotency_key"}
+        and value not in (None, "", [], {})
+    }
+    return json.loads(json.dumps(semantic, ensure_ascii=False, sort_keys=True, default=str))
 
-    The task ledger is fleet-wide; ``~/.shared-agent-memory/changelog.py`` is
-    not. A client runtime must therefore retain its completion evidence in its
-    own Hermes state when that optional richer backend is absent.
-    """
+
+def _fallback_record_result(record: dict) -> dict:
+    semantic = _semantic_change_record(record)
+    key = "client_changelog" if _clean_text(semantic.get("client_slug")) else "stack_changelog"
+    result = {
+        key: str(CHANGE_RECORDS_PATH),
+        "local_task_ledger_changelog": str(CHANGE_RECORDS_PATH),
+        "record_payload": semantic,
+    }
+    for record_field, value in semantic.items():
+        result[f"record_{record_field}"] = value
+    return result
+
+
+@contextmanager
+def _change_record_file_lock():
+    lock_path = CHANGE_RECORDS_PATH.with_name(CHANGE_RECORDS_PATH.name + ".lock")
+    with lock_path.open("a+b") as lock:
+        if _fcntl is not None:
+            _fcntl.flock(lock.fileno(), _fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                _fcntl.flock(lock.fileno(), _fcntl.LOCK_UN)
+            return
+        if _msvcrt is None:
+            raise RuntimeError("no supported cross-process file lock")
+        lock.seek(0, os.SEEK_END)
+        if lock.tell() == 0:
+            lock.write(b"\0")
+            lock.flush()
+        lock.seek(0)
+        _msvcrt.locking(lock.fileno(), _msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            lock.seek(0)
+            _msvcrt.locking(lock.fileno(), _msvcrt.LK_UNLCK, 1)
+
+
+def _read_canonical_records(descriptor: int) -> tuple[list[dict], int]:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    chunks = []
+    while True:
+        chunk = os.read(descriptor, 64 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    complete_end = content.rfind(b"\n") + 1
+    records = []
+    for number, raw in enumerate(content[:complete_end].splitlines(), start=1):
+        try:
+            record = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"canonical change record corruption at line {number}") from exc
+        if not isinstance(record, dict):
+            raise ValueError(f"canonical change record corruption at line {number}")
+        records.append(record)
+    return records, complete_end
+
+
+def _persist_canonical_change_record(**kwargs) -> tuple[dict, bool]:
+    idempotency_key = _clean_text(kwargs.get("idempotency_key"))
     record = {
         "schema_version": 1,
         "recorded_at": _now_iso(),
@@ -417,17 +563,90 @@ def _fallback_record_change(**kwargs) -> dict[str, str]:
     )
     CHANGE_RECORDS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with _db_lock:
-        descriptor = os.open(
-            CHANGE_RECORDS_PATH,
-            os.O_APPEND | os.O_CREAT | os.O_WRONLY,
-            0o600,
-        )
+        with _change_record_file_lock():
+            descriptor = os.open(
+                CHANGE_RECORDS_PATH,
+                os.O_CREAT | os.O_RDWR,
+                0o600,
+            )
+            try:
+                records, valid_size = _read_canonical_records(descriptor)
+                current_size = os.fstat(descriptor).st_size
+                if valid_size != current_size:
+                    os.ftruncate(descriptor, valid_size)
+                    os.fsync(descriptor)
+                if idempotency_key:
+                    for existing in records:
+                        if _clean_text(existing.get("idempotency_key")) != idempotency_key:
+                            continue
+                        existing_semantic = _semantic_change_record(existing)
+                        requested_semantic = _semantic_change_record(kwargs)
+                        conflicts = [
+                            field
+                            for field in sorted(existing_semantic.keys() | requested_semantic.keys())
+                            if existing_semantic.get(field) != requested_semantic.get(field)
+                        ]
+                        if conflicts:
+                            raise ValueError(
+                                "change record idempotency conflict for "
+                                f"{idempotency_key}: {', '.join(conflicts)}"
+                            )
+                        return _fallback_record_result(existing), False
+                initial_size = valid_size
+                os.lseek(descriptor, 0, os.SEEK_END)
+                try:
+                    written = 0
+                    while written < len(payload):
+                        count = os.write(descriptor, payload[written:])
+                        if count <= 0:
+                            raise OSError("canonical change record write did not advance")
+                        written += count
+                    os.fsync(descriptor)
+                except BaseException:
+                    os.ftruncate(descriptor, initial_size)
+                    os.fsync(descriptor)
+                    raise
+            finally:
+                os.close(descriptor)
+    return _fallback_record_result(record), True
+
+
+def _fallback_record_change(**kwargs) -> dict:
+    """Persist a required record without an operator-only Python module.
+
+    The task ledger is fleet-wide; ``~/.shared-agent-memory/changelog.py`` is
+    not. A client runtime must therefore retain its completion evidence in its
+    own Hermes state when that optional richer backend is absent.
+    """
+    result, _ = _persist_canonical_change_record(**kwargs)
+    return result
+
+
+def _record_task_change(
+    record_fn,
+    *,
+    task_id: str,
+    reflection_builder=None,
+    **kwargs,
+) -> dict[str, str]:
+    idempotency_key = f"task-ledger:{task_id}"
+    canonical, created = _persist_canonical_change_record(
+        idempotency_key=idempotency_key,
+        **kwargs,
+    )
+    if created and record_fn is not _fallback_record_change:
         try:
-            os.write(descriptor, payload)
-        finally:
-            os.close(descriptor)
-    key = "client_changelog" if kwargs.get("client_slug") else "stack_changelog"
-    return {key: str(CHANGE_RECORDS_PATH), "local_task_ledger_changelog": str(CHANGE_RECORDS_PATH)}
+            enrichment = dict(kwargs)
+            if enrichment.get("reflection") and reflection_builder is not None:
+                enrichment["reflection"] = reflection_builder(**enrichment["reflection"])
+            record_fn(idempotency_key=idempotency_key, **enrichment)
+        except Exception:
+            logger.warning(
+                "task-ledger: optional changelog enrichment failed for %s",
+                task_id,
+                exc_info=True,
+            )
+    return canonical
 
 
 def _load_changelog_backend():
@@ -484,8 +703,32 @@ TASK_OPEN_SCHEMA = {
                 "type": "boolean",
                 "description": "Override whether this task must write a structured change record before it can close.",
             },
+            "acceptance_criteria": {
+                "type": "array",
+                "minItems": 1,
+                "items": {"type": "string"},
+                "description": (
+                    "Required outcomes from the principal's request or approved plan. "
+                    "task_done must provide one evidence item per criterion in this order."
+                ),
+            },
+            "delivery_required": {
+                "type": "boolean",
+                "description": (
+                    "True only when an external synchronous send must finish before task_done. "
+                    "Current native replies and ordinary foreground completion use false."
+                ),
+            },
+            "delivery_target": {
+                "type": "string",
+                "description": (
+                    "Exact destination for a delivery-required synchronous Telegram send: "
+                    "telegram:<chat-id>:<thread-id>. "
+                    "Omit when delivery_required is false."
+                ),
+            },
         },
-        "required": ["ask", "expected_artifact"],
+        "required": ["ask", "expected_artifact", "acceptance_criteria", "delivery_required"],
     },
 }
 
@@ -495,6 +738,9 @@ def task_open_handler(
     expected_artifact: str = "",
     client_slug: str = "",
     change_record_required=None,
+    acceptance_criteria=None,
+    delivery_required: bool | None = None,
+    delivery_target: str = "",
     **kwargs,
 ) -> str:
     try:
@@ -513,11 +759,27 @@ def task_open_handler(
         ask = _clean_text(ask)
         expected_artifact = _clean_text(expected_artifact)
         client_slug = _clean_text(client_slug)
+        criteria = _normalize_lines(acceptance_criteria)
         if not ask:
             return "Error opening task: missing ask"
         if not expected_artifact:
             expected_artifact = "UNSPECIFIED_ARTIFACT"
-        required = _truthy(change_record_required) if change_record_required is not None else bool(client_slug)
+        if not criteria:
+            return "Error opening task: at least one acceptance criterion is required"
+        if not isinstance(delivery_required, bool):
+            return "Error opening task: delivery_required must be explicitly true or false"
+        raw_delivery_target = _clean_text(delivery_target)
+        delivery_target = _normalize_delivery_target(raw_delivery_target)
+        if raw_delivery_target and delivery_target is None:
+            return "Error opening task: delivery_target must name an exact Telegram topic"
+        if delivery_required and not delivery_target:
+            return (
+                "Error opening task: delivery_required tasks need an exact Telegram topic "
+                "delivery_target"
+            )
+        if not delivery_required and delivery_target:
+            return "Error opening task: delivery_target is only valid when delivery_required is true"
+        required = bool(client_slug) or _truthy(change_record_required)
         change_status = "pending" if required else "not_required"
         now = _now_iso()
 
@@ -527,8 +789,9 @@ def task_open_handler(
                 INSERT INTO tasks
                     (id, agent, chat_id, thread_id, platform, requested_by, ask, expected_artifact,
                      status, opened_at, updated_at, session_id, client_slug, change_record_required,
-                     change_recorded, change_record_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 0, ?)
+                     change_recorded, change_record_status, acceptance_criteria, delivery_required,
+                     delivery_target, completion_stage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 'authorized')
                 """,
                 (
                     task_id,
@@ -545,15 +808,25 @@ def task_open_handler(
                     client_slug or None,
                     1 if required else 0,
                     change_status,
+                    json.dumps(criteria, ensure_ascii=False),
+                    1 if _truthy(delivery_required) else 0,
+                    delivery_target or None,
                 ),
             )
             db.commit()
         suffix = "\nChange record: required" if required else ""
+        if criteria:
+            suffix += f"\nAcceptance criteria: {len(criteria)}"
+        if _truthy(delivery_required):
+            suffix += f"\nDelivery receipt: required for {delivery_target}"
         return (
             f"Task opened: {task_id}\n"
             f"Ask: {ask}\n"
             f"Expected artifact: {expected_artifact}{suffix}\n\n"
-            f"Call task_done({task_id!r}, artifact_path=...) when complete."
+            f"Call task_done({task_id!r}, artifact_path=..., summary=..., "
+            "acceptance_evidence=[...]) after every criterion is proved. "
+            "Delivery-required tasks must close as delivered with a "
+            "persisted Telegram delivery_receipt."
         )
     except Exception as e:
         return f"Error opening task: {e}"
@@ -615,8 +888,10 @@ def task_update_handler(task_id: str, note: str, artifact_path: str = "", **kwar
 TASK_DONE_SCHEMA = {
     "name": "task_done",
     "description": (
-        "Mark a task as done. Provide the artifact path. If the task is client-facing or change-record-required, "
-        "this call must also write the structured changelog/reflection record before it can close."
+        "Mark a task done only after reconciling its acceptance criteria with concrete evidence. "
+        "Delivery-required tasks must prove delivery with a persisted Telegram receipt. If the task is "
+        "client-facing or change-record-required, this call must also write the structured "
+        "changelog/reflection record before it can close."
     ),
     "parameters": {
         "type": "object",
@@ -624,9 +899,38 @@ TASK_DONE_SCHEMA = {
             "task_id": {"type": "string", "description": "Task ID from task_open"},
             "artifact_path": {
                 "type": "string",
-                "description": "Concrete proof of completion: file path, delivered message ID, URL, etc.",
+                "description": (
+                    "Concrete artifact proof: an existing non-empty file, http(s) URL, "
+                    "or Telegram receipt accepted by the artifact verifier."
+                ),
             },
-            "summary": {"type": "string", "description": "One-sentence summary of what was delivered"},
+            "summary": {
+                "type": "string",
+                "description": "One-sentence summary of the verified or delivered outcome.",
+            },
+            "acceptance_evidence": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Concrete evidence for each acceptance criterion, in the same order. "
+                    "Required when task_open recorded acceptance criteria."
+                ),
+            },
+            "completion_stage": {
+                "type": "string",
+                "enum": ["verified", "delivered"],
+                "description": (
+                    "The highest outcome state actually proved. Defaults to delivered when task_open "
+                    "set delivery_required; otherwise defaults to verified."
+                ),
+            },
+            "delivery_receipt": {
+                "type": "string",
+                "description": (
+                    "Persisted Telegram receipt: telegram:<chat-id>:<thread-id>:<message-id>. "
+                    "Required for delivered and whenever task_open set delivery_required."
+                ),
+            },
             "record_change": {
                 "type": "boolean",
                 "description": "Force a structured change record on close. Defaults to required for client tasks.",
@@ -689,6 +993,104 @@ def _verify_artifact(artifact_path: str) -> bool:
     return False
 
 
+def _parse_telegram_receipt(receipt: str) -> tuple[str, str, str] | None:
+    parts = _clean_text(receipt).split(":")
+    if len(parts) not in {3, 4} or parts[0].lower() != "telegram":
+        return None
+    chat_id = parts[1]
+    thread_id = "" if len(parts) == 3 else parts[2]
+    message_id = parts[-1]
+    if not re.fullmatch(r"-?\d+", chat_id):
+        return None
+    if thread_id and not re.fullmatch(r"\d+", thread_id):
+        return None
+    if not re.fullmatch(r"\d+", message_id):
+        return None
+    return chat_id, thread_id, message_id
+
+
+def _normalize_delivery_target(target: str) -> str | None:
+    parts = _clean_text(target).split(":")
+    if len(parts) != 3 or parts[0].lower() != "telegram":
+        return None
+    chat_id = parts[1]
+    thread_id = parts[2]
+    if not re.fullmatch(r"-?\d+", chat_id):
+        return None
+    if not re.fullmatch(r"[1-9]\d*", thread_id):
+        return None
+    return f"telegram:{chat_id}:{thread_id}"
+
+
+def _canonical_telegram_receipt(receipt: str) -> str | None:
+    parsed = _parse_telegram_receipt(receipt)
+    if parsed is None:
+        return None
+    chat_id, thread_id, message_id = parsed
+    return f"telegram:{chat_id}:" + (f"{thread_id}:" if thread_id else "") + message_id
+
+
+def _opened_epoch(opened_at: str) -> float:
+    opened_at_us = _timestamp_microseconds(opened_at)
+    return opened_at_us / 1_000_000 if opened_at_us is not None else float("inf")
+
+
+def _transaction_ledger_has_delivery(
+    chat_id: str,
+    thread_id: str,
+    message_id: str,
+    opened_at: str,
+    closeout_started_epoch: float,
+) -> bool:
+    if not TELEGRAM_TRANSACTION_PATH.is_file():
+        return False
+    opened_epoch = _opened_epoch(opened_at)
+    try:
+        with sqlite3.connect(
+            f"file:{TELEGRAM_TRANSACTION_PATH}?mode=ro", uri=True, timeout=0.2
+        ) as ledger:
+            return (
+                ledger.execute(
+                    """SELECT 1
+                         FROM events accepted
+                    LEFT JOIN events received
+                           ON received.transaction_id=accepted.transaction_id
+                          AND received.event_type='received'
+                        WHERE accepted.event_type='external_telegram_accepted'
+                          AND accepted.outbound_message_id=?
+                          AND COALESCE(accepted.chat_id,received.chat_id,'')=?
+                          AND COALESCE(accepted.thread_id,received.thread_id,'')=?
+                          AND accepted.occurred_at>=?
+                          AND accepted.occurred_at<=?
+                        LIMIT 1""",
+                    (message_id, chat_id, thread_id, opened_epoch, closeout_started_epoch),
+                ).fetchone()
+                is not None
+            )
+    except (OSError, sqlite3.Error):
+        return False
+
+
+def _verify_delivery_receipt(
+    receipt: str, task_row: sqlite3.Row, closeout_started_epoch: float
+) -> bool:
+    parsed = _parse_telegram_receipt(receipt)
+    if parsed is None:
+        return False
+    chat_id, thread_id, message_id = parsed
+    receipt_target = f"telegram:{chat_id}" + (f":{thread_id}" if thread_id else "")
+    if receipt_target != _clean_text(task_row["delivery_target"]):
+        return False
+    opened_at = _clean_text(task_row["opened_at"])
+    return _transaction_ledger_has_delivery(
+        chat_id,
+        thread_id,
+        message_id,
+        opened_at,
+        closeout_started_epoch,
+    )
+
+
 def _normalize_severity(raw: str | None) -> str:
     mapping = {
         "1": "critical",
@@ -714,10 +1116,7 @@ def _build_reflection(kwargs: dict) -> dict | None:
     rules = _normalize_lines(kwargs.get("reflection_rules"))
     if not any([title, problem, fix, root_cause, rules]):
         return None
-    _, reflection_builder = _load_changelog_backend()
-    if reflection_builder is None:
-        raise RuntimeError("changelog reflection backend unavailable")
-    return reflection_builder(
+    return _fallback_reflection_entry(
         scope=_clean_text(kwargs.get("client_slug")) or "stack",
         title=title or _clean_text(kwargs.get("change_title")) or _clean_text(kwargs.get("summary")),
         problem=problem or _clean_text(kwargs.get("change_description")) or _clean_text(kwargs.get("summary")),
@@ -730,11 +1129,22 @@ def _build_reflection(kwargs: dict) -> dict | None:
 
 
 def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) -> str:
+    closeout_started_epoch = time.time_ns() / 1_000_000_000
+    db = None
+    delivery_receipt = None
+    closeout_lock_owned = False
+    transaction_open = False
+    reservation_acquired = False
+    canonical_record_durable = False
+    closeout_succeeded = False
+
     try:
         db = get_db()
         with _db_lock:
             task_row = db.execute(
-                "SELECT id, ask, client_slug, change_record_required FROM tasks WHERE id=?",
+                "SELECT id, ask, client_slug, change_record_required, acceptance_criteria, "
+                "delivery_required, delivery_target, opened_at, completion_stage FROM tasks "
+                "WHERE id=? AND status NOT IN ('done','abandoned')",
                 (task_id,),
             ).fetchone()
         if task_row is None:
@@ -742,11 +1152,102 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
 
         artifact_path = _clean_text(artifact_path)
         summary = _clean_text(summary)
+        if not summary:
+            return f"Error closing task: missing completion summary for {task_id}."
         if not _verify_artifact(artifact_path):
             return (
                 f"Error closing task: artifact verification failed for {task_id}. "
                 "Provide an existing non-empty file, an http(s) URL, or a telegram receipt."
             )
+        raw_criteria = task_row["acceptance_criteria"]
+        legacy_contract = (
+            raw_criteria is None and _clean_text(task_row["completion_stage"]) == "authorized"
+        )
+        criteria = _stored_lines(raw_criteria)
+        acceptance_evidence = _normalize_lines(kwargs.get("acceptance_evidence"))
+        if not legacy_contract and not criteria:
+            return f"Error closing task: outcome contract is missing or malformed for {task_id}."
+        if not legacy_contract and len(acceptance_evidence) != len(criteria):
+            return (
+                f"Error closing task: acceptance reconciliation failed for {task_id}. "
+                f"Expected {len(criteria)} evidence items in criterion order; got {len(acceptance_evidence)}."
+            )
+        delivery_required = _truthy(task_row["delivery_required"])
+        completion_stage = _clean_text(kwargs.get("completion_stage")).lower()
+        if not completion_stage:
+            completion_stage = "delivered" if delivery_required else "verified"
+        if completion_stage not in {"verified", "delivered"}:
+            return f"Error closing task: invalid completion stage for {task_id}: {completion_stage}"
+        raw_delivery_receipt = _clean_text(kwargs.get("delivery_receipt"))
+        delivery_receipt = _canonical_telegram_receipt(raw_delivery_receipt)
+        if delivery_required and completion_stage != "delivered":
+            return f"Error closing task: delivery is required for {task_id}; verified is not delivered."
+        if not delivery_required and completion_stage != "verified":
+            return f"Error closing task: delivery was not required for {task_id}; close it as verified."
+        if completion_stage == "verified" and raw_delivery_receipt:
+            return f"Error closing task: delivery receipts are not valid for verified task {task_id}."
+        if completion_stage == "delivered" and not (
+            delivery_receipt
+            and _verify_delivery_receipt(
+                delivery_receipt,
+                task_row,
+                closeout_started_epoch,
+            )
+        ):
+            return (
+                f"Error closing task: a persisted Telegram delivery receipt is required for {task_id}. "
+                "Use telegram:<chat-id>:<thread-id>:<message-id>."
+            )
+        _db_lock.acquire()
+        closeout_lock_owned = True
+        db.execute("BEGIN IMMEDIATE")
+        transaction_open = True
+        current = db.execute(
+            "SELECT status, delivery_receipt FROM tasks WHERE id=?",
+            (task_id,),
+        ).fetchone()
+        if current is None or current["status"] in {"done", "abandoned"}:
+            return f"Task {task_id} not found or already closed."
+        current_receipt = _clean_text(current["delivery_receipt"])
+        if delivery_receipt and current_receipt and current_receipt.casefold() != delivery_receipt.casefold():
+            return (
+                f"Error closing task: a persisted Telegram delivery receipt is required for {task_id}. "
+                "The task is bound to a different receipt."
+            )
+        if delivery_receipt and db.execute(
+            "SELECT 1 FROM tasks WHERE delivery_receipt=? COLLATE NOCASE AND id<>? LIMIT 1",
+            (delivery_receipt, task_id),
+        ).fetchone():
+            return (
+                f"Error closing task: a persisted Telegram delivery receipt is required for {task_id}. "
+                "The supplied receipt is already bound to another task."
+            )
+        if delivery_receipt:
+            if not current_receipt:
+                claimed = db.execute(
+                    "UPDATE tasks SET delivery_receipt=? WHERE id=? "
+                    "AND status NOT IN ('done','abandoned') "
+                    "AND (delivery_receipt IS NULL OR TRIM(delivery_receipt)='')",
+                    (delivery_receipt, task_id),
+                )
+                if claimed.rowcount == 0:
+                    return f"Task {task_id} not found or already closed."
+                reservation_acquired = True
+            db.commit()
+            transaction_open = False
+            db.execute("BEGIN IMMEDIATE")
+            transaction_open = True
+            current = db.execute(
+                "SELECT status, delivery_receipt FROM tasks WHERE id=?",
+                (task_id,),
+            ).fetchone()
+            if (
+                current is None
+                or current["status"] in {"done", "abandoned"}
+                or _clean_text(current["delivery_receipt"]).casefold()
+                != delivery_receipt.casefold()
+            ):
+                return f"Task {task_id} not found or already closed."
         final_client_slug = _clean_text(kwargs.get("client_slug")) or _clean_text(task_row["client_slug"])
         required = (
             _truthy(task_row["change_record_required"])
@@ -781,7 +1282,7 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
         change_error = None
 
         if should_record:
-            record_fn, _ = _load_changelog_backend()
+            record_fn, reflection_builder = _load_changelog_backend()
             if record_fn is None:
                 return f"Error closing task: required change record backend unavailable for {task_id}."
             try:
@@ -798,7 +1299,10 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
                         "change_description": change_description,
                     }
                 )
-                written = record_fn(
+                written = _record_task_change(
+                    record_fn,
+                    task_id=task_id,
+                    reflection_builder=reflection_builder,
                     client_slug=final_client_slug or None,
                     change_type=_clean_text(kwargs.get("change_type")) or "ops",
                     title=change_title,
@@ -814,8 +1318,15 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
                     verification_notes=_normalize_lines(kwargs.get("verification_notes")),
                     reflection=reflection,
                 )
-                if required and not written.get("client_changelog"):
-                    return f"Error closing task: required client change record was not written for {task_id}."
+                canonical_record_durable = True
+                required_record_key = (
+                    "client_changelog" if final_client_slug else "stack_changelog"
+                )
+                if required and not written.get(required_record_key):
+                    return (
+                        f"Error closing task: required {required_record_key} "
+                        f"was not written for {task_id}."
+                    )
                 change_status = "recorded" if written else ("pending" if required else "not_required")
             except Exception as exc:
                 logger.exception("task-ledger: change record write failed for %s", task_id)
@@ -826,84 +1337,156 @@ def task_done_handler(task_id: str, artifact_path: str, summary: str, **kwargs) 
 
         verified = 1
         now = _now_iso()
+        cur = db.execute(
+            """
+            UPDATE tasks
+               SET status='done',
+                   artifact_path=?,
+                   artifact_verified=?,
+                   status_note=?,
+                   updated_at=?,
+                   closed_at=?,
+                   client_slug=?,
+                   change_record_required=?,
+                   change_recorded=?,
+                   change_record_status=?,
+                   change_record_ref=?,
+                   change_record_error=?,
+                   acceptance_evidence=?,
+                   completion_stage=?,
+                   delivery_receipt=?
+             WHERE id=? AND status NOT IN ('done','abandoned')
+            """,
+            (
+                artifact_path,
+                verified,
+                summary,
+                now,
+                now,
+                final_client_slug or None,
+                1 if required else 0,
+                1 if change_status == "recorded" else 0,
+                change_status,
+                json.dumps(written, sort_keys=True) if written else None,
+                change_error,
+                json.dumps(acceptance_evidence, ensure_ascii=False),
+                completion_stage,
+                delivery_receipt or None,
+                task_id,
+            ),
+        )
+        if cur.rowcount == 0:
+            return f"Task {task_id} not found or already closed."
+        db.commit()
+        transaction_open = False
+        reservation_acquired = False
+        closeout_succeeded = True
+        verify_msg = "artifact verified"
+        record_msg = f"change record: {change_status}"
+        if change_error:
+            record_msg += f" ({change_error})"
+        delivery_line = f"Delivery receipt: {delivery_receipt}\n" if delivery_receipt else ""
+        return (
+            f"Task {task_id} done.\n"
+            f"{verify_msg}\n"
+            f"{record_msg}\n"
+            f"Outcome stage: {completion_stage}\n"
+            f"Artifact: {artifact_path}\n"
+            f"{delivery_line}"
+            f"Summary: {summary}"
+        )
+    except Exception as e:
+        return f"Error closing task: {e}"
+    finally:
+        if transaction_open and db is not None:
+            db.rollback()
+            transaction_open = False
+        if (
+            reservation_acquired
+            and not canonical_record_durable
+            and not closeout_succeeded
+            and db is not None
+            and delivery_receipt
+        ):
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "UPDATE tasks SET delivery_receipt=NULL WHERE id=? "
+                    "AND status NOT IN ('done','abandoned') AND delivery_receipt=? COLLATE NOCASE",
+                    (task_id, delivery_receipt),
+                )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("task-ledger: delivery reservation release failed for %s", task_id)
+        if closeout_lock_owned:
+            _db_lock.release()
+
+
+TASK_BLOCK_SCHEMA = {
+    "name": "task_block",
+    "description": "Mark a task blocked only with observed attempts and the exact resume condition.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "task_id": {"type": "string", "description": "Task ID from task_open"},
+            "blocker_reason": {"type": "string", "description": "Why you are blocked."},
+            "attempted_routes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Observed capability/router/technical attempts, or the reached human hard-stop checkpoint."
+                ),
+            },
+            "resume_condition": {
+                "type": "string",
+                "description": "The smallest exact condition that permits work to resume.",
+            },
+        },
+        "required": ["task_id", "blocker_reason", "attempted_routes", "resume_condition"],
+    },
+}
+
+
+def task_block_handler(
+    task_id: str,
+    blocker_reason: str,
+    attempted_routes=None,
+    resume_condition: str = "",
+    **kwargs,
+) -> str:
+    try:
+        db = get_db()
+        blocker_reason = _clean_text(blocker_reason)
+        attempts = _normalize_lines(attempted_routes)
+        resume_condition = _clean_text(resume_condition)
+        if not blocker_reason:
+            return f"Error blocking task: missing blocker reason for {task_id}."
+        if not attempts:
+            return f"Error blocking task: record at least one observed route/checkpoint attempt for {task_id}."
+        if not resume_condition:
+            return f"Error blocking task: missing exact resume condition for {task_id}."
         with _db_lock:
             cur = db.execute(
-                """
-                UPDATE tasks
-                   SET status='done',
-                       artifact_path=?,
-                       artifact_verified=?,
-                       status_note=?,
-                       updated_at=?,
-                       closed_at=?,
-                       client_slug=?,
-                       change_record_required=?,
-                       change_recorded=?,
-                       change_record_status=?,
-                       change_record_ref=?,
-                       change_record_error=?
-                 WHERE id=? AND status NOT IN ('done','abandoned')
-                """,
+                "UPDATE tasks SET status='blocked', blocker_reason=?, blocker_attempts=?, "
+                "resume_condition=?, updated_at=? "
+                "WHERE id=? AND status NOT IN ('done','abandoned')",
                 (
-                    artifact_path,
-                    verified,
-                    summary,
-                    now,
-                    now,
-                    final_client_slug or None,
-                    1 if required else 0,
-                    1 if change_status == "recorded" else 0,
-                    change_status,
-                    json.dumps(written, sort_keys=True) if written else None,
-                    change_error,
+                    blocker_reason,
+                    json.dumps(attempts, ensure_ascii=False),
+                    resume_condition,
+                    _now_iso(),
                     task_id,
                 ),
             )
             db.commit()
         if cur.rowcount == 0:
             return f"Task {task_id} not found or already closed."
-        verify_msg = "artifact verified"
-        record_msg = f"change record: {change_status}"
-        if change_error:
-            record_msg += f" ({change_error})"
         return (
-            f"Task {task_id} done.\n"
-            f"{verify_msg}\n"
-            f"{record_msg}\n"
-            f"Artifact: {artifact_path}\n"
-            f"Summary: {summary}"
+            f"Task {task_id} blocked: {blocker_reason}\n"
+            f"Attempts recorded: {len(attempts)}\n"
+            f"Resume when: {resume_condition}"
         )
-    except Exception as e:
-        return f"Error closing task: {e}"
-
-
-TASK_BLOCK_SCHEMA = {
-    "name": "task_block",
-    "description": "Mark a task as blocked when you cannot proceed.",
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "task_id": {"type": "string", "description": "Task ID from task_open"},
-            "blocker_reason": {"type": "string", "description": "Why you are blocked."},
-        },
-        "required": ["task_id", "blocker_reason"],
-    },
-}
-
-
-def task_block_handler(task_id: str, blocker_reason: str, **kwargs) -> str:
-    try:
-        db = get_db()
-        with _db_lock:
-            cur = db.execute(
-                "UPDATE tasks SET status='blocked', blocker_reason=?, updated_at=? "
-                "WHERE id=? AND status NOT IN ('done','abandoned')",
-                (blocker_reason, _now_iso(), task_id),
-            )
-            db.commit()
-        if cur.rowcount == 0:
-            return f"Task {task_id} not found or already closed."
-        return f"Task {task_id} blocked: {blocker_reason}"
     except Exception as e:
         return f"Error blocking task: {e}"
 
@@ -960,9 +1543,11 @@ def task_list_handler(status: str = None, chat_scope: bool = False, limit: int =
                 f"""
                 SELECT id, agent, ask, status, expected_artifact, artifact_path,
                        artifact_verified, blocker_reason, opened_at, updated_at,
-                       change_record_required, change_recorded, change_record_status
+                       change_record_required, change_recorded, change_record_status,
+                       completion_stage, delivery_receipt, blocker_attempts, resume_condition,
+                       acceptance_criteria, delivery_required
                   FROM tasks{where_sql}
-                 ORDER BY opened_at DESC LIMIT ?
+                 ORDER BY julianday(opened_at) DESC, id DESC LIMIT ?
                 """,
                 (*params, limit),
             ).fetchall()
@@ -974,14 +1559,24 @@ def task_list_handler(status: str = None, chat_scope: bool = False, limit: int =
             line = f"[{r['status']:11}] {r['id']}  {r['ask'][:80]}"
             if r["status"] == "done":
                 verify_label = "OK" if r["artifact_verified"] else "UNVERIFIED"
-                line += f"\n              {verify_label} {r['artifact_path'] or '(no artifact)'}"
+                artifact_label = r["artifact_path"] or "(no artifact)"
+                line += f"\n              {verify_label}/{r['completion_stage']} {artifact_label}"
+                if r["delivery_receipt"]:
+                    line += f"\n              receipt: {r['delivery_receipt']}"
                 if r["change_record_required"]:
                     record_label = "RECORDED" if r["change_recorded"] else f"MISSING ({r['change_record_status']})"
                     line += f"\n              change-record: {record_label}"
             elif r["status"] == "blocked":
                 line += f"\n              BLOCKED {r['blocker_reason']}"
+                line += f"\n              attempts: {len(_stored_lines(r['blocker_attempts']))}"
+                line += f"\n              resume: {r['resume_condition']}"
             elif r["status"] in ("open", "in_progress"):
                 line += f"\n              expected: {(r['expected_artifact'] or '')[:100]}"
+                criteria_count = len(_stored_lines(r["acceptance_criteria"]))
+                if criteria_count:
+                    line += f"\n              acceptance: {criteria_count} item(s)"
+                if r["delivery_required"]:
+                    line += "\n              delivery: required"
                 if r["change_record_required"]:
                     line += "\n              change-record: required"
                 line += f"\n              opened: {r['opened_at']}"
@@ -1006,6 +1601,9 @@ def register(ctx):
             expected_artifact=args.get("expected_artifact", ""),
             client_slug=args.get("client_slug", ""),
             change_record_required=args.get("change_record_required"),
+            acceptance_criteria=args.get("acceptance_criteria"),
+            delivery_required=args.get("delivery_required"),
+            delivery_target=args.get("delivery_target", ""),
             **_clean_kwargs(kwargs),
         ),
     )
@@ -1028,6 +1626,9 @@ def register(ctx):
             task_id=args.get("task_id", ""),
             artifact_path=args.get("artifact_path", ""),
             summary=args.get("summary", ""),
+            acceptance_evidence=args.get("acceptance_evidence", []) or [],
+            completion_stage=args.get("completion_stage", ""),
+            delivery_receipt=args.get("delivery_receipt", ""),
             record_change=args.get("record_change"),
             client_slug=args.get("client_slug", ""),
             change_type=args.get("change_type", ""),
@@ -1054,6 +1655,8 @@ def register(ctx):
         lambda args, **kwargs: task_block_handler(
             task_id=args.get("task_id", ""),
             blocker_reason=args.get("reason", "") or args.get("blocker_reason", ""),
+            attempted_routes=args.get("attempted_routes", []) or [],
+            resume_condition=args.get("resume_condition", ""),
             **_clean_kwargs(kwargs),
         ),
     )

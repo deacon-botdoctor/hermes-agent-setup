@@ -6,18 +6,21 @@ from __future__ import annotations
 from pathlib import Path
 
 MARKER = "HERMES_MCP_LEGACY_COLD_ALIAS_ACTIVATION_v1"
+DIRECT_WRAPPER_MARKER = "HERMES_DIRECT_TOOL_WRAPPER_COMPAT_v1"
 
 MODEL_TOOLS_FUNCTION = "def handle_function_call(\n"
 MODEL_TOOLS_FUNCTION_PATCHED = f"""_{MARKER} = True
 
 
-def _scoped_mcp_dispatch_names(tool_defs):
-    # Exact model-facing canonical MCP names are safe bridge targets.
+def _scoped_bridge_dispatch_names(tool_defs):
+    # {DIRECT_WRAPPER_MARKER}: tool_call may safely unwrap any exact tool name
+    # already granted to this session. This keeps provider wrapper mistakes
+    # inside the same scope as a normal top-level call.
     return frozenset(
         name
         for definition in tool_defs
         for name in [str((definition.get("function") or {{}}).get("name") or "")]
-        if name.startswith("mcp__")
+        if name
     )
 
 
@@ -33,7 +36,7 @@ def _resolve_tool_search_call_with_cold_activation(
 
     _scoped_names = (
         _ts_mod.scoped_deferrable_names(current_defs)
-        | _scoped_mcp_dispatch_names(current_defs)
+        | _scoped_bridge_dispatch_names(current_defs)
     )
     _underlying, _underlying_args, _err = _ts_mod.resolve_underlying_call(
         function_args or {{}}, scoped_names=_scoped_names
@@ -112,7 +115,7 @@ def _resolve_tool_search_call_with_cold_activation(
                     current_defs = []
                 _scoped_names = (
                     _ts_mod.scoped_deferrable_names(current_defs)
-                    | _scoped_mcp_dispatch_names(current_defs)
+                    | _scoped_bridge_dispatch_names(current_defs)
                 )
                 _underlying, _underlying_args, _err = _ts_mod.resolve_underlying_call(
                     function_args or {{}}, scoped_names=_scoped_names
@@ -191,6 +194,18 @@ EXECUTOR_CALL = """                _scoped_names = _tool_search_scoped_names(age
                 _underlying, _underlying_args, _err = _ts.resolve_underlying_call(
                     function_args, scoped_names=_scoped_names
                 )
+"""
+EXECUTOR_SCOPE_OLD = """        names = _ts.scoped_deferrable_names(scoped_defs)
+"""
+EXECUTOR_SCOPE_NEW = f"""        # {DIRECT_WRAPPER_MARKER}: include exact direct tools in the
+        # session scope so provider-emitted tool_call wrappers execute under
+        # the same hooks, approvals, and checkpoints as top-level calls.
+        names = frozenset(
+            name
+            for definition in scoped_defs
+            for name in [str((definition.get("function") or {{}}).get("name") or "")]
+            if name
+        )
 """
 EXECUTOR_FUNCTION = "def execute_tool_calls_concurrent("
 EXECUTOR_FUNCTION_PATCHED = """def _resolve_legacy_cold_alias_for_agent(
@@ -281,21 +296,25 @@ def patch_model_tools_text(source: str) -> str:
 
 def patch_tool_executor_text(source: str) -> str:
     helper_name = "_resolve_legacy_cold_alias_for_agent"
-    if source.count(helper_name) == 3:
+    if source.count(helper_name) != 3:
+        if source.count(EXECUTOR_FUNCTION) != 1:
+            raise RuntimeError("tool_executor function anchor drift")
+        if source.count(EXECUTOR_CALL) != 2:
+            raise RuntimeError("tool_executor bridge anchors drift")
+        source = source.replace(EXECUTOR_FUNCTION, EXECUTOR_FUNCTION_PATCHED, 1)
+        before, between, after = source.split(EXECUTOR_CALL)
+        source = (
+            before
+            + EXECUTOR_CONCURRENT_CALL_PATCHED
+            + between
+            + EXECUTOR_SEQUENTIAL_CALL_PATCHED
+            + after
+        )
+    if source.count(EXECUTOR_SCOPE_NEW) == 1:
         return source
-    if source.count(EXECUTOR_FUNCTION) != 1:
-        raise RuntimeError("tool_executor function anchor drift")
-    if source.count(EXECUTOR_CALL) != 2:
-        raise RuntimeError("tool_executor bridge anchors drift")
-    source = source.replace(EXECUTOR_FUNCTION, EXECUTOR_FUNCTION_PATCHED, 1)
-    before, between, after = source.split(EXECUTOR_CALL)
-    return (
-        before
-        + EXECUTOR_CONCURRENT_CALL_PATCHED
-        + between
-        + EXECUTOR_SEQUENTIAL_CALL_PATCHED
-        + after
-    )
+    if source.count(EXECUTOR_SCOPE_OLD) != 1:
+        raise RuntimeError("tool_executor scoped names anchor drift")
+    return source.replace(EXECUTOR_SCOPE_OLD, EXECUTOR_SCOPE_NEW, 1)
 
 
 def patch_mcp_legacy_cold_alias_activation_v1(hermes_dir: Path) -> bool:

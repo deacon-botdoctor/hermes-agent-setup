@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Activity-triggered self-improvement cycle.
 
-Replaces the fixed nightly cron. Runs every 2 hours via cron, checks each
+Replaces the fixed nightly cron. Runs every 2 hours via an Operator Control
+schedule, checks each
 agent's message count since last reflection, and fires the cycle when:
 - Agent has processed >= MSG_THRESHOLD messages since last reflection
 - OR agent has had >= ERROR_THRESHOLD fallback/error events
@@ -10,8 +11,11 @@ agent's message count since last reflection, and fires the cycle when:
 This means high-volume agents reflect more often, quiet agents don't waste
 model calls, and reflection is always triggered by having enough signal.
 
-Usage (cron every 2h on Mini):
-    python3 self-improvement-trigger.py [--dry-run]
+Usage (poll every 2h):
+    HERMES_CRON_JOB_ID=skill-reflection \
+    HERMES_CRON_RUN_ID=<unique-run-id> \
+    HERMES_CRON_SCHEDULE_SOURCE=operator-control \
+      python3 self-improvement-trigger.py --scheduled [--dry-run]
 """
 
 from __future__ import annotations
@@ -50,6 +54,7 @@ SPARK_SSH_HOST = os.environ.get("HERMES_SPARK_SSH_HOST", "")
 MSG_THRESHOLD = int(os.environ.get("SI_MSG_THRESHOLD", "100"))
 ERROR_THRESHOLD = int(os.environ.get("SI_ERROR_THRESHOLD", "5"))
 MAX_INTERVAL_HOURS = int(os.environ.get("SI_MAX_INTERVAL_HOURS", "72"))
+MIN_MODEL_INTERVAL_HOURS = int(os.environ.get("SI_MIN_MODEL_INTERVAL_HOURS", "24"))
 TOOL_READINESS_MAX_AGE_SECONDS = int(os.environ.get("SI_TOOL_READINESS_MAX_AGE_SECONDS", "7200"))
 TOOL_READINESS_ENABLED = os.environ.get("SI_TOOL_READINESS_ENABLED", "1").lower() not in ("0", "false", "no")
 TOOL_READINESS_COOLDOWN_SECONDS = int(os.environ.get("SI_TOOL_READINESS_COOLDOWN_SECONDS", "21600"))
@@ -57,6 +62,8 @@ ERROR_SIG_COOLDOWN_SECONDS = int(os.environ.get("SI_ERROR_SIG_COOLDOWN", "86400"
 
 # Optional local-agent filter via env: SI_AGENTS=<agent_id>
 _agent_filter = os.environ.get("SI_AGENTS", "").strip()
+_PROVENANCE_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_SCHEDULE_SOURCE = "operator-control"
 
 
 def _local_agent_id() -> str:
@@ -131,7 +138,42 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+    fd, temp_path = tempfile.mkstemp(prefix=".self-improvement-trigger-", suffix=".tmp", dir=STATE_FILE.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(state, indent=2, sort_keys=True) + "\n")
+        os.replace(temp_path, STATE_FILE)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def scheduled_provenance(required: bool = False) -> dict[str, str] | None:
+    """Validate and bind accountable cron provenance for a scheduled model call."""
+    job_id = os.environ.get("HERMES_CRON_JOB_ID", "").strip()
+    run_id = os.environ.get("HERMES_CRON_RUN_ID", "").strip()
+    source = os.environ.get("HERMES_CRON_SCHEDULE_SOURCE", "").strip()
+    supplied = any((job_id, run_id, source, os.environ.get("HERMES_ONESHOT_SESSION_ID", "").strip()))
+    if not required and not supplied:
+        return None
+    if source != _SCHEDULE_SOURCE:
+        raise ValueError("scheduled reflection requires HERMES_CRON_SCHEDULE_SOURCE=operator-control")
+    if not _PROVENANCE_PART.fullmatch(job_id):
+        raise ValueError("scheduled reflection requires a valid HERMES_CRON_JOB_ID")
+    if not _PROVENANCE_PART.fullmatch(run_id):
+        raise ValueError("scheduled reflection requires a valid HERMES_CRON_RUN_ID")
+    session_id = f"cron_{job_id}_{run_id}"
+    configured = os.environ.get("HERMES_ONESHOT_SESSION_ID", "").strip()
+    if configured and configured != session_id:
+        raise ValueError("scheduled reflection session provenance does not match its job/run identity")
+    os.environ["HERMES_ONESHOT_SESSION_ID"] = session_id
+    return {
+        "kind": "cron_run",
+        "source": source,
+        "job_id": job_id,
+        "run_id": run_id,
+        "session_id": session_id,
+    }
 
 
 def _parse_probe_timestamp(value: str) -> float | None:
@@ -447,6 +489,13 @@ def should_trigger(
 ) -> tuple[bool, str]:
     """Decide if self-improvement should fire for this agent."""
     agent_state = state["agents"].get(agent_id, {})
+    last_model_attempt = agent_state.get("last_model_attempt_ts", agent_state.get("last_run_ts", 0))
+    model_hours_since = (time.time() - last_model_attempt) / 3600
+    if model_hours_since < MIN_MODEL_INTERVAL_HOURS:
+        return False, (
+            f"model_budget: {model_hours_since:.1f}h < "
+            f"{MIN_MODEL_INTERVAL_HOURS}h minimum"
+        )
     last_run = agent_state.get("last_run_ts", 0)
     hours_since = (time.time() - last_run) / 3600
 
@@ -733,9 +782,17 @@ def launch_reflection(
         return {"reflection_status": "no_new_report", "proposal_outbox_status": "not_run"}
 
 
-def main():
+def main() -> int:
     dry_run = "--dry-run" in sys.argv
+    scheduled = "--scheduled" in sys.argv
+    try:
+        provenance = scheduled_provenance(required=scheduled)
+    except ValueError as exc:
+        log(f"REFUSED: {exc}")
+        return 2
     state = load_state()
+    if not isinstance(state.get("agents"), dict):
+        state["agents"] = {}
     now_ts = time.time()
     triggered = []
     skipped = []
@@ -751,17 +808,26 @@ def main():
 
         msg_count, error_count = count_mini_messages(agent_id, since_ts, state)
         should, reason = should_trigger(agent_id, state, msg_count, error_count, papercut_count)
-        if tool_reason:
+        if tool_reason and not reason.startswith("model_budget:"):
             should, reason = True, tool_reason
 
         if should:
             log(f"TRIGGER {agent_id}: {reason}")
             triggered.append(agent_id)
             if not dry_run:
+                state["agents"][agent_id] = {
+                    **agent_state,
+                    "last_model_attempt_ts": now_ts,
+                    "last_model_provenance": provenance or {"kind": "manual"},
+                }
+                # Reserve the model-call budget before dispatch. A failed or
+                # interrupted paid attempt still consumes this 24-hour slot.
+                save_state(state)
                 run_result = launch_reflection(
                     agent_id, "localhost", tool_context=tool_context if reason == tool_reason else None
                 )
                 state["agents"][agent_id] = {
+                    **state["agents"][agent_id],
                     "last_run_ts": now_ts,
                     "last_reason": reason,
                     "last_msgs": msg_count,
@@ -788,8 +854,15 @@ def main():
             log(f"TRIGGER {agent_id} ({user}): {reason}")
             triggered.append(agent_id)
             if not dry_run:
+                state["agents"][agent_id] = {
+                    **agent_state,
+                    "last_model_attempt_ts": now_ts,
+                    "last_model_provenance": provenance or {"kind": "manual"},
+                }
+                save_state(state)
                 run_result = launch_reflection(agent_id, SPARK_SSH_HOST, user)
                 state["agents"][agent_id] = {
+                    **state["agents"][agent_id],
                     "last_run_ts": now_ts,
                     "last_reason": reason,
                     "last_msgs": msg_count,
@@ -807,7 +880,8 @@ def main():
     log(f"Cycle complete: {len(triggered)} triggered, {len(skipped)} skipped")
     if skipped:
         log(f"  Skipped: {', '.join(skipped[:10])}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

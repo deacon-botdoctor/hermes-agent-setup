@@ -15,17 +15,24 @@ The driver posture is selected by runtime configuration, never by a model turn:
 - `dedicated_principal` uses unrestricted CUA only when the configured
   principal, agent, device, and `outcome_scoped` authority exactly match the
   live runtime.
+- An exactly bound dedicated principal may additionally opt into
+  `control_scope: principal_machine`. On that principal-owned machine, local
+  apps, files, browser tabs, signed-in sessions, and installed control lanes
+  are eligible for an explicitly requested task; semantic-only input rules do
+  not create a second authorization ceremony.
 
 ## When to Use
 
-Use this skill after the Golden readiness doctor marks the exact runtime and
-driver ready for semantic computer control.
+Use this skill when the active runtime exposes the `computer_use` tool. Tool
+exposure means the installer/promotion readiness gate passed for that runtime.
 
 ## Prerequisites
 
-Run the paired baseline
-`check-semantic-computer-control.py --required --semantic-probe` audit against
-the exact runtime candidate before claiming desktop control is ready.
+The installer and promotion operator own the paired semantic-control readiness
+audit. Do not search for or run its host-side checker during an ordinary agent
+turn. If the tool is absent or reports degraded readiness, use the structured
+tool-readiness evidence already provided by the runtime and report the named
+blocker; do not invent a client-local checker path.
 
 - `not_applicable` is normal for headless or non-opted-in runtimes.
 - `staged` means package/config wiring is incomplete; do not expose the tool.
@@ -39,7 +46,9 @@ agent's non-UI tools.
 
 ## Procedure
 
-1. Capture the named app using semantic mode.
+1. Capture the named app using semantic mode, unless the exactly bound runtime
+   declares `control_scope: principal_machine`; in that scope, use the most
+   reliable installed local control lane for the requested outcome.
 2. Reason from current element indices or typed-browser refs.
 3. Use one background semantic action, then capture fresh state.
 4. If background control explicitly escalates, cannot verify input, or reaches
@@ -60,10 +69,10 @@ agent's non-UI tools.
 
 ## Pitfalls
 
-- Raw coordinates, direct driver calls, and generated UI scripts remain
-  forbidden. Unrestricted driver mode is valid only through an exact
-  `dedicated_principal` runtime binding; a tool call cannot broaden its own
-  permission posture.
+- Outside `control_scope: principal_machine`, raw coordinates, direct driver
+  calls, and generated UI scripts remain forbidden. Principal-machine scope is
+  valid only through an exact `dedicated_principal` runtime binding; a tool
+  call cannot broaden its own permission posture.
 - Do not replace a failed semantic action with AppleScript, injected input, or
   a legacy desktop-control tool.
 - End the session when work finishes. Native API/CLI/file lanes remain valid

@@ -85,6 +85,7 @@ def patch_base_source(content: str) -> str | None:
                         caption=None,
                         metadata=_final_thread_metadata,
                     )
+                    _record_delivery(tts_result)
                     _tts_voice_delivered = bool(
                         getattr(tts_result, "success", False)
                     )

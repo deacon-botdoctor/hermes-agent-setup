@@ -4,9 +4,20 @@ description: Escalate visual, image, animation, design, and brand-output request
 triggers:
   - image generation
   - make a visual
+  - high resolution
+  - higher resolution
+  - HD image
+  - upscale image
+  - restore image
+  - enhance image
+  - sharpen image
+  - remove pixelation
   - animate it
   - poster
   - flyer
+  - logo
+  - wordmark
+  - vector
   - character visual
   - profile picture
   - brand creative
@@ -22,28 +33,43 @@ Do not phone it in with a local placeholder or crude composite when better image
 
 ## Required workflow
 
-1. Identify source assets:
+1. Classify the requested operation using
+   `shared-rules/image-generation-routing.md`:
+   - geometry-only raster work,
+   - restoration/detail recovery,
+   - exact logo/wordmark/vector reconstruction, or
+   - new/transformed creative artwork.
+   Never answer a restoration or vector request with a larger Pillow canvas.
+
+2. Identify source assets:
    - profile photo / logo / brand guide / existing design / product image.
    - preserve identity-critical elements unless user asks for a redesign.
 
-2. Determine target output:
+3. Determine target output:
    - static image, animation/video, PDF/poster, web/design mockup, or prompt package.
 
-3. Scout tools/providers:
+4. Scout tools/providers:
    - image generation and editing: follow `shared-rules/image-generation-routing.md` for provider selection and the QA/escalation ladder.
-   - approved video generation: Veo or other approved video provider.
-   - deterministic/local compositor only for exact layout, captions, or print prep.
+   - exact logos/wordmarks: locate an approved vector master or reconstruct
+     editable SVG before raster export.
+   - video creation, editing, animation, captioning, and rendering: load the installed `hyperframes` skill first and follow `shared-rules/video-production-routing.md`.
+   - approved generative-video providers: use only for source shots or plates needed by the HyperFrames composition.
+   - deterministic/local compositor only for geometry-only work, exact layout,
+     captions, print prep, or final export from an adequate/vector source.
 
-4. Write a rich prompt:
+5. Write a rich prompt when generation/editing is the selected lane:
    - subject identity and reference use
    - scene/action/composition
    - lighting/style/quality bar
    - exact negative constraints
    - output format/aspect ratio
 
-5. Generate, inspect, and iterate if obviously weak.
+6. Generate or reconstruct, then run the effective-resolution proof from the
+   shared rule. Pixel dimensions, centering, and file existence are not enough.
 
-6. Deliver the best artifact with a short note. If animation was requested or obvious, produce video/GIF when supported.
+7. Deliver the best artifact with a short note. Use `[[as_document]]` for
+   lossless Telegram image masters. If animation was requested or obvious,
+   produce video/GIF when supported.
 
 ## Quality bar
 
@@ -61,6 +87,13 @@ For any client-visible creative artifact, follow `creative-output-standard-path.
 
 `shared-rules/image-generation-routing.md` is authoritative for native image
 generation, reference editing, auxiliary escalation, and publishable QA.
+
+### Video routing
+
+`shared-rules/video-production-routing.md` is authoritative for video workflow
+selection and production QA. HyperFrames owns composition, motion, captions,
+layout, snapshots, render, and inspection by default. Do not silently substitute
+a crude Pillow/FFmpeg frame generator when that route is available.
 
 ### Brand prep is not enough
 

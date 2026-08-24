@@ -103,7 +103,7 @@ def test_openrouter_missing_usage_is_recorded_without_enrichment(tmp_path, monke
         base_url="https://openrouter.ai/api/v1",
         api_mode="chat",
         api_key=None,
-        provider_request_id="id_unavailable",
+        openrouter_generation_id="id_unavailable",
     )
 
     assert payload["usage_status"] == "unavailable"
@@ -125,7 +125,7 @@ def test_openrouter_zero_usage_is_not_priced_as_spend(tmp_path, monkeypatch):
         base_url="https://openrouter.ai/api/v1",
         api_mode="chat",
         api_key=None,
-        provider_request_id="id_unavailable",
+        openrouter_generation_id="id_unavailable",
     )
 
     assert payload["usage_status"] == "provider_reported"
@@ -143,7 +143,7 @@ def test_openrouter_empty_usage_is_not_priced_as_spend(tmp_path, monkeypatch):
         base_url="https://openrouter.ai/api/v1",
         api_mode="chat",
         api_key=None,
-        provider_request_id="id_unavailable",
+        openrouter_generation_id="id_unavailable",
     )
 
     assert payload["usage_status"] == "provider_reported"
@@ -168,7 +168,7 @@ def test_openrouter_zero_usage_retains_actual_provider_cost(tmp_path, monkeypatc
         base_url="https://openrouter.ai/api/v1",
         api_mode="chat",
         api_key=None,
-        provider_request_id="id_unavailable",
+        openrouter_generation_id="id_unavailable",
     )
 
     assert payload["usage_status"] == "provider_reported"
@@ -215,7 +215,7 @@ def test_openrouter_mapping_usage_is_normalized_as_reported(tmp_path, monkeypatc
         base_url="https://openrouter.ai/api/v1",
         api_mode="chat",
         api_key=None,
-        provider_request_id="id_unavailable",
+        openrouter_generation_id="id_unavailable",
     )
 
     assert observed["usage"]["prompt_tokens"] == 100
@@ -268,6 +268,10 @@ def test_reconciler_cli_falls_back_without_profile_receipt(tmp_path):
                         "outcome": "success",
                         "provider_request_id": "id_unavailable",
                         "provider_request_id_source": "unavailable",
+                        "openrouter_generation_id": "id_unavailable",
+                        "openrouter_generation_id_source": "unavailable",
+                        "provenance_kind": "unlinked",
+                        "provenance_ref": "id_unavailable",
                         "cost_status": "unknown",
                         "key_fingerprint": "id_unavailable",
                         "key_fingerprint_method": "unavailable",

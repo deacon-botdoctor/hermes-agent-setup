@@ -18,6 +18,7 @@ COMPLETION_MARKER = "HERMES_SUPPRESS_COMPACTION_COMPLETION_STATUS_v1"
 CHAT_MARKER = "HERMES_SILENT_AUTO_CONTEXT_LIFECYCLE_v1"
 CONTINUITY_MARKER = "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1"
 DRAIN_SILENT_DELIVERY_MARKER = "HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2"
+DRAIN_ADMISSION_FAILURE_MARKER = "HERMES_DRAIN_ADMISSION_FAILURE_VISIBILITY_v1"
 
 HELPER_OLD = '''def _emit_compaction_done(agent: Any) -> None:
     """Emit the structured terminal edge for a started compaction."""
@@ -231,6 +232,30 @@ STARTUP_FAILED_SILENT_GUARD_NEW = '''        if (
             adapter = self._adapter_for_source(event.source)
 '''
 
+STARTUP_FAILED_SILENT_GUARD_FINAL = '''        if (
+            decision is not None
+            and not decision.durable_accepted
+            and not decision.response
+        ):
+            # HERMES_DRAIN_ADMISSION_FAILURE_VISIBILITY_v1 — webhook-style
+            # transports can retry a rejected delivery. Long-poll/chat
+            # transports cannot: once their callback returns, the update
+            # offset advances. Give those users an actionable resend notice
+            # instead of silently consuming an instruction that was never
+            # admitted to the durable inbox.
+            if event.retry_transport_on_admission_failure:
+                raise RuntimeError(
+                    "startup-gate admission failed; transport retry required"
+                )
+            decision = _StartupGateDecision(
+                "I couldn't safely save that message during a restart. "
+                "Please resend it.",
+                False,
+            )
+        if decision is not None and decision.response:
+            adapter = self._adapter_for_source(event.source)
+'''
+
 STARTUP_RESPONSE_GUARD = '''        if decision is not None and decision.response:
 '''
 
@@ -350,12 +375,23 @@ RESTART_UNSTABLE_IDENTITY_OLD = '''    result = await adapter.handle_message(inb
     # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
     assert adapter.sent == []  # ty:ignore[unresolved-attribute]
 '''
-RESTART_UNSTABLE_IDENTITY_NEW = '''    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — an inbound message that cannot
+RESTART_UNSTABLE_IDENTITY_SILENT = '''    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — an inbound message that cannot
     # be durably identified must be retried by the transport, never swallowed.
     with pytest.raises(RuntimeError, match="transport retry required"):
         await adapter.handle_message(inbound)
 
     assert adapter.sent == []  # ty:ignore[unresolved-attribute]
+'''
+RESTART_UNSTABLE_IDENTITY_NEW = '''    # HERMES_DRAIN_ADMISSION_FAILURE_VISIBILITY_v1
+    # HERMES_SILENT_DRAIN_NOTICE_DELIVERY_v2 — an inbound message that cannot
+    # be durably identified must never be swallowed. Long-poll transports do
+    # not redeliver after their callback returns, so tell the user to resend.
+    result = await adapter.handle_message(inbound)
+
+    assert result is None
+    assert adapter.sent == [  # ty:ignore[unresolved-attribute]
+        "I couldn't safely save that message during a restart. Please resend it."
+    ]
 '''
 
 RESTART_SAVED_ASSERT_OLD = (
@@ -500,10 +536,17 @@ RESTART_FAILED_DELIVERY_EXPECTATION_OLD = '''    with pytest.raises(RuntimeError
     assert adapter._active_sessions == {}
     assert adapter._pending_messages == {}
 '''
-RESTART_FAILED_DELIVERY_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="transport retry required"):
+RESTART_FAILED_DELIVERY_EXPECTATION_SILENT = '''    with pytest.raises(RuntimeError, match="transport retry required"):
         await adapter.handle_message(inbound)
 
     adapter._send_with_retry.assert_not_awaited()  # ty:ignore[unresolved-attribute]
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
+'''
+RESTART_FAILED_DELIVERY_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="delivery was not accepted"):
+        await adapter.handle_message(inbound)
+
+    adapter._send_with_retry.assert_awaited_once()  # ty:ignore[unresolved-attribute]
     assert adapter._active_sessions == {}
     assert adapter._pending_messages == {}
 '''
@@ -514,7 +557,13 @@ RESTART_MISSING_ADAPTER_EXPECTATION_OLD = '''    with pytest.raises(RuntimeError
     assert adapter._active_sessions == {}
     assert adapter._pending_messages == {}
 '''
-RESTART_MISSING_ADAPTER_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="transport retry required"):
+RESTART_MISSING_ADAPTER_EXPECTATION_SILENT = '''    with pytest.raises(RuntimeError, match="transport retry required"):
+        await adapter.handle_message(inbound)
+
+    assert adapter._active_sessions == {}
+    assert adapter._pending_messages == {}
+'''
+RESTART_MISSING_ADAPTER_EXPECTATION_NEW = '''    with pytest.raises(RuntimeError, match="adapter is unavailable"):
         await adapter.handle_message(inbound)
 
     assert adapter._active_sessions == {}
@@ -1045,6 +1094,13 @@ def patch_continuity_gateway_text(source: str) -> str:
             STARTUP_FAILED_SILENT_GUARD_NEW,
             label="silent failed startup admission",
         )
+    if DRAIN_ADMISSION_FAILURE_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            STARTUP_FAILED_SILENT_GUARD_NEW,
+            STARTUP_FAILED_SILENT_GUARD_FINAL,
+            label="visible non-retry startup admission failure",
+        )
     forbidden = (
         "Gateway startup recovery is still finishing",
         "Hermes is already processing this saved instruction",
@@ -1134,6 +1190,25 @@ def patch_restart_test_text(source: str) -> str:
             RESTART_UNSTABLE_IDENTITY_OLD,
             RESTART_UNSTABLE_IDENTITY_NEW,
             label="unstable identity transport retry test",
+        )
+    if DRAIN_ADMISSION_FAILURE_MARKER not in patched:
+        patched = _replace_exact(
+            patched,
+            RESTART_FAILED_DELIVERY_EXPECTATION_SILENT,
+            RESTART_FAILED_DELIVERY_EXPECTATION_NEW,
+            label="failed long-poll admission visibility test",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_MISSING_ADAPTER_EXPECTATION_SILENT,
+            RESTART_MISSING_ADAPTER_EXPECTATION_NEW,
+            label="missing long-poll adapter visibility test",
+        )
+        patched = _replace_exact(
+            patched,
+            RESTART_UNSTABLE_IDENTITY_SILENT,
+            RESTART_UNSTABLE_IDENTITY_NEW,
+            label="unstable long-poll identity visibility test",
         )
     ast.parse(patched)
     return patched

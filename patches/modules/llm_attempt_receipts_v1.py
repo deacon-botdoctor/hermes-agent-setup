@@ -11,6 +11,7 @@ MARKER = "HERMES_LLM_ATTEMPT_RECEIPTS_v1"
 PAYLOAD = Path(__file__).resolve().parent.parent / "payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py"
 TRUNCATED_RETRY_MARKER = "HERMES_TRUNCATED_TOOL_RETRY_CACHE_BUST_v1"
 ITERATION_SUMMARY_MARKER = "HERMES_XAI_ITERATION_SUMMARY_TOOLLESS_v1"
+CODEX_APP_SERVER_MARKER = "HERMES_LLM_ATTEMPT_CODEX_APP_SERVER_v1"
 
 TRUNCATED_RETRY_ANCHOR = """                                # Don't append the broken response to messages;
                                 # just re-run the same API call from the current
@@ -793,6 +794,53 @@ def _patch_auxiliary(content: str) -> str:
     return content
 
 
+def _patch_codex_app_server(content: str) -> str:
+    """Account for the opaque Codex app-server turn boundary.
+
+    ``codex_app_server`` returns before the ordinary conversation-loop provider
+    seam, so without this carrier a model-backed turn can bypass the attempt
+    ledger entirely. Treat one app-server turn as one accountable main attempt;
+    the app-server remains responsible for its internal provider lifecycle.
+    """
+    if CODEX_APP_SERVER_MARKER in content:
+        return content
+    anchor = """    try:
+        turn = agent._codex_session.run_turn(user_input=user_message)
+    except Exception as exc:
+"""
+    replacement = f"""    try:
+        # {CODEX_APP_SERVER_MARKER}: this runtime bypasses the ordinary
+        # conversation-loop provider seam. Bind the opaque app-server turn to
+        # the same content-free accountable-attempt ledger before dispatch.
+        from agent.llm_attempt_receipts import execute_main_attempt
+
+        _codex_attempt_id = f"codex-app-server:{{effective_task_id}}"
+        turn = execute_main_attempt(
+            lambda: agent._codex_session.run_turn(user_input=user_message),
+            task=effective_task_id or "conversation",
+            provider=str(getattr(agent, "provider", "") or "openai-codex"),
+            model=str(getattr(agent, "model", "") or ""),
+            base_url=str(getattr(agent, "base_url", "") or ""),
+            api_mode=str(getattr(agent, "api_mode", "") or "codex_app_server"),
+            logical_request_id=_codex_attempt_id,
+            session_id=str(getattr(agent, "session_id", "") or ""),
+            turn_id=str(effective_task_id or ""),
+            platform=str(getattr(agent, "platform", "") or ""),
+            api_key=getattr(agent, "api_key", None),
+            retry_count=0,
+            is_fallback=bool(getattr(agent, "_fallback_activated", False)),
+            fallback_cause=getattr(agent, "_active_fallback_cause", None),
+        )
+    except Exception as exc:
+"""
+    return _replace_once(
+        content,
+        anchor,
+        replacement,
+        "Codex app-server accountable attempt boundary",
+    )
+
+
 def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
     target = Path(hermes_dir)
     helper = target / "agent/llm_attempt_receipts.py"
@@ -800,12 +848,14 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
     fallback = target / "agent/chat_completion_helpers.py"
     turn_finalizer = target / "agent/turn_finalizer.py"
     auxiliary = target / "agent/auxiliary_client.py"
+    codex_runtime = target / "agent/codex_runtime.py"
     run_agent_test = target / "tests/run_agent/test_run_agent.py"
     for path in (
         main_loop,
         fallback,
         turn_finalizer,
         auxiliary,
+        codex_runtime,
         run_agent_test,
         PAYLOAD,
     ):
@@ -824,6 +874,7 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
         (fallback, _patch_fallback_cause),
         (turn_finalizer, _patch_iteration_status),
         (auxiliary, _patch_auxiliary),
+        (codex_runtime, _patch_codex_app_server),
         (
             run_agent_test,
             lambda content: _patch_iteration_tests(
@@ -845,4 +896,8 @@ def patch_llm_attempt_receipts_v1(hermes_dir: Path) -> bool:
         str(PAYLOAD.parent.parent / "open_todo_stop_guard_v1.py")
     )
     changed = open_todo_module["patch_open_todo_stop_guard_v1"](target) or changed
+    outcome_stop_module = runpy.run_path(
+        str(PAYLOAD.parent.parent / "outcome_stop_guard_v1.py")
+    )
+    changed = outcome_stop_module["patch_outcome_stop_guard_v1"](target) or changed
     return changed

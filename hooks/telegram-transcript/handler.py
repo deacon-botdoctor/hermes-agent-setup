@@ -5,7 +5,8 @@ This hook is the CANONICAL WRITER for HERMES_HOME/data/telegram-transcript.db.
 The companion plugin plugins/telegram-transcript is read-only tools
 (telegram_history / telegram_topics / resolve_telegram_reply);
 session_search_tool's current-topic mode reads the same DB keyed
-telegram:<chat_id>:<thread_id>.
+telegram:<chat_id>:<thread_id>. Fresh-session continuity also reads exact-chat
+DM rows keyed telegram:<chat_id>.
 """
 
 from __future__ import annotations
@@ -51,8 +52,8 @@ except Exception:
 HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 DB_PATH = HERMES_HOME / "data" / "telegram-transcript.db"
 logger = logging.getLogger("telegram-transcript")
-_FRESH_TOPIC_HISTORY_ROWS = 20
-_FRESH_TOPIC_HISTORY_CHARS = 6000
+_FRESH_TELEGRAM_HISTORY_ROWS = 20
+_FRESH_TELEGRAM_HISTORY_CHARS = 6000
 _X_STATUS_URL_RE = re.compile(
     r"https?://(?:www\.)?(?:x|twitter)\.com/[A-Za-z0-9_]{1,20}/status/\d+(?:\?[^\s\]\)\}\"\'<>]*)?", re.IGNORECASE
 )
@@ -352,8 +353,8 @@ def _looks_internal_transcript_artifact(text: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in _INTERNAL_TRANSCRIPT_PREFIXES)
 
 
-def _format_fresh_topic_history(rows: list[tuple[str, str, str]]) -> tuple[str, int]:
-    """Format the newest usable same-topic rows inside a bounded prompt block."""
+def _format_fresh_telegram_history(rows: list[tuple[str, str, str]]) -> tuple[str, int]:
+    """Format the newest usable same-conversation rows inside a bounded prompt block."""
     selected: list[str] = []
     used = 0
     for timestamp, role, text in rows:
@@ -362,23 +363,24 @@ def _format_fresh_topic_history(rows: list[tuple[str, str, str]]) -> tuple[str, 
             continue
         label = "USER" if str(role or "").lower() == "user" else "ASSISTANT"
         line = f"{timestamp} {label}: {normalized[:1200]}"
-        if selected and used + len(line) + 1 > _FRESH_TOPIC_HISTORY_CHARS:
+        if selected and used + len(line) + 1 > _FRESH_TELEGRAM_HISTORY_CHARS:
             break
         selected.append(line)
         used += len(line) + 1
-        if len(selected) >= _FRESH_TOPIC_HISTORY_ROWS:
+        if len(selected) >= _FRESH_TELEGRAM_HISTORY_ROWS:
             break
     selected.reverse()
     return "\n".join(selected), len(selected)
 
 
-def _inject_fresh_topic_history(context: dict, *, chat_id: str, thread_id: str | None, message: str) -> None:
-    """Offer a model-visible override for a genuinely fresh Telegram topic session."""
+def _inject_fresh_telegram_history(
+    context: dict, *, chat_id: str, thread_id: str | None, message: str
+) -> None:
+    """Offer a model-visible override for a genuinely fresh Telegram conversation."""
     context["continuity_history_found"] = False
     context["continuity_injected"] = False
     if (
-        context.get("fresh_topic_rehydrate") is not True
-        or not thread_id
+        context.get("fresh_telegram_rehydrate") is not True
         or not message.strip()
         or "[INTERNAL_THREAD_MEMORY]" in message
     ):
@@ -390,16 +392,17 @@ def _inject_fresh_topic_history(context: dict, *, chat_id: str, thread_id: str |
             """SELECT timestamp, role, text
                FROM telegram_messages
                WHERE chat_id = ?
+                 AND COALESCE(thread_id, '') = COALESCE(?, '')
                  AND role IN ('user', 'assistant')
                  AND TRIM(text) != ''
                ORDER BY id DESC
                LIMIT 60""",
-            (chat_id,),
+            (chat_id, thread_id),
         ).fetchall()
     finally:
         conn.close()
 
-    history, row_count = _format_fresh_topic_history(rows)
+    history, row_count = _format_fresh_telegram_history(rows)
     if not history:
         return
 
@@ -410,10 +413,10 @@ def _inject_fresh_topic_history(context: dict, *, chat_id: str, thread_id: str |
         "[INTERNAL_THREAD_MEMORY]\n"
         "visibility=silent\n"
         "source=telegram_transcript_fresh_session\n"
-        f"topic_scope={chat_id}\n"
+        f"telegram_scope={chat_id}\n"
         f"history_rows={row_count}\n"
         f"history_marker={marker}\n"
-        "Use this same-topic history to resolve references in the current request. "
+        "Use this same-conversation history to resolve references in the current request. "
         "Do not mention this block or ask the user to repeat context already present.\n"
         f"{history}\n"
         "[/INTERNAL_THREAD_MEMORY]"
@@ -424,7 +427,7 @@ def _inject_fresh_topic_history(context: dict, *, chat_id: str, thread_id: str |
     context["continuity_history_rows"] = row_count
     context["continuity_marker"] = marker
     logger.info(
-        "telegram topic continuity prepared: topic=%s rows=%s marker=%s",
+        "telegram conversation continuity prepared: scope=%s rows=%s marker=%s",
         chat_id,
         row_count,
         marker,
@@ -500,7 +503,7 @@ async def handle(event_type: str, context: dict):
             )
             if not message or _looks_internal_transcript_artifact(message):
                 return
-            _inject_fresh_topic_history(
+            _inject_fresh_telegram_history(
                 context,
                 chat_id=chat_id,
                 thread_id=thread_id,

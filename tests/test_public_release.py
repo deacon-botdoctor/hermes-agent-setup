@@ -62,18 +62,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 285
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 24
+    assert manifest["components"]["runtime_payload"]["file_count"] == 742
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 33
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "dbfb7d9f1f713492894577b53466d4d64b85a0a8852010a3675a617cd4c47ade",
-        "file_count": 82,
+        "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
+        "file_count": 93,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 82
+    assert manifest["runtime_fingerprint"]["file_count"] == 93
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -83,7 +83,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 82
+    assert len(manifest["runtime_fingerprint"]["files"]) == 93
     assert set(release) == {
         "schema_version",
         "release",
@@ -106,6 +106,59 @@ def test_release_identity_matches_source_manifest():
         "golden_suite",
         "clean_upstream_rehearsal",
     }
+
+
+def test_host_health_and_cron_self_repair_are_release_owned():
+    manifest = json.loads(
+        (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
+    )
+    owned_paths = {
+        entry["path"]
+        for component in manifest["components"].values()
+        for entry in component["files"]
+    }
+    assert {
+        "bin/hermes-local-selfcheck.py",
+        "bin/hermes-canary-reconciler.py",
+        "bin/hermes-disk-retention.py",
+        "bin/tool-readiness-probe.py",
+        "patches/modules/cron_operator_delivery_v1.py",
+        "shared-rules/host-health.md",
+    } <= owned_paths
+
+    installers = yaml.safe_load((ROOT / "installers.yaml").read_text(encoding="utf-8"))
+    health_installer = next(
+        row
+        for row in installers["installers"]
+        if row["name"] == "install_runtime_health_tools"
+    )
+    assert {
+        "bin/hermes-local-selfcheck.py",
+        "bin/hermes-canary-reconciler.py",
+        "bin/hermes-disk-retention.py",
+        "bin/tool-readiness-probe.py",
+    } <= set(health_installer["sources"])
+
+    host_rule = (ROOT / "shared-rules" / "host-health.md").read_text(
+        encoding="utf-8"
+    )
+    assert "never automatically blocks a requested job" in host_rule
+    assert "Allocated swap and active swap churn are distinct signals" in host_rule
+    assert "Never reboot the host or stop unknown" in host_rule
+
+    cron_patch = (
+        ROOT / "patches" / "modules" / "cron_operator_delivery_v1.py"
+    ).read_text(encoding="utf-8")
+    assert 'SELF_REMEDIATION_MARKER = "HERMES_CRON_SELF_REMEDIATION_v1"' in cron_patch
+    assert '"_cron_repair_attempt": True' in cron_patch
+    assert "Do not blindly rerun external side effects" in cron_patch
+    assert "Never tell the operator to inspect logs" in cron_patch
+    assert "automatic repair stopped:" in cron_patch
+
+    registry = yaml.safe_load((ROOT / "patches" / "registry.yaml").read_text())
+    entry = next(row for row in registry["patches"] if row["name"] == "cron_operator_delivery_v1")
+    assert entry["module"] == "modules/cron_operator_delivery_v1.py"
+    assert entry["function"] == "patch_cron_operator_delivery_v1"
 
 
 def test_verifier_rejects_nested_fingerprint_golden_mismatch(monkeypatch):
@@ -422,7 +475,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 28
+    assert len(patches) == 33
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -1838,16 +1891,18 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert (
         "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "3c27eb6234bf91b8ceee9e9071591b31e9b148cb/scripts/install.ps1"
+        "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb/scripts/install.ps1"
         in instructions
     )
     assert (
-        "4dcbf2b665750cb578f69a6efa40770659e21821a463746f86da68af0d2bb31c"
+        "522941b9d678898392d31fc239cc229f6852a0f1bac8f266f7b81f8991f239d1"
         in instructions
     )
     assert "-m hermes_cli.main setup" in instructions
     assert "gateway install" in instructions
     assert "gateway status" in instructions
+    assert instructions.count("hermes-local-selfcheck.py") >= 3
+    assert "manifest-required capability/canary check passes" in instructions
     assert '$InstallMode = "<fresh-or-existing>"' in instructions
     assert "$ProvenHermesHome" in instructions
     assert "$ProvenServiceOwner" in instructions

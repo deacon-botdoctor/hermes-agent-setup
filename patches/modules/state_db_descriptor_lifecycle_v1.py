@@ -16,6 +16,58 @@ class PatchError(RuntimeError):
     pass
 
 
+def _native_pool_shape(source: str) -> tuple[bool, bool]:
+    tree = ast.parse(source)
+    limit = any(
+        isinstance(node, (ast.Assign, ast.AnnAssign))
+        and any(
+            isinstance(target, ast.Name) and target.id == "_READ_POOL_MAX"
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+        )
+        for node in tree.body
+    )
+    session_db = next(
+        (node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "SessionDB"),
+        None,
+    )
+    if session_db is None:
+        return False, limit
+    checkout = any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_checkout_read_conn"
+        for node in session_db.body
+    )
+    permit = any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "_read_permits"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and isinstance(node.value.func.value, ast.Name)
+        and node.value.func.value.id == "threading"
+        and node.value.func.attr == "BoundedSemaphore"
+        and len(node.value.args) == 1
+        and isinstance(node.value.args[0], ast.Name)
+        and node.value.args[0].id == "_READ_POOL_MAX"
+        for node in ast.walk(session_db)
+    )
+    cross_thread = any(
+        isinstance(node, ast.Call)
+        and any(
+            keyword.arg == "check_same_thread"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is False
+            for keyword in node.keywords
+        )
+        for node in ast.walk(session_db)
+    )
+    return all((limit, checkout, permit, cross_thread)), any((limit, checkout, permit))
+
+
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
     count = source.count(old)
     if count != 1:
@@ -24,6 +76,15 @@ def _replace_once(source: str, old: str, new: str, label: str) -> str:
 
 
 def patch_hermes_state_source(source: str) -> str:
+    native_pool_complete, native_pool_present = _native_pool_shape(source)
+    if native_pool_complete:
+        # Current Hermes owns the bounded connection pool, pre-open permits,
+        # cross-thread teardown, and locked-writer fallback. Do not layer the
+        # retired per-thread-cache transform over that stronger native design.
+        return source
+    if native_pool_present:
+        raise PatchError("native SessionDB descriptor contract is incomplete")
+
     if MARKER in source:
         required = (
             "_READ_CONNECTION_CACHE_LIMIT = 8",
@@ -139,7 +200,7 @@ def patch_hermes_state_source(source: str) -> str:
 def patch_gateway_source(source: str) -> str:
     if MARKER in source:
         required = (
-            "_store_db = getattr(self.session_store, \"_db\", None)",
+            '_store_db = getattr(self.session_store, "_db", None)',
             "_closed_db_ids: set[int] = set()",
         )
         if not all(item in source for item in required):
@@ -300,9 +361,7 @@ def patch_state_db_descriptor_lifecycle_v1(hermes_dir: Path) -> bool:
     backups: list[Path] = []
     try:
         for path in changed:
-            backup = path.with_name(
-                f"{path.name}.bak-{stamp}-state-db-descriptor-lifecycle-v1"
-            )
+            backup = path.with_name(f"{path.name}.bak-{stamp}-state-db-descriptor-lifecycle-v1")
             shutil.copy2(path, backup)
             backups.append(backup)
         for path in changed:

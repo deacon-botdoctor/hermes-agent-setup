@@ -10,9 +10,12 @@ from typing import Any
 
 _FLOOR_SOURCES = (
     ("HERMES_OPERATING_FLOOR_v1", "content-policy.md"),
+    ("HERMES_SELF_REPAIR_FLOOR_v1", "content-policy.md"),
     ("HERMES_CREDENTIAL_INTAKE_FLOOR_v1", "content-policy.md"),
     ("HERMES_COVENANT_CORE_v1", "westminster-marque.md"),
     ("HERMES_TRUTH_OVER_COMFORT_v1", "truth-over-comfort.md"),
+    ("HERMES_OUTCOME_CONTRACT_v1", "truth-over-comfort.md"),
+    ("HERMES_MACHINE_CAPABILITY_v1", "machine-capability.md"),
 )
 _EVIDENCE_MARKER = "HERMES_CLIENT_LOCAL_EVIDENCE_OPTIN_v1"
 _EVIDENCE_BLOCK = f"""<!-- {_EVIDENCE_MARKER}:START -->

@@ -1,0 +1,423 @@
+{
+  "catalog_version": "2026-08-21",
+  "entries": [
+    {
+      "bundles": [
+        "core-baseline",
+        "creative-production",
+        "document-production",
+        "research"
+      ],
+      "id": "capability-scout",
+      "install_path": "skills/internal/capability-scout",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "bdaf93c0881ebc1ea01ea75816f6d00c741fb4ffdf44893d059eac2a2eb1f677",
+      "stage": "baseline",
+      "summary": "Find and inspect installed skills, approved catalog candidates, tools, and integrations before accepting a weak workaround."
+    },
+    {
+      "bundles": [
+        "core-baseline",
+        "creative-production"
+      ],
+      "id": "creative-output-escalation",
+      "install_path": "skills/internal/creative-output-escalation",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "8218a8455aa9833ecc7bdfd25d0efe0bb528bd98a68fa6ffeeb98c87f2fe7349",
+      "stage": "baseline",
+      "summary": "Route client-visible creative work through approved high-quality media and production paths."
+    },
+    {
+      "bundles": [
+        "document-production"
+      ],
+      "id": "document-docx",
+      "install_path": null,
+      "invokable": false,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": null,
+      "stage": "candidate",
+      "summary": "Create, edit, render, and verify Word documents with layout-aware closeout."
+    },
+    {
+      "bundles": [
+        "document-production"
+      ],
+      "id": "document-xlsx",
+      "install_path": null,
+      "invokable": false,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": null,
+      "stage": "candidate",
+      "summary": "Create, edit, calculate, format, and verify spreadsheet workbooks."
+    },
+    {
+      "bundles": [
+        "core-baseline",
+        "creative-production"
+      ],
+      "id": "golden-visual-qa",
+      "install_path": "skills/fleet/golden-visual-qa",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "be61e5f3c8ce7dbae6b6178722fed8110936a34fc6abde18007de5428aa277f5",
+      "stage": "baseline",
+      "summary": "Render and fail closed on compiled client-facing visuals until exact-artifact visual evidence passes."
+    },
+    {
+      "bundles": [
+        "research"
+      ],
+      "id": "grok-x-research",
+      "install_path": "skills/fleet/grok-x-research",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "external_read",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "d909f6528bc82c24cac1ccdd57d23a7688b9c5ca6e3f972af5e10724e96a71f5",
+      "stage": "endorsed",
+      "summary": "Perform read-only, citation-aware X research through the calling runtime's brokered xai-oauth capability."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "human-taste",
+      "install_path": "skills/creative/human-taste",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "07c270e822a0dbecc7b417b245a77038f541bc42a89802889a624e6cc3835341",
+      "stage": "endorsed",
+      "summary": "Evaluate UX and product design quality for cognitive load, coherence, clarity, and context fit."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "human-taste-code",
+      "install_path": "skills/creative/human-taste-code",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "6cf314311647adb927d140aab2113b2ec7830b0c756f7b237a3bc13cfc1e2030",
+      "stage": "endorsed",
+      "summary": "Evaluate software design quality for abstraction depth, conceptual integrity, change cost, and structural clarity."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "human-taste-content",
+      "install_path": "skills/creative/human-taste-content",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "6d27f4f40866767e3c601734523151babe7193b90a92a44debe912c6ebe1d73d",
+      "stage": "endorsed",
+      "summary": "Evaluate writing quality for clarity, authentic voice, information density, and tone fit."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes",
+      "install_path": "skills/creative/hyperframes",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "ef8c4bd3d4f6d3929f15f3a155ee8424b79db7e50a483ea6550ea4b0852b97ec",
+      "stage": "endorsed",
+      "summary": "Route video, animation, motion-graphic, slideshow, and interactive-deck work through the HyperFrames production system."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-animation",
+      "install_path": "skills/creative/hyperframes-animation",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "437c7157440f25281fe53649f257c50cf9d304419c50d8d338d9517d502362ce",
+      "stage": "endorsed",
+      "summary": "Provide seek-safe animation rules, scene blueprints, transitions, text effects, and runtime adapters for HyperFrames."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-audio",
+      "install_path": "skills/creative/hyperframes-audio",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "3f88aee9f616128dca7219e37ecb0a1d8d178ed9be2390c83993bc0efaa9ffdb",
+      "stage": "endorsed",
+      "summary": "Mix, automate, duck, and repair audio already placed in a HyperFrames composition."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-cli",
+      "install_path": "skills/creative/hyperframes-cli",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "34466aae014d7aa025e02855ff7f63616bc2090aaac552c5ec1d1c3ab7e06f35",
+      "stage": "endorsed",
+      "summary": "Operate the HyperFrames development, inspection, preview, comparison, and rendering loop."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-core",
+      "install_path": "skills/creative/hyperframes-core",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "f877168c2c341e2c68901d2573f8dd438e99026a989df94ffa1f19324467d562",
+      "stage": "endorsed",
+      "summary": "Define the deterministic HyperFrames composition, timing, track, media, and validation contract."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-creative",
+      "install_path": "skills/creative/hyperframes-creative",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "027e99e8c4970d93b372531d18a5f939514a3bf603b923bb54a0669f8b68761a",
+      "stage": "endorsed",
+      "summary": "Direct palettes, typography, narration, beat planning, composition patterns, and brand treatment for HyperFrames."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-keyframes",
+      "install_path": "skills/creative/hyperframes-keyframes",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "2ad08f2bfb8f4852640c1b7d3fa58ee94d3aa207839ad695a0985ff36c896b72",
+      "stage": "endorsed",
+      "summary": "Build seek-safe keyframes, camera moves, paths, masks, morphs, depth, and other deterministic motion."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "hyperframes-registry",
+      "install_path": "skills/creative/hyperframes-registry",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "external_read",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "1d7eec348c9135695ecb69ff5adbb3ae0e437dd25f27290a4d53098259dec9bb",
+      "stage": "endorsed",
+      "summary": "Discover, install, wire, and author registry blocks and components for HyperFrames compositions."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "impeccable",
+      "install_path": "skills/creative/impeccable",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "77f0cabec0bbe95144277e245c0b4ac6e4f98e1488572eb30889a8e694da2607",
+      "stage": "endorsed",
+      "summary": "Apply a comprehensive frontend craft, UX, accessibility, responsive, and visual-polish workflow."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "media-use",
+      "install_path": "skills/creative/media-use",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "external_read",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "564d29f87a8bbed2773af68acf65324703e5844ba567e40d97ffe3b79c72f705",
+      "stage": "endorsed",
+      "summary": "Resolve, generate, transform, freeze, and reuse media assets through the shared HyperFrames media system."
+    },
+    {
+      "bundles": [
+        "core-baseline"
+      ],
+      "id": "nightly-client-reflection-default",
+      "install_path": "skills/fleet/nightly-client-reflection-default",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "abe379612147b8e4cb4576c2bfc31ff21640375b1a1231ce1abb421095eecaca",
+      "stage": "baseline",
+      "summary": "Run the default bounded client-agent day review and skill-candidate reflection workflow."
+    },
+    {
+      "bundles": [
+        "core-baseline"
+      ],
+      "id": "papercuts",
+      "install_path": "skills/fleet/papercuts",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "be457fc0f2075825892b6317bff971f185afac71277aeeefeb27b77a2f58236b",
+      "stage": "baseline",
+      "summary": "Capture small routing, update, tool, authentication, and dependency friction after bounded recovery."
+    },
+    {
+      "bundles": [],
+      "id": "self-improvement-loop-gates",
+      "install_path": "skills/internal/self-improvement-loop-gates",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "d8eafcbc526cf4358706ad6b74e4b125361284faaec67b5abf681febde9f2b07",
+      "stage": "baseline",
+      "summary": "Keep reflection proposal-only and require central archive, held-out proof, approval, and rollback before promotion."
+    },
+    {
+      "bundles": [
+        "creative-production"
+      ],
+      "id": "visual-reference-library",
+      "install_path": "skills/curated/visual-reference-library",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "instructional",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "75797c1d8bd44d7d4fed6ac1f6bf5144bf907d49db552db6dfcb82cd44d72905",
+      "stage": "endorsed",
+      "summary": "Load client-neutral visual patterns, production lanes, inputs, and QA gates before producing visual artifacts."
+    }
+  ],
+  "schema_version": 1
+}

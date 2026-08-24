@@ -10,6 +10,8 @@ platform_toolsets:
     - mcp-capability-router
   telegram:
     - image_gen
+    - skills
+    - vision
     - mcp-on-demand-control
     - mcp-capability-router
   cron:

@@ -51,7 +51,7 @@ def main() -> int:
     accepted = next((row for row in rows if row["event_type"] == "telegram_accepted"), None)
     status = (
         "Failed"
-        if "failed" in kinds
+        if {"failed", "run_failure_observed"} & kinds
         else "Replied"
         if accepted and accepted.get("outbound_message_id")
         else "Pending"

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "release": {
+    "package": "browser-use",
+    "version": "0.13.7",
+    "harness_package": "browser-harness",
+    "harness_version": "0.1.8"
+  },
+  "installer": {
+    "method": "uv_isolated_venv",
+    "target": "tools/browser-use-0.13.7",
+    "lock": "pylock.browser-use-cli-v1.toml",
+    "lock_sha256": "baafc493e5b7e104c4417dede1dd722bd14fc31ac6188f13fe2ad124d573bdec"
+  },
+  "artifacts": [
+    {
+      "package": "browser-use",
+      "filename": "browser_use-0.13.7-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/8a/b7/6df062c7cfd2a863f18dda0d5c7f8711e7316d772feb92370311391d8a2a/browser_use-0.13.7-py3-none-any.whl",
+      "sha256": "2264439e45cc7dd7fe480ca37e9eabd040c31a4e4d5e20c069ad2f60c07e3ba8"
+    },
+    {
+      "package": "browser-harness",
+      "filename": "browser_harness-0.1.8-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/0a/b9/aa8ab029af34e99784758fd5e8f76c853219cff1733ea422ff161313d108/browser_harness-0.1.8-py3-none-any.whl",
+      "sha256": "4bbc414007750683408a6cf4e5c87dd62c85b8628e478d5020413814fde8ae50"
+    }
+  ],
+  "privacy_environment": {
+    "BH_TELEMETRY": "0",
+    "BROWSER_HARNESS_TELEMETRY": "0",
+    "ANONYMIZED_TELEMETRY": "false",
+    "BROWSER_USE_CLOUD_SYNC": "false"
+  },
+  "acceptance": {
+    "baseline": "exact_direct_versions_and_receipt_bound_executable",
+    "recordings_default": "off"
+  }
+}

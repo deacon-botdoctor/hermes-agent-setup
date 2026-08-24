@@ -10,13 +10,14 @@ tooling, then applies only the source-visible compatibility gaps listed in
 
 [`release.json`](release.json) pins the current upstream and Golden identities,
 runtime-payload digest, and assembled-runtime fingerprint. The sanitized source
-manifest allowlists every shipped runtime file by Git blob identity. Fleet
-health/start adapters, routes, credentials, client identities, private data,
-and operator control are not included.
+manifest allowlists every shipped runtime file by Git blob identity. Public
+local health/readiness tools are included; private fleet routes, credentials,
+client identities, private data, and operator-control implementation are not.
 
-This release also carries a separately pinned native-agent-continuity overlay.
-It does not advance the general Hermes runtime pin. Managed new-client
-provisioning writes the tenant manifest that activates the overlay through the
+This release also carries the separately pinned native-agent-continuity overlay
+and advances the general Hermes/Golden runtime to the fleet-proven host-health,
+capability-readiness, and cron self-remediation build. Managed new-client
+provisioning writes the tenant manifest that activates continuity through the
 existing self-heal scheduler; installations without that manifest receive the
 verified files but are not enrolled or changed automatically.
 
@@ -87,9 +88,11 @@ Use the fresh POSIX or Windows path in [`AGENTS.md`](AGENTS.md). Both paths:
 5. install only manifest-owned profile files with a local rollback;
 6. install and receipt the pinned native Cua Driver without restarting the
    gateway;
-7. run native `hermes doctor`;
-8. install the native gateway service only after verification; and
-9. install the release-pinned recurring runtime-coherence check for the host's
+7. run native `hermes doctor` and the local host-capacity/readiness self-check;
+8. prove each manifest-declared capability and canary through its real user
+   path;
+9. install the native gateway service only after verification; and
+10. install the release-pinned recurring runtime-coherence check for the host's
    native scheduler.
 
 For a managed new client, the provisioner also declares
@@ -176,3 +179,23 @@ The replacement has five rules:
 This repository contains a deterministic assembler and a bounded profile
 installer, not a fleet control plane. Native setup, doctor, gateway services,
 and local user data remain owned by Hermes and the user.
+
+## Self-check and self-repair defaults
+
+The profile installs a cross-platform local self-check, canary reconciler,
+disk-retention guard, tool-readiness probe, and host-health operating rule. An
+agent checks fresh disk, memory, process, and swap evidence before heavy work,
+explains constrained headroom, and keeps the requested job moving with bounded
+checkpoints. Pressure is not an automatic large-job veto. Cleanup remains
+limited to task-owned or retention-policy-covered data; unknown processes,
+unique data, active runtimes, and rollback artifacts are protected.
+
+Routine scheduled-job failures are repair work, not an operator assignment.
+After saving the original receipt, Hermes may run exactly one bounded repair
+turn inside the owning runtime for script, configuration, runtime, timeout, or
+execution failures, then verify and append the result. Successful script jobs
+remain model-free, repair cannot recurse, and credentials, billing,
+permissions, destructive data, provider limits, and uncertain external side
+effects remain hard stops. The operator receives either a verified recovery or
+the concrete boundary that stopped automatic repair—never an instruction to
+repair the agent's script or configuration.

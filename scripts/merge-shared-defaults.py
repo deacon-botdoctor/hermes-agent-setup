@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Any, Iterable
@@ -146,7 +148,7 @@ def reconcile_mcp_control_defaults(
     plugin_path = "plugins.enabled"
     if plugin_path in exempt_set:
         skipped.append(plugin_path)
-    elif isinstance(plugin_additions, list):
+    elif isinstance(plugin_additions, list) and plugin_additions:
         plugins = merged.setdefault("plugins", {})
         if not isinstance(plugins, dict):
             plugins = {}
@@ -286,6 +288,106 @@ def _discover_defaults_files(defaults_dir: Path) -> list[Path]:
     return files
 
 
+NATIVE_IMAGE_DEFAULT_NAMES = {
+    "config-native-image-generation.yaml",
+    "config-mcp-on-demand-control.yaml",
+}
+
+NATIVE_IMAGE_REQUIRED_TOOLS = {
+    "cli": ("image_gen",),
+    "telegram": ("image_gen", "skills", "vision"),
+    "cron": ("image_gen",),
+}
+
+
+def _reconcile_native_image_exposure(
+    client_config: dict,
+    defaults: dict,
+    exemptions: Iterable[str],
+) -> tuple[dict, list[str], list[str]]:
+    """Add the executable image surface without reconciling unrelated MCP policy."""
+    platform_toolsets = defaults.get("platform_toolsets")
+    if not isinstance(platform_toolsets, dict):
+        raise ValueError("native-image MCP defaults omit platform_toolsets")
+
+    exempt_set = set(exemptions)
+    merged = _deep_copy(client_config)
+    platforms = merged.get("platform_toolsets")
+    if not isinstance(platforms, dict):
+        platforms = {}
+        merged["platform_toolsets"] = platforms
+    applied: list[str] = []
+    skipped: list[str] = []
+    for platform, required_tools in NATIVE_IMAGE_REQUIRED_TOOLS.items():
+        values = platform_toolsets.get(platform)
+        if not isinstance(values, list) or any(
+            tool not in values for tool in required_tools
+        ):
+            missing = [
+                tool
+                for tool in required_tools
+                if not isinstance(values, list) or tool not in values
+            ]
+            raise ValueError(
+                f"native-image MCP defaults omit {', '.join(missing)} for {platform}"
+            )
+        dotted = f"platform_toolsets.{platform}"
+        if dotted in exempt_set:
+            skipped.append(dotted)
+            continue
+        current_value = platforms.get(platform)
+        current = list(current_value) if isinstance(current_value, list) else []
+        wanted = [*current, *(tool for tool in required_tools if tool not in current)]
+        if current_value != wanted:
+            platforms[platform] = wanted
+            applied.append(dotted)
+    return merged, applied, skipped
+
+
+def _native_image_receipt(
+    merged: dict,
+    exemptions: list[str],
+    applied: list[tuple[str, str]],
+    skipped: list[tuple[str, str]],
+) -> dict:
+    image_gen = merged.get("image_gen")
+    toolsets = merged.get("platform_toolsets")
+    route_ready = (
+        isinstance(image_gen, dict)
+        and isinstance(image_gen.get("provider"), str)
+        and bool(image_gen["provider"].strip())
+        and isinstance(image_gen.get("model"), str)
+        and bool(image_gen["model"].strip())
+    )
+    exposure = {
+        platform: all(
+            isinstance(toolsets, dict)
+            and isinstance(toolsets.get(platform), list)
+            and tool in toolsets[platform]
+            for tool in required_tools
+        )
+        for platform, required_tools in NATIVE_IMAGE_REQUIRED_TOOLS.items()
+    }
+    if not route_ready or not all(exposure.values()):
+        raise ValueError("effective native-image capability is incomplete")
+    managed = {
+        "image_gen.provider",
+        "image_gen.model",
+        "platform_toolsets.cli",
+        "platform_toolsets.telegram",
+        "platform_toolsets.cron",
+    }
+    return {
+        "status": "pass",
+        "scope": "native-image",
+        "changed_paths": sorted({path for _, path in applied} & managed),
+        "skipped_paths": sorted({path for _, path in skipped} & managed),
+        "exemptions": sorted(set(exemptions) & managed),
+        "effective_image_gen": image_gen,
+        "effective_platform_exposure": exposure,
+    }
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile-root", type=Path, help="Client HERMES_HOME (contains config.yaml)")
@@ -298,8 +400,19 @@ def main(argv: list[str]) -> int:
         default=Path(__file__).resolve().parent.parent / "shared-defaults",
         help="Directory of config-*.yaml default sets",
     )
+    parser.add_argument(
+        "--receipt-json",
+        action="store_true",
+        help="Emit a machine-readable reconciliation receipt",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Show diff, do not write")
     parser.add_argument("--quiet", action="store_true", help="Suppress informational output")
+    parser.add_argument(
+        "--scope",
+        choices=("all", "native-image"),
+        default="all",
+        help="Apply all shared defaults or only executable native-image routing",
+    )
     args = parser.parse_args(argv)
 
     if args.config_path:
@@ -315,6 +428,16 @@ def main(argv: list[str]) -> int:
         return 1
 
     defaults_files = _discover_defaults_files(args.defaults_dir)
+    if args.scope == "native-image":
+        defaults_files = [path for path in defaults_files if path.name in NATIVE_IMAGE_DEFAULT_NAMES]
+        found = {path.name for path in defaults_files}
+        if found != NATIVE_IMAGE_DEFAULT_NAMES:
+            missing = sorted(NATIVE_IMAGE_DEFAULT_NAMES - found)
+            print(
+                "error: incomplete native-image defaults: " + ", ".join(missing),
+                file=sys.stderr,
+            )
+            return 1
     if not defaults_files:
         print(f"error: no defaults files in {args.defaults_dir}", file=sys.stderr)
         return 1
@@ -344,7 +467,7 @@ def main(argv: list[str]) -> int:
     all_skipped: list[tuple[str, str]] = []
     merged = client_config
     retirement_path = args.defaults_dir / "retired-policy-defaults-v1.yaml"
-    if retirement_path.exists():
+    if args.scope == "all" and retirement_path.exists():
         try:
             retirement = _load_yaml(retirement_path)
         except ValueError as exc:
@@ -370,7 +493,14 @@ def main(argv: list[str]) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         if defaults_path.name == "config-mcp-on-demand-control.yaml":
-            merged, applied, skipped = reconcile_mcp_control_defaults(merged, defaults, exemptions)
+            if args.scope == "native-image":
+                try:
+                    merged, applied, skipped = _reconcile_native_image_exposure(merged, defaults, exemptions)
+                except ValueError as exc:
+                    print(f"error: {defaults_path}: {exc}", file=sys.stderr)
+                    return 1
+            else:
+                merged, applied, skipped = reconcile_mcp_control_defaults(merged, defaults, exemptions)
         else:
             merged, applied, skipped = merge(merged, defaults, exemptions)
         for k in applied:
@@ -378,13 +508,27 @@ def main(argv: list[str]) -> int:
         for k in skipped:
             all_skipped.append((defaults_path.name, k))
 
+    receipt = None
+    if args.scope == "native-image":
+        try:
+            receipt = _native_image_receipt(merged, exemptions, all_applied, all_skipped)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+    old_text = config_path.read_text()
+    new_text = yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
+    if receipt is not None:
+        receipt["sha256_before"] = hashlib.sha256(old_text.encode()).hexdigest()
+        receipt["sha256_after"] = hashlib.sha256(new_text.encode()).hexdigest()
+
     if merged == client_config:
-        if not args.quiet:
+        if args.receipt_json and receipt is not None:
+            receipt["sha256_after"] = receipt["sha256_before"]
+            print(json.dumps(receipt, sort_keys=True))
+        elif not args.quiet:
             print(f"[merge-shared-defaults] {config_path}: already in sync (no changes)")
         return 0
-
-    new_text = yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
-    old_text = config_path.read_text()
 
     if args.dry_run:
         diff = difflib.unified_diff(
@@ -405,7 +549,9 @@ def main(argv: list[str]) -> int:
     tmp_path.chmod(config_path.stat().st_mode & 0o777)
     tmp_path.replace(config_path)
 
-    if not args.quiet:
+    if args.receipt_json and receipt is not None:
+        print(json.dumps(receipt, sort_keys=True))
+    elif not args.quiet:
         print(f"[merge-shared-defaults] wrote {config_path}")
         for fname, key in all_retired:
             print(f"  retired  {fname}: {key}")

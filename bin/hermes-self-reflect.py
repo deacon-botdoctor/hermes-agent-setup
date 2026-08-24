@@ -19,9 +19,11 @@ call fails, the deterministic day-review report is still written (no blank).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -38,6 +40,17 @@ except ImportError:  # Backward-compatible until the papercuts runtime payload l
     papercut_inbox = None
 
 REPORTS_DIR = "workspace/ops/reports/client-day-review"
+MAX_RECENT_SKILLS = 24
+MAX_SKILL_USAGE_BYTES = 1_000_000
+MAX_SKILL_BYTES = 1_000_000
+SKILL_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
+SKILL_EVIDENCE_CLASSES = {
+    "client_rework",
+    "operator_correction",
+    "repeated_failure",
+    "repeated_success",
+}
+SCHEDULE_PROVENANCE_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 SENSITIVE_KEY = re.compile(r"(?:api[_-]?key|token|secret|password|authorization|private[_-]?key)", re.IGNORECASE)
 SENSITIVE_FIELD_PATTERN = re.compile(
     r"(?im)((?:\\?[\"'])?(?:api[_-]?key|token|secret|password|authorization|private[_-]?key)(?:\\?[\"'])?\s*[:=]\s*)(?:\\\"(?:\\.|[^\"\\])*\\\"|\\'(?:\\.|[^'\\])*\\'|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,;}\]]+)"
@@ -69,6 +82,10 @@ def find_day_review(home: Path):
 
 def find_hermes_cli(home: Path):
     """Resolve the selected runtime's CLI before interpreter or PATH fallbacks."""
+    bound_python = active_runtime_python(home)
+    if bound_python is not None:
+        hermes = bound_python.parent / ("hermes.exe" if IS_WIN else "hermes")
+        return [str(hermes)] if hermes.is_file() else [str(bound_python), "-m", "hermes_cli.main"]
     for bin_dir in _venv_bin_dirs(home):
         hermes = bin_dir / ("hermes.exe" if IS_WIN else "hermes")
         if hermes.exists():
@@ -98,7 +115,178 @@ def iso(dt=None):
     return (dt or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _parse_timestamp(value):
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _read_regular_bytes(path: Path, maximum_bytes: int):
+    """Read one bounded regular file without following a final symlink."""
+    try:
+        before = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(before.st_mode) or before.st_size > maximum_bytes:
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    no_follow = getattr(os, "O_NOFOLLOW", 0)
+    if no_follow:
+        flags |= no_follow
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        return None
+    try:
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_size > maximum_bytes:
+            return None
+        if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+            return None
+        with os.fdopen(descriptor, "rb") as handle:
+            descriptor = -1
+            content = handle.read(maximum_bytes + 1)
+        return content if len(content) <= maximum_bytes else None
+    except OSError:
+        return None
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+
+
+def _skill_identity(content: bytes):
+    try:
+        text = content[:16_384].decode("utf-8", errors="replace")
+    except Exception:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    name = ""
+    version = "unversioned"
+    closed = False
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped == "---":
+            closed = True
+            break
+        key, separator, value = stripped.partition(":")
+        if not separator:
+            continue
+        value = value.strip().strip('"\'')
+        if key == "name":
+            name = value
+        elif key == "version" and value:
+            version = value[:64]
+    if not closed or not SKILL_ID_PATTERN.fullmatch(name) or len(version) > 64:
+        return None
+    return name, version
+
+
+def recent_skill_usage(home: Path, hours: int, now=None):
+    """Return bounded, exact identities for skills successfully loaded recently.
+
+    The Hermes-owned sidecar is treated only as load evidence. This function
+    neither infers outcome causality nor mutates skill state.
+    """
+    usage_path = home / "skills" / ".usage.json"
+    content = _read_regular_bytes(usage_path, MAX_SKILL_USAGE_BYTES)
+    if content is None:
+        return []
+    try:
+        usage = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return []
+    if not isinstance(usage, dict):
+        return []
+    cutoff = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).timestamp() - max(1, hours) * 3600
+    candidates = {}
+    for raw_name, record in usage.items():
+        name = str(raw_name)
+        if not SKILL_ID_PATTERN.fullmatch(name) or not isinstance(record, dict):
+            continue
+        used_at = _parse_timestamp(record.get("last_used_at"))
+        try:
+            use_count = int(record.get("use_count") or 0)
+        except (TypeError, ValueError):
+            continue
+        if used_at is None or used_at.timestamp() < cutoff or use_count < 1:
+            continue
+        candidates[name] = (record, used_at, use_count)
+    if not candidates:
+        return []
+
+    resolved = {}
+    skills_root = home / "skills"
+    try:
+        skill_paths = skills_root.rglob("SKILL.md")
+        for index, skill_path in enumerate(skill_paths):
+            if index >= 2_000:
+                break
+            try:
+                relative_parts = skill_path.relative_to(skills_root).parts
+            except ValueError:
+                continue
+            if any(part.startswith(".") for part in relative_parts[:-1]):
+                continue
+            skill_content = _read_regular_bytes(skill_path, MAX_SKILL_BYTES)
+            if skill_content is None:
+                continue
+            identity = _skill_identity(skill_content)
+            if identity is None or identity[0] not in candidates:
+                continue
+            name, version = identity
+            if name in resolved:  # ambiguous identities fail closed
+                resolved[name] = None
+                continue
+            record, used_at, use_count = candidates[name]
+            provenance = str(record.get("created_by") or "local")
+            if provenance not in {"agent", "installed", "local"}:
+                provenance = "local"
+            resolved[name] = {
+                "skill_id": name,
+                "skill_version": version,
+                "skill_sha256": hashlib.sha256(skill_content).hexdigest(),
+                "last_used_at": used_at.isoformat().replace("+00:00", "Z"),
+                "use_count": min(use_count, 1_000_000_000),
+                "provenance": provenance,
+                "evidence": "successful_load_within_window",
+            }
+    except OSError:
+        return []
+    rows = [value for value in resolved.values() if isinstance(value, dict)]
+    return sorted(rows, key=lambda row: (row["last_used_at"], row["skill_id"]), reverse=True)[:MAX_RECENT_SKILLS]
+
+
 IS_WIN = os.name == "nt"
+
+
+def active_runtime_python(home: Path) -> Path | None:
+    """Resolve the immutable active runtime from its target-bound binding receipt."""
+    binding_path = home / "state" / "runtime-binding.json"
+    try:
+        binding = json.loads(binding_path.read_text(encoding="utf-8"))
+        if binding.get("status") != "active":
+            return None
+        declared_home = Path(str(binding.get("hermes_home") or "")).expanduser().resolve()
+        runtime_root = Path(str(binding.get("runtime_root") or "")).expanduser().resolve()
+        runtime_python = Path(str(binding.get("runtime_python") or "")).expanduser().resolve()
+        expected_candidates = (home / "state" / "runtime-candidates").resolve()
+        if declared_home != home.resolve():
+            return None
+        if runtime_root != expected_candidates and expected_candidates not in runtime_root.parents:
+            return None
+        if runtime_python != runtime_root and runtime_root not in runtime_python.parents:
+            return None
+        if not runtime_python.is_file():
+            return None
+        return runtime_python
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
 
 
 def _venv_bin_dirs(home: Path):
@@ -416,7 +604,7 @@ def redact_papercut_value(value):
     return SENSITIVE_FIELD_PATTERN.sub(r"\1[REDACTED]", redacted)
 
 
-def build_prompt(deterministic, insights, agent_name, external_context=None):
+def build_prompt(deterministic, insights, agent_name, external_context=None, recent_skills=None):
     """Compact reflection prompt for the agent's own model."""
     d = deterministic
     scores = d.get("scores", {})
@@ -434,6 +622,8 @@ def build_prompt(deterministic, insights, agent_name, external_context=None):
         "deterministic_skillify": [s.get("summary") if isinstance(s, dict) else s for s in skill][:8],
         "open_or_promised_asks": [o.get("summary") for o in open_asks][:10],
     }
+    if recent_skills:
+        summary["recent_skill_usage"] = recent_skills[:MAX_RECENT_SKILLS]
     papercuts = (d.get("self_reflection_meta") or {}).get("papercut_inbox") or {}
     if papercuts.get("pending_count"):
         summary["papercut_inbox"] = {
@@ -464,7 +654,10 @@ def build_prompt(deterministic, insights, agent_name, external_context=None):
         '  "narrative": 2-4 sentence honest self-assessment of how you served the client today,\n'
         '  "failures": [short strings: where you leaked, failed, or over/under-escalated],\n'
         '  "proposal_inputs": [{"pattern": str, "why": str, '
-        '"draft_skill_name": str, "target_rung": "memory"|"skill"}],\n'
+        '"draft_skill_name": str, "target_rung": "memory"|"skill", '
+        '"skill_id": optional str, "skill_version": optional str, '
+        '"skill_sha256": optional 64-char hex, "evidence_class": optional '
+        '"repeated_failure"|"operator_correction"|"client_rework"|"repeated_success"}],\n'
         '  "open_promises": [{"summary": str, "owed_to_client": true|false}],\n'
         '  "operator_systems_lessons": [short strings: durable operational lessons from today],\n'
         '  "papercut_actions": [{"papercut_ids": [str], "lesson": str, "next_action": str, '
@@ -474,13 +667,37 @@ def build_prompt(deterministic, insights, agent_name, external_context=None):
         "class-level evidence, not ordinary one-off sessions. "
         "Skill creation is proposal-first: target memory for single durable "
         "facts/preferences, skill only for repeated reusable procedures. "
+        "When proposing a change to an existing skill, copy skill_id, skill_version, "
+        "and skill_sha256 exactly from recent_skill_usage and select one evidence_class. "
+        "A successful load proves use, not causality; connect it only to repeated day-review "
+        "evidence. Never propose or perform a direct skill edit. "
         "Be specific and self-critical. If the day was clean, say so plainly."
     )
     return prompt
 
 
+def bind_scheduled_model_provenance() -> str | None:
+    """Fail closed when a scheduled model call lacks its accountable cron identity."""
+    job_id = os.environ.get("HERMES_CRON_JOB_ID", "").strip()
+    run_id = os.environ.get("HERMES_CRON_RUN_ID", "").strip()
+    source = os.environ.get("HERMES_CRON_SCHEDULE_SOURCE", "").strip()
+    configured = os.environ.get("HERMES_ONESHOT_SESSION_ID", "").strip()
+    if not any((job_id, run_id, source, configured)):
+        return None
+    if source != "operator-control":
+        raise RuntimeError("scheduled reflection model call requires Operator Control provenance")
+    if not SCHEDULE_PROVENANCE_PART.fullmatch(job_id) or not SCHEDULE_PROVENANCE_PART.fullmatch(run_id):
+        raise RuntimeError("scheduled reflection model call has invalid job/run provenance")
+    expected = f"cron_{job_id}_{run_id}"
+    if configured != expected:
+        raise RuntimeError("scheduled reflection model call has mismatched session provenance")
+    os.environ["HERMES_ONESHOT_SESSION_ID"] = expected
+    return expected
+
+
 def call_own_model(prompt):
     """Call the agent's own model via hermes -z. Returns (parsed_or_none, raw, model_hint)."""
+    bind_scheduled_model_provenance()
     with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as tf:
         tf.write(prompt)
         pf = tf.name
@@ -522,7 +739,7 @@ def extract_json(text):
     return None
 
 
-def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback):
+def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback, recent_skills=None):
     rep = dict(deterministic)
     rep["schema_version"] = max(2, int(rep.get("schema_version", 1)))
     # self_reflection block
@@ -560,9 +777,29 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback):
             proposals.extend(("self_reflection_legacy_skillify", item) for item in legacy_skillify)
         if proposals:
             rep.setdefault("proposal_inputs", [])
+            trusted_skills = {
+                (item.get("skill_id"), item.get("skill_version"), item.get("skill_sha256")): item
+                for item in (recent_skills or [])
+                if isinstance(item, dict)
+            }
             for source, item in proposals:
                 proposal = item if isinstance(item, dict) else {"pattern": str(item)}
                 proposal = {**proposal, "source": source}
+                attribution_fields = ("skill_id", "skill_version", "skill_sha256")
+                has_attribution = any(proposal.get(field) not in (None, "") for field in attribution_fields)
+                if has_attribution:
+                    key = tuple(proposal.get(field) for field in attribution_fields)
+                    trusted = trusted_skills.get(key)
+                    if trusted is None or proposal.get("evidence_class") not in SKILL_EVIDENCE_CLASSES:
+                        continue
+                    proposal.update(
+                        {
+                            "skill_id": trusted["skill_id"],
+                            "skill_version": trusted["skill_version"],
+                            "skill_sha256": trusted["skill_sha256"],
+                            "skill_use_evidence": trusted["evidence"],
+                        }
+                    )
                 proposal.setdefault("target_rung", "skill")
                 proposal.setdefault("held_out_status", "not_run")
                 rep["proposal_inputs"].append(proposal)
@@ -682,17 +919,20 @@ def main():
     if external_context:
         deterministic.setdefault("self_reflection_meta", {})["external_context"] = external_context
 
+    skill_usage = recent_skill_usage(home, args.hours)
+    deterministic.setdefault("self_reflection_meta", {})["recent_skill_usage"] = skill_usage
+
     # 2. own-model reflection
     reflection_obj, raw, used_fallback = None, "", True
     if not args.no_model:
         agent_name = deterministic.get("client", {}).get("agent_name") or cfg.get("agent_name") or "this agent"
         insights = gather_insights()
-        prompt = build_prompt(deterministic, insights, agent_name, external_context)
+        prompt = build_prompt(deterministic, insights, agent_name, external_context, skill_usage)
         reflection_obj, raw, _ = call_own_model(prompt)
         used_fallback = reflection_obj is None
 
     # 3. merge + write
-    report = merge_report(deterministic, reflection_obj, raw, None, used_fallback)
+    report = merge_report(deterministic, reflection_obj, raw, None, used_fallback, skill_usage)
     report["report_id"] = unique_report_id(report.get("report_id"))
 
     out_dir = home / REPORTS_DIR

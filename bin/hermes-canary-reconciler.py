@@ -121,6 +121,39 @@ def default_registry() -> list[dict[str, Any]]:
             },
         },
         {
+            "capability_id": "tool_readiness",
+            "title": "End-to-end tool readiness",
+            "detect": {"any_path": ["bin/tool-readiness-probe.py"]},
+            "canary": {
+                "id": "tool_readiness",
+                "required": True,
+                "script": "bin/tool-readiness-probe.py",
+                "state": "state/tool-readiness-probe-latest.json",
+                "interval_minutes": 30,
+                "cron_tag": "HERMES_TOOL_READINESS_PROBE",
+                "run_if_stale_seconds": 3600,
+                "timeout_seconds": 120,
+                "args": ["--output", "{hermes}/state/tool-readiness-probe-latest.json"],
+            },
+        },
+        {
+            "capability_id": "disk_retention",
+            "title": "Runtime and snapshot retention",
+            "always": True,
+            "detect": {},
+            "canary": {
+                "id": "disk_retention",
+                "required": True,
+                "script": "bin/hermes-disk-retention.py",
+                "state": "state/disk-retention-last.json",
+                "interval_minutes": 1440,
+                "cron_tag": "HERMES_DISK_RETENTION",
+                "run_if_stale_seconds": 90000,
+                "timeout_seconds": 300,
+                "args": ["--apply", "--json", "--clear-flags"],
+            },
+        },
+        {
             "capability_id": "mcp",
             "title": "MCP tool servers",
             "detect": {"config_contains": ["mcp_servers", "mcp:", "model_context_protocol"]},
@@ -201,7 +234,12 @@ def cron_line_for(canary: dict[str, Any], script: Path, agent_id: str, agent_nam
         f"cd {sh_quote(str(HOME))} && {' '.join(env_parts)} "
         f"{sh_quote(str(script))}{(' ' + args) if args else ''} >/dev/null 2>&1"
     )
-    return f"*/{interval} * * * * sleep {jitter}; {cmd} # {tag}"
+    if interval >= 1440:
+        minute = hashlib.sha256(jitter_seed + b"\x00daily").digest()[0] % 60
+        schedule = f"{minute} 4 * * *"
+    else:
+        schedule = f"*/{interval} * * * *"
+    return f"{schedule} sleep {jitter}; {cmd} # {tag}"
 
 
 def sh_quote(value: str) -> str:
@@ -224,6 +262,40 @@ def _same_script_path(value: str, script: Path, systemd: bool = False) -> bool:
     if not os.path.isabs(candidate):
         return False
     return os.path.normpath(candidate) == os.path.normpath(str(script))
+
+
+def _shell_command_invokes_script(command: str, script: Path, systemd: bool = False) -> bool:
+    def inspect(tokens: list[str], depth: int) -> bool:
+        if depth > 3:
+            return False
+        for index, token in enumerate(tokens):
+            if (
+                _same_script_path(token, script, systemd)
+                and index > 0
+                and re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", Path(tokens[index - 1]).name)
+            ):
+                return True
+        for index, token in enumerate(tokens):
+            if Path(token).name not in {"sh", "bash", "zsh"}:
+                continue
+            for option_index, option in enumerate(tokens[index + 1 :], start=index + 1):
+                if not option.startswith("-") or "c" not in option:
+                    continue
+                if option_index + 1 >= len(tokens):
+                    return False
+                try:
+                    nested = shlex.split(tokens[option_index + 1], comments=False, posix=True)
+                except ValueError:
+                    return False
+                if inspect(nested, depth + 1):
+                    return True
+                break
+        return False
+
+    try:
+        return inspect(shlex.split(command, comments=False, posix=True), 0)
+    except ValueError:
+        return False
 
 
 def _command_invokes_script(argv: list[str], script: Path, systemd: bool = False) -> bool:
@@ -251,6 +323,13 @@ def _command_invokes_script(argv: list[str], script: Path, systemd: bool = False
     executable = Path(command[0]).name
     if re.fullmatch(r"python(?:\d+(?:\.\d+)*)?", executable):
         return len(command) > 1 and _same_script_path(command[1], script, systemd)
+    if executable in {"sh", "bash", "zsh"}:
+        for index, argument in enumerate(command[1:], start=1):
+            if not argument.startswith("-") or "c" not in argument:
+                continue
+            if index + 1 >= len(command):
+                return False
+            return _shell_command_invokes_script(command[index + 1], script, systemd)
     return False
 
 
@@ -415,8 +494,28 @@ def existing_schedule(
     cron_lines: list[str] | None = None,
 ) -> str | None:
     lines = current_crontab() if cron_lines is None else cron_lines
-    if expected_cron_line is not None and lines is not None and expected_cron_line in lines:
-        return "cron"
+    if lines is not None:
+        if expected_cron_line is not None and expected_cron_line in lines:
+            return "cron"
+        # Installer and rollout generations legitimately differ in quoting,
+        # jitter, interpreter choice, and harmless HOME/cd prefixes.  Treat an
+        # active, correctly tagged line that invokes the exact canary path as
+        # present instead of trying to rewrite a working crontab every 30m.
+        for line in lines:
+            if not _cron_line_has_tag(line, tag):
+                continue
+            command = line.rsplit("#", 1)[0].strip()
+            if not command or command.startswith("#"):
+                continue
+            try:
+                lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|")
+                lexer.whitespace_split = True
+                tokens = list(lexer)
+            except ValueError:
+                continue
+            for token in tokens:
+                if _same_script_path(token, script):
+                    return "cron-compatible"
     for directory in LAUNCH_AGENT_DIRS:
         for path in directory.glob("*.plist"):
             if _active_launchd_schedule(path, script):
@@ -567,6 +666,10 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         native_schedule = schedule_kind in {"launchd", "systemd-user"}
         if cron_lines is None:
             cron_change = "failed:crontab_read"
+        elif schedule_kind in {"cron", "cron-compatible"} and sum(
+            _cron_line_has_tag(item, tag) for item in cron_lines
+        ) == 1:
+            cron_change = "unchanged"
         else:
             cron_change = install_cron(
                 tag,

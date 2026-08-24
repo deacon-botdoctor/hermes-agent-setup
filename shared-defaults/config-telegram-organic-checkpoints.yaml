@@ -1,9 +1,13 @@
 # Telegram foreground-turn checkpoints are the sole fleet exception to the
 # globally quiet long-running notification surface.
 agent:
-  gateway_notify_interval: 600
+  gateway_notify_interval: 300
+  # Client-facing progress belongs in the agent-authored checkpoint card. Raw
+  # tool telemetry and the gateway inactivity countdown stay internal.
+  gateway_timeout_warning: 0
 
 display:
   platforms:
     telegram:
       long_running_notifications: true
+      cleanup_progress: true

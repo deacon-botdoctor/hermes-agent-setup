@@ -1,0 +1,12 @@
+{
+  "name": "HyperFrames Media Use",
+  "source": "https://github.com/heygen-com/hyperframes",
+  "source_path": "skills/media-use",
+  "source_commit": "9ba528914dafc05c54e2191c19f99847c8f4420a",
+  "version": "0.7.108",
+  "license": "Apache-2.0",
+  "local_patches": [
+    "Replace the public support-address example with support@example.com for Golden PII neutrality."
+  ],
+  "vendored_at": "2026-08-14"
+}
