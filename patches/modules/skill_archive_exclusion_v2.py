@@ -11,13 +11,15 @@ MARKER = "HERMES_SKILL_ARCHIVE_EXCLUSION_v2"
 BACKUP_SUFFIX = ".bak-pre-skill-archive-exclusion-v2"
 
 FUNCTION_ANCHOR = "def is_excluded_skill_path(path, *, root: Optional[Path] = None) -> bool:\n"
-FUNCTION_REPLACEMENT = '''def is_excluded_skill_archive_dir_name(name: str) -> bool:
+LEGACY_PREDICATE = '    return value.startswith(("drafts-v2.shipped-", ".bak-fleet-package-")) or value == ".bak-fleet-package"\n'
+ARCHIVE_PREDICATE = '    return value.startswith(("drafts-v2.shipped-", "drafts-v2.pulled-", "drafts-v2.stale-")) or ".bak-fleet-package-" in value or value.endswith(".bak-fleet-package")\n'
+FUNCTION_REPLACEMENT = f'''def is_excluded_skill_archive_dir_name(name: str) -> bool:
     """Return True for preserved package snapshots that are not live skills.
 
     # HERMES_SKILL_ARCHIVE_EXCLUSION_v2
     """
     value = str(name)
-    return value.startswith(("drafts-v2.shipped-", ".bak-fleet-package-")) or value == ".bak-fleet-package"
+{ARCHIVE_PREDICATE.rstrip()}
 
 
 def is_excluded_skill_path(path, *, root: Optional[Path] = None) -> bool:
@@ -48,7 +50,13 @@ COMPACT_WALK_NEW = "        dirs[:] = [d for d in dirs if d not in EXCLUDED_SKIL
 
 def patch_source(source: str) -> Optional[str]:
     if MARKER in source:
-        return None
+        if source.count(ARCHIVE_PREDICATE) == 1:
+            return None
+        if source.count(LEGACY_PREDICATE) != 1:
+            raise RuntimeError("[skill_archive_exclusion] marked predicate drift")
+        patched = source.replace(LEGACY_PREDICATE, ARCHIVE_PREDICATE, 1)
+        ast.parse(patched)
+        return patched
     path_old = PATH_OLD if PATH_OLD in source else COMPACT_PATH_OLD
     walk_old, walk_new = (WALK_OLD, WALK_NEW) if WALK_OLD in source else (COMPACT_WALK_OLD, COMPACT_WALK_NEW)
     for label, anchor in (("function", FUNCTION_ANCHOR), ("path", path_old), ("walk", walk_old)):

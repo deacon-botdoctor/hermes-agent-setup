@@ -2021,7 +2021,7 @@ def _storage_headroom(home: Path, used_pct: int | None) -> dict[str, Any] | None
     return headroom
 
 
-def _storage_snapshot(home: Path) -> dict[str, Any]:
+def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict[str, Any]:
     """Observe volume pressure and the existing retention owner, without scanning files."""
     storage: dict[str, Any] = {
         "schema_version": 1, "measured_at": utc_now(), "status": "unknown",
@@ -2060,7 +2060,9 @@ def _storage_snapshot(home: Path) -> dict[str, Any]:
         "planned_reclaim_bytes": 0, "deleted_reclaim_bytes": 0,
         "errors_count": 0, "protected_runtime_count": 0,
     }
-    path = home / "state/disk-retention-last.json"
+    # Receipt ownership may be profile-local while disk and resource ownership stay host-local.
+    retention_home = home if retention_home is None else retention_home
+    path = retention_home / "state/disk-retention-last.json"
     try:
         if path.is_symlink() or not path.is_file():
             if path.exists() or path.is_symlink():
@@ -2077,7 +2079,7 @@ def _storage_snapshot(home: Path) -> dict[str, Any]:
                     or receipt.get("mode") not in {"apply", "dry-run"}
                     or not isinstance(receipt.get("hermes_home"), str)
                     or not Path(receipt["hermes_home"]).is_absolute()
-                    or Path(str(receipt.get("hermes_home") or "")).resolve() != home.resolve()):
+                    or Path(str(receipt.get("hermes_home") or "")).resolve() != retention_home.resolve()):
                 raise ValueError("wrong retention receipt")
             checked = receipt.get("checked_at")
             stamp = datetime.fromisoformat(str(checked).replace("Z", "+00:00"))
@@ -2123,7 +2125,7 @@ def _storage_snapshot(home: Path) -> dict[str, Any]:
     return storage
 
 
-def _snapshot_payload(home: Path) -> dict[str, Any]:
+def _snapshot_payload(home: Path, *, retention_home: Path | None = None) -> dict[str, Any]:
     leases, invalid = load_leases(home)
     intents, invalid_intents = load_intents(home)
     now = epoch_now()
@@ -2164,7 +2166,7 @@ def _snapshot_payload(home: Path) -> dict[str, Any]:
         snapshot_status = "invalid"
     elif coverage["status"] == "gap":
         snapshot_status = "fail"
-    storage = _storage_snapshot(home)
+    storage = _storage_snapshot(home, retention_home=retention_home)
     if storage["pressure_status"] in {"warn", "fail"}:
         failure_causes.append("storage_pressure")
     if storage["retention"]["status"] in {"warn", "block", "error"}:
@@ -2217,10 +2219,10 @@ def _add_failure_cause(payload: dict[str, Any], cause: str) -> None:
         causes.append(cause)
 
 
-def snapshot(home: Path) -> dict[str, Any]:
+def snapshot(home: Path, *, retention_home: Path | None = None) -> dict[str, Any]:
     with _registry_lock(home, "operation.lock"):
         with _registry_lock(home):
-            return _write_receipt(home, _snapshot_payload(home))
+            return _write_receipt(home, _snapshot_payload(home, retention_home=retention_home))
 
 
 def finish(home: Path, *, task_id: str, apply: bool) -> dict[str, Any]:
@@ -2320,12 +2322,12 @@ def _finish(home: Path, *, task_id: str, apply: bool) -> dict[str, Any]:
     return _write_receipt(home, payload)
 
 
-def reconcile(home: Path, *, apply: bool) -> dict[str, Any]:
+def reconcile(home: Path, *, apply: bool, retention_home: Path | None = None) -> dict[str, Any]:
     with _registry_lock(home, "operation.lock"):
-        return _reconcile(home, apply=apply)
+        return _reconcile(home, apply=apply, retention_home=retention_home)
 
 
-def _reconcile(home: Path, *, apply: bool) -> dict[str, Any]:
+def _reconcile(home: Path, *, apply: bool, retention_home: Path | None = None) -> dict[str, Any]:
     with _registry_lock(home):
         leases, invalid = load_leases(home)
         intents, invalid_intents = load_intents(home)
@@ -2478,7 +2480,7 @@ def _reconcile(home: Path, *, apply: bool) -> dict[str, Any]:
                 path.unlink(missing_ok=True)
             elif apply:
                 _atomic_json(path, lease)
-    payload = _snapshot_payload(home)
+    payload = _snapshot_payload(home, retention_home=retention_home)
     payload.update(
         {
             "operation": "reconcile",
@@ -2546,7 +2548,12 @@ def _parser() -> argparse.ArgumentParser:
 
     reconcile_parser = sub.add_parser("reconcile")
     reconcile_parser.add_argument("--apply", action="store_true")
-    sub.add_parser("snapshot")
+    snapshot_parser = sub.add_parser("snapshot")
+    for storage_parser in (reconcile_parser, snapshot_parser):
+        storage_parser.add_argument(
+            "--retention-home", type=Path,
+            help="Existing retention receipt owner; defaults to --hermes-home. Does not redirect disk or registry state.",
+        )
     return parser
 
 
@@ -2591,9 +2598,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.operation == "renew-lease":
             payload = renew_lease(home, lease_id=args.lease_id, ttl=args.ttl)
         elif args.operation == "reconcile":
-            payload = reconcile(home, apply=args.apply)
+            payload = reconcile(home, apply=args.apply, retention_home=args.retention_home)
         else:
-            payload = snapshot(home)
+            payload = snapshot(home, retention_home=args.retention_home)
         print(json.dumps(payload, indent=2, sort_keys=True))
         return 2 if payload.get("status") in {"fail", "invalid", "error"} else 0
     except (ValueError, RuntimeError) as exc:
