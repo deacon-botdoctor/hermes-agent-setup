@@ -1,9 +1,9 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74",
+    "digest": "de963ad5538903552c1e91f8ad0617f960dd3b9eb04f58c7f4239b7d46e2cbac",
     "file_count": 125
   },
-  "baseline_wiring_digest": "da31183806fe2ca357729ccfed71096f73f7c968c1b9e472df332b1bb676917d",
+  "baseline_wiring_digest": "15f008686aaf0d003c907e1fcba49d4f99c9fae577bc97a19ce62d58a3767abd",
   "canonical_upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "d488ab4d9edb0320f324f512f78d5c66383ae6d49e8358f576df709c8e0ce674",
-  "golden_sha": "6db8386e225d9f16e77ab747609c1017cb7e4f70",
+  "deployment_digest": "ea9e888365a3cf46d2702107a5058382163455f3b69b3ddc2dea796313c39e66",
+  "golden_sha": "2de25a43f5ac2fec1f926347a01683fa816ab3d0",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
   },
-  "release": "botdoctor-hermes-2026.09.06-golden-6db8386e",
+  "release": "botdoctor-hermes-2026.09.06-golden-2de25a43",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "ced00952a9d5e52d7d9cd9daf3b29f480ef51222d43a306e78b612f3f0804dc0",
+  "runtime_payload_digest": "e5ebaf4cc99697d569044d2ecf0df24236b9656cf029abc69ea10b74841e3341",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Runtime assembly inputs are unchanged from the two verified Golden432287ef public builds (49 fresh patches, 0 repeat; private CPython 3.11.15 / SQLite 3.53.1). Fresh current-release verification reproduces the same 125-file fingerprint 0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74.",
-    "golden_suite": "Reviewed Golden 6db8386e225d9f16e77ab747609c1017cb7e4f70; manager-gate and steward owner fixes pass 294 focused tests and independent CLI T1\u2013T3. No production activation claimed."
+    "clean_upstream_rehearsal": "Fresh current-release public assembly applied 49 patches, then repeated with 0 additional patches; private CPython 3.11.15 / SQLite 3.53.1 produced the 125-file fingerprint de963ad5538903552c1e91f8ad0617f960dd3b9eb04f58c7f4239b7d46e2cbac.",
+    "golden_suite": "Canonical Golden 2de25a43f5ac2fec1f926347a01683fa816ab3d0 includes the merged Host Audit source updates; the public capsule records the exact two deployable blob changes. No production activation claimed."
   }
 }
