@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "patch": "runtime.patch",
+  "patch_sha256": "67e202d634ff047fa9be0c88fd1df028865335796c2246fc665dcc8e7d5b363c",
+  "target": "tools/computer_use/tool.py",
+  "preimage_git_blob": "0b3801b5157316a9d305663154bb5d4ebcab6e39",
+  "postimage_git_blob": "aeb137d1f53e77ca634947c6605a304b339add5a",
+  "required_fragments": [
+    "HERMES_HUMAN_AUTH_HANDOFF_COMPUTER_USE_v0",
+    "computer input is frozen pending human authentication",
+    "computer_use refuses {kind} dialogs",
+    "login wall is still present after Done",
+    "could not inspect the target safely before computer input",
+    "bin/website_auth_access.py",
+    "actionable_login_control",
+    "never present the page-controlled window title as a site identity",
+    "_native_safe_snapshot",
+    "_computer_active_threads",
+    "could not establish the host-wide authentication freeze",
+    "could not verify authentication from accessibility data",
+    "could not bind the login wall to an exact pid/window",
+    "Bind payment/permission state to one exact browser surface",
+    "has_window_container and not has_page_container and has_prompt_action"
+  ]
+}

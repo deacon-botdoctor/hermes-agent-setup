@@ -10,6 +10,7 @@ import json
 import math
 import os
 import sqlite3
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -31,6 +32,39 @@ _DELIVERY_FAILURE: contextvars.ContextVar[Any] = contextvars.ContextVar(
 _GENERIC_AGENT_ERROR = "sorry, i encountered an unexpected error"
 
 
+def wal_reset_bug_fixed(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> bool:
+    current = tuple((list(version) + [0, 0, 0])[:3])
+    return (
+        current >= (3, 51, 3)
+        or (3, 50, 7) <= current < (3, 51, 0)
+        or (3, 44, 6) <= current < (3, 45, 0)
+    )
+
+
+def safe_journal_mode(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> str:
+    if _is_linux_platform():
+        return "DELETE"
+    return "WAL" if wal_reset_bug_fixed(version) else "DELETE"
+
+
+def _is_linux_platform() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def require_safe_journal_mode(connection: sqlite3.Connection, *, allow_initialize: bool = False) -> None:
+    effective = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+    expected = safe_journal_mode()
+    # Existing DELETE is safe on every supported version. Existing WAL must
+    # satisfy the current safety policy; refuse unsafe state without migrating it.
+    if not allow_initialize and (effective == "DELETE" or effective == expected):
+        return
+    if effective != expected and allow_initialize:
+        effective = str(connection.execute(f"PRAGMA journal_mode={expected}").fetchone()[0]).upper()
+    if effective != expected:
+        connection.close()
+        raise sqlite3.DatabaseError(f"unsafe journal mode: expected {expected}, found {effective}")
+
+
 def _path() -> Path:
     return Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")) / "state" / "telegram-transactions.sqlite3"
 
@@ -38,8 +72,9 @@ def _path() -> Path:
 def _connect() -> sqlite3.Connection:
     path = _path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    allow_initialize = not path.exists() or path.stat().st_size == 0
     db = sqlite3.connect(path, timeout=0.2)
-    db.execute("PRAGMA journal_mode=WAL")
+    require_safe_journal_mode(db, allow_initialize=allow_initialize)
     db.executescript("""
         CREATE TABLE IF NOT EXISTS events (
           event_id TEXT PRIMARY KEY, transaction_id TEXT NOT NULL, event_type TEXT NOT NULL,
@@ -57,30 +92,37 @@ def _connect() -> sqlite3.Connection:
     return db
 
 
-def _append(tx: str, kind: str, **values: Any) -> bool:
+def _insert(db: sqlite3.Connection, tx: str, kind: str, **values: Any) -> bool:
     payload = values.pop("detail", {})
     event_id = hashlib.sha256(f"{tx}:{kind}".encode()).hexdigest()
     occurred_at = values.get("occurred_at")
     if occurred_at is None:
         occurred_at = time.time()
+    inserted = db.execute(
+        "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (
+            event_id,
+            tx,
+            kind,
+            occurred_at,
+            values.get("run_id"),
+            values.get("inbound_update_id"),
+            values.get("outbound_message_id"),
+            values.get("chat_id"),
+            values.get("thread_id"),
+            json.dumps(payload, sort_keys=True, default=str),
+        ),
+    )
+    return inserted.rowcount == 1
+
+
+def _append(tx: str, kind: str, **values: Any) -> bool:
     try:
         with _connect() as db:
-            db.execute(
-                "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    event_id,
-                    tx,
-                    kind,
-                    occurred_at,
-                    values.get("run_id"),
-                    values.get("inbound_update_id"),
-                    values.get("outbound_message_id"),
-                    values.get("chat_id"),
-                    values.get("thread_id"),
-                    json.dumps(payload, sort_keys=True, default=str),
-                ),
-            )
-        return True
+            inserted = _insert(db, tx, kind, **values)
+        # A new run needs newly recorded boundaries. Other receipts remain
+        # idempotent, including external delivery acceptance acknowledgements.
+        return inserted or kind not in {"received", "run_started"}
     except (OSError, sqlite3.Error):
         return False
 
@@ -96,20 +138,25 @@ def begin(event: Any, agent_id: str) -> str | None:
     if platform != "telegram" or update_id is None:
         return None
     tx = hashlib.sha256(f"telegram:{agent_id}:{update_id}".encode()).hexdigest()
-    if not _append(
-        tx,
-        "received",
-        inbound_update_id=str(update_id),
-        chat_id=str(getattr(source, "chat_id", "")),
-        thread_id=str(getattr(source, "thread_id", "") or ""),
-        detail={
-            "inbound_message_id": str(getattr(event, "message_id", "") or ""),
-            "sender_user_id": str(getattr(source, "user_id", "") or ""),
-        },
-    ):
-        return None
     run_id = uuid.uuid4().hex
-    if not _append(tx, "run_started", run_id=run_id):
+    try:
+        with _connect() as db:
+            if not _insert(
+                db,
+                tx,
+                "received",
+                inbound_update_id=str(update_id),
+                chat_id=str(getattr(source, "chat_id", "")),
+                thread_id=str(getattr(source, "thread_id", "") or ""),
+                detail={
+                    "inbound_message_id": str(getattr(event, "message_id", "") or ""),
+                    "sender_user_id": str(getattr(source, "user_id", "") or ""),
+                },
+            ) or not _insert(db, tx, "run_started", run_id=run_id):
+                # Neither boundary may survive a duplicate or failed admission.
+                db.rollback()
+                return None
+    except (OSError, sqlite3.Error):
         return None
     _CURRENT.set((tx, run_id))
     try:
@@ -424,7 +471,7 @@ def classify(transaction_id: str) -> dict[str, Any]:
         "Failed"
         if {"failed", "run_failure_observed"} & kinds
         else "Replied"
-        if "telegram_accepted" in kinds
+        if {"telegram_accepted", "external_telegram_accepted"} & kinds
         else "Pending"
     )
     return {"transaction_id": transaction_id, "status": status, "events": rows}

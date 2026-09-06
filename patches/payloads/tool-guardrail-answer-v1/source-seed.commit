@@ -1,0 +1,8 @@
+tree 1d32ec7c99dcce2fc96f9b46197f9ed7809ed057
+parent 852072479f23f33275410156d13fa8cff5bbb729
+author deacon-botdoctor <291411030+deacon-botdoctor@users.noreply.github.com> 1788487226 -0500
+committer deacon-botdoctor <291411030+deacon-botdoctor@users.noreply.github.com> 1788487226 -0500
+
+chore: backport case-colliding contributor cleanup
+
+Backports upstream fcdae2cf0bd1ae2f6b448ba134defb2c3e076396 onto the reviewed Bot Doctor Hermes 0.21 runtime-policy seed.

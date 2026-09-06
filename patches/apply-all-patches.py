@@ -32,7 +32,11 @@ def _runtime_fingerprint_matches(runtime_dir: Path, fingerprint: dict) -> bool:
         return [line.strip() for line in proc.stdout.splitlines() if line.strip()] if proc.returncode == 0 else None
 
     changed: set[str] = set()
-    for args in (("diff", "--name-only"), ("diff", "--cached", "--name-only", "HEAD"), ("ls-files", "--others", "--exclude-standard")):
+    for args in (
+        ("diff", "--name-only"),
+        ("diff", "--cached", "--name-only", "HEAD"),
+        ("ls-files", "--others", "--exclude-standard"),
+    ):
         paths = git_lines(*args)
         if paths is None:
             return False
@@ -233,6 +237,72 @@ def _host_level_target_absent(entry: dict, hermes_dir: Path) -> bool:
     return True
 
 
+def _native_carrier_postimage_verified(hermes_dir: Path, patches_dir: Path, name: str):
+    """Read-only exact native carrier proof where old text markers do not exist."""
+    import hashlib
+    import importlib.util
+    import json
+    import subprocess
+
+    modules = {
+        "tool_guardrail_answer_carrier_v1": "tool_guardrail_answer_carrier_v1",
+        "durable_drain_runtime_v1": "durable_drain_inbox_carrier_v1",
+        "platform_delivery_drain_v1": "platform_delivery_drain_v1",
+    }
+    if name not in modules:
+        return None
+    head = subprocess.run(["git", "-C", str(hermes_dir), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=False)
+    if head.returncode or head.stdout.strip() != "d3630f853239e8c41ce7201e09fbdf39bcbc5431":
+        return None
+    try:
+        path = patches_dir / "modules" / (modules[name] + ".py")
+        spec = importlib.util.spec_from_file_location("_native_postverify_" + name, path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        if name == "tool_guardrail_answer_carrier_v1":
+            manifest = mod._load_d363_manifest()  # validates payload checksum and provenance
+            marker = hermes_dir / mod.D363_MARKER_RELATIVE
+            return (not marker.is_symlink() and marker.is_file()
+                    and mod._d363_marker_is_valid(json.loads(marker.read_text()), manifest)
+                    and mod._d363_postimage_variant(hermes_dir, manifest) is not None)
+        if name == "platform_delivery_drain_v1":
+            target = hermes_dir / "gateway/run_shutdown.py"
+            return (not target.is_symlink() and target.is_file()
+                    and hashlib.sha256(target.read_bytes()).hexdigest() in mod._NATIVE_IMAGES.values())
+        manifest = json.loads((mod.NATIVE_PAYLOAD_DIR / "manifest.json").read_text())
+        if manifest.get("schema_version") != 1 or manifest.get("base_commit") != mod.NATIVE_BASE_COMMIT:
+            return False
+        patch = manifest.get("patch")
+        if not isinstance(patch, str) or Path(patch).name != patch:
+            return False
+        if mod._sha256(mod.NATIVE_PAYLOAD_DIR / patch) != manifest.get("patch_sha256"):
+            return False
+        post = manifest.get("postimage_sha256")
+        variants = manifest.get("postimage_sha256_variants", [])
+        if not isinstance(post, dict) or not post or not isinstance(variants, list):
+            return False
+        if any(not isinstance(v, dict) or set(v) != set(post) for v in variants):
+            return False
+        def matches(images):
+            for relative, expected in images.items():
+                rel = Path(relative)
+                if rel.is_absolute() or ".." in rel.parts:
+                    return False
+                target = hermes_dir / rel
+                if target.is_symlink():
+                    return False
+                if expected is None:
+                    if target.exists():
+                        return False
+                elif not target.is_file() or mod._sha256(target) != expected:
+                    return False
+            return True
+        return any(matches(images) for images in [post, *variants])
+    except Exception:
+        return False
+
+
 def _post_verify_markers(hermes_dir: Path, patches_dir: Path, results: list) -> list:
     """Marker-verify APPLIED/IDEMPOTENT outcomes so a silent anchor-miss can
     never be recorded as success again (2026-07-02 v0.18.0 bump lesson: 50
@@ -245,13 +315,11 @@ def _post_verify_markers(hermes_dir: Path, patches_dir: Path, results: list) -> 
         import importlib.util
         import subprocess
 
-        import yaml
-
         ubr_path = patches_dir.parent / "bin" / "upstream-bump-rehearsal.py"
         spec = importlib.util.spec_from_file_location("_ubr_verify", str(ubr_path))
         ubr = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(ubr)
-        registry = yaml.safe_load((patches_dir / "registry.yaml").read_text())["patches"]
+        registry = ubr.parse_registry(patches_dir / "registry.yaml")
     except Exception as e:
         print(f"[post_verify] skipped (rehearsal harness/registry unavailable: {e})")
         return []
@@ -286,6 +354,13 @@ def _post_verify_markers(hermes_dir: Path, patches_dir: Path, results: list) -> 
                 src = mod_path.read_text()
             except Exception:
                 pass
+        native_verified = _native_carrier_postimage_verified(hermes_dir, patches_dir, name)
+        if native_verified is not None:
+            r["marker_verified"] = bool(native_verified)
+            if not native_verified:
+                r["status"] = "ANCHOR-MISS"
+                suspects.append(name)
+            continue
         try:
             markers, how = ubr.derive_markers(entry, src)
         except Exception:
@@ -380,9 +455,7 @@ _SNAPSHOT_EXCLUDE_NAMES = {
     "memory.db-shm",
 }
 _SNAPSHOT_FILE_SIZE_CAP = 5 * 1024 * 1024
-_RETAINED_RUNTIME_BACKUP_SUFFIXES = (
-    ".bak-pre-telegram-transaction-canary-v1",
-)
+_RETAINED_RUNTIME_BACKUP_SUFFIXES = (".bak-pre-telegram-transaction-canary-v1",)
 
 
 def _hermes_home_for(hermes_dir: Path) -> Path:
@@ -480,11 +553,7 @@ def _runtime_backup_paths(hermes_dir: Path) -> set[Path]:
 
 def _runtime_file_paths(hermes_dir: Path) -> set[Path]:
     """Return the exact pre-apply file set relative to the runtime root."""
-    return {
-        path.relative_to(hermes_dir)
-        for path in hermes_dir.rglob("*")
-        if path.is_file()
-    }
+    return {path.relative_to(hermes_dir) for path in hermes_dir.rglob("*") if path.is_file()}
 
 
 def _remove_new_runtime_backups(
@@ -519,10 +588,7 @@ def _remove_new_runtime_backups(
         except ValueError:
             continue
         source_runtime_relative = source.relative_to(hermes_dir)
-        if (
-            str(source_relative) not in snapshot_files
-            and source_runtime_relative in preexisting_files
-        ):
+        if str(source_relative) not in snapshot_files and source_runtime_relative in preexisting_files:
             continue
         (hermes_dir / relative).unlink()
         removable.append(str(relative))
@@ -734,12 +800,24 @@ def main():
         self_sha = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         provenance: dict = {"verified": False}
         manifest_script = Path(__file__).resolve().parent.parent / "bin" / "runtime-payload-manifest.py"
+        source_manifest = None
         if manifest_script.exists():
             golden_repo = manifest_script.parent.parent
-            source_manifest = golden_repo / "runtime-payload-source-manifest.json"
-            status_proc = None if source_manifest.exists() else subprocess.run(
-                ["git", "-C", str(golden_repo), "status", "--porcelain"],
-                text=True, capture_output=True, timeout=30,
+            source_manifest_override = os.environ.get("HERMES_EXACT_SOURCE_MANIFEST", "").strip()
+            source_manifest = (
+                Path(source_manifest_override).expanduser().resolve()
+                if source_manifest_override
+                else golden_repo / "runtime-payload-source-manifest.json"
+            )
+            status_proc = (
+                None
+                if source_manifest.exists()
+                else subprocess.run(
+                    ["git", "-C", str(golden_repo), "status", "--porcelain"],
+                    text=True,
+                    capture_output=True,
+                    timeout=30,
+                )
             )
             if status_proc is not None and status_proc.returncode == 0 and status_proc.stdout.strip():
                 provenance["error"] = "Golden source worktree is dirty; refusing exact provenance"
@@ -757,6 +835,8 @@ def main():
                     manifest_cmd.extend(["--source-manifest", str(source_manifest)])
                 if pre_apply_clean_base and patch_run_verified:
                     manifest_cmd.extend(["--runtime-dir", str(hermes_dir)])
+                    if os.environ.get("HERMES_EXACT_ASSEMBLY_FINGERPRINT") == "1":
+                        manifest_cmd.append("--exact-assembly")
                 manifest_proc = subprocess.run(
                     manifest_cmd,
                     text=True,
@@ -880,4 +960,6 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = main()
+    if exit_code:
+        raise SystemExit(exit_code)

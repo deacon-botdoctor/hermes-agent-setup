@@ -1,0 +1,19 @@
+{
+  "cpython-3.11.15-darwin-aarch64-none": {
+    "name": "cpython",
+    "arch": {
+      "family": "aarch64",
+      "variant": null
+    },
+    "os": "darwin",
+    "libc": "none",
+    "major": 3,
+    "minor": 11,
+    "patch": 15,
+    "prerelease": "",
+    "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20260602/cpython-3.11.15%2B20260602-aarch64-apple-darwin-install_only_stripped.tar.gz",
+    "sha256": "f1461690377000ee2161af52db780b7c1a200549fff7c8064e47e1ee1832265b",
+    "variant": null,
+    "build": "20260602"
+  }
+}

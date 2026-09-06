@@ -36,7 +36,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer as FastMCP
 
 SERVER_NAME = "capability-router"
 mcp = FastMCP(SERVER_NAME)
@@ -238,10 +238,11 @@ def _load_runtime_active_mcp_servers() -> set[str]:
 
 
 def _is_installed(cap: dict[str, Any], declared: set[str]) -> bool:
-    """Return the legacy ``installed`` view of current invocation readiness.
+    """Return whether a capability remains discoverable on this host.
 
-    A backend capability is ready when its server is eager or active in this
-    gateway process. Catalog/meta entries without a server are always ready.
+    Backend capabilities require a configured server. Catalog/meta entries
+    without a server remain discoverable, but availability marks them
+    reference-only and never invokable.
     """
     srv = cap.get("mcp_server")
     if not srv:
@@ -274,9 +275,13 @@ def _capability_availability(cap: dict[str, Any], active: set[str] | None = None
     srv = cap.get("mcp_server")
     if not srv:
         return {
-            "availability": "catalog",
-            "can_invoke_now": True,
-            "route_hint": "Catalog/meta capability; no backend MCP server required.",
+            "availability": "reference",
+            "can_invoke_now": False,
+            "activation_required": False,
+            "route_hint": (
+                "Reference-only routing guidance; inspect its policy and use the "
+                "named native tool, skill, script, or owner lane."
+            ),
         }
     if srv in active and str(srv) in _load_policy_allowed_mcp_servers() and _router_platforms_with_backend(str(srv)):
         return {

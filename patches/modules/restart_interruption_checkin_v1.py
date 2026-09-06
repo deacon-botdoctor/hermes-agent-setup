@@ -14,9 +14,21 @@ SILENT_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v4"
 CONTEXTUAL_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v5"
 FILTERED_CONTEXTUAL_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v6"
 MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_v7"
+D363_STARTUP_MARKER = "HERMES_RESTART_INTERRUPTION_CHECKIN_D363_v1"
 SHUTDOWN_NOTICE_MARKER = "HERMES_RESTART_NOTICE_NO_FALSE_CHECKIN_v1"
 BACKUP_SUFFIX = ".bak-pre-restart-interruption-checkin-v7"
 METHOD_ANCHOR = "    def _schedule_resume_pending_sessions(self, platform=None) -> int:\n"
+D363_STARTUP_METHOD = '''    def _schedule_resume_pending_sessions(self, platform=None) -> int:
+        """Leave side-effect-ambiguous interrupted turns for a real user turn.
+
+        Delivery-ledger recovery runs before this method and clears markers for
+        already-produced answers. Every remaining restart marker denotes an
+        interrupted agent turn, so never synthesize another agent event during
+        startup or adapter reconnect.
+        """
+        # HERMES_RESTART_INTERRUPTION_CHECKIN_D363_v1
+        return 0
+'''
 SCHEDULER_DOC_OLD = '''        """Auto-continue fresh restart-interrupted sessions after startup.
 
         ``resume_pending`` already preserves the transcript AND the existing
@@ -232,14 +244,14 @@ HELPER_PREFIX = '''    # [HERMES_RESTART_INTERRUPTION_CHECKIN_v3]
             "confirm the last step. I didn’t repeat it. Do you still need me to finish it?"
         )
 '''
-INTERNAL_HANDOFF_FILTER = '''                if summary.startswith((
+INTERNAL_HANDOFF_FILTER = """                if summary.startswith((
                     "[CONTEXT COMPACTION",
                     "[CONTEXT SUMMARY]",
                     "[PRIOR CONTEXT",
                     "[INTERNAL_CONTINUITY",
                 )):
                     continue
-'''
+"""
 V5_HELPER_PREFIX = HELPER_PREFIX.replace(INTERNAL_HANDOFF_FILTER, "").replace(
     PRIOR_MARKER,
     CONTEXTUAL_MARKER,
@@ -488,6 +500,17 @@ PRIMARY_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN = """\
 
                         # Rebuild channel directory with the new adapter
 """
+PRIMARY_RECONNECT_SUCCESS_LATEST_BLOCK = """\
+                        logger.info("✓ %s reconnected successfully", platform.value)
+
+                        # Final responses rejected while this adapter was down
+"""
+PRIMARY_RECONNECT_SUCCESS_LATEST_BLOCK_WITH_DRAIN = """\
+                        logger.info("✓ %s reconnected successfully", platform.value)
+                        self._schedule_post_startup_drain()
+
+                        # Final responses rejected while this adapter was down
+"""
 PROFILE_RECONNECT_SUCCESS_BLOCK = """                            logger.info(
                                 "✓ %s reconnected (profile: %s)",
                                 platform.value,
@@ -502,6 +525,21 @@ PROFILE_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN = """                            logg
                             )
                             self._schedule_post_startup_drain()
                             return
+"""
+PROFILE_RECONNECT_SUCCESS_LATEST_BLOCK = """                            logger.info(
+                                "✓ %s reconnected (profile: %s)",
+                                platform.value,
+                                profile_name,
+                            )
+                            await self._redeliver_failed_obligations_for_platform(
+"""
+PROFILE_RECONNECT_SUCCESS_LATEST_BLOCK_WITH_DRAIN = """                            logger.info(
+                                "✓ %s reconnected (profile: %s)",
+                                platform.value,
+                                profile_name,
+                            )
+                            self._schedule_post_startup_drain()
+                            await self._redeliver_failed_obligations_for_platform(
 """
 
 STARTUP_WAIT_BLOCK_OLD = """        if tasks:
@@ -522,7 +560,7 @@ STARTUP_WAIT_BLOCK_NEW = """        if tasks:
                 results = []
 """
 NATIVE_BOUNDED_STARTUP_WAIT = "                done, pending = await asyncio.wait(tasks, timeout=timeout)\n"
-SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN = '''        hint = (
+SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN = """        hint = (
             "Your current task will be interrupted. "
             "I'll check in when the gateway is back."
             if self._restart_requested
@@ -531,10 +569,17 @@ SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN = '''        hint = (
                 "I'll check in the next time the gateway starts."
             )
         )
-'''
-SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN = f'''        # {SHUTDOWN_NOTICE_MARKER}
+"""
+SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN = f"""        # {SHUTDOWN_NOTICE_MARKER}
         hint = "Your current task will be interrupted."
-'''
+"""
+SHUTDOWN_NOTICE_WITH_RESUME_PROMPT = """        hint = (
+            "Your current task will be interrupted. "
+            "Send any message after restart and I'll try to resume where you left off."
+            if self._restart_requested
+            else "Your current task will be interrupted."
+        )
+"""
 
 TEST_REPLACEMENTS = {
     "test_startup_auto_resume_schedules_fresh_pending_sessions": """@pytest.mark.asyncio
@@ -880,7 +925,7 @@ async def test_restart_checkin_never_runs_interrupted_agent():
 
 
 def _silent_pending_runtime_test(name: str) -> str:
-    return f'''@pytest.mark.asyncio
+    return f"""@pytest.mark.asyncio
 async def {name}():
     runner, adapter = make_restart_runner()
     source = make_restart_source(chat_id="silent-recovery-chat")
@@ -905,7 +950,7 @@ async def {name}():
     assert adapter.sent == []
     adapter.handle_message.assert_not_awaited()
     assert pending_entry.resume_pending is True
-'''
+"""
 
 
 # Patch upstream's scheduler-specific tests to the independent product policy:
@@ -942,7 +987,7 @@ POLICY_TEST_ALTERNATIVES = {
 }
 
 NOTICE_TEST_REPLACEMENTS = {
-    "test_restart_banner_promises_a_checkin": '''@pytest.mark.asyncio
+    "test_restart_banner_promises_a_checkin": """@pytest.mark.asyncio
 async def test_restart_banner_reports_interruption_without_false_checkin():
     runner, adapter = make_restart_runner()
     runner._restart_requested = True
@@ -953,8 +998,8 @@ async def test_restart_banner_reports_interruption_without_false_checkin():
     assert adapter.sent == [
         "⚠️ Gateway restarting — Your current task will be interrupted."
     ]
-''',
-    "test_restart_notifies_home_channel_even_without_active_sessions": '''@pytest.mark.asyncio
+""",
+    "test_restart_notifies_home_channel_even_without_active_sessions": """@pytest.mark.asyncio
 async def test_restart_home_channel_notice_has_no_false_checkin():
     runner, adapter = make_restart_runner()
     runner._restart_requested = True
@@ -969,8 +1014,8 @@ async def test_restart_home_channel_notice_has_no_false_checkin():
     assert adapter.sent == [
         "⚠️ Gateway restarting — Your current task will be interrupted."
     ]
-''',
-    "test_shutdown_banner_promises_a_checkin_on_next_start": '''@pytest.mark.asyncio
+""",
+    "test_shutdown_banner_promises_a_checkin_on_next_start": """@pytest.mark.asyncio
 async def test_shutdown_banner_reports_interruption_without_false_checkin():
     runner, adapter = make_restart_runner()
     runner._restart_requested = False
@@ -981,7 +1026,7 @@ async def test_shutdown_banner_reports_interruption_without_false_checkin():
     assert adapter.sent == [
         "⚠️ Gateway shutting down — Your current task will be interrupted."
     ]
-''',
+""",
 }
 
 
@@ -1003,13 +1048,17 @@ def patch_shutdown_notice_text(content: str) -> str:
     """Do not promise a proactive check-in when recovery is user-turn driven."""
     if SHUTDOWN_NOTICE_MARKER in content:
         return content
-    if SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN not in content:
-        return content
-    return content.replace(
+    for candidate in (
         SHUTDOWN_NOTICE_WITH_FALSE_CHECKIN,
-        SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN,
-        1,
-    )
+        SHUTDOWN_NOTICE_WITH_RESUME_PROMPT,
+    ):
+        if candidate in content:
+            return content.replace(
+                candidate,
+                SHUTDOWN_NOTICE_WITHOUT_FALSE_CHECKIN,
+                1,
+            )
+    return content
 
 
 def _validate_behavior_tests(hermes_dir: Path) -> None:
@@ -1062,7 +1111,12 @@ def _patch_behavior_tests(hermes_dir: Path) -> bool:
         if f"async def {new_name}(" in patched:
             continue
         if f"async def {old_name}(" not in patched:
-            raise RuntimeError(f"restart notice test anchor drifted: {old_name}")
+            # Newer upstream consolidated the restart-notice cases and
+            # removed some historical test names. Append Golden's focused
+            # no-false-checkin case instead of coupling the safety assertion
+            # to upstream's preferred test layout.
+            patched = patched.rstrip() + "\n\n" + replacement.rstrip() + "\n"
+            continue
         updated = _replace_async_test(patched, old_name, replacement)
         if updated is None:
             raise RuntimeError(f"restart notice test anchor drifted: {old_name}")
@@ -1085,8 +1139,177 @@ def _patch_behavior_tests(hermes_dir: Path) -> bool:
     return True
 
 
+def _patch_d363_resume_tests(source: str) -> str:
+    """Replace obsolete auto-execution assertions with the native silent policy."""
+    names = {
+        "test_reconnect_reschedule_is_platform_scoped": "test_reconnect_retains_pending_on_every_platform",
+        "test_startup_restore_waits_for_resume_before_draining_inbound": "test_startup_restore_replays_durable_input_without_synthetic_resume",
+        "test_auto_resume_sets_sentinel_before_task_execution": "test_restart_pending_does_not_claim_agent_slot",
+        "test_auto_resume_runs_agent_exactly_once_through_full_path": "test_restart_pending_runs_only_after_real_user_turn",
+    }
+    for old_name, new_name in names.items():
+        tree = ast.parse(source)
+        if any(isinstance(n, ast.AsyncFunctionDef) and n.name == new_name for n in tree.body):
+            continue
+        nodes = [n for n in tree.body if isinstance(n, ast.AsyncFunctionDef) and n.name == old_name]
+        if len(nodes) != 1:
+            raise RuntimeError(f"d363 restart policy test missing: {old_name}")
+        node = nodes[0]
+        lines = source.splitlines(keepends=True)
+        body = "".join(lines[node.lineno - 1:node.end_lineno])
+        if "assert scheduled == 1" not in body:
+            raise RuntimeError(f"d363 restart policy test drift: {old_name}")
+        # Retain source/session setup and the actual adapter pipeline of the
+        # existing native tests; change only the obsolete scheduling contract.
+        if old_name == "test_reconnect_reschedule_is_platform_scoped":
+            start = body.index("    # Only the telegram session")
+            body = body[:start] + '''    assert scheduled == 0
+    assert runner._schedule_resume_pending_sessions(platform=Platform.DISCORD) == 0
+    adapter.handle_message.assert_not_called()
+    assert tg_entry.resume_pending and discord_entry.resume_pending
+    assert not runner._running_agents
+'''
+        elif old_name == "test_startup_restore_waits_for_resume_before_draining_inbound":
+            body = '''async def test_startup_restore_replays_durable_input_without_synthetic_resume():
+    """The restart policy suppresses old agent work, not newly admitted inbox work."""
+    from types import SimpleNamespace
+    runner, adapter = make_restart_runner()
+    if not hasattr(runner, "_init_durable_drain"):
+        pytest.skip("requires the durable inbox composition")
+    from gateway import drain_inbox
+    runner._startup_restore_in_progress = True
+    runner._startup_restore_tasks = []
+    runner._init_durable_drain()
+    await runner._claim_durable_producer()
+    runner._scale_to_zero_note_real_inbound = lambda: None
+    runner._hm_pre_gateway_dispatch_hook = lambda event, source: event
+    runner._is_user_authorized_for_source = lambda source: True
+    runner._is_session_running = lambda key: False
+    runner.session_store.replay_marker_status_for_session_key.return_value = False
+    runner.session_store.persist_replay_marker.return_value = True
+    runner.session_store.get_or_create_session.side_effect = lambda source, **kw: SimpleNamespace(
+        session_id="sid", session_key=runner._session_key_for_source(source))
+    seen = []
+    async def handle(event):
+        assert not event.internal
+        seen.append(event.text)
+        event.handler_succeeded = True
+    adapter.handle_message = handle
+    assert runner._schedule_resume_pending_sessions() == 0
+    source = make_restart_source(chat_id="restore-chat")
+    inbound = MessageEvent(text="hello", message_id="native-startup-hello", message_type=MessageType.TEXT, source=source)
+    assert await runner._handle_message(inbound) is None
+    assert seen == []
+    assert drain_inbox.pending_records()[0]["text"] == "hello"
+    await runner._finish_startup_restore()
+    await runner._durable_replay_task
+    assert seen == ["hello"]
+    assert not runner._startup_restore_in_progress
+    assert drain_inbox.pending_records() == []
+    runner.session_store.persist_replay_marker.assert_called_once()
+'''
+        elif old_name == "test_auto_resume_sets_sentinel_before_task_execution":
+            body = body[:body.index("    # Slow mock:")] + '''    adapter.handle_message = AsyncMock()
+    assert runner._schedule_resume_pending_sessions() == 0
+    await asyncio.sleep(0)
+    adapter.handle_message.assert_not_called()
+    assert pending_entry.resume_pending
+    assert pending_entry.session_key not in runner._running_agents
+    assert pending_entry.session_key not in runner._running_agents_ts
+'''
+        else:
+            body = body[:body.index("    scheduled = runner._schedule_resume_pending_sessions()")] + '''    assert runner._schedule_resume_pending_sessions() == 0
+    await asyncio.sleep(0)
+    assert agent_runs == []
+    assert pending_entry.resume_pending
+    assert session_key not in runner._running_agents
+    # The actual adapter/runner chain remains available for the next real user turn.
+    runner._is_user_authorized_for_source = lambda source: True
+    task = await adapter.handle_message(MessageEvent(
+        text="Please continue", message_id="real-user-after-restart", source=source))
+    task = task or adapter._session_tasks.get(session_key)
+    assert task is not None
+    await task
+    assert agent_runs == [session_key]
+    assert session_key not in runner._running_agents
+    assert session_key not in getattr(adapter, "_pending_messages", {})
+'''
+        body = body.replace("async def " + old_name + "(", "async def " + new_name + "(", 1)
+        body_tree = ast.parse(body)
+        doc = body_tree.body[0].body[0]
+        if isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant) and isinstance(doc.value.value, str):
+            body_lines = body.splitlines(keepends=True)
+            body_lines[doc.lineno - 1:doc.end_lineno] = ['    """Restart markers do not authorize synthetic execution; explicit user work remains available."""\n']
+            body = "".join(body_lines)
+        source = "".join(lines[:node.lineno - 1]) + body + "\n" + "".join(lines[node.end_lineno:])
+    compile(source, "native restart policy tests", "exec")
+    return source
+
+
+def _patch_d363_startup_scheduler(hermes_dir: Path) -> bool:
+    """Disable only d363's synthetic restart turn, retaining ledger recovery."""
+    startup_path = Path(hermes_dir) / "gateway" / "run_startup.py"
+    tests_path = Path(hermes_dir) / "tests/gateway/test_restart_resume_pending.py"
+    tests_before = tests_path.read_text() if tests_path.is_file() else None
+    tests_after = _patch_d363_resume_tests(tests_before) if tests_before is not None else None
+    source = startup_path.read_text(encoding="utf-8")
+    if D363_STARTUP_MARKER in source:
+        if D363_STARTUP_METHOD not in source:
+            raise RuntimeError("d363 restart interruption scheduler anchors drifted")
+        if tests_after != tests_before:
+            tests_path.write_text(tests_after)
+            return True
+        return False
+    try:
+        tree = ast.parse(source, filename=str(startup_path))
+    except SyntaxError as exc:
+        raise RuntimeError(f"cannot parse d363 restart startup source: {exc}") from exc
+    method = next(
+        (
+            node
+            for owner in tree.body
+            if isinstance(owner, ast.ClassDef) and owner.name == "GatewayStartupMixin"
+            for node in owner.body
+            if isinstance(node, ast.FunctionDef) and node.name == "_schedule_resume_pending_sessions"
+        ),
+        None,
+    )
+    if method is None or method.end_lineno is None:
+        raise RuntimeError("d363 restart interruption scheduler is missing")
+    method_source = ast.get_source_segment(source, method) or ""
+    required = (
+        "_resume_pending_candidates(platform)",
+        "_run_startup_resume_event",
+        "asyncio.create_task",
+    )
+    if not all(seam in method_source for seam in required):
+        raise RuntimeError("d363 restart interruption scheduler anchors drifted")
+    lines = source.splitlines(keepends=True)
+    patched = "".join(lines[: method.lineno - 1]) + D363_STARTUP_METHOD + "".join(lines[method.end_lineno :])
+    ast.parse(patched, filename=str(startup_path))
+    backup = Path(str(startup_path) + BACKUP_SUFFIX)
+    created_backup = False
+    try:
+        if not backup.exists():
+            shutil.copy2(startup_path, backup)
+            created_backup = True
+        startup_path.write_text(patched, encoding="utf-8")
+        if tests_after != tests_before:
+            tests_path.write_text(tests_after)
+    except Exception:
+        startup_path.write_text(source, encoding="utf-8")
+        if tests_before is not None and tests_after != tests_before:
+            tests_path.write_text(tests_before)
+        if created_backup:
+            backup.unlink(missing_ok=True)
+        raise
+    return True
+
+
 def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
     """Patch the native scheduler without adding a parallel task system."""
+    if (Path(hermes_dir) / "gateway" / "run_startup.py").exists():
+        return _patch_d363_startup_scheduler(Path(hermes_dir))
     _validate_behavior_tests(Path(hermes_dir))
     run_py = Path(hermes_dir) / "gateway" / "run.py"
     original = run_py.read_text(encoding="utf-8")
@@ -1097,10 +1320,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             raise RuntimeError("current restart interruption status anchors drifted")
     else:
         if FILTERED_CONTEXTUAL_MARKER in original:
-            if (
-                FILTERED_CONTEXTUAL_HELPER not in original
-                or FILTERED_CONTEXTUAL_CHECKIN_BLOCK not in original
-            ):
+            if FILTERED_CONTEXTUAL_HELPER not in original or FILTERED_CONTEXTUAL_CHECKIN_BLOCK not in original:
                 raise RuntimeError("filtered contextual restart recovery upgrade anchors drifted")
             patched = patched.replace(FILTERED_CONTEXTUAL_HELPER, HELPER, 1)
             patched = patched.replace(FILTERED_CONTEXTUAL_CHECKIN_BLOCK, CHECKIN_BLOCK, 1)
@@ -1158,11 +1378,7 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             else:
                 raise RuntimeError("legacy restart interruption check-in anchors drifted")
         else:
-            schedule_blocks = [
-                block
-                for block in (SCHEDULE_BLOCK, SCHEDULE_BLOCK_SESSION_STATE)
-                if block in original
-            ]
+            schedule_blocks = [block for block in (SCHEDULE_BLOCK, SCHEDULE_BLOCK_SESSION_STATE) if block in original]
             if METHOD_ANCHOR not in original or len(schedule_blocks) != 1:
                 raise RuntimeError("restart interruption check-in anchors drifted")
             patched = patched.replace(METHOD_ANCHOR, HELPER + METHOD_ANCHOR, 1)
@@ -1170,7 +1386,16 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
                 patched = patched.replace(SCHEDULER_DOC_OLD, SCHEDULER_DOC_NEW, 1)
             patched = patched.replace(schedule_blocks[0], CHECKIN_BLOCK, 1)
         if STARTUP_WAIT_BLOCK_NEW not in patched:
-            if NATIVE_BOUNDED_STARTUP_WAIT in patched:
+            native_deadline_wait = all(
+                seam in patched
+                for seam in (
+                    "timeout = _startup_restore_drain_timeout_secs()",
+                    "done, pending = await asyncio.wait(",
+                    "timeout=max(0.0, deadline - loop.time()),",
+                    "Startup-restore gate released after %.0fs",
+                )
+            )
+            if NATIVE_BOUNDED_STARTUP_WAIT in patched or native_deadline_wait:
                 pass
             elif STARTUP_WAIT_BLOCK_OLD not in patched:
                 raise RuntimeError("restart interruption startup-wait anchor drifted")
@@ -1188,25 +1413,49 @@ def patch_restart_interruption_checkin_v1(hermes_dir: Path) -> bool:
             1,
         )
     elif DURABLE_DRAIN_METHOD_ANCHOR in patched and POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE not in patched:
-        raise RuntimeError("post-startup durable drain anchor drifted")
+        native_reschedule = all(
+            seam in patched
+            for seam in (
+                "self._post_startup_drain_requested = True",
+                "self._post_startup_drain_requested = False",
+                '"_post_startup_drain_requested"',
+                "self._schedule_post_startup_drain()",
+            )
+        )
+        if not native_reschedule:
+            raise RuntimeError("post-startup durable drain anchor drifted")
 
     if POST_STARTUP_DRAIN_BLOCK_WITH_RESCHEDULE in patched:
         reconnect_blocks = (
             (
-                PRIMARY_RECONNECT_SUCCESS_BLOCK,
-                PRIMARY_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN,
+                (
+                    PRIMARY_RECONNECT_SUCCESS_BLOCK,
+                    PRIMARY_RECONNECT_SUCCESS_LATEST_BLOCK,
+                ),
+                (
+                    PRIMARY_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN,
+                    PRIMARY_RECONNECT_SUCCESS_LATEST_BLOCK_WITH_DRAIN,
+                ),
             ),
             (
-                PROFILE_RECONNECT_SUCCESS_BLOCK,
-                PROFILE_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN,
+                (
+                    PROFILE_RECONNECT_SUCCESS_BLOCK,
+                    PROFILE_RECONNECT_SUCCESS_LATEST_BLOCK,
+                ),
+                (
+                    PROFILE_RECONNECT_SUCCESS_BLOCK_WITH_DRAIN,
+                    PROFILE_RECONNECT_SUCCESS_LATEST_BLOCK_WITH_DRAIN,
+                ),
             ),
         )
-        for old_block, new_block in reconnect_blocks:
-            if new_block in patched:
+        for old_blocks, new_blocks in reconnect_blocks:
+            if any(block in patched for block in new_blocks):
                 continue
-            if old_block not in patched:
+            counts = tuple(patched.count(block) for block in old_blocks)
+            if sum(counts) != 1:
                 raise RuntimeError("durable drain reconnect anchor drifted")
-            patched = patched.replace(old_block, new_block, 1)
+            index = counts.index(1)
+            patched = patched.replace(old_blocks[index], new_blocks[index], 1)
 
     if patched != original:
         backup = Path(str(run_py) + BACKUP_SUFFIX)

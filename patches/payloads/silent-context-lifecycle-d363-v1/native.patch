@@ -1,0 +1,561 @@
+--- a/gateway/platforms/whatsapp_cloud.py
++++ b/gateway/platforms/whatsapp_cloud.py
+@@ -892,7 +892,7 @@
+             confirm_text = "✅ Approved." if choice == "approve" else "❌ Denied."
+         else:
+             logger.info("[whatsapp_cloud] approval resolver reported no waiter (session_key=%s) — likely already resolved", session_key)
+-            confirm_text = "⌛ Approval expired — command was not run (already timed out or resolved elsewhere)."
++            return True  # Consume stale approval without adding a transcript event.
+         await self._reply_best_effort(to, confirm_text, "[whatsapp_cloud] approval confirm failed")
+         return True
+ 
+--- a/gateway/relay/adapter.py
++++ b/gateway/relay/adapter.py
+@@ -1942,7 +1942,9 @@
+ 
+         choice = option_id if option_id in _EXEC_APPROVAL_LABELS else "deny"
+         count = resolve_gateway_approval(str(state.get("session_key") or ""), choice)
+-        label = _EXEC_APPROVAL_LABELS[choice] if count else "⌛ Approval expired — no command was waiting."
++        if not count:
++            return  # Resolver still denies stale approvals; no lifecycle chat ack.
++        label = _EXEC_APPROVAL_LABELS[choice]
+         # In-channel ack preserves the audit trail the native edit gives (the
+         # connector's prompt message can't be edited cross-platform yet).
+         self._send_lifecycle_ack(chat_id, label, ack_meta)
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -88,6 +88,12 @@
+     r"|compressed\s+~[\d,]+\s+(?:→|->)\s+~[\d,]+\s+tokens,\s+retrying"
+     r"|context\s+reduced\s+to\s+[\d,]+\s+tokens\s+\(was\s+[\d,]+\),\s+retrying"
+     r"|session\s+compressed\s+\d+\s+times"
++    # HERMES_SILENT_AUTO_CONTEXT_LIFECYCLE_v1
++    # Automatic blocked-overflow diagnostics stay available on raw local/API/
++    # webhook surfaces; human chat surfaces recover silently through the
++    # configured context lifecycle instead of delegating /new or /compress.
++    r"|context\s+is\s+over\s+the\s+compression\s+threshold.*"
++    r"compression\s+is\s+currently\s+blocked"
+     r"|rate\s+limited\.\s+waiting\s+\d"
+     r"|retrying\s+in\s+\d"
+     r"|max\s+retries\s+\(\d+\).*(?:trying\s+fallback|exhausted|invalid\s+responses)"
+@@ -682,6 +688,9 @@
+     if _gateway_surface_passes_raw_text(platform):
+         return text
+ 
++    # Completion is an internal lifecycle edge; raw surfaces returned above.
++    if event_type == "compacted":
++        return None
+     text = _redact_gateway_user_facing_secrets(text)
+     # Opt-in `compression.progress_notices` lets ROUTINE (template-derived) progress through; other noise stays.
+     if _TELEGRAM_NOISY_STATUS_RE.search(text) and not (
+--- a/gateway/slash_commands.py
++++ b/gateway/slash_commands.py
+@@ -1121,7 +1121,7 @@
+             return session_key, None
+         if session_key in self._pending_approvals:
+             self._pending_approvals.pop(session_key)
+-            return session_key, t(stale_key)
++            return session_key, "" if stale_key == "gateway.approval_expired" else t(stale_key)
+         return session_key, t(none_key)
+ 
+     async def _handle_approve_command(self, event: MessageEvent) -> Optional[str]:
+@@ -1130,8 +1130,8 @@
+         from tools.approval import resolve_gateway_approval
+         session_key, stale = self._blocking_approval_or_stale(event, "gateway.approval_expired",
+                                                               "gateway.approve.no_pending")
+-        if stale:
+-            return stale
++        if stale is not None:
++            return stale or None
+         # Args: "all", "all session", "all always", "session", "always" ("always" beats "session").
+         args = event.get_command_args().strip().lower().split()
+         choices = {_APPROVE_CHOICE_BY_ARG[a] for a in args if a in _APPROVE_CHOICE_BY_ARG}
+--- a/plugins/platforms/discord/adapter.py
++++ b/plugins/platforms/discord/adapter.py
+@@ -6270,7 +6270,10 @@ def _define_discord_view_classes() -> None:
+         async def _gate(self, interaction: discord.Interaction, *, resolved_msg: Optional[str], unauth_msg: str) -> bool:
+             """Reject (ephemerally) an already-resolved or unauthorized click; True when it may proceed."""
+             if resolved_msg is not None and self.resolved:
+-                await interaction.response.send_message(resolved_msg, ephemeral=True)
++                if resolved_msg:
++                    await interaction.response.send_message(resolved_msg, ephemeral=True)
++                else:
++                    await interaction.response.defer()
+                 return False
+             if not self._check_auth(interaction):
+                 await interaction.response.send_message(unauth_msg, ephemeral=True)
+@@ -6359,7 +6362,7 @@ def _define_discord_view_classes() -> None:
+         async def _resolve(self, interaction: discord.Interaction, choice: str, color: discord.Color, label: str):
+             """Resolve the approval via the gateway approval queue and update the embed."""
+             if not await self._gate(
+-                interaction, resolved_msg="This approval has already been resolved~",
++                interaction, resolved_msg="",
+                 unauth_msg="You're not authorized to approve commands~",
+             ):
+                 return
+@@ -6375,13 +6378,26 @@ def _define_discord_view_classes() -> None:
+                 )
+             except Exception as exc:
+                 logger.error("Failed to resolve gateway approval from button: %s", exc)
+-                count = 0
+-            if not count:
+-                color = discord.Color.dark_grey()
+-                label = "⌛ Approval expired — command was not run (already timed out or resolved elsewhere)"
++                count = None
++            if count is None:
++                await self._finalize_embed(interaction, discord.Color.dark_grey(), 'Approval could not be confirmed. Check the command status before retrying.')
++                return
++            if count == 0:
++                self._disable_all()
++                await interaction.response.edit_message(view=self)
++                return
+             await self._finalize_embed(
+                 interaction, color, f"{label} by {interaction.user.display_name}" if count else label)
+ 
++        async def on_timeout(self):
++            self.resolved = True
++            self._disable_all()
++            if self._message:
++                try:
++                    await self._message.edit(view=self)
++                except Exception:
++                    pass
++
+         @discord.ui.button(label="Allow Once", style=discord.ButtonStyle.green)
+         async def allow_once(self, interaction: discord.Interaction, button: discord.ui.Button):
+             await self._resolve(interaction, "once", discord.Color.green(), "Approved once")
+--- a/plugins/platforms/matrix/adapter.py
++++ b/plugins/platforms/matrix/adapter.py
+@@ -2380,9 +2380,7 @@
+         self._approval_prompts_by_event.pop(target_event_id, None)
+         self._approval_prompt_by_session.pop(prompt.session_key, None)
+         await self._redact_bot_approval_reactions(room_id, prompt)
+-        await self._send_invalid_reaction_feedback(
+-            room_id, target_event_id,
+-            "This approval prompt has expired. Run the command again if you still want to approve it.")
++        logger.info("Matrix approval prompt expired; stale controls removed")
+ 
+     async def _expire_matrix_model_picker_prompt(self, room_id: str, target_event_id: str, prompt: Any) -> None:
+         prompt.resolved = True
+--- a/plugins/platforms/slack/adapter.py
++++ b/plugins/platforms/slack/adapter.py
+@@ -4746,9 +4746,11 @@ class SlackAdapter(BasePlatformAdapter):
+         updated_blocks = [
+             {"type": "section", "text": {"type": "mrkdwn", "text": original_text or placeholder}},
+             {"type": "context", "elements": [{"type": "mrkdwn", "text": decision_text}]}]
++        if not decision_text:
++            updated_blocks = updated_blocks[:1]  # Remove stale controls without an expiry context.
+         try:
+             await self._get_client(channel_id, team_id=team_id).chat_update(
+-                channel=channel_id, ts=msg_ts, text=decision_text,
++                channel=channel_id, ts=msg_ts, text=decision_text or original_text or placeholder,
+                 blocks=sanitize_blocks(updated_blocks) if sanitize else updated_blocks)
+         except Exception as e:
+             logger.warning("[Slack] Failed to update %s message: %s", label, e)
+@@ -4834,12 +4836,12 @@ class SlackAdapter(BasePlatformAdapter):
+                 session_key, choice, user_name)
+         except Exception as exc:
+             logger.error("Failed to resolve gateway approval from Slack button: %s", exc)
+-            count = 0
++            count = None
+         decision_text = self._APPROVAL_DECISIONS[choice].format(user=user_name)
+-        if not count:
+-            decision_text = (
+-                "⌛ Approval expired — command was not run (already timed out or resolved elsewhere)"
+-            )
++        if count is None:
++            decision_text = 'Approval could not be confirmed. Check the command status before retrying.'
++        elif count == 0:
++            decision_text = ""
+         await self._finalize_interactive_message(
+             channel_id, msg_ts, self._section_text(message), decision_text,
+             "Command approval request", "approval", team_id or None)
+--- a/plugins/platforms/teams/adapter.py
++++ b/plugins/platforms/teams/adapter.py
+@@ -561,7 +561,7 @@
+         return await self._app.send(chat_id, fallback)
+ 
+     @staticmethod
+-    def _invoke_message(text: str) -> "InvokeResponse[AdaptiveCardActionMessageResponse]":
++    def _invoke_message(text: Optional[str]) -> "InvokeResponse[AdaptiveCardActionMessageResponse]":
+         return InvokeResponse(status=200, body=AdaptiveCardActionMessageResponse(value=text))
+ 
+     @staticmethod
+@@ -586,7 +586,7 @@
+         if not choice:
+             return self._invoke_message("Unknown action.")
+         if not has_blocking_approval(session_key):
+-            return self._invoke_card([TextBlock(text="⚠️ Approval already resolved or expired.", wrap=True)])
++            return self._invoke_message("")
+         resolve_gateway_approval(session_key, choice)
+         body = _approval_body(data.get("cmd", ""), data.get("desc", ""))
+         body.append(TextBlock(text=_APPROVAL_LABELS[choice], wrap=True, weight="Bolder"))
+--- a/plugins/platforms/telegram/adapter.py
++++ b/plugins/platforms/telegram/adapter.py
+@@ -4248,7 +4248,14 @@
+             return None
+         session_key = state.pop(key, None) if pop else state.get(key)
+         if not session_key:
+-            await query.answer(text=resolved)
++            if resolved:
++                await query.answer(text=resolved)
++            else:
++                await query.answer()
++                try:
++                    await query.edit_message_reply_markup(reply_markup=None)
++                except Exception:
++                    pass
+         return session_key
+ 
+     async def _handle_exec_approval_callback(self, query, data: str, cb: Dict[str, Any]) -> None:
+@@ -4264,7 +4271,7 @@
+             return
+         session_key = await self._claim_callback_state(
+             query, cb, self._approval_state, approval_id, "⛔ You are not authorized to approve commands.",
+-            "This approval has already been resolved.")
++            "")  # Silent stale approval; retain authorization gate.
+         if not session_key:
+             return
+         user_display = getattr(query.from_user, "first_name", "User")
+@@ -4288,8 +4295,12 @@
+             label = label_map.get(choice, "Resolved")
+             edit_text = f"{label} by {user_display}"
+         else:
+-            label = "⌛ Approval expired"
+-            edit_text = f"{label} — no command was waiting. It already timed out (and was denied) or was resolved elsewhere."
++            await query.answer()
++            try:
++                await query.edit_message_reply_markup(reply_markup=None)
++            except Exception:
++                pass
++            return
+         await query.answer(text=label)
+         await self._edit_md_quiet(query, edit_text)
+         # Typing was paused when the approval was sent; the text /approve and /deny paths resume it too.
+--- a/tests/gateway/relay/test_relay_interactive.py
++++ b/tests/gateway/relay/test_relay_interactive.py
+@@ -360,3 +360,16 @@
+     # A legacy id minted before the nonce existed (no "." segment) is still
+     # treated as ours, so a prompt in flight across an upgrade resolves.
+     assert a._minted_here("a1b2c3d4") is True
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize('count',[0,1])
++async def test_expired_exec_approval_has_no_ack(monkeypatch,count):
++    from unittest.mock import MagicMock
++    import tools.approval
++    adapter,_=_adapter()
++    adapter._send_lifecycle_ack=MagicMock()
++    adapter.resume_typing_for_chat=MagicMock()
++    monkeypatch.setattr(tools.approval,'resolve_gateway_approval',lambda *a:count)
++    await adapter._resolve_exec_approval({'session_key':'session'},'once','chat',{})
++    assert adapter._send_lifecycle_ack.call_count==count
++    assert adapter.resume_typing_for_chat.call_count==count
+--- a/tests/gateway/test_discord_view_base_parity.py
++++ b/tests/gateway/test_discord_view_base_parity.py
+@@ -77,7 +77,7 @@
+ @pytest.mark.parametrize(
+     "name,call,expected",
+     [
+-        ("exec", lambda v, i: v._resolve(i, "once", None, "x"), "This approval has already been resolved~"),
++        ("exec", lambda v, i: v._resolve(i, "once", None, "x"), None),
+         ("slash", lambda v, i: v._resolve(i, "once", None, "x"), "This prompt has already been resolved~"),
+         ("update", lambda v, i: v._respond(i, "y", None, "x"), "Already answered~"),
+         ("clarify", lambda v, i: v._resolve_choice(i, 0, "a"), "This prompt has already been answered~"),
+@@ -90,7 +90,11 @@
+     view.resolved = True
+     interaction = _interaction()
+     await call(view, interaction)
+-    interaction.response.send_message.assert_awaited_once_with(expected, ephemeral=True)
++    if expected is None:
++        interaction.response.defer.assert_awaited_once_with()
++        interaction.response.send_message.assert_not_awaited()
++    else:
++        interaction.response.send_message.assert_awaited_once_with(expected, ephemeral=True)
+ 
+ 
+ @pytest.mark.asyncio
+@@ -103,8 +107,12 @@
+     await view.on_timeout()
+     assert view.resolved is True
+     assert all(child.disabled for child in view.children)
+-    assert embed.footer == "⏱ Prompt expired — no action taken"
+-    msg.edit.assert_awaited_once_with(embed=embed, view=view)
++    if name == "exec":
++        assert not hasattr(embed, "footer")
++        msg.edit.assert_awaited_once_with(view=view)
++    else:
++        assert embed.footer == "⏱ Prompt expired — no action taken"
++        msg.edit.assert_awaited_once_with(embed=embed, view=view)
+ 
+ 
+ @pytest.mark.asyncio
+--- a/tests/gateway/test_slack_approval_buttons.py
++++ b/tests/gateway/test_slack_approval_buttons.py
+@@ -178,6 +178,32 @@
+         update_kwargs = mock_client.chat_update.call_args[1]
+         section_text = update_kwargs["blocks"][0]["text"]["text"]
+         assert len(section_text) <= 3000
++
++    @pytest.mark.asyncio
++    async def test_expired_approval_acknowledges_without_expiry_context(self):
++        adapter = _make_adapter()
++        _attach_auth_runner(adapter)
++        adapter._approval_resolved["1.3"] = False
++        ack = AsyncMock()
++        body = {
++            "message": {"ts": "1.3", "blocks": [
++                {"type": "section", "text": {"type": "mrkdwn", "text": "request"}},
++            ]},
++            "channel": {"id": "C1"},
++            "user": {"name": "alice", "id": "U_ALICE"},
++        }
++        action = {"action_id": "hermes_approve_once", "value": "session-key"}
++        client = adapter._team_clients["T1"]
++        client.chat_update = AsyncMock()
++
++        with patch("tools.approval.resolve_gateway_approval", return_value=0):
++            await adapter._handle_approval_action(ack, body, action)
++
++        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
++        ack.assert_awaited_once_with()
++        update = client.chat_update.await_args.kwargs
++        assert update["text"] == "request"
++        assert all(block["type"] != "context" for block in update["blocks"])
+ 
+     @pytest.mark.asyncio
+     async def test_global_allowlist_blocks_unauthorized_click(self, monkeypatch):
+--- a/tests/gateway/test_telegram_approval_buttons.py
++++ b/tests/gateway/test_telegram_approval_buttons.py
+@@ -209,6 +209,29 @@
+ 
+         assert "12345" not in adapter._typing_paused
+ 
++
++    @pytest.mark.asyncio
++    async def test_expired_approval_callback_acknowledges_without_notice(self):
++        adapter = _make_adapter()
++        adapter._approval_state[7] = "agent:main:telegram:group:12345:99"
++        query = AsyncMock()
++        query.data = "ea:once:7"
++        query.message = MagicMock()
++        query.message.chat_id = 12345
++        query.from_user = MagicMock(id="12345", first_name="Operator")
++        query.answer = AsyncMock()
++        query.edit_message_text = AsyncMock()
++        query.edit_message_reply_markup = AsyncMock()
++        update = MagicMock(callback_query=query)
++
++        with patch.dict(os.environ, {"TELEGRAM_ALLOWED_USERS": "*"}, clear=False):
++            with patch("tools.approval.resolve_gateway_approval", return_value=0):
++                await adapter._handle_callback_query(update, MagicMock())
++
++        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
++        query.answer.assert_awaited_once_with()
++        query.edit_message_reply_markup.assert_awaited_once_with(reply_markup=None)
++        query.edit_message_text.assert_not_awaited()
+ 
+     @pytest.mark.asyncio
+     async def test_approval_callback_escapes_dynamic_user_name(self):
+--- a/tests/gateway/test_telegram_noise_filter.py
++++ b/tests/gateway/test_telegram_noise_filter.py
+@@ -57,6 +57,14 @@
+         "⚠ Skipping concurrent compression — another path is already "
+         "compressing this session. Will retry after it finishes."
+     ),
++    # HERMES_SILENT_AUTO_CONTEXT_LIFECYCLE_v1 — automatic blocked-overflow
++    # diagnostics remain raw locally but are lifecycle noise on human chat.
++    CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE.format(
++        tokens=85_000, threshold=72_000, reason="cooldown:30"
++    ),
++    CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE.format(
++        tokens=85_000, threshold=72_000, reason="ineffective"
++    ),
+ ]
+ 
+ # Messages that must NEVER be swallowed by the compression-noise filter:
+@@ -88,18 +96,6 @@
+         "⏳ Compression skipped: could not acquire this session's "
+         "compression lock. Another compression may still be running, or "
+         "the lock check failed — try again shortly."
+-    ),
+-    # Blocked-overflow warning (#62625/#62708): the context is over the
+-    # compression threshold but compression is blocked (summary-LLM cooldown
+-    # or the anti-thrash breaker). FAILURE-CLASS — must reach chat users so
+-    # they can /new or /compress before the session dies at the hard token
+-    # limit. Formatted from the SAME template the emit site uses, so a
+-    # rewording that drifts into the noise regex fails here.
+-    CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE.format(
+-        tokens=85_000, threshold=72_000, reason="cooldown:30"
+-    ),
+-    CONTEXT_OVERFLOW_BLOCKED_WARNING_TEMPLATE.format(
+-        tokens=85_000, threshold=72_000, reason="ineffective"
+     ),
+ ]
+ 
+@@ -343,3 +339,14 @@
+     # Prose around the secret is preserved — redaction is surgical.
+     assert "here is the token you asked me to echo" in sanitized
+     assert sanitized.endswith("done.")
++
++@pytest.mark.parametrize('platform',CHAT_PLATFORMS)
++def test_compaction_done_is_internal_even_if_progress_enabled(monkeypatch,platform):
++    import gateway.run as run
++    monkeypatch.setattr(run,'_gateway_compression_progress_notices_enabled',lambda:True)
++    assert run._prepare_gateway_status_message(platform,'compacted','✓ Context compaction complete — continuing turn...') is None
++
++@pytest.mark.parametrize('platform',['local','api_server','webhook','msgraph_webhook'])
++def test_compaction_done_remains_available_to_raw_consumers(platform):
++    text='✓ Context compaction complete — continuing turn...'
++    assert _prepare_gateway_status_message(platform,'compacted',text)==text
+--- a/tests/gateway/test_whatsapp_cloud.py
++++ b/tests/gateway/test_whatsapp_cloud.py
+@@ -1400,3 +1400,16 @@
+         assert event.reply_to_text is None
+         assert event.reply_to_is_own_message is False
+ 
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize('count', [0,1])
++async def test_stale_approval_is_consumed_without_notice(monkeypatch,count):
++    import tools.approval
++    adapter=_make_adapter()
++    adapter._exec_approval_state={'approval':'session'}
++    reply=AsyncMock();adapter._reply_best_effort=reply
++    monkeypatch.setattr(tools.approval,'resolve_gateway_approval',lambda *a:count)
++    assert await adapter._handle_approval_tap('recipient',{},['ea','approval','approve']) is True
++    assert adapter._exec_approval_state=={}
++    assert reply.await_count==count
++    if count: assert reply.await_args.args[1]=='✅ Approved.'
+--- /dev/null
++++ b/tests/gateway/test_silent_lifecycle_native.py
+@@ -0,0 +1,130 @@
++"""Native approval lifecycle behavior; no SDK login or live gateway is required."""
++import ast
++import logging
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, MagicMock
++import pytest
++
++ROOT=Path(__file__).resolve().parents[2]
++
++
++def native_method(path,owner,name,**namespace):
++    """Execute the exact native method when an optional SDK is unavailable."""
++    tree=ast.parse((ROOT/path).read_text())
++    cls=next(n for n in ast.walk(tree) if isinstance(n,ast.ClassDef) and n.name==owner)
++    method=next(n for n in cls.body if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name==name)
++    module=ast.Module(body=[ast.ImportFrom(module='__future__',names=[ast.alias(name='annotations')],level=0),method],type_ignores=[])
++    ns={'logger':logging.getLogger(__name__),**namespace}
++    exec(compile(ast.fix_missing_locations(module),str(ROOT/path),'exec'),ns)
++    return ns[name]
++
++
++@pytest.mark.asyncio
++async def test_matrix_expiry_removes_state_and_controls_without_notice():
++    method=native_method('plugins/platforms/matrix/adapter.py','MatrixAdapter','_expire_matrix_approval_prompt')
++    prompt=SimpleNamespace(session_key='session',resolved=False)
++    adapter=SimpleNamespace(_approval_prompts_by_event={'event':prompt},_approval_prompt_by_session={'session':prompt},
++        _redact_bot_approval_reactions=AsyncMock(),_send_invalid_reaction_feedback=AsyncMock())
++    await method(adapter,'room','event',prompt)
++    assert prompt.resolved
++    assert not adapter._approval_prompts_by_event and not adapter._approval_prompt_by_session
++    adapter._redact_bot_approval_reactions.assert_awaited_once_with('room',prompt)
++    adapter._send_invalid_reaction_feedback.assert_not_awaited()
++
++
++@pytest.mark.asyncio
++async def test_teams_stale_callback_keeps_authorization_and_resolver_boundary(monkeypatch):
++    import tools.approval as approval
++    method=native_method('plugins/platforms/teams/adapter.py','TeamsAdapter','_on_card_action',_APPROVAL_CHOICES={'approve':'once'})
++    resolve=MagicMock();monkeypatch.setattr(approval,'resolve_gateway_approval',resolve)
++    monkeypatch.setattr(approval,'has_blocking_approval',lambda key:False)
++    adapter=SimpleNamespace(_card_action_denied=MagicMock(return_value=None),_invoke_message=lambda value:dict(status=200,value=value),_invoke_card=MagicMock())
++    ctx=SimpleNamespace(activity=SimpleNamespace(value=SimpleNamespace(action=SimpleNamespace(data={'hermes_action':'approve','session_key':'session'})),from_=SimpleNamespace()))
++    assert await method(adapter,ctx)=={'status':200,'value':''}
++    adapter._card_action_denied.assert_called_once();resolve.assert_not_called();adapter._invoke_card.assert_not_called()
++    adapter._card_action_denied.return_value='denied'
++    assert (await method(adapter,ctx))['value']=='denied'
++
++
++@pytest.mark.asyncio
++async def test_stale_slash_approval_is_consumed_without_resolving(monkeypatch):
++    import tools.approval as approval
++    from gateway.slash_commands import GatewaySlashCommandsMixin
++    adapter=GatewaySlashCommandsMixin()
++    adapter._pending_approvals={'session':object()}
++    adapter._session_key_for_source=lambda source:'session'
++    monkeypatch.setattr(approval,'has_blocking_approval',lambda key:False)
++    resolve=MagicMock();monkeypatch.setattr(approval,'resolve_gateway_approval',resolve)
++    assert await adapter._handle_approve_command(SimpleNamespace(source=object())) is None
++    assert adapter._pending_approvals=={}
++    resolve.assert_not_called()
++
++UNCONFIRMED = 'Approval could not be confirmed. Check the command status before retrying.'
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize('outcome', ['exception', 0, 1])
++async def test_discord_approval_resolution_uncertainty_keeps_guard(monkeypatch, outcome):
++    import tools.approval as approval
++    resolve = MagicMock(side_effect=RuntimeError('ambiguous') if outcome == 'exception' else None, return_value=outcome)
++    monkeypatch.setattr(approval, 'resolve_gateway_approval', resolve)
++    discord = SimpleNamespace(Color=SimpleNamespace(dark_grey=lambda: 'gray'))
++    method = native_method('plugins/platforms/discord/adapter.py', 'ExecApprovalView', '_resolve', discord=discord)
++    footer = {}
++    embed = SimpleNamespace(color='old', set_footer=lambda **kw: footer.update(kw), remove_footer=lambda: footer.clear())
++    interaction = SimpleNamespace(user=SimpleNamespace(display_name='Operator'), message=SimpleNamespace(embeds=[embed]), response=SimpleNamespace(edit_message=AsyncMock(), defer=AsyncMock(), send_message=AsyncMock()))
++    child = SimpleNamespace(disabled=False)
++    view = SimpleNamespace(resolved=False, session_key='session', children=[child], _check_auth=lambda _: True, _first_embed=lambda _: embed)
++    view._disable_all = lambda: setattr(child, 'disabled', True)
++    async def gate(*args, **kwargs):
++        return not view.resolved
++    view._gate = gate
++    # Execute the native render owner as well; legacy callback renders inline.
++    try:
++        finalize = native_method('plugins/platforms/discord/adapter.py', '_HermesView', '_finalize_embed', discord=discord)
++        async def render(*args):
++            await finalize(view, *args)
++        view._finalize_embed = render
++    except StopIteration:
++        pass
++    await method(view, interaction, 'once', 'green', 'Approved once')
++    assert view.resolved and child.disabled
++    if outcome == 'exception':
++        assert footer == {'text': UNCONFIRMED} and embed.color == 'gray'
++    elif outcome == 0:
++        assert footer == {}
++    else:
++        assert footer == {'text': 'Approved once by Operator'}
++    await method(view, interaction, 'once', 'green', 'Approved once')
++    resolve.assert_called_once_with('session', 'once')
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize('outcome', ['exception', 0, 1])
++async def test_slack_approval_resolution_uncertainty_keeps_guard(monkeypatch, outcome):
++    import tools.approval as approval
++    resolve = MagicMock(side_effect=RuntimeError('ambiguous') if outcome == 'exception' else None, return_value=outcome)
++    monkeypatch.setattr(approval, 'resolve_gateway_approval', resolve)
++    method = native_method('plugins/platforms/slack/adapter.py', 'SlackAdapter', '_handle_approval_action', sanitize_blocks=lambda blocks: blocks)
++    body = {'message': {'ts': 'stamp', 'blocks': [{'type': 'section', 'text': {'text': 'request'}}]}, 'channel': {'id': 'channel'}, 'user': {'id': 'user', 'name': 'Operator'}}
++    action = {'action_id': 'hermes_approve_once', 'value': 'session'}
++    client = SimpleNamespace(chat_update=AsyncMock())
++    finalized = AsyncMock()
++    adapter = SimpleNamespace(_approval_resolved={'stamp': False}, _workspace_message_marker=lambda *a: 'stamp', _event_team_id=lambda *a: 'team', _is_interactive_user_authorized=lambda *a, **kw: True, _get_client=lambda *a, **kw: client, _APPROVAL_CHOICES={'hermes_approve_once': 'once'}, _APPROVAL_DECISIONS={'once': 'Approved once by {user}'}, _section_text=lambda message: 'request', _finalize_interactive_message=finalized)
++    adapter._begin_interaction = AsyncMock(return_value=('team', action['action_id'], 'session', body['message'], 'stamp', 'channel', 'Operator', 'user'))
++    ack = AsyncMock()
++    await method(adapter, ack, body, action)
++    if finalized.await_count:
++        text = finalized.await_args.args[3]
++    else:
++        blocks = client.chat_update.await_args.kwargs['blocks']
++        text = next((part['text'] for block in blocks if block['type'] == 'context' for part in block['elements']), '')
++        assert all(block['type'] != 'actions' for block in blocks)
++    if outcome == 'exception':
++        assert text == UNCONFIRMED
++    elif outcome == 0:
++        assert text == ''
++    else:
++        assert 'Approved once by Operator' in text
++    assert adapter._approval_resolved == {}
++    await method(adapter, ack, body, action)
++    resolve.assert_called_once_with('session', 'once')

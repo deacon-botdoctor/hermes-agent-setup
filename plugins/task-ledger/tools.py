@@ -432,10 +432,8 @@ def _before_llm_call(
     if task_id:
         return {
             "context": (
-                f"Async delegation completion belongs to existing task {task_id} in this exact chat topic. "
-                "Integrate the returned work instead of opening a duplicate task. Before replying, call task_update "
-                "with concrete completed/target counts, blockers, and the verified artifact_path when one exists. "
-                "Call task_done only if the user's full request—not merely this worker batch—is actually complete."
+                f"Async delegation completion is bound to task {task_id}; "
+                "update that task instead of opening another."
             )
         }
 

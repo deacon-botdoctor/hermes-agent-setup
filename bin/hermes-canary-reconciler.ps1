@@ -196,7 +196,7 @@ if (-not (Test-Path -LiteralPath $selfScript)) { $missing += [ordered]@{capabili
 
 $readinessScript = Join-Path $Bin 'tool-readiness-probe.py'
 $readinessState = Join-Path $State 'tool-readiness-probe-latest.json'
-$readinessExtra = '--output ' + (PsLiteral $readinessState)
+$readinessExtra = '--smoke --output ' + (PsLiteral $readinessState)
 $readinessStatus = EnsureTask 'HermesToolReadiness' 'powershell.exe' (PythonArguments $python $readinessScript $readinessExtra) $readinessScript 30 3
 $capabilities += [ordered]@{id='tool_readiness';title='End-to-end tool readiness';detected=(Test-Path -LiteralPath $readinessScript);reasons=@('installed_probe');canary=[ordered]@{id='tool_readiness';script=$readinessScript;state=$readinessState;status=$(if(Test-Path -LiteralPath $readinessScript){'enabled'}else{'missing'});schedule=$readinessStatus}}
 if (-not (Test-Path -LiteralPath $readinessScript)) { $missing += [ordered]@{capability='tool_readiness';canary='tool_readiness';reason='script missing';script=$readinessScript} }
@@ -204,9 +204,19 @@ if (-not (Test-Path -LiteralPath $readinessScript)) { $missing += [ordered]@{cap
 $retentionScript = Join-Path $Bin 'hermes-disk-retention.py'
 $retentionState = Join-Path $State 'disk-retention-last.json'
 $retentionExtra = '--apply --json --clear-flags --home ' + (PsLiteral $HomeDir) + ' --hermes-home ' + (PsLiteral $Hermes)
-$retentionStatus = EnsureTask 'HermesDiskRetention' 'powershell.exe' (PythonArguments $python $retentionScript $retentionExtra) $retentionScript 1440 30
+$retentionStatus = EnsureTask 'HermesDiskRetention' 'powershell.exe' (PythonArguments $python $retentionScript $retentionExtra) $retentionScript 120 30
 $capabilities += [ordered]@{id='disk_retention';title='Runtime and snapshot retention';detected=$true;reasons=@('fleet_health_floor');canary=[ordered]@{id='disk_retention';script=$retentionScript;state=$retentionState;status=$(if(Test-Path -LiteralPath $retentionScript){'enabled'}else{'missing'});schedule=$retentionStatus}}
 if (-not (Test-Path -LiteralPath $retentionScript)) { $missing += [ordered]@{capability='disk_retention';canary='disk_retention';reason='script missing';script=$retentionScript} }
+
+$capacityScript = Join-Path $Bin 'hermes-windows-capacity-containment.ps1'
+$capacityConfig = Join-Path $Hermes 'config\windows-capacity-containment.json'
+$capacityStatus = $null
+if (Test-Path -LiteralPath $capacityConfig) {
+  $capacityArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $capacityScript + '" -Apply -ConfigPath "' + $capacityConfig + '"'
+  $capacityStatus = EnsureTask 'HermesWindowsCapacityContainment' 'powershell.exe' $capacityArgs $capacityScript 15 5
+  $capabilities += [ordered]@{id='windows_capacity_containment';title='Bounded Windows capacity containment';detected=$true;reasons=@('explicit_config');canary=[ordered]@{id='windows_capacity_containment';script=$capacityScript;state=(Join-Path $State 'windows-capacity-containment-latest.json');status=$(if(Test-Path -LiteralPath $capacityScript){'enabled'}else{'missing'});schedule=$capacityStatus}}
+  if (-not (Test-Path -LiteralPath $capacityScript)) { $missing += [ordered]@{capability='windows_capacity_containment';canary='windows_capacity_containment';reason='script missing';script=$capacityScript} }
+}
 
 if ($configText.Contains('mcp_servers') -or $configText.Contains('mcp:')) {
   $capabilities += [ordered]@{id='mcp';title='MCP tool servers';detected=$true;reasons=@('config:mcp');canary=[ordered]@{status='inventory_only';reason='no local canary registered yet'}}
@@ -217,10 +227,11 @@ $reconcilerStatus = EnsureTask 'HermesCanaryReconciler' 'powershell.exe' $selfTa
 $taskEvidence = @(
   (TaskEvidence 'HermesLocalSelfCheck' 15 3),
   (TaskEvidence 'HermesToolReadiness' 30 3),
-  (TaskEvidence 'HermesDiskRetention' 1440 30),
+  (TaskEvidence 'HermesDiskRetention' 120 30),
   (TaskEvidence 'HermesCanaryReconciler' 30 3)
 )
-foreach ($schedule in @($selfStatus,$readinessStatus,$retentionStatus,$reconcilerStatus)) {
+if ($capacityStatus) { $taskEvidence += TaskEvidence 'HermesWindowsCapacityContainment' 15 5 }
+foreach ($schedule in @($selfStatus,$readinessStatus,$retentionStatus,$capacityStatus,$reconcilerStatus)) {
   if ([string]$schedule -eq 'script_missing' -or [string]$schedule -like 'failed:*') {
     $failedActions += [ordered]@{action='ensure_task';status=[string]$schedule}
   }

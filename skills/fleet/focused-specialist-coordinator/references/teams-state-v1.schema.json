@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "teams.state/v1",
+  "title": "Client Teams State Card v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "tenant_id", "decision_id", "version", "supersedes", "manager",
+    "issued_by", "issued_at", "effective_at", "intent", "canonical_facts",
+    "invariants", "non_goals", "risk_tier", "affected_lanes", "required_receipts",
+    "approval_boundaries", "status"
+  ],
+  "properties": {
+    "schema": {"const": "teams.state/v1"},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "decision_id": {"type": "string", "minLength": 1},
+    "version": {"type": "integer", "minimum": 1},
+    "supersedes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "manager": {"type": "string", "minLength": 1},
+    "issued_by": {"type": "string", "minLength": 1},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "effective_at": {"type": "string", "minLength": 1},
+    "intent": {"type": "string", "minLength": 1},
+    "canonical_facts": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "invariants": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "non_goals": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "risk_tier": {"type": "integer", "minimum": 0, "maximum": 3},
+    "affected_lanes": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "required_receipts": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "approval_boundaries": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "status": {"enum": ["draft", "impact_mapped", "dispatched", "reviewing", "verification_pending", "ready_to_close", "blocked", "closed", "superseded"]}
+  }
+}

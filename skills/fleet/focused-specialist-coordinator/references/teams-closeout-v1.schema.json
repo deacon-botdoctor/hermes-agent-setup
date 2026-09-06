@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "teams.closeout/v1",
+  "title": "Client Teams Manager Closeout v1",
+  "description": "The executable Python gate is authoritative for cross-object joins and semantic validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "state", "packets", "receipts", "manager_reviews", "verification", "manager_closeout"],
+  "properties": {
+    "schema": {"const": "teams.closeout/v1"},
+    "state": {"$ref": "teams-state-v1.schema.json"},
+    "packets": {"type": "array", "minItems": 1, "items": {"$ref": "teams-packet-v1.schema.json"}},
+    "receipts": {"type": "array", "items": {"$ref": "teams-receipt-v1.schema.json"}},
+    "manager_reviews": {"type": "array"},
+    "verification": {"type": "object"},
+    "manager_closeout": {"type": "object"}
+  }
+}

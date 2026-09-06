@@ -146,7 +146,9 @@ It periodically proves that the service-owned runtime root, Python, and
 assembled `AIAgent`/`init_agent` contract still agree. It writes a local 0600
 receipt, does not restart Hermes, and does not inspect conversation content.
 
-The installer and exact baseline source commit are pinned in `release.json`.
+The installer and probe bytes are pinned by SHA-256 in `release.json`; its
+baseline source commit records upstream lineage. Import checks use an empty
+temporary HOME and HERMES_HOME, then keep only the final receipt.
 Fresh installs run it after native service activation; upgrades run it after
 the controlled cutover succeeds. Exact commands and rollback behavior are in
 [AGENTS.md](AGENTS.md#install-the-recurring-runtime-coherence-check).

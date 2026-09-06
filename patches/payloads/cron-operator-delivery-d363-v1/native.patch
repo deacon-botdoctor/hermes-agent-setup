@@ -1,0 +1,1248 @@
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index 5bd41cc..64a2015 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -942,6 +942,7 @@ def _content_policy_blocked_result(
+     return {
+         "final_response": final_response, "messages": messages, "api_calls": api_call_count,
+         "completed": False, "failed": True, "error": f"content_policy_blocked: {error_detail}",
++        "failure_reason": "content_policy_blocked",
+     }
+ 
+ 
+diff --git a/agent/turn_api_error.py b/agent/turn_api_error.py
+index 13cd554..c72d638 100644
+--- a/agent/turn_api_error.py
++++ b/agent/turn_api_error.py
+@@ -59,8 +59,11 @@ def handle_api_error(
+     the retry loop with ``restart_with_rebuilt_messages`` armed (``"break"``) so the pre-API
+     preflight re-runs against the fallback's context window (#84733)."""
+     _provider_overflow_recovery_pending = False
++    classified = None
+ 
+     def _verdict(action: str, result: Optional[Dict[str, Any]] = None) -> ApiErrorVerdict:
++        if result is not None and classified is not None:
++            result.setdefault("failure_reason", classified.reason.value)
+         return ApiErrorVerdict(
+             action=action, thinking_spinner=thinking_spinner, messages=messages,
+             active_system_prompt=active_system_prompt, conversation_history=conversation_history,
+diff --git a/cron/scheduler.py b/cron/scheduler.py
+index 89d18d6..d5a45be 100644
+--- a/cron/scheduler.py
++++ b/cron/scheduler.py
+@@ -3,6 +3,10 @@ A file lock (~/.hermes/cron/.tick.lock) keeps overlapping processes to one tick
+ """
+ 
+ import atexit
++from cron.scheduler_operator import (
++    _CronOperatorFailure, _cron_operator_failure_exception, _cron_result_failure_kind,
++    _format_cron_operator_delivery_with_media, _attempt_cron_failure_remediation,
++)
+ import concurrent.futures
+ import contextlib
+ import contextvars
+@@ -1290,7 +1294,7 @@ def _run_no_agent_job(
+             f"{output}\n\n"
+             f"Time: {now_iso}"
+         )
+-        return False, f"{header}**Status:** script failed\n\n{output}\n", alert, output
++        return False, f"{header}**Status:** script failed\n\n{output}\n", alert, _CronOperatorFailure(output, getattr(output, "kind", "script"))
+ 
+     # wakeAgent=false is a silent signal, same as empty stdout.
+     if not _parse_wake_gate(output):
+@@ -1328,7 +1332,7 @@ def _apply_monitor_gate(
+             f"Time: {_mon_now}"
+         )
+         return (
+-            False, f"{header}**Status:** monitor source failed\n\n{_mon.error}\n", _mon_alert, _mon.error,
++            False, f"{header}**Status:** monitor source failed\n\n{_mon.error}\n", _mon_alert, _CronOperatorFailure(_mon.error, "script"),
+         ), extra_prompt
+     if not _mon.changed:
+         # Unchanged: silent no_change tick (ledger doc kept; SILENT_MARKER blocks delivery).
+@@ -1486,7 +1490,7 @@ def _preflight_or_block(job: dict, job_id: str, job_name: str, cfg: dict) -> Opt
+         "configuration is fixed; the next healthy run clears this "
+         "state. Set `cron.preflight: false` in config.yaml to disable this validation."
+     )
+-    return False, blocked_doc, "", f"{marker} {_pf_reason}"
++    return False, blocked_doc, "", _CronOperatorFailure(f"{marker} {_pf_reason}", "configuration")
+ 
+ 
+ def _resolve_job_runtime(
+@@ -1531,7 +1535,7 @@ def _resolve_job_runtime(
+         is_auth = isinstance(resolve_exc, AuthError)
+         is_transient_net = _is_transient_provider_resolve_error(resolve_exc)
+         if not (is_auth or is_transient_net):
+-            raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
++            raise _cron_operator_failure_exception("configuration", RuntimeError, format_runtime_provider_error(resolve_exc)) from resolve_exc
+ 
+         primary_provider_for_drift = (
+             str(getattr(resolve_exc, "provider", "") or "").strip().lower()
+@@ -1563,7 +1567,7 @@ def _resolve_job_runtime(
+                 return runtime, fb_model, primary_provider_for_drift
+             except Exception as fb_exc:
+                 logger.debug("Job '%s': fallback %s failed: %s", job_id, fb_provider, fb_exc)
+-        raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
++        raise _cron_operator_failure_exception("provider_auth" if is_auth else "runtime", RuntimeError, format_runtime_provider_error(resolve_exc)) from resolve_exc
+ 
+ 
+ def _check_model_drift(
+@@ -1626,7 +1630,7 @@ def _check_model_drift(
+ 
+         _drift_already_alerted = mark_drift_alerted(job_id)
+     _drift_marker = DRIFT_SKIP_SILENT_MARKER if _drift_already_alerted else DRIFT_SKIP_MARKER
+-    raise RuntimeError(
++    raise _cron_operator_failure_exception("safety", RuntimeError,
+         f"{_drift_marker} Skipped to prevent unintended spend: global "
+         f"inference config drifted since this job was created "
+         f"({_changes}), and this job is unpinned. No inference call "
+@@ -2016,7 +2020,7 @@ def _prepare_job_prompt(
+             require_parseable_user_config()
+         except InvalidUserConfigError as exc:
+             logger.error("Job '%s': refusing to run — %s", job_id, exc)
+-            return (False, f"# Cron Job: {job_name}\n\nError: {exc}\n", "", str(exc)), None
++            return (False, f"# Cron Job: {job_name}\n\nError: {exc}\n", "", _CronOperatorFailure(str(exc), "configuration")), None
+ 
+     # no_agent short-circuits BEFORE importing run_agent / opening SessionDB.
+     if job.get("no_agent"):
+@@ -2074,7 +2078,7 @@ def _prepare_job_prompt(
+             "and the match is a false positive, rephrase the content to avoid "
+             "the threat pattern (`tools/cronjob_tools.py::_CRON_THREAT_PATTERNS`)."
+         )
+-        return (False, blocked_doc, "", str(block_exc)), None
++        return (False, blocked_doc, "", _CronOperatorFailure(str(block_exc), "safety")), None
+     if prompt is None:
+         logger.info("Job '%s': script produced no output, skipping AI call.", job_name)
+         return (True, "", SILENT_MARKER, None), None
+@@ -2202,6 +2206,9 @@ def _resolve_cron_agent_setup(job: dict, job_id: str, job_name: str, jc) -> _Cro
+     if _mt is None:
+         _mt = _cfg.get("max_turns")
+     setup.max_iterations = _resolve_turn_limit(_mt)
++    job_limit = job.get("max_iterations")
++    if isinstance(job_limit, int) and 1 <= job_limit <= 90:
++        setup.max_iterations = min(setup.max_iterations, job_limit)
+ 
+     # Runtime backstop (CWE-200/522): fail closed BEFORE resolution on a provider/base_url pair
+     # that would ship a stored credential off-host; hand-written jobs bypass create-time checks.
+@@ -2347,29 +2354,36 @@ def run_job(
+     _session_db = None
+     _audit: Optional[_FireAudit] = None
+     scope = _CronRunScope(job, job_id, execution_id)
++    failure_kind = "runtime"
+     try:
+         scope.enter()
+         if scope.workdir:
+             logger.info("Job '%s': using task-scoped workdir %s", job_id, scope.workdir)
+         _reload_dotenv_and_publish_delivery_target(job)
+ 
++        failure_kind = "configuration"
+         jc = _load_cron_job_config(job, job_id, job_name)
+         _cfg = jc.cfg
+         model = jc.model
++        failure_kind = "configuration"
+         setup = _resolve_cron_agent_setup(job, job_id, job_name, jc)
+         if setup.blocked is not None:
+             return setup.blocked
+         model = setup.model
+ 
+         # Open state.db only after every early-return gate has passed.
++        failure_kind = "runtime"
+         _session_db = _open_cron_session_db(job)
++        failure_kind = "configuration"
+         agent = _construct_cron_agent(
+             AIAgent, job, _cfg, setup, workdir=scope.workdir, session_id=_cron_session_id,
+             session_db=_session_db)
+         _audit = _FireAudit(job, job_id, model)
+ 
++        failure_kind = "execution"
+         result = _run_agent_with_watchdog(
+             agent, prompt, job, job_id, job_name, scope.task_id, cancel_event)
++        failure_kind = _cron_result_failure_kind(result)
+         final_response = _final_response_from_result(result, job_id, job_name, AIAgent)
+         # Keep final_response clean for delivery logic (empty = no delivery).
+         logged_response = final_response if final_response else "(No response generated)"
+@@ -2388,7 +2402,8 @@ def run_job(
+             _run_doc_header(job, f"{job_name} (FAILED)", job_id, prompt)
+             + f"## Error\n\n```\n{error_msg}\n```\n"
+         )
+-        return False, output, "", error_msg
++        kind = getattr(e, "_cron_operator_kind", "timeout" if isinstance(e, TimeoutError) else failure_kind)
++        return False, output, "", _CronOperatorFailure(error_msg, kind)
+ 
+     finally:
+         scope.exit()
+@@ -2659,6 +2674,11 @@ def _compose_run_delivery(
+             # command). NOT gated on incident ack: acks silence failure pings, not drift alerts.
+             _drift_text = re.sub(r"\[drift_skip[^\]]*\]\s*", "", err).strip()
+             deliver_content = f"⚠️ Cron '{job.get('name') or job['id']}' skipped: {_drift_text}"
++    if not incident_acked:
++        deliver_content = _format_cron_operator_delivery_with_media(
++            job.get("name") or job.get("id"), final_response if success else error,
++            success=success, job_lane="script" if job.get("no_agent") else "model",
++            failure_kind=getattr(error, "kind", "configuration" if blocked_config or drift_skip else "execution"))
+     return (
+         deliver_content, blocked_config, blocked_config_silent or drift_skip_silent,
+         incident_acked, failure_incident_id)
+@@ -2717,7 +2737,7 @@ class _RunDelivery:
+ 
+ def _save_compose_deliver(
+     d: _RunDelivery, fence: _FireOwnership, final_response: str, output: str, *,
+-    adapters, loop, verbose: bool, execution_token,
++    adapters, loop, verbose: bool, execution_token, deferred_agents=None, execution_id=None,
+ ) -> None:
+     """Save output, compose the notice and deliver it (both side effects run under the fire-claim
+     fence; a lost claim raises ``_FireClaimLostDuringSideEffect`` for the caller)."""
+@@ -2733,16 +2753,25 @@ def _save_compose_deliver(
+     # output; force the honest "interrupted" failure path. Peek-only (consumed later).
+     if d.success and _is_interrupted(job["id"], execution_token):
+         d.success = False
+-        d.error = (
+-            "Interrupted by gateway shutdown before the run finished "
+-            "(tool subprocess was killed mid-flight)."
+-        )
+-
++        d.error = _CronOperatorFailure(
++            "Interrupted by gateway shutdown before the run finished (tool subprocess was killed mid-flight).",
++            "interrupted")
++
++    remediation_delivery = ""
++    if not d.success and not job.get("_cron_repair_attempt") and not fence.lost() and not _is_interrupted(job["id"], execution_token):
++        remediation_delivery, _ = _attempt_cron_failure_remediation(
++            job, failure_kind=getattr(d.error, "kind", "script" if job.get("no_agent") else "execution"),
++            output_file=output_file, deferred_agents=deferred_agents, failure_detail=d.error,
++            cancel_event=fence.fire_claim_lost, execution_id=execution_id)
++        if fence.lost():
++            raise _FireClaimLostDuringSideEffect
+     (
+         deliver_content, d.blocked_config, _silent_alert, d.incident_acked, d.failure_incident_id,
+     ) = _compose_run_delivery(
+         job, success=d.success, error=d.error, final_response=final_response,
+         output_file=output_file)
++    if remediation_delivery and not d.incident_acked:
++        deliver_content = remediation_delivery
+     # Whitespace-only == empty: skip delivery; the guard below marks it a soft failure.
+     d.should_deliver = bool(deliver_content.strip()) and not _silent_alert
+     # Not a substring check: bare "SILENT"/"NO_REPLY" or a report quoting "[SILENT]" must
+@@ -2851,7 +2880,8 @@ def _deliver_crash_failure(
+             job,
+             # Same text as the normal failure delivery: this run also counts toward
+             # failure_streak, so the nudge must leave through here too.
+-            _summarize_cron_failure_for_delivery(job, err_text) + _failure_streak_nudge(job),
++            _format_cron_operator_delivery_with_media(job.get("name") or job.get("id"), err_text,
++                success=False, job_lane="model", failure_kind="pre_repair"),
+             adapters=adapters,
+             loop=loop,
+             for_failure=True,
+@@ -2982,7 +3012,7 @@ def _run_one_job_body(
+         try:
+             _save_compose_deliver(
+                 d, fence, final_response, output, adapters=adapters, loop=loop, verbose=verbose,
+-                execution_token=execution_token)
++                execution_token=execution_token, deferred_agents=_deferred_agents, execution_id=execution_id)
+         except _FireClaimLostDuringSideEffect:
+             d.side_effect_ownership_lost = True
+         finally:
+diff --git a/cron/scheduler_delivery.py b/cron/scheduler_delivery.py
+index 45b9843..cab8816 100644
+--- a/cron/scheduler_delivery.py
++++ b/cron/scheduler_delivery.py
+@@ -840,7 +840,7 @@ _IMAGE_EXTS = frozenset({'.jpg', '.jpeg', '.png', '.webp', '.gif'})
+ 
+ 
+ def _send_media_via_adapter(
+-    adapter, chat_id: str, media_files: list, metadata: dict | None, loop, job: dict, platform=None,
++    adapter, chat_id: str, media_files: list, metadata: dict | None, loop, job: dict, platform=None, *, force_document=False,
+ ) -> list:
+     """Send MEDIA files as native attachments (routed by extension, as in
+     _process_message_background). Returns per-file error strings so a dropped attachment surfaces
+@@ -870,7 +870,7 @@ def _send_media_via_adapter(
+                 method, path_kw = "send_voice", "audio_path"
+             elif ext in _VIDEO_EXTS:
+                 method, path_kw = "send_video", "video_path"
+-            elif ext in _IMAGE_EXTS:
++            elif ext in _IMAGE_EXTS and not (force_document and str(getattr(route_platform, "value", route_platform)) == "telegram"):
+                 method, path_kw = "send_image_file", "image_path"
+             else:
+                 method, path_kw = "send_document", "file_path"
+@@ -1035,6 +1035,7 @@ class _TargetDelivery:
+     inchannel_continuable: bool
+     opened_thread_id: Optional[str]
+     live_adapter_ready: bool = False
++    force_document: bool = False
+ 
+     @property
+     def is_relay(self) -> bool:
+@@ -1251,7 +1252,7 @@ def _live_send_media(
+                 routed_media_metadata["scope_id"] = logical_home.scope_id
+     _media_errors = _send_media_via_adapter(
+         t.runtime_adapter, t.chat_id, media_files, routed_media_metadata or None, t.loop, t.job,
+-        platform=t.platform,
++        platform=t.platform, **({"force_document": True} if t.force_document else {}),
+     )
+     # Surface per-file failures into run status: text delivered but attachment lost is not ok.
+     for _me in _media_errors:
+@@ -1383,7 +1384,7 @@ def _standalone_send(
+     def _send():
+         return _send_to_platform(
+             t.platform, t.pconfig, t.chat_id, content, thread_id=t.thread_id,
+-            media_files=media_files)
++            media_files=media_files, **({"force_document": True} if t.force_document else {}))
+ 
+     def _warned(msg: str) -> tuple[None, str]:
+         logger.warning("Job '%s': %s", job["id"], msg)
+@@ -1627,7 +1628,8 @@ def _deliver_result(
+     # Targets acked with NO evidence (bare SendResult(success=True) — Slack/Matrix/Mattermost);
+     # persisted as ``last_delivery_unverified`` so `hermes cron list` shows it.
+     unverified_targets: list = []
+-    if wrap_response:
++    from cron.scheduler_operator import _is_cron_operator_delivery
++    if wrap_response and not _is_cron_operator_delivery(content):
+         task_name = job.get("name", job["id"])
+         delivery_content = (
+             f"Cronjob Response: {task_name}\n"
+@@ -1645,7 +1647,9 @@ def _deliver_result(
+     # at boot; standalone runs (`hermes cron run`) did not, silently dropping files. Idempotent.
+     from gateway.media_policy import apply_media_policy_env
+     apply_media_policy_env(user_cfg)
++    force_document = "[[as_document]]" in delivery_content
+     media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
++    cleaned_delivery_content = cleaned_delivery_content.replace("[[as_document]]", "").strip()
+     requested_media = len(media_files)
+     media_files = BasePlatformAdapter.filter_media_delivery_paths(media_files)
+     # Policy-dropped attachments will never be sent on ANY lane — record them in run status.
+@@ -1690,6 +1694,7 @@ def _deliver_result(
+             mirror_enabled=mirror_enabled, mirror_text=mirror_text, delivery_errors=delivery_errors)
+         if t is None:
+             continue
++        t.force_document = force_document and t.platform_name == "telegram"
+         target_errors: list = []
+         delivered = t.live_adapter_ready and _deliver_via_live_adapter(
+             t, cleaned_delivery_content, media_files,
+diff --git a/cron/scheduler_operator.py b/cron/scheduler_operator.py
+new file mode 100644
+index 0000000..e597627
+--- /dev/null
++++ b/cron/scheduler_operator.py
+@@ -0,0 +1,565 @@
++"""Golden operator delivery and one bounded repair attempt; native scheduler owns execution."""
++from __future__ import annotations
++import json
++import logging
++import re
++from pathlib import Path
++logger = logging.getLogger("cron.scheduler")
++SILENT_MARKER = "[SILENT]"
++
++
++def _is_cron_silence_response(text):
++    from cron.scheduler import _is_cron_silence_response as is_silent
++    return is_silent(text)
++
++
++def run_job(*args, **kwargs):
++    from cron.scheduler import run_job as execute
++    return execute(*args, **kwargs)
++
++
++# HERMES_CRON_OPERATOR_DELIVERY_v1
++# HERMES_CRON_NO_EMPTY_SUCCESS_NOISE_v1
++# HERMES_CRON_SELF_REMEDIATION_v1
++_CRON_OPERATOR_FALLBACK = SILENT_MARKER
++_CRON_OPERATOR_WITHHELD = (
++    "completed, but its result was withheld because it did not meet the delivery "
++    "safety contract. Review the saved receipt."
++)
++
++
++class _CronOperatorFailure(str):
++    def __new__(cls, value: str, kind: str):
++        instance = super().__new__(cls, value)
++        instance.kind = kind
++        return instance
++
++
++def _cron_operator_failure_exception(kind: str, exception_type, message: str) -> Exception:
++    exc = exception_type(message)
++    exc._cron_operator_kind = kind
++    return exc
++
++
++def _cron_operator_has_unicode_control(text: str) -> bool:
++    import unicodedata
++
++    return any(unicodedata.category(character) in {"Cf", "Cs", "Zl", "Zp"} for character in text)
++
++
++def _cron_operator_job_name(job_name: str) -> str:
++    raw_name = str(job_name or "")
++    name = " ".join(raw_name.split())
++    if name.lower().endswith(" cron"):
++        name = name[:-5].rstrip()
++    unsafe = (
++        not name
++        or len(name) > 80
++        or bool(re.fullmatch(r"(?:[0-9a-fA-F]{12}|[0-9]{6,}|[0-9a-fA-F-]{32,})", name))
++        or _cron_operator_has_hard_detail(raw_name)
++    )
++    return "Scheduled job" if unsafe else name
++
++
++def _cron_operator_has_hard_detail(text: str) -> bool:
++    from gateway.platforms.base import MEDIA_DELIVERY_EXTS
++
++    if not text or "\n" in text or "\r" in text:
++        return True
++    if re.search(r"[\x00-\x1f\x7f-\x9f]", text):
++        return True
++    if _cron_operator_has_unicode_control(text):
++        return True
++    decoder = json.JSONDecoder()
++    for index, character in enumerate(text):
++        if character not in "[{":
++            continue
++        try:
++            value, _ = decoder.raw_decode(text[index:])
++        except (json.JSONDecodeError, RecursionError):
++            continue
++        if isinstance(value, (dict, list)):
++            return True
++    if re.search(
++        r"(?<!\w)(?:[A-Za-z][A-Za-z0-9+.-]*:/{1,3}|~[/\\]|\.\.?[/\\]|"
++        r"[/\\]|[A-Za-z]:[/\\])\S+",
++        text,
++    ):
++        return True
++    for match in re.finditer(
++        r"(?<![@\w])(?:[A-Za-z0-9_-]+\.)+([A-Za-z0-9]+)\b|"
++        r"(?<!\w)\.([A-Za-z0-9]+)\b",
++        text,
++    ):
++        extension = next(group for group in match.groups() if group)
++        if (
++            f".{extension.lower()}" in MEDIA_DELIVERY_EXTS
++            or extension.isalpha()
++            and extension.islower()
++            and 2 <= len(extension) <= 10
++        ):
++            return True
++    if re.search(
++        r"\b(?:(?i:(?:[A-Za-z][A-Za-z0-9]*[_-])*"
++        r"(?:id|pid|uuid|token|trace[_ -]?id))|"
++        r"[A-Za-z][A-Za-z0-9]*(?:Id|ID|Token|TOKEN))\s*[:=#]\s*[A-Za-z0-9_-]+\b",
++        text,
++    ):
++        return True
++    return bool(
++        re.search(
++            r"\b(?:[0-9a-f]{12,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\b",
++            text,
++            re.I,
++        )
++    )
++
++def _cron_operator_failure_message(failure_kind: str) -> str:
++    if failure_kind == "blocked_config":
++        failure_kind = "configuration"
++    return {
++        "safety": (
++            "was stopped by a safety check. No action was taken; the saved receipt "
++            "records the protected boundary."
++        ),
++        "configuration": (
++            "was blocked by configuration, and automatic recovery did not complete. "
++            "The saved receipt records the remaining blocker."
++        ),
++        "script": (
++            "failed in its script or runtime, and automatic recovery did not "
++            "complete. The saved receipt records the failure and repair attempt."
++        ),
++        "runtime": (
++            "failed in the local runtime, and automatic recovery did not complete. "
++            "The saved receipt records both attempts."
++        ),
++        "interrupted": (
++            "was interrupted during gateway shutdown. Its next scheduled run "
++            "remains enabled."
++        ),
++        "provider_auth": (
++            "could not authenticate with its configured provider. No credentials "
++            "were changed automatically."
++        ),
++        "provider_limit": (
++            "stopped at a provider limit. No quota or billing change was made."
++        ),
++        "timeout": (
++            "timed out, and one automatic recovery attempt did not complete. "
++            "The saved receipt records both attempts."
++        ),
++        "execution": (
++            "failed during execution, and automatic recovery did not complete. "
++            "The saved receipt records both attempts."
++        ),
++        "pre_repair": (
++            "failed before automatic recovery could start. The saved receipt "
++            "records the runtime failure."
++        ),
++    }.get(
++        failure_kind,
++        "failed during execution, and automatic recovery did not complete. "
++        "The saved receipt records both attempts.",
++    )
++
++
++_CRON_REPAIRABLE_FAILURE_KINDS = frozenset(
++    {"configuration", "script", "runtime", "timeout", "execution"}
++)
++_CRON_REPAIR_RECOVERED_PREFIXES = (
++    "repaired and verified:",
++    "recovered and verified:",
++)
++_CRON_REPAIR_STOPPED_PREFIX = "automatic repair stopped:"
++_CRON_REPAIR_CIRCUIT_SECONDS = 4 * 60 * 60
++
++
++def _cron_repair_signature(
++    job: dict, failure_kind: str, output_file: Path, failure_detail: object = None
++) -> str:
++    import hashlib
++    import os
++
++    target_sha = ""
++    roots = []
++    if os.environ.get("HERMES_HOME"):
++        roots.append(Path(os.environ["HERMES_HOME"]))
++    roots.extend(output_file.parents[:3])
++    for root in roots:
++        marker = root / "state" / "golden-target-sha"
++        try:
++            target_sha = marker.read_text(encoding="utf-8").strip()
++        except OSError:
++            continue
++        if target_sha:
++            break
++    basis = {
++        "job": str(job.get("id") or job.get("name") or "unknown"),
++        "failure_kind": failure_kind,
++        "schedule": job.get("schedule") or job.get("cron"),
++        "script": job.get("script"),
++        "monitor_script": job.get("monitor_script"),
++        "enabled_toolsets": job.get("enabled_toolsets"),
++        "provider": job.get("provider"),
++        "model": job.get("model"),
++        "target_sha": target_sha,
++    }
++    return hashlib.sha256(
++        json.dumps(basis, sort_keys=True, separators=(",", ":"), default=str).encode()
++    ).hexdigest()
++
++
++def _cron_repair_circuit_path(job: dict, output_file: Path) -> Path:
++    import hashlib
++
++    identity = str(job.get("id") or job.get("name") or "unknown")
++    name = hashlib.sha256(identity.encode()).hexdigest()[:24] + ".json"
++    return output_file.parent / ".repair-circuit" / name
++
++
++def _cron_repair_circuit_open(
++    job: dict, failure_kind: str, output_file: Path, failure_detail: object = None
++) -> bool:
++    import time
++
++    path = _cron_repair_circuit_path(job, output_file)
++    try:
++        state = json.loads(path.read_text(encoding="utf-8"))
++    except (OSError, TypeError, ValueError, json.JSONDecodeError):
++        return False
++    return bool(
++        state.get("status") == "failed"
++        and state.get("signature")
++        == _cron_repair_signature(job, failure_kind, output_file, failure_detail)
++        and time.time() - float(state.get("failed_at_epoch") or 0)
++        < _CRON_REPAIR_CIRCUIT_SECONDS
++    )
++
++
++def _set_cron_repair_circuit(
++    job: dict,
++    failure_kind: str,
++    output_file: Path,
++    *,
++    failed: bool,
++    failure_detail: object = None,
++) -> None:
++    import os
++    import time
++
++    path = _cron_repair_circuit_path(job, output_file)
++    if not failed:
++        try:
++            path.unlink()
++        except FileNotFoundError:
++            pass
++        return
++    path.parent.mkdir(parents=True, exist_ok=True)
++    state = {
++        "schema_version": 1,
++        "status": "failed",
++        "signature": _cron_repair_signature(
++            job, failure_kind, output_file, failure_detail
++        ),
++        "failed_at_epoch": time.time(),
++        "cooldown_seconds": _CRON_REPAIR_CIRCUIT_SECONDS,
++    }
++    tmp = path.with_name(path.name + f".tmp-{os.getpid()}")
++    tmp.write_text(json.dumps(state, sort_keys=True) + "\n", encoding="utf-8")
++    os.replace(tmp, path)
++
++
++def _cron_repair_prompt(job: dict, failure_kind: str, output_file: Path) -> str:
++    name = _cron_operator_job_name(job.get("name") or job.get("id"))
++    return (
++        "A scheduled job failed and this is an internal repair turn, not an "
++        "operator handoff. Inspect the saved receipt and the owning job's local "
++        "script/configuration, identify the cause, make the smallest safe local "
++        "repair, and verify it proportionally. Preserve the original job's "
++        "authorization and data boundaries. Do not change credentials, billing, "
++        "permissions, destructive data, or public/client delivery outside the "
++        "job's existing contract. Do not blindly rerun external side effects; "
++        "rerun only after proving idempotency or by using a dry-run/read-only "
++        "verification path. Never tell the operator to inspect logs, review the "
++        "receipt, or repair/retry/reconfigure the system. If repaired, finish with "
++        f"exactly one sentence beginning '{name} cron — repaired and verified:' "
++        f"or '{name} cron — recovered and verified:'. If a real authority or "
++        "safety boundary prevents repair, finish with exactly one sentence "
++        f"beginning '{name} cron — automatic repair stopped:' and name the "
++        "specific blocker plus what you already attempted. Keep paths, IDs, raw "
++        "logs, and secrets in the receipt, not the final response.\n\n"
++        f"Failure category: {failure_kind}\n"
++        f"Saved receipt: {output_file}"
++    )
++
++
++def _cron_repair_outcome(job: dict, response: str) -> tuple[str, bool]:
++    name = _cron_operator_job_name(job.get("name") or job.get("id"))
++    required_prefix = f"{name} cron — "
++    text = str(response or "").strip()
++    if not text.startswith(required_prefix):
++        return "", False
++    body = text[len(required_prefix):].strip()
++    lowered = body.lower()
++    recovered = any(lowered.startswith(prefix) for prefix in _CRON_REPAIR_RECOVERED_PREFIXES)
++    stopped = lowered.startswith(_CRON_REPAIR_STOPPED_PREFIX)
++    if not (recovered or stopped):
++        return "", False
++    detail = body.split(":", 1)[1].strip() if ":" in body else body
++    if re.match(
++        r"(?i)^(?:please\s+)?(?:you\s+(?:need|must|should|can)\s+|"
++        r"review\b|inspect\b|repair\b|fix\b|retry\b|rerun\b|restart\b|"
++        r"reconfigure\b|configure\b)",
++        detail,
++    ):
++        return "", False
++    formatted = _format_cron_operator_delivery_with_media(
++        name,
++        text,
++        success=True,
++        job_lane="model",
++        failure_kind="execution",
++    )
++    if not formatted or formatted == SILENT_MARKER:
++        return "", False
++    if recovered:
++        return f"{name} cron — automatic repair attempted; the original run remains failed.", False
++    return formatted, False
++
++
++def _append_cron_repair_receipt(output_file: Path, repair_doc: str) -> None:
++    try:
++        with Path(output_file).open("a", encoding="utf-8") as handle:
++            handle.write("\n\n## Automatic repair attempt\n\n")
++            handle.write(str(repair_doc or "No repair receipt was produced.").strip())
++            handle.write("\n")
++    except Exception:
++        logger.warning("Could not append automatic repair receipt", exc_info=True)
++
++
++def _cron_repair_claim_lost(local_scope: dict) -> bool:
++    if bool(local_scope.get("side_effect_ownership_lost", False)):
++        return True
++    probe = local_scope.get("_fire_claim_ownership_lost")
++    if not callable(probe):
++        return False
++    try:
++        return bool(probe())
++    except Exception:
++        return True
++
++
++def _attempt_cron_failure_remediation(
++    job: dict,
++    *,
++    failure_kind: str,
++    output_file: Path,
++    deferred_agents: list,
++    failure_detail: object = None,
++    cancel_event=None, execution_id=None,
++) -> tuple[str, bool]:
++    if job.get("no_agent"):
++        name = _cron_operator_job_name(job.get("name") or job.get("id"))
++        return f"{name} cron — failed in its script or runtime. Automatic repair skipped: script-only execution. Review the saved receipt.", False
++    if failure_kind == "blocked_config":
++        failure_kind = "configuration"
++    if failure_kind not in _CRON_REPAIRABLE_FAILURE_KINDS:
++        return "", False
++    if _cron_repair_circuit_open(
++        job, failure_kind, output_file, failure_detail
++    ):
++        name = _cron_operator_job_name(job.get("name") or job.get("id"))
++        _append_cron_repair_receipt(
++            output_file,
++            "Automatic repair was not repeated because the same job configuration, "
++            "runtime release, and failure class already failed inside the bounded cooldown.",
++        )
++        return (
++            f"{name} cron — automatic repair paused: the same configuration and "
++            "runtime already failed automatic recovery; the saved receipt records "
++            "the suppressed repeat.",
++            False,
++        )
++
++    repair_job = dict(job)
++    repair_job.update(
++        {
++            "_cron_repair_attempt": True,
++            "max_iterations": 10,
++            "no_agent": False,
++            "script": None,
++            "monitor_script": None,
++            "monitor_url": None,
++            "monitor_state": None,
++            "context_from": None,
++            "skills": [],
++            "skill": None,
++            # Preserve the original job tool allowlist; native config still applies.
++            # Keep job-bound provider, endpoint, model and snapshot constraints.
++            "prompt": _cron_repair_prompt(job, failure_kind, output_file),
++            "deliver": "local",
++        }
++    )
++    try:
++        repair_success, repair_doc, repair_response, _repair_error = run_job(
++            repair_job,
++            defer_agent_teardown=deferred_agents,
++            extra_prompt=None,
++            cancel_event=cancel_event, execution_id=execution_id,
++        )
++    except Exception:
++        logger.warning("Automatic cron repair attempt raised", exc_info=True)
++        _set_cron_repair_circuit(
++            job,
++            failure_kind,
++            output_file,
++            failed=True,
++            failure_detail=failure_detail,
++        )
++        return "", False
++
++    _append_cron_repair_receipt(output_file, repair_doc)
++    if not repair_success:
++        _set_cron_repair_circuit(
++            job,
++            failure_kind,
++            output_file,
++            failed=True,
++            failure_detail=failure_detail,
++        )
++        return "", False
++    delivery, recovered = _cron_repair_outcome(job, repair_response)
++    _set_cron_repair_circuit(
++        job,
++        failure_kind,
++        output_file,
++        failed=not recovered,
++        failure_detail=failure_detail,
++    )
++    return delivery, recovered
++
++
++# HERMES_CRON_LONG_SUCCESS_DELIVERY_v1
++# HERMES_CRON_PLAIN_SUCCESS_DELIVERY_v1
++def _cron_operator_delivery_candidate(value: str) -> str:
++    raw = str(value or "")
++    if "\r" in raw.replace("\r\n", ""):
++        return ""
++    normalized_newlines = raw.replace("\r\n", "\n")
++    if _cron_operator_has_hard_detail(normalized_newlines.replace("\n", " ")):
++        return ""
++    normalized = "\n".join(
++        " ".join(line.split()) for line in normalized_newlines.split("\n")
++    ).strip()
++    return normalized if normalized and len(normalized) <= 3500 else ""
++
++
++def _format_cron_operator_delivery(
++    job_name: str,
++    output: str,
++    *,
++    success: bool,
++    job_lane: str,
++    failure_kind: str,
++) -> str:
++    name = _cron_operator_job_name(job_name)
++    prefix = f"{name} cron — "
++    if not success:
++        return prefix + _cron_operator_failure_message(failure_kind)
++
++    text = str(output or "").strip()
++    if not text or _is_cron_silence_response(text):
++        return SILENT_MARKER
++
++    candidate = ""
++    if job_lane == "script" and len(text) <= 4096:
++        try:
++            payload = json.loads(text)
++        except (json.JSONDecodeError, RecursionError, TypeError, ValueError):
++            payload = None
++        if isinstance(payload, dict):
++            for field in ("message", "summary"):
++                value = payload.get(field)
++                if isinstance(value, str):
++                    candidate = _cron_operator_delivery_candidate(value)
++                    if candidate:
++                        break
++        else:
++            candidate = _cron_operator_delivery_candidate(text)
++    elif job_lane == "model":
++        required_prefix = f"{name} cron — "
++        value = text[len(required_prefix):] if text.startswith(required_prefix) else text
++        candidate = _cron_operator_delivery_candidate(value)
++
++    return prefix + (candidate or _CRON_OPERATOR_WITHHELD)
++
++
++def _format_cron_operator_delivery_with_media(
++    job_name: str,
++    output: str,
++    *,
++    success: bool,
++    job_lane: str,
++    failure_kind: str,
++) -> str:
++    from gateway.platforms.base import BasePlatformAdapter
++
++    original = str(output or "")
++    media_files, visible = BasePlatformAdapter.extract_media(original)
++    formatted = _format_cron_operator_delivery(
++        job_name,
++        visible,
++        success=success,
++        job_lane=job_lane,
++        failure_kind=failure_kind,
++    )
++    if formatted == SILENT_MARKER:
++        if not media_files or not success or _is_cron_silence_response(visible):
++            return formatted
++        # A valid media directive is already the report. Do not add a
++        # content-free success caption merely because visible text was empty.
++        formatted = ""
++    if not success or not media_files:
++        return formatted
++
++    directives = []
++    if "[[as_document]]" in original:
++        directives.append("[[as_document]]")
++    if any(is_voice for _, is_voice in media_files):
++        directives.append("[[audio_as_voice]]")
++    directives.extend(f"MEDIA:{path}" for path, _ in media_files)
++    return "\n".join(part for part in (formatted, *directives) if part)
++
++
++def _is_cron_operator_delivery(content: str) -> bool:
++    first_line = str(content or "").splitlines()[0] if content else ""
++    if first_line.startswith(("MEDIA:", "[[as_document]]", "[[audio_as_voice]]")):
++        return True
++    return bool(re.match(r"^[^\r\n]{1,100} cron — ", first_line))
++
++
++
++
++def _cron_result_failure_kind(result: dict) -> str:
++    reason = str(result.get("turn_exit_reason") or "")
++    if result.get("interrupted") is True:
++        return "interrupted"
++    if result.get("compression_exhausted") is True:
++        return "configuration"
++    return {
++        "interpreter_shutdown": "interrupted",
++        "auth": "provider_auth", "auth_permanent": "provider_auth",
++        "rate_limit": "provider_limit", "upstream_rate_limit": "provider_limit", "billing": "provider_limit",
++        "timeout": "timeout", "local_resource_exhaustion": "runtime",
++        "content_policy_blocked": "safety", "provider_policy_blocked": "safety",
++        "ssl_cert_verification": "runtime", "model_not_found": "configuration",
++        "format_error": "configuration", "invalid_encrypted_content": "configuration",
++        "multimodal_tool_content_unsupported": "configuration", "thinking_signature": "configuration",
++        "oauth_long_context_beta_forbidden": "configuration", "llama_cpp_grammar_pattern": "configuration",
++        "context_overflow": "configuration", "payload_too_large": "configuration",
++        "image_too_large": "configuration", "long_context_tier": "configuration",
++    }.get(str(result.get("failure_reason") or "")) or {
++        "guardrail_halt": "safety", "ollama_runtime_context_too_small": "configuration",
++        "session_persistence_failed": "runtime",
++    }.get(reason) or ("runtime" if reason.startswith("local_processing_error(") else "execution")
+diff --git a/cron/scheduler_prompt.py b/cron/scheduler_prompt.py
+index 91d6736..562c5e8 100644
+--- a/cron/scheduler_prompt.py
++++ b/cron/scheduler_prompt.py
+@@ -200,7 +200,12 @@ def _build_job_prompt(
+     omitted, the script (if any) runs inline as before. extra_prompt: Optional per-run context (from
+     ``cronjob(action='run')``, 57331 — salvaged from #57342 by @liuhao1024).
+     """
++    from cron.scheduler_operator import _cron_operator_job_name
+     user_prompt = str(job.get("prompt") or "")
++    if not job.get("_cron_repair_attempt"):
++        user_prompt += (
++            "\nFORMAT: Write a concise plain-language report. The system adds the job label. "
++            "Keep IDs, paths, logs, token counts and raw JSON in the saved receipt.")
+     if extra_prompt:
+         user_prompt = f"{user_prompt}\n\n## Run Context\n{extra_prompt}"
+     prompt = user_prompt
+@@ -317,7 +322,7 @@ def _guard_job_credential_exfil(job: dict) -> None:
+             "Job '%s': refusing to run — unsafe provider/base_url pair could "
+             "exfiltrate a stored credential: %s",
+             job_id, err)
+-        raise RuntimeError(f"Cron job '{job_id}' blocked for safety: {err}")
++        raise _sched._cron_operator_failure_exception("safety", RuntimeError, f"Cron job '{job_id}' blocked for safety: {err}")
+ 
+ 
+ def _block_and_pause_job(
+@@ -340,7 +345,7 @@ def _block_and_pause_job(
+         f"{reason}\n"
+     )
+     alert = f"⚠ Cron job '{job_name}' was auto-paused\n\n{reason}"
+-    return False, doc, alert, reason
++    return False, doc, alert, _sched._CronOperatorFailure(reason, "configuration")
+ 
+ 
+ # Late-bound origin namespace (see module docstring). Imported LAST so this module is fully
+diff --git a/cron/scheduler_script.py b/cron/scheduler_script.py
+index 04e66ae..d0ab114 100644
+--- a/cron/scheduler_script.py
++++ b/cron/scheduler_script.py
+@@ -327,13 +327,14 @@ def _run_job_script(
+     Optional absolute path to use as the script's cwd. When set, the subprocess runs in this directory
+     instead of the scripts-dir parent. See #69396.
+     """
++    from cron.scheduler_operator import _CronOperatorFailure
+     path, err = _resolve_script_path(script_path)
+     if path is None:
+-        return False, err
++        return False, _CronOperatorFailure(err, "configuration")
+     script_timeout = _get_script_timeout()
+     argv, env_overlay, err = _script_argv(path)
+     if argv is None:
+-        return False, err
++        return False, _CronOperatorFailure(err, "configuration")
+ 
+     try:
+         from tools.environments.local import build_subprocess_env
+@@ -364,7 +365,7 @@ def _run_job_script(
+             if cancel_event is not None and cancel_event.is_set():
+                 _terminate_cron_script_tree(proc)
+                 _drain_script_pipes(proc)
+-                return False, "Script cancelled because cron fire ownership was lost"
++                return False, _CronOperatorFailure("Script cancelled because cron fire ownership was lost", "interrupted")
+             remaining = deadline - time.monotonic()
+             if remaining <= 0:
+                 _terminate_cron_script_tree(proc)
+@@ -375,7 +376,7 @@ def _run_job_script(
+                 # / #59549). agent.deadline.kill_process_tree snapshots the descendant set via psutil BEFORE
+                 # signalling, so own-session grandchildren are reached too — the unified deadline layer's
+                 # tree-kill (#85147, d6a5cb9725).
+-                return False, f"Script timed out after {script_timeout}s: {path}"
++                return False, _CronOperatorFailure(f"Script timed out after {script_timeout}s: {path}", "timeout")
+             try:
+                 stdout_raw, stderr_raw = proc.communicate(timeout=min(0.1, remaining))
+                 break
+diff --git a/tests/cron/test_cron_drift_alert_once.py b/tests/cron/test_cron_drift_alert_once.py
+index 5beba41..76cea6a 100644
+--- a/tests/cron/test_cron_drift_alert_once.py
++++ b/tests/cron/test_cron_drift_alert_once.py
+@@ -91,11 +91,10 @@ class TestDriftAlertOnce:
+         assert len(deliveries) == 1, f"expected 1 alert, got {len(deliveries)}: {deliveries}"
+         blob = deliveries[0].lower()
+         assert "drift" in blob
+-        assert "pin" in blob
+-        assert "host running hermes" in blob
+-        # The single alert must carry the complete supported remediation
+-        # command — the generic summarizer's 180-char truncation must not eat it.
+-        assert "hermes cron edit drift-once-test" in deliveries[0]
++        assert "stopped by a safety check" in blob
++        # Operational remediation stays in the durable error, not human delivery.
++        assert "hermes cron edit drift-once-test" in stored["last_error"]
++        assert "hermes cron edit" not in deliveries[0]
+         assert "cronjob action=update" not in deliveries[0]
+         assert "[drift_skip" not in deliveries[0]
+ 
+@@ -120,7 +119,7 @@ class TestDriftAlertOnce:
+             fresh = [j for j in cron_jobs.load_jobs() if j["id"] == job["id"]][0]
+             _tick(fresh, tmp_path, "nous", deliveries)
+ 
+-        drift_alerts = [d for d in deliveries if "drift" in d.lower()]
++        drift_alerts = [d for d in deliveries if "stopped by a safety check" in d.lower()]
+         assert len(drift_alerts) == 2, f"expected re-alert after heal: {deliveries}"
+ 
+     def test_non_drift_failures_untouched_by_the_bit(self, tmp_path):
+@@ -158,4 +157,5 @@ class TestDriftAlertOnce:
+                 sched.run_one_job(fresh)
+ 
+         assert len(deliveries) == 1, "non-drift failure must still deliver"
+-        assert "boom unrelated" in deliveries[0]
++        assert "boom unrelated" not in deliveries[0]
++        assert "failed during execution" in deliveries[0]
+diff --git a/tests/cron/test_cron_failure_deliver.py b/tests/cron/test_cron_failure_deliver.py
+index e84d39b..7a11c58 100644
+--- a/tests/cron/test_cron_failure_deliver.py
++++ b/tests/cron/test_cron_failure_deliver.py
+@@ -81,7 +81,7 @@ def run_env(monkeypatch, tmp_path):
+     monkeypatch.setattr(s, "mark_execution_running", lambda _execution_id: {})
+     monkeypatch.setattr(
+         s, "save_job_output",
+-        lambda jid, out: state["saved"].append(jid) or f"/tmp/{jid}.txt",
++        lambda jid, out: state["saved"].append(jid) or (home / f"{jid}.txt"),
+     )
+     monkeypatch.setattr(
+         s, "mark_job_run",
+@@ -105,7 +105,7 @@ def _failing_run_job(error="provider exploded"):
+     return _fake
+ 
+ 
+-def _succeeding_run_job(final="all good, here is the brief"):
++def _succeeding_run_job(final="scout cron — all good, here is the brief"):
+     def _fake(job, **_kw):
+         return (True, "raw output", final, None)
+     return _fake
+@@ -462,3 +462,21 @@ class TestPreflightAndDashboardLanes:
+             {"failure_deliver": ""}, tmp_path
+         )
+         assert cleared["failure_deliver"] is None
++
++
++def test_native_repair_uses_one_fire_and_tears_down_both_agents(run_env,monkeypatch):
++    from cron.scheduler_operator import _CronOperatorFailure
++    calls=[];closed=[]
++    def execute(job,**kw):
++        calls.append((job,kw));kw['defer_agent_teardown'].append('repair' if job.get('_cron_repair_attempt') else 'original')
++        if job.get('_cron_repair_attempt'):
++            return True,'repair receipt','scout cron — repaired and verified: local check passed.',None
++        return False,'original receipt','',_CronOperatorFailure('script failed','script')
++    monkeypatch.setattr(s,'run_job',execute)
++    monkeypatch.setattr(s,'_teardown_cron_agent',lambda agent,jid:closed.append(agent))
++    assert s.run_one_job({'id':'repair-job','name':'scout','deliver':'slack:D0MAIN'}) is True
++    assert len(calls)==2 and calls[0][1]['execution_id']==calls[1][1]['execution_id']
++    assert closed==['original','repair']
++    assert len(run_env['send'])==1
++    assert run_env['send'][0]['message']=='scout cron — automatic repair attempted; the original run remains failed.'
++    assert run_env['marked'][-1][0][1] is False
+diff --git a/tests/cron/test_media_delivery_parity.py b/tests/cron/test_media_delivery_parity.py
+index f863df3..0aa8d19 100644
+--- a/tests/cron/test_media_delivery_parity.py
++++ b/tests/cron/test_media_delivery_parity.py
+@@ -329,3 +329,25 @@ class TestMediaPolicyEnvBridge:
+             "manual-run delivery must filter media under the same configured "
+             "policy as the gateway process (allowlisted file was dropped)"
+         )
++
++
++@pytest.mark.parametrize('platform,document',[('telegram',True),('telegram',False),('matrix',True),('slack',True)])
++def test_document_mode_preserves_native_image_routing(tmp_path,platform,document):
++    import asyncio
++    import threading
++    from types import SimpleNamespace
++    from gateway.config import Platform
++    image=tmp_path/'report.png';image.write_bytes(b'fixture image')
++    calls=[]
++    class Adapter:
++        async def send_document(self,**kw):
++            calls.append(('document',kw));return SimpleNamespace(success=True)
++        async def send_image_file(self,**kw):
++            calls.append(('image',kw));return SimpleNamespace(success=True)
++    adapter=Adapter();adapter.platform=Platform(platform)
++    loop=asyncio.new_event_loop();thread=threading.Thread(target=loop.run_forever,daemon=True);thread.start()
++    try:
++        assert _send_media_via_adapter(adapter,'chat',[(str(image),False)],None,loop,{'id':'job'},platform=Platform(platform),force_document=document)==[]
++        assert calls[0][0]==('document' if document and platform=='telegram' else 'image')
++    finally:
++        loop.call_soon_threadsafe(loop.stop);thread.join(timeout=5);loop.close()
+diff --git a/tests/cron/test_operator_delivery_native.py b/tests/cron/test_operator_delivery_native.py
+new file mode 100644
+index 0000000..7b9ce62
+--- /dev/null
++++ b/tests/cron/test_operator_delivery_native.py
+@@ -0,0 +1,155 @@
++"""Golden residuals through native scheduler owners; no provider or transport network."""
++import contextlib
++import json
++import threading
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import MagicMock
++import pytest
++from cron import scheduler as s, scheduler_operator as op
++
++
++@pytest.mark.parametrize('private',['/tmp/secret.log','https://private.example/a','{"token":"secret"}','token=secret','trace_id=abc','123456789abcdef','a\tb','x\u202ey'])
++def test_machine_detail_is_withheld(private):
++    result=op._format_cron_operator_delivery('Report',f'Report cron — {private}',success=True,job_lane='model',failure_kind='execution')
++    assert private not in result
++    assert 'withheld' in result
++
++
++@pytest.mark.parametrize('lane,text,expected',[
++ ('model','Report cron — Sold 20 units.','Report cron — Sold 20 units.'),
++ ('model','Sold 20 units.','Report cron — Sold 20 units.'),
++ ('script','{"summary":"Sold 20 units."}','Report cron — Sold 20 units.'),
++ ('script','Sold 20 units.','Report cron — Sold 20 units.'),
++ ('script','First line.\nSecond line.','Report cron — First line.\nSecond line.'),
++ ('model','',s.SILENT_MARKER),('script','[SILENT]',s.SILENT_MARKER),
++])
++def test_operator_format_retains_contract(lane,text,expected):
++    assert op._format_cron_operator_delivery('Report',text,success=True,job_lane=lane,failure_kind='execution')==expected
++
++
++@pytest.mark.parametrize('reason,kind',[('auth','provider_auth'),('billing','provider_limit'),('content_policy_blocked','safety'),('timeout','timeout'),('format_error','configuration'),('ssl_cert_verification','runtime')])
++def test_failure_kind_uses_structured_result_not_text(reason,kind):
++    assert op._cron_result_failure_kind({'failure_reason':reason,'error':'provider_auth safety secret'})==kind
++    assert op._cron_result_failure_kind({'error':reason})=='execution'
++
++
++@pytest.mark.parametrize('kind',['provider_auth','provider_limit','safety','interrupted'])
++def test_nonrepairable_failure_never_starts_agent(tmp_path,monkeypatch,kind):
++    execute=MagicMock();monkeypatch.setattr(op,'run_job',execute)
++    assert op._attempt_cron_failure_remediation({'id':'job','name':'Report'},failure_kind=kind,output_file=tmp_path/'receipt',deferred_agents=[])==('',False)
++    execute.assert_not_called()
++
++
++def test_repair_circuit_and_cancellation_identity(tmp_path,monkeypatch):
++    monkeypatch.setenv('HERMES_HOME',str(tmp_path))
++    receipt=tmp_path/'receipt';receipt.write_text('private original receipt')
++    cancel=threading.Event();agents=[];calls=[]
++    def execute(job,**kw):
++        calls.append((job,kw));return False,'repair receipt','', 'failed'
++    monkeypatch.setattr(op,'run_job',execute)
++    job={'id':'job','name':'Report','script':'x.py','provider':'original','enabled_toolsets':['terminal']}
++    for attempt in range(2):op._attempt_cron_failure_remediation(job,failure_kind='script',output_file=receipt,deferred_agents=agents,cancel_event=cancel,execution_id='execution',failure_detail=f'request id={attempt}')
++    assert len(calls)==1
++    repair,kw=calls[0]
++    assert repair['_cron_repair_attempt'] and repair['max_iterations']==10
++    assert not repair['script'] and repair['deliver']=='local'
++    assert repair['enabled_toolsets']==['terminal']
++    assert kw['cancel_event'] is cancel and kw['execution_id']=='execution'
++    assert kw['defer_agent_teardown'] is agents
++    assert 'private original receipt' in receipt.read_text() and 'repair receipt' in receipt.read_text()
++    assert job['script']=='x.py' and job['provider']=='original'
++
++
++@pytest.fixture
++def delivery(tmp_path,monkeypatch):
++    monkeypatch.setenv('HERMES_HOME',str(tmp_path))
++    receipt=tmp_path/'receipt';sent=[]
++    def save(jid,text):receipt.write_text(text);return receipt
++    monkeypatch.setattr(s,'save_job_output',save)
++    monkeypatch.setattr(s,'_upsert_incident_for_failure',lambda *a,**k:(False,None))
++    monkeypatch.setattr(s,'_is_interrupted',lambda *a:False)
++    monkeypatch.setattr(s,'_deliver_result',lambda job,text,**kw:sent.append((text,kw)))
++    monkeypatch.setattr(s,'_resolve_delivery_targets',lambda *a,**k:[])
++    fence=SimpleNamespace(side_effect_fence=lambda:contextlib.nullcontext(True),lost=lambda:False,fire_claim_lost=threading.Event())
++    return receipt,sent,fence
++
++
++def test_verified_repair_is_delivered_with_original_receipt_and_owned_execution(delivery,monkeypatch):
++    receipt,sent,fence=delivery;agents=[];calls=[]
++    def execute(job,**kw):
++        calls.append(kw);return True,'verified receipt','Report cron — repaired and verified: completed local validation.',None
++    monkeypatch.setattr(op,'run_job',execute)
++    d=s._RunDelivery(job={'id':'job','name':'Report','deliver':'local'},success=False,error=op._CronOperatorFailure('/private/error','script'))
++    s._save_compose_deliver(d,fence,'','original private error',adapters=None,loop=None,verbose=False,execution_token=None,deferred_agents=agents,execution_id='exec')
++    assert not d.success and d.error is not None
++    assert sent[0][0]=='Report cron — automatic repair attempted; the original run remains failed.'
++    assert calls[0]['cancel_event'] is fence.fire_claim_lost
++    assert 'original private error' in receipt.read_text() and 'verified receipt' in receipt.read_text()
++
++
++def test_lost_claim_never_repairs_or_delivers(delivery,monkeypatch):
++    receipt,sent,fence=delivery;fence.lost=lambda:True
++    repair=MagicMock();monkeypatch.setattr(s,'_attempt_cron_failure_remediation',repair)
++    d=s._RunDelivery(job={'id':'job','name':'Report','deliver':'local'},success=False,error=op._CronOperatorFailure('bad','script'))
++    s._save_compose_deliver(d,fence,'','receipt',adapters=None,loop=None,verbose=False,execution_token=None)
++    repair.assert_not_called();assert not sent
++
++
++def test_claim_loss_during_repair_prevents_delivery(delivery,monkeypatch):
++    receipt,sent,fence=delivery
++    def repair(*a,**kw):
++        fence.lost=lambda:True
++        return 'Report cron — repaired and verified: done.',True
++    monkeypatch.setattr(s,'_attempt_cron_failure_remediation',repair)
++    d=s._RunDelivery(job={'id':'job','name':'Report'},success=False,error=op._CronOperatorFailure('bad','script'))
++    with pytest.raises(s._FireClaimLostDuringSideEffect):
++        s._save_compose_deliver(d,fence,'','receipt',adapters=None,loop=None,verbose=False,execution_token=None)
++    assert not sent
++
++
++@pytest.mark.parametrize('reason',['auth','rate_limit','content_policy_blocked','format_error'])
++def test_native_api_error_verdict_carries_classifier_reason(monkeypatch,reason):
++    import inspect,time
++    import agent.turn_api_error as api
++    agent=MagicMock(thinking_callback=None,context_compressor=None,_interrupt_requested=False)
++    monkeypatch.setattr(api,'recover_before_classification',lambda *a,**k:(False,'system'))
++    monkeypatch.setattr(api,'recover_after_classification',lambda *a,**k:(False,False))
++    classified=SimpleNamespace(reason=SimpleNamespace(value=reason),status_code=400,retryable=False,should_compress=False,should_rotate_credential=False,should_fallback=False)
++    monkeypatch.setattr(api,'classify_api_error',lambda *a,**k:classified)
++    monkeypatch.setattr(api,'log_api_error_attempt',lambda *a,**k:('Error','detail','provider','base','model'))
++    terminal={'completed':False,'failed':True,'error':'private error'}
++    routed=SimpleNamespace(action='return',result=terminal,status_code=400,messages=[],active_system_prompt='system',conversation_history=[],retry_count=1,max_retries=1,compression_attempts=0,is_rate_limited=False,wrapped_output_cap_budget=None,is_zai_coding_overload=False,provider_overflow_recovery_pending=False)
++    monkeypatch.setattr(api,'route_classified_error',lambda *a,**k:routed)
++    kwargs={name:None for name in inspect.signature(api.handle_api_error).parameters if name!='agent'}
++    kwargs.update(api_error=RuntimeError('opaque'),retry_count=0,max_retries=1,api_start_time=time.time(),api_messages=[],thinking_spinner=None)
++    assert api.handle_api_error(agent,**kwargs).result['failure_reason']==reason
++
++
++def test_http_200_content_policy_producer_stays_nonrepairable():
++    from agent.conversation_loop import _content_policy_blocked_result
++    result=_content_policy_blocked_result([],1,final_response='blocked',error_detail='private detail')
++    assert result['failed'] is True
++    assert op._cron_result_failure_kind(result)=='safety'
++
++
++def test_script_output_cannot_spoof_failure_category(monkeypatch):
++    monkeypatch.setattr(s,'_run_job_script_with_claim_heartbeat',lambda *a,**k:(False,'provider_auth safety /private/path'))
++    ok,doc,response,error=s._run_no_agent_job({'script':'fake.py'},'job','Report',None)
++    assert not ok and error.kind=='script'
++    assert 'provider_auth safety /private/path' in doc
++
++
++@pytest.mark.parametrize('directive',['MEDIA:/tmp/private.pdf','[[as_document]]\nMEDIA:/tmp/private.pdf','[[audio_as_voice]]\nMEDIA:/tmp/private.ogg'])
++def test_failed_output_never_carries_media(directive):
++    text=op._format_cron_operator_delivery_with_media('Report','failure\n'+directive,success=False,job_lane='script',failure_kind='script')
++    assert 'MEDIA:' not in text and '[[' not in text and '/tmp/' not in text
++
++
++def test_script_only_failure_never_starts_repair(tmp_path, monkeypatch):
++    execute = MagicMock()
++    monkeypatch.setattr(op, 'run_job', execute)
++    assert op._attempt_cron_failure_remediation(
++        {'id':'script-only', 'name':'Report', 'no_agent':True}, failure_kind='script',
++        output_file=tmp_path/'receipt', deferred_agents=[]) == ('Report cron — failed in its script or runtime. Automatic repair skipped: script-only execution. Review the saved receipt.', False)
++    execute.assert_not_called()
+diff --git a/tests/cron/test_shutdown_interrupt.py b/tests/cron/test_shutdown_interrupt.py
+index a8bb3bf..52233d1 100644
+--- a/tests/cron/test_shutdown_interrupt.py
++++ b/tests/cron/test_shutdown_interrupt.py
+@@ -609,7 +609,7 @@ class TestRunOneJobHonoursInterruptedFlag:
+         # not be silently None / the agent's own (possibly absent) error.
+         assert "interrupt" in mock_summarize.call_args.args[1].lower()
+         delivered_content = mock_deliver.call_args.args[1]
+-        assert delivered_content == "This run was interrupted."
++        assert delivered_content.startswith("test job cron — was interrupted during gateway shutdown.")
+         assert "plausible final response" not in delivered_content
+ 
+ 

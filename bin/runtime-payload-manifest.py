@@ -233,6 +233,8 @@ def changed_paths(repo: Path, base_sha: str, target_sha: str) -> list[str]:
 def is_runtime_state_or_artifact(path: str) -> bool:
     parts = path.split("/")
     name = parts[-1]
+    if parts[:2] == [".hermes-runtime", "python"]:
+        return True
     if any(
         part in {"venv", ".venv", "node_modules"} or part.endswith(".egg-info")
         for part in parts
@@ -479,8 +481,8 @@ def main(argv: list[str] | None = None) -> int:
             str(target.get("canonical_upstream_sha") or ""),
             str(target.get("golden_sha") or ""),
             (
-                target.get("assembled_runtime_fingerprint", {}).get("files")
-                if isinstance(target.get("assembled_runtime_fingerprint"), dict)
+                target.get("runtime_fingerprint", {}).get("files")
+                if isinstance(target.get("runtime_fingerprint"), dict)
                 else None
             ),
         )

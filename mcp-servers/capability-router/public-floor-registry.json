@@ -89,6 +89,15 @@
       "mcp_server": "visual-identity",
       "tool_name": "visual_identity_search",
       "preferred_for": ["brand assets", "logo", "visual reference", "style guide"]
+    },
+    {
+      "id": "visual.refero-styles",
+      "category": "visual",
+      "label": "Refero DESIGN.md styles",
+      "summary": "Search the public Refero style library and render DESIGN.md in-session when a client wants more visual ideas.",
+      "mcp_server": "refero-styles",
+      "tool_name": "refero_search",
+      "preferred_for": ["more visual ideas", "DESIGN.md", "design tokens", "style library", "not generic SaaS"]
     }
   ]
 }

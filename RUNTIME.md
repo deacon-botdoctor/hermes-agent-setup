@@ -156,7 +156,10 @@ values only when they still exactly match the old defaults.
   with an older mutable checkout.
 - **Recurring coherence receipt:** a release-pinned host scheduler rechecks the
   exact runtime root, Python, and assembled initializer contract without
-  restarting Hermes or reading conversations.
+  restarting Hermes or reading conversations. Import probes use a newly created
+  temporary HOME and HERMES_HOME; only the final receipt reaches the real profile.
+  The coherence source commit records upstream lineage; the release probe and
+  package SHA-256 values bind the current public implementation.
 - **Machine-aware execution:** the local self-check publishes current capacity,
   process, disk, and swap evidence. Large jobs use that evidence for staging,
   checkpoint, and cleanup decisions rather than being categorically blocked.
@@ -202,7 +205,7 @@ values only when they still exactly match the old defaults.
   leave no persistent GBrain server process.
 
 The authoritative per-patch reason, target, test, rollback, and retirement
-condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 33
+condition are in [`patches/registry.yaml`](patches/registry.yaml). There are 49
 cohesive registry entries in this release.
 
 ## Profile additions

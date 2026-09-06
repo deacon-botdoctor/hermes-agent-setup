@@ -1,0 +1,360 @@
+--- a/tests/tools/test_process_registry.py
++++ b/tests/tools/test_process_registry.py
+@@ -1885,6 +1885,14 @@
+     ENTIRE gateway cgroup, taking down the messaging control plane.
+     """
+ 
++    @pytest.fixture(autouse=True)
++    def _isolated_host_ownership(self, monkeypatch):
++        # These are systemd argv/cleanup tests. Ownership admission is exercised
++        # with real native spawn methods in test_process_registry_host_steward.py.
++        monkeypatch.setattr("tools.process_registry._register_with_host_steward", lambda session: "")
++        # Simulate the systemd platform explicitly; Darwin-specific cases override it.
++        monkeypatch.setattr("tools.process_registry._IS_LINUX", True)
++
+     @pytest.fixture()
+     def _gateway_identity(self, monkeypatch):
+         """Opt-in: mark this test as running AS the live gateway process."""
+--- a/tools/process_registry.py
++++ b/tools/process_registry.py
+@@ -13,6 +13,7 @@
+ import shlex
+ import signal
+ import subprocess
++import sys
+ import threading
+ import time
+ import uuid
+@@ -37,6 +38,142 @@
+ 
+ # Crash-recovery checkpoint (gateway only)
+ CHECKPOINT_PATH = get_hermes_home() / "processes.json"
++
++# HERMES_HOST_STEWARD_RUNTIME_OWNERSHIP_v1: every persistent local terminal
++# process must acquire durable host ownership before it is exposed as running.
++_HOST_STEWARD_TTL_SECONDS = 24 * 3600  # matches ProcessRegistry's active-age cap
++
++
++class _HostStewardRegistrationError(RuntimeError):
++    pass
++
++
++def _register_with_host_steward(session: "ProcessSession") -> str:
++    supervised = _is_supervised_gateway_process()
++    session.host_steward_scope = "managed" if supervised else "user"
++    if not supervised:
++        # Interactive CLI work is user-owned rather than fleet-agent-owned.
++        return ""
++    home = get_hermes_home()
++    steward = home / "bin" / "hermes-host-steward.py"
++    if steward.is_symlink() or not steward.is_file():
++        raise _HostStewardRegistrationError(
++            "Host Steward is unavailable; refusing an unowned background process"
++        )
++    task_id = (
++        getattr(session, "task_id", "")
++        or getattr(session, "session_key", "")
++        or session.id
++    )
++    try:
++        result = subprocess.run(
++            [
++                sys.executable,
++                str(steward),
++                "--hermes-home",
++                str(home),
++                "register-process",
++                "--task-id",
++                task_id,
++                "--pid",
++                str(session.pid),
++                "--ttl",
++                str(_HOST_STEWARD_TTL_SECONDS),
++                *(["--systemd-unit", session.systemd_unit] if session.systemd_unit else []),
++            ],
++            capture_output=True,
++            text=True,
++            check=False,
++            timeout=10,
++        )
++        payload = json.loads(result.stdout) if result.stdout else {}
++    except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError) as exc:
++        raise _HostStewardRegistrationError(
++            "Host Steward registration failed; refusing an unowned background process"
++        ) from exc
++    lease_id = payload.get("lease_id") if isinstance(payload, dict) else None
++    if (
++        result.returncode != 0 or not isinstance(payload, dict)
++        or payload.get("schema") != "hermes-host-steward/v1"
++        or payload.get("kind") != "process"
++        or payload.get("task_id") != task_id
++        or not isinstance(lease_id, str)
++        or len(lease_id) != 32
++        or any(character not in "0123456789abcdef" for character in lease_id)
++    ):
++        raise _HostStewardRegistrationError(
++            "Host Steward rejected background-process ownership"
++        )
++    session.host_steward_renewed_at = time.time()
++    return lease_id
++
++
++def _renew_with_host_steward(session: "ProcessSession") -> None:
++    if not session.host_steward_lease_id:
++        return
++    now = time.time()
++    if now - session.host_steward_renewed_at < _HOST_STEWARD_TTL_SECONDS / 2:
++        return
++    home = get_hermes_home()
++    steward = home / "bin" / "hermes-host-steward.py"
++    try:
++        result = subprocess.run(
++            [
++                sys.executable,
++                str(steward),
++                "--hermes-home",
++                str(home),
++                "renew-lease",
++                "--lease-id",
++                session.host_steward_lease_id,
++                "--ttl",
++                str(_HOST_STEWARD_TTL_SECONDS),
++            ],
++            capture_output=True,
++            text=True,
++            check=False,
++            timeout=10,
++        )
++        payload = json.loads(result.stdout) if result.stdout else {}
++    except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError) as exc:
++        raise _HostStewardRegistrationError("Host Steward lease renewal failed") from exc
++    if result.returncode != 0 or not isinstance(payload, dict) or payload.get("renewed") != 1:
++        raise _HostStewardRegistrationError("Host Steward rejected lease renewal")
++    session.host_steward_renewed_at = now
++
++
++def _release_with_host_steward(session: "ProcessSession") -> None:
++    lease_id = session.host_steward_lease_id
++    if not lease_id:
++        return
++    home = get_hermes_home()
++    steward = home / "bin" / "hermes-host-steward.py"
++    try:
++        result = subprocess.run(
++            [
++                sys.executable,
++                str(steward),
++                "--hermes-home",
++                str(home),
++                "release-lease",
++                "--lease-id",
++                lease_id,
++                "--apply",
++            ],
++            capture_output=True,
++            text=True,
++            check=False,
++            timeout=15,
++        )
++        payload = json.loads(result.stdout) if result.stdout else {}
++    except (OSError, subprocess.SubprocessError, ValueError, json.JSONDecodeError):
++        return
++    if result.returncode == 0 and isinstance(payload, dict) and payload.get("outcome") in {
++        "released",
++        "already_gone",
++        "preserved",
++    }:
++        session.host_steward_lease_id = ""
+ 
+ MAX_OUTPUT_CHARS = 200_000      # rolling output buffer
+ FINISHED_TTL_SECONDS = 1800     # keep finished processes 30 minutes
+@@ -323,6 +460,9 @@
+     detached: bool = False                      # Recovered from checkpoint (no pipe)
+     pid_scope: str = "host"                     # "host" for local/PTY PIDs, "sandbox" for env-local PIDs
+     systemd_unit: str = ""                      # transient scope unit name when spawned under systemd-run
++    host_steward_lease_id: str = ""
++    host_steward_scope: str = "legacy"
++    host_steward_renewed_at: float = 0.0
+     # Watcher/notification routing (persisted for crash recovery)
+     # systemd_unit: str = ""                      # transient scope unit name when spawned under systemd-run
+     # (#70716)
+@@ -374,6 +514,7 @@
+ # ``session_id``; ``command`` is redacted and ``owner_task_id`` defaulted on write).
+ _CHECKPOINT_FIELDS = (
+     "command", "pid", "pid_scope", "host_start_time", "systemd_unit", "cwd",
++    "host_steward_lease_id", "host_steward_scope",
+     "started_at", "task_id", "owner_task_id", "session_key",
+     *(f"watcher_{k}" for k in _WATCHER_ROUTE_KEYS), "watcher_interval",
+     "parent_session_id", "notify_on_complete", "watch_patterns")
+@@ -811,6 +952,17 @@
+         session.pid = pty_proc.pid
+         session.host_start_time = self._safe_host_start_time(session.pid)
+         session._pty = pty_proc
++        try:
++            session.host_steward_lease_id = _register_with_host_steward(session)
++        except _HostStewardRegistrationError:
++            if session.systemd_unit:
++                with suppress(Exception):
++                    _stop_systemd_unit(session.systemd_unit)
++            with suppress(Exception):
++                self._terminate_host_pid(session.pid, session.host_start_time)
++            with suppress(Exception):
++                pty_proc.terminate(force=True)
++            raise
+         self._track_started(session, self._pty_reader_loop, f"proc-pty-reader-{session.id}")
+         return session
+ 
+@@ -832,6 +984,8 @@
+         if use_pty:
+             try:
+                 return self._spawn_local_pty(session, safe_command, env_vars)
++            except _HostStewardRegistrationError:
++                raise
+             except ImportError:
+                 logger.warning("ptyprocess not installed, falling back to pipe mode")
+             except Exception as e:
+@@ -861,6 +1015,7 @@
+         session.pid = proc.pid
+         session.host_start_time = self._safe_host_start_time(session.pid)
+         try:
++            session.host_steward_lease_id = _register_with_host_steward(session)
+             self._track_started(session, self._reader_loop, f"proc-reader-{session.id}")
+         except Exception:
+             self._reap_untracked(session, proc)
+@@ -1156,6 +1311,8 @@
+             self._finished[session.id] = session
+         session._completion_event.set()
+         self._write_checkpoint()
++        if was_running:
++            _release_with_host_steward(session)
+         if was_running and session.notify_on_complete:
+             notification = {
+                 "type": "completion",
+@@ -1462,6 +1619,11 @@
+         if session is None:
+             return _not_found(session_id)
+         self._reconcile_local_exit(session)  # orphaned-pipe reader guard
++        if not session.exited:
++            try:
++                _renew_with_host_steward(session)
++            except _HostStewardRegistrationError as exc:
++                logger.warning("Host Steward lease renewal deferred: %s", exc)
+         with session._lock:
+             output_preview = _output_tail(session, 1000)
+         result = {
+--- /dev/null
++++ b/tests/tools/test_process_registry_host_steward.py
+@@ -0,0 +1,113 @@
++"""Host ownership at the native local spawn boundary; no external steward is invoked."""
++import json
++from types import SimpleNamespace
++from unittest.mock import MagicMock
++
++import pytest
++import tools.process_registry as pr
++
++
++@pytest.fixture
++def home(tmp_path, monkeypatch):
++    monkeypatch.setattr(pr, 'get_hermes_home', lambda: tmp_path)
++    monkeypatch.setattr(pr, 'CHECKPOINT_PATH', tmp_path / 'processes.json')
++    monkeypatch.setattr(pr, '_is_supervised_gateway_process', lambda: True)
++    (tmp_path / 'bin').mkdir()
++    (tmp_path / 'bin/hermes-host-steward.py').write_text('# test fixture')
++    return tmp_path
++
++
++def session(**kw):
++    return pr.ProcessSession(id='proc_test', command='echo test', task_id='task', pid=1234, **kw)
++
++
++def test_registration_requires_valid_lease_before_exposure(home, monkeypatch):
++    run = MagicMock(return_value=SimpleNamespace(stdout=json.dumps(dict(
++        schema='hermes-host-steward/v1', kind='process', task_id='task', lease_id='a'*32)), returncode=0))
++    monkeypatch.setattr(pr.subprocess, 'run', run)
++    item=session(systemd_unit='hermes-worker-test.scope')
++    assert pr._register_with_host_steward(item) == 'a'*32
++    assert item.host_steward_scope == 'managed'
++    assert item.host_steward_renewed_at > 0
++    argv=run.call_args.args[0]
++    assert argv[-2:] == ['--systemd-unit', 'hermes-worker-test.scope']
++    assert argv[argv.index('--pid')+1] == '1234'
++
++
++@pytest.mark.parametrize('payload', [{}, [], {'schema':'wrong'}, {'schema':'hermes-host-steward/v1','kind':'process','task_id':'other','lease_id':'a'*32}])
++def test_invalid_receipt_fails_closed(home, monkeypatch, payload):
++    monkeypatch.setattr(pr.subprocess,'run',lambda *a,**k:SimpleNamespace(stdout=json.dumps(payload),returncode=0))
++    with pytest.raises(pr._HostStewardRegistrationError):
++        pr._register_with_host_steward(session())
++
++
++def test_missing_or_symlink_steward_rejected(home):
++    path=home/'bin/hermes-host-steward.py';path.unlink()
++    with pytest.raises(pr._HostStewardRegistrationError): pr._register_with_host_steward(session())
++    (home/'fixture').write_text('fixture');path.symlink_to(home/'fixture')
++    with pytest.raises(pr._HostStewardRegistrationError): pr._register_with_host_steward(session())
++
++
++def test_interactive_process_is_user_owned(home,monkeypatch):
++    monkeypatch.setattr(pr,'_is_supervised_gateway_process',lambda:False)
++    run=MagicMock();monkeypatch.setattr(pr.subprocess,'run',run)
++    item=session();assert pr._register_with_host_steward(item)==''
++    assert item.host_steward_scope=='user';run.assert_not_called()
++
++
++def test_pipe_registration_failure_reaps_before_exposure(home,monkeypatch):
++    registry=pr.ProcessRegistry();proc=MagicMock(pid=1234)
++    monkeypatch.setattr(pr.subprocess,'Popen',lambda *a,**k:proc)
++    monkeypatch.setattr(registry,'_scope_argv',lambda *a: ['test'])
++    monkeypatch.setattr(registry,'_safe_host_start_time',lambda p:987)
++    monkeypatch.setattr(pr,'_register_with_host_steward',MagicMock(side_effect=pr._HostStewardRegistrationError('no lease')))
++    reap=MagicMock();track=MagicMock()
++    monkeypatch.setattr(registry,'_reap_untracked',reap);monkeypatch.setattr(registry,'_track_started',track)
++    with pytest.raises(pr._HostStewardRegistrationError): registry.spawn_local('echo test')
++    track.assert_not_called();reap.assert_called_once()
++    assert reap.call_args.args[0].host_start_time==987
++    assert registry._running=={}
++
++
++def test_pty_registration_failure_reaps_without_pipe_fallback(home,monkeypatch):
++    import ptyprocess
++    registry=pr.ProcessRegistry();pty=MagicMock(pid=1234)
++    monkeypatch.setattr(ptyprocess.PtyProcess,'spawn',lambda *a,**k:pty)
++    monkeypatch.setattr(registry,'_scope_argv',lambda *a:['test'])
++    monkeypatch.setattr(registry,'_safe_host_start_time',lambda p:987)
++    monkeypatch.setattr(pr,'_register_with_host_steward',MagicMock(side_effect=pr._HostStewardRegistrationError('no lease')))
++    kill=MagicMock();popen=MagicMock();track=MagicMock()
++    monkeypatch.setattr(registry,'_terminate_host_pid',kill)
++    monkeypatch.setattr(pr.subprocess,'Popen',popen);monkeypatch.setattr(registry,'_track_started',track)
++    with pytest.raises(pr._HostStewardRegistrationError): registry.spawn_local('echo test',use_pty=True)
++    kill.assert_called_once_with(1234,987);pty.terminate.assert_called_once_with(force=True)
++    track.assert_not_called();popen.assert_not_called()
++
++
++def test_checkpoint_recovery_fields_and_release_once(home,monkeypatch):
++    registry=pr.ProcessRegistry();item=session(host_start_time=987,host_steward_lease_id='a'*32,host_steward_scope='managed')
++    registry._running[item.id]=item;registry._write_checkpoint()
++    row=json.loads(pr.CHECKPOINT_PATH.read_text())[0]
++    assert row['host_steward_lease_id']=='a'*32 and row['host_steward_scope']=='managed'
++    # Native checkpoint decoder uses the same field table/defaults on recovery.
++    assert pr._CHECKPOINT_DEFAULTS['host_steward_lease_id']==''
++    recovered=pr.ProcessRegistry()
++    monkeypatch.setattr(recovered,'_host_pid_is_ours',lambda pid,birth:pid==1234 and birth==987)
++    assert recovered.recover_from_checkpoint()==1
++    restored=recovered._running[item.id]
++    assert restored.host_steward_lease_id==item.host_steward_lease_id
++    assert restored.host_steward_scope=='managed' and restored.detached
++
++    release=MagicMock();monkeypatch.setattr(pr,'_release_with_host_steward',release)
++    registry._move_to_finished(item);registry._move_to_finished(item)
++    release.assert_called_once_with(item)
++
++
++def test_renewal_throttle_and_release(home,monkeypatch):
++    item=session(host_steward_lease_id='a'*32)
++    run=MagicMock(return_value=SimpleNamespace(stdout='{"renewed":1}',returncode=0))
++    monkeypatch.setattr(pr.subprocess,'run',run)
++    pr._renew_with_host_steward(item);pr._renew_with_host_steward(item)
++    run.assert_called_once()
++    run.return_value=SimpleNamespace(stdout='{"outcome":"released"}',returncode=0)
++    pr._release_with_host_steward(item);assert item.host_steward_lease_id==''

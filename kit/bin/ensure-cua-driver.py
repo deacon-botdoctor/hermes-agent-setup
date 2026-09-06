@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,8 +43,18 @@ def load_contract(path: Path) -> dict[str, Any]:
         or installer.get("pin_environment") != "CUA_DRIVER_RS_VERSION"
         or not isinstance(acceptance, dict)
         or acceptance.get("baseline") != "exact_version_present"
+        or not re.fullmatch(
+            r"\d+(?:\.\d+){2,}",
+            str(acceptance.get("minimum_compatible_version", "")),
+        )
     ):
         raise ValueError("invalid Cua Driver release contract")
+    version = tuple(int(part) for part in str(release["version"]).split("."))
+    minimum = tuple(
+        int(part) for part in str(acceptance["minimum_compatible_version"]).split(".")
+    )
+    if version < minimum:
+        raise ValueError("Cua Driver release is below the Hermes compatibility floor")
     return data
 
 
@@ -98,6 +109,9 @@ def child_env(home: Path, contract: dict[str, Any]) -> dict[str, str]:
     env[installer.get("telemetry_environment", "CUA_DRIVER_RS_TELEMETRY_ENABLED")] = str(
         installer.get("telemetry_default", "0")
     )
+    managed_driver = home / "bin" / "cua-driver.exe"
+    if os.name == "nt" and managed_driver.is_file():
+        env["HERMES_CUA_DRIVER_CMD"] = str(managed_driver)
     return env
 
 
@@ -160,6 +174,65 @@ def run(
         check=False,
         env=env,
     )
+
+
+def sync_windows_managed_driver(
+    *,
+    home: Path,
+    wanted: str,
+    asset_key: str,
+    env: dict[str, str],
+    package_home: Path | None = None,
+) -> dict[str, Any]:
+    """Copy the exact driver from the login-user cache into HERMES_HOME/bin."""
+    target = {
+        "windows-x86_64": "x86_64-pc-windows-msvc",
+        "windows-arm64": "aarch64-pc-windows-msvc",
+    }.get(asset_key)
+    if not target:
+        raise ValueError(f"unsupported Windows managed-driver asset: {asset_key}")
+    packages = package_home or (Path.home() / ".cua-driver" / "packages")
+    source_dir = packages / "releases" / f"{wanted}-{target}"
+    source_driver = source_dir / "cua-driver.exe"
+    version = run([str(source_driver), "--version"], env=env, timeout=20)
+    match = VERSION_RE.search((version.stdout or version.stderr or "").strip())
+    if version.returncode != 0 or not match or match.group(1) != wanted:
+        raise RuntimeError("native Windows CUA package is missing or not exact")
+    destinations = [home / "bin"]
+    if home.parent.name.lower() == "profiles":
+        destinations.insert(0, home.parent.parent / "bin")
+    for destination in destinations:
+        destination.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for destination in destinations:
+        for name in ("cua-driver.exe", "cua-driver-uia.exe", "cua-cursor-theme.exe"):
+            source = source_dir / name
+            if not source.is_file():
+                raise RuntimeError(f"native Windows CUA package is incomplete: {name}")
+            target_path = destination / name
+            temporary = target_path.with_name(target_path.name + ".new")
+            shutil.copy2(source, temporary)
+            os.replace(temporary, target_path)
+            copied.append(str(target_path))
+    managed_driver = destinations[0] / "cua-driver.exe"
+    managed_version = run([str(managed_driver), "--version"], env=env, timeout=20)
+    managed_match = VERSION_RE.search(
+        (managed_version.stdout or managed_version.stderr or "").strip()
+    )
+    if (
+        managed_version.returncode != 0
+        or not managed_match
+        or managed_match.group(1) != wanted
+    ):
+        raise RuntimeError("managed Windows CUA driver did not verify")
+    return {
+        "ok": True,
+        "path": str(managed_driver),
+        "version": wanted,
+        "copied": copied,
+        "destinations": [str(destination) for destination in destinations],
+        "source": str(source_dir),
+    }
 
 
 def probe_driver(
@@ -226,10 +299,14 @@ def ensure_driver(
 
     env = child_env(home, contract)
     wanted = contract["release"]["version"]
+    is_windows = (system or platform.system()).lower() == "windows"
     before = probe_driver(python, env=env)
     exact_before = before.get("installed") is True and before.get("version") == wanted
     install_attempted = False
     install_returncode: int | None = None
+    install_stdout = ""
+    install_stderr = ""
+    managed_driver: dict[str, Any] | None = None
 
     if not exact_before and not dry_run:
         install_attempted = True
@@ -244,9 +321,28 @@ def ensure_driver(
             timeout=900,
         )
         install_returncode = proc.returncode
+        install_stdout = (proc.stdout or "").strip()[-1_000:]
+        install_stderr = (proc.stderr or "").strip()[-1_000:]
 
-    after = before if dry_run or exact_before else probe_driver(python, env=env)
+    if is_windows and not dry_run and (exact_before or install_returncode == 0):
+        try:
+            managed_driver = sync_windows_managed_driver(
+                home=home,
+                wanted=wanted,
+                asset_key=asset_key,
+                env=env,
+            )
+            env["HERMES_CUA_DRIVER_CMD"] = str(managed_driver["path"])
+        except Exception as exc:
+            managed_driver = {"ok": False, "error": str(exc)}
+
+    if is_windows and managed_driver and managed_driver.get("ok"):
+        after = probe_driver(python, env=env)
+    else:
+        after = before if dry_run or exact_before else probe_driver(python, env=env)
     exact_after = after.get("installed") is True and after.get("version") == wanted
+    if is_windows and not dry_run:
+        exact_after = exact_after and bool(managed_driver and managed_driver.get("ok"))
 
     doctor_payload = None
     doctor_returncode: int | None = None
@@ -301,6 +397,9 @@ def ensure_driver(
         "after": after,
         "install_attempted": install_attempted,
         "install_returncode": install_returncode,
+        "install_stdout": install_stdout,
+        "install_stderr": install_stderr,
+        "managed_driver": managed_driver,
         "doctor_ready": ready,
         "doctor_returncode": doctor_returncode,
         "doctor": doctor_payload,

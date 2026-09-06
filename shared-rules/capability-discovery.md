@@ -1,139 +1,152 @@
-## Capability discovery — call the router FIRST (HARD RULE)
+## Capability discovery — native execution first
 
-You have a small "hot" toolset of MCPs that load by default each turn. For any request involving capabilities **not** already in your hot toolset, your FIRST stop is the **capability-router** MCP. Do not guess at tool names from memory and do not tell the user "I don't have that tool" before checking the router.
+Hermes' native `tool_search` is the execution source of truth. It searches the
+tools registered in the current gateway, returns exact callable names, and
+preserves the normal authorization, plugin, and audit path through `tool_call`.
+Use the custom capability router only as a secondary reference index for cold,
+uninstalled, other-lane, or operating-pattern guidance.
 
-### HARD VIOLATION — deny reflexes to never invoke
+### Hard rule
 
-The following denial patterns are hard violations of this rule. They are training-base reflexes; they are wrong every time on this fleet, because cap-router exists:
+For a request that needs a capability not already visible in the hot toolset:
+
+1. Call native `tool_search` with the user's intent.
+2. If it returns the right tool, use `tool_describe` when its schema is not
+   obvious, then invoke it with `tool_call`.
+3. If native search has no viable match, search for the capability-router tools
+   through native `tool_search`, then call
+   `mcp__capability_router__search_capabilities` for broad inventory and routing
+   guidance.
+4. Invoke a router result only when it names an exact backend tool and reports
+   `can_invoke_now: true`. Reference entries are never callable.
+
+Do not guess tool names from memory. Do not tell the user a capability is
+missing before both the current executable catalog and the relevant reference
+route have been checked.
+
+### Denial reflexes to avoid
+
+Do not default to statements such as:
 
 - "I am a text-only agent."
-- "I do not have screen / vision / capture access."
-- "I cannot see images / screenshots / your screen."
-- "I am an AI; I do not have direct access to [your machine / files / browser / email]."
+- "I cannot see images, files, your screen, or a browser."
 - "That is not something I can do."
-- "I would need [credentials / access / a tool]." (without naming a router search you actually ran)
+- "I would need credentials, access, or a tool" without naming the discovery
+  and readiness checks actually run.
 
-If you find yourself reaching for any of these, STOP. Call `mcp__capability_router__search_capabilities` with a keyword from the ask FIRST. Only after exhausting viable router hits is "I cannot" allowed, and the response must list what was tried.
+Discover first. If the route is genuinely unavailable, report the exact failed
+or missing prerequisite and the smallest owner repair.
 
-The operator has paid for every capability the router exposes. Denying without checking is a system failure equivalent to going silent on a deliverable.
+### Hot defaults
 
-### Hot defaults (always available)
+Use already-visible core tools directly, including native Hermes memory and
+profile-specific always-on tools. Native image generation, MCP tools, and
+non-core plugin tools may be deferred behind `tool_search`; that does not mean
+they are unavailable.
 
-These are loaded every turn for fast, low-latency core work:
+Do not call either discovery layer for a trivial request whose tool is already
+visible.
 
-- native Hermes memory tools — bounded `MEMORY.md` / `USER.md` recall and writes
-- `telegram-directory` — Telegram chat/topic routing
-- Any `local-*` MCPs configured for this client (offline-only ops)
-- Profile-specific always-on MCPs declared in your SOUL/AGENTS.md (e.g. `maton-gmail`, `maton-calendar` for clients who explicitly need them hot)
+### Native executable search
 
-Everything else — image gen, web search, mail, calendar, sheets, drive, docs, browser, calendly, deep memory, vision analysis, document generation, etc. — is **on-demand via capability-router**.
+Native Hermes exposes three progressive-disclosure tools:
 
-### How to use the router
+- `tool_search` finds connected MCP/plugin tools by intent.
+- `tool_describe` returns the exact schema for a deferred tool.
+- `tool_call` invokes that deferred tool through the ordinary Hermes execution
+  path.
 
-Four tools available on every Hermes agent in this fleet:
+Search results describe tools registered in the current gateway. They are the
+authoritative answer to "what can run now?" A stale catalog entry must never
+override native executable state.
 
-- `mcp__capability_router__search_capabilities(query="<what you want>")` — keyword search the 175+ catalogued tools. Returns hits with `mcp_server`, `tool_name`, `availability`, `can_invoke_now`, `activation_required`, `requires_creds`, plus `score` + `score_breakdown` showing why each ranked where it did. A cold server may appear as one activation marker with `tool_name: null`; activate it, then search the refreshed toolset for the concrete tool.
-- `mcp__capability_router__describe_capability(capability_id="catalog.<id>")` — full schema (inputs, outputs, cost, creds) for a concrete capability after search narrows it down. For a cold concrete hit, activate it first or pass `include_uninstalled=true` to inspect its catalog schema before activation. An activation marker describes only the server, not its cached tool schemas.
-- `mcp__capability_router__list_categories()` — browse the catalog by category when you don't know what you're looking for.
-- `mcp__capability_router__record_capability_outcome(capability_id, outcome, query="", error_class="")` — call this AFTER you invoke a capability so the router learns. `outcome` is `"success"` or `"failure"`. `error_class` is a short tag if it failed (`"auth"`, `"network"`, `"ratelimit"`, `"schema"`, `"timeout"`, `"other"`). The router uses this history to boost capabilities that have worked for you and demote ones that haven't.
+### Capability-router reference search
 
-Search results carry `availability`, `can_invoke_now`, `activation_required`,
-`activation_tool`, `status_tool`, `preferred_for`, `deprioritize_for`, and
-`score_breakdown`. The legacy `installed` field mirrors `can_invoke_now`; it no
-longer means merely present on disk. Invoke directly only when
-`can_invoke_now: true`. An
-allowlisted configured backend may instead be `availability: cold`; inspect it
-with the returned status tool when needed, activate it with the returned
-activation tool, then search again so its newly registered tools become
-visible. Trust the score order: it already factors in keyword match, fleet
-preferences, and your own usage history.
+The capability router remains useful for fleet-wide discovery that native
+search cannot answer: policy-allowed cold servers, capabilities installed on a
+different lane, credential prerequisites, and operating patterns.
 
-### After routing — invoke the underlying tool
+Router results include `availability`, `can_invoke_now`,
+`activation_required`, `activation_tool`, `status_tool`, `mcp_server`,
+`tool_name`, and a ranked score breakdown.
 
-Once the router returns the right capability, inspect its invocation state:
+- `can_invoke_now: true` requires an exact callable backend in the live gateway.
+- `availability: cold` may be activated only when `activation_required: true`
+  and the returned server is policy-allowed. Check status, activate it, then
+  rerun native `tool_search` before invocation.
+- `availability: reference` is guidance only. Read its routing policy and use
+  the named native tool, skill, script, or owner lane.
+- `configured_unverified`, `installed_not_declared`, and `not_declared` are not
+  invocation permission.
 
-- If `can_invoke_now: true`, call its underlying tool directly by its bound name (`mcp__<server>__<tool>` in Hermes' collision-safe tool naming convention).
-- If `activation_required: true`, call `restart_mcp_server(server_name="<mcp_server>")`, confirm it connected, then run capability/tool search again and invoke the newly registered tool in the same turn. The runtime refreshes the current agent's tool snapshot after the activation call; this does not bypass policy denies or platform toolset exposure.
-- Otherwise skip it unless its install or credential prerequisite can be repaired within the authorized task.
+The router is an index, not a proxy. Never invent or directly call a name that
+only appears in reference metadata.
 
-Persisted sessions may replay a retired flattened `mcp_server_tool` action. The
-runtime may activate and dispatch that call in one request only when its backend
-is uniquely identified, policy-allowed, in scope, and the MCP control tools are
-available; every ambiguous, disabled, out-of-scope, or failed case remains
-blocked. This is a compatibility path, not an invocation convention: always use
-the canonical `mcp__server__tool` name returned by current discovery for new
-calls.
+### Operating patterns
 
-The router does not proxy the capability call; it reports whether the backing
-server is ready now and, for policy-allowed cold servers, how to activate it.
+Operating-pattern entries have no backend tool and are always reference-only.
+Use `describe_capability` to inspect their routing policy, then select the
+underlying lane they name. Important examples include:
 
-Some router hits are **operating patterns** rather than callable MCP tools. These have `kind: operating_pattern` and no `mcp_server`. Treat them as routing doctrine: they tell you which lane to use, which safety rule applies, what closeout evidence is required, and when to queue durable work instead of acting in the live chat loop. Do not try to invoke an operating pattern as a tool. Use `describe_capability()` to read its `routing_policy`, then choose the underlying lane/tool/script/skill it names.
+- `ops-pattern.durable-work` only for an explicit background/overnight request,
+  monitoring, or restart-survival need; duration, complexity, and auditability alone do not move ownership
+  out of the live conversation;
+- GBrain local administration through its bounded operator lane;
+- isolated worktrees for repo-writing work;
+- resource-capacity gates for local inference;
+- artifact-first closeout for substantial research;
+- the bounded public-web/browser routing contract.
 
-Important operating-pattern examples:
+### Failure ladder
 
-- `ops-pattern.durable-work` — use the durable workload lane only for an explicit background/overnight request, long-lived monitoring or waiting, or a concrete restart-survival requirement; duration, complexity, and auditability alone do not move ownership out of the live conversation.
-- `ops-pattern.gbrain-local-admin` — local-only GBrain admin operations go through Minions shell jobs with `inherit`, never raw secret `env`.
-- `ops-pattern.coding-worktree` — repo-writing coding work requires an isolated worktree/branch by default.
-- `ops-pattern.gstack-claude` — planning/review/QA/security/build work should launch Claude Code with explicit gstack skill prompts.
-- `ops-pattern.local-inference-gate` — Spark/local inference jobs must respect measured capacity and liveness gates.
-- `ops-pattern.artifact-first-research` — substantial research closes with a markdown artifact path plus short executive readout.
-- `ops-pattern.web-routing` — public reads use local Firecrawl; interactive work uses the isolated per-client browser with a two-failure stop rule.
+When the first tool fails:
 
-Example flow:
+1. Record the exact failure class.
+2. Try the next viable result from the same native search.
+3. If executable results are exhausted, consult the router for a policy-allowed
+   cold backend or an alternate owner lane.
+4. Stop only after every viable in-scope route has been tried, or when a real
+   hard stop such as missing credentials or authorization is reached.
 
-1. User asks: "draw me a picture of a broken lattice"
-2. You call `mcp__capability_router__search_capabilities(query="generate image")`
-3. Router returns hits including `catalog.openrouter-image` (`can_invoke_now: true`, `mcp_server: openrouter-image`, `tool_name: generate_image`)
-4. You call `mcp__openrouter_image__generate_image(prompt="a broken lattice")`
-5. Image returned, attached via `MEDIA:` tag
+After a router-selected capability is invoked, call
+`record_capability_outcome` with success or failure so host-local ranking can
+learn. Do not record outcomes for native results that did not originate in the
+router.
 
-### When the first capability fails — try the next one (HARD RULE)
+Web work is the exception to broad fallback: follow the web-routing operating
+pattern and stop after two failures on the selected lane. Do not fan out across
+alternate browsers, profiles, daemons, or improvised wrappers.
 
-The first ranked hit isn't always right. The router's keyword scoring is imperfect; tools also fail for transient reasons (expired tokens, wrong account scope, rate limits). Your job is to exhaust the search results before declaring inability.
+### Specialized routes
 
-If your invocation errors:
+- Image generation and reference editing follow `image-generation-routing.md`:
+  use Hermes' native `image_generate` route first, then escalate only on
+  readiness or QA failure.
+- Public extraction follows the canonical Firecrawl route; interactive work
+  uses the isolated owner browser lane.
+- Mail, calendar, documents, and tenant services use the dedicated runtime's
+  authenticated connector rather than a hand-rolled API script.
+- Filed knowledge uses the configured client-isolated GBrain lane, never an
+  unrelated media or desktop MCP.
 
-1. **Do not report inability.** Fall through to the next-ranked candidate in the same `search_capabilities` response.
-2. **Activate or skip candidates that can't run now** — activate an
-   `activation_required: true` cold backend, but skip entries that are not
-   policy-allowed, are blocked by missing `requires_creds`, or already failed
-   in this turn.
-3. **Try the next viable hit.** Re-attempt with whatever input adjustments the new tool's schema requires (call `describe_capability` if the schema isn't obvious).
-4. **Continue until either** a candidate succeeds, OR every viable hit has been tried.
+### Spend and provenance
 
-Only after that full exhaustion can you tell the user the capability isn't available — and even then, name what you tried and what each one returned, not just "can't do that." If multiple tools failed with the same error class (auth, network), surface that as a likely root cause; if they failed differently, surface the most informative error.
+Paid capabilities must use the accountable receipt/provenance seam. A tool's
+presence in search results is not permission to bypass task, session, cron,
+tool, or delegation provenance, and it is not permission to make an otherwise
+unauthorized billed call. Emergency OpenRouter routes remain fail-closed when
+their work reference is missing.
 
-**Web-routing exception:** follow `ops-pattern.web-routing` and `browser-piloting.md` for public extraction and browser work. After two failures on the selected web lane, stop with a diagnostic; do not exhaust alternate browsers, profiles, daemons, or hand-rolled wrappers. A domain-specific tested harness may be selected before the first attempt when the router identifies it as the correct lane.
+### Known bad routes
 
-Concrete example: you ask the router "create calendar event," it returns `apple-calendar` first and `maton-calendar` second. Apple errors with auth. Doctrine: try `maton-calendar` next. Don't tell the user calendar isn't available — try the other hit.
+- Do not call `mac-control/read_resource`; that server exposes no resources.
+- Do not use `local-media/file_text_extract` on knowledge-store paths; its root
+  is the media store.
+- Do not hand-roll mail or calendar send scripts around the authenticated
+  connector and its audit path.
+- Do not retry the same wrong tool with cosmetic path or argument changes more
+  than once. Move to the next viable result.
+- Do not treat first-attempt failure as proof that the capability is absent.
 
-After each invocation, call `record_capability_outcome` with the `capability_id` you tried and `outcome="success"` or `"failure"` (with `error_class` if it failed). Future searches on this host will boost capabilities that succeeded and demote ones that failed. The router gets smarter the more you use it.
-
-### What NOT to do
-
-- Do **not** maintain hardcoded mental lists of which MCP does what. The catalog grows. Trust the router.
-- Do **not** reply "image generation isn't available" or "I don't have that capability" before calling the router AND exhausting every viable hit it returned. First-attempt failure ≠ capability is gone.
-- Do **not** invent tool names from training data. Only invoke MCP tools the router or your hot toolset confirms exist.
-- Do **not** call the router for every trivial turn. Use your hot tools (native memory, `telegram-directory`, profile-specific always-on) directly.
-
-### Cost / billing note
-
-Capabilities backed by paid APIs (OpenRouter, FAL, Anthropic, etc.) bill against the operator's keys, not the user's. The flat-fee Bot Doctor model means routine capability use is already covered — invoke freely when the user's request justifies it.
-
-### When in doubt
-
-If you're partway through a turn and realize the user's request needs a capability you don't see in your toolset: **stop, call the router, then continue.** Do not improvise a fallback (browser scrape, terminal hack, hand-rolled API call) when the router can point you at a real MCP.
-
-### Common traps — named anti-patterns (ALWAYS-WRONG tool calls)
-
-These are tool-call patterns that LOOK plausible but ALWAYS fail. The router will avoid them; this list is the explicit memory so you do not burn a turn rediscovering them.
-
-- **Vault file reads — never call `mac-control/read_resource`.** `mac-control` exposes only `open_app`, `list_running_apps`, `get_frontmost_app`, `show_notification`. It has zero MCP resources. Any `read_resource` call against it returns "Unknown resource" no matter the URI. Use the configured client-isolated GBrain lookup lane for filed knowledge.
-
-- **Vault file reads — never feed `local-media/file_text_extract` a knowledge-store path.** `local-media` is rooted at `MEDIA_ROOT` (typically `~/.hermes-local/media`), not the knowledge store. Use the configured client-isolated GBrain lookup lane.
-
-- **Sending mail / calendar invites — never hand-roll `send_gmail.py` / `send_calendar_invite.py` / similar one-off scripts.** Use the Maton MCPs (`maton-gmail`, `maton-google-docs`, `maton-notion`, etc.) via the router. Hand-rolled scripts bypass keychain auth, audit logging, and retry handling. If a Maton MCP is cold, activate the policy-allowed backend and search again rather than scripting around it.
-
-- **First-attempt failure is not capability-absent.** If a tool errors with `Unknown resource`, `path escapes`, `auth failed`, `404`, etc., you have learned ONE tool does not do the job. Do NOT retry the same tool with a URL-encoded variant, a plain-path variant, or a slightly different argument shape more than once. Move on to the next router hit. Looping on a broken tool burns 20+ minutes per turn.
-
-When you discover a new always-wrong pattern, append it here. The list is a deliberate memory, not a performance burden — every entry saves a future turn.
+When a new always-wrong route is proven, add it here with its correct owner
+lane so the fleet does not rediscover the same failure.

@@ -131,6 +131,15 @@ SYSTEMD_INSTALL_REPLACEMENT = '''    unit_path = get_systemd_unit_path(system=sy
     # Existing system units already pin HERMES_HOME; adopt it before any
 '''
 
+NATIVE_SYSTEMD_INSTALL_ANCHOR = "    # Offer to remove legacy units first: alongside the new unit they flap-fight for the bot token.\n"
+NATIVE_SYSTEMD_INSTALL_REPLACEMENT = '''    if _operator_runtime_binding_preserves_service(
+        "systemd-system" if system else "systemd-user"
+    ):
+        print("Service is protected by the active runtime binding")
+        return
+
+''' + NATIVE_SYSTEMD_INSTALL_ANCHOR
+
 LAUNCHD_CURRENT_ANCHOR = '''    if not plist_path.exists():
         return False
 
@@ -225,10 +234,13 @@ def patch_gateway_source(source: str) -> str:
         if source.count(HELPER_ANCHOR) != 1:
             raise RuntimeError("gateway service binding helper anchor drift")
         source = source.replace(HELPER_ANCHOR, HELPER + HELPER_ANCHOR, 1)
+    native_install = NATIVE_SYSTEMD_INSTALL_ANCHOR in source
     for anchor, replacement, label in (
         (SYSTEMD_CURRENT_ANCHOR, SYSTEMD_CURRENT_REPLACEMENT, "systemd current"),
-        (SYSTEMD_INSTALL_ANCHOR, SYSTEMD_INSTALL_REPLACEMENT, "systemd install"),
-        (LAUNCHD_CURRENT_ANCHOR, LAUNCHD_CURRENT_REPLACEMENT, "launchd current"),
+        (NATIVE_SYSTEMD_INSTALL_ANCHOR if native_install else SYSTEMD_INSTALL_ANCHOR,
+         NATIVE_SYSTEMD_INSTALL_REPLACEMENT if native_install else SYSTEMD_INSTALL_REPLACEMENT, "systemd install"),
+        (LAUNCHD_CURRENT_ANCHOR if LAUNCHD_CURRENT_ANCHOR in source else LAUNCHD_CURRENT_ANCHOR.replace("\n\n", "\n"),
+         LAUNCHD_CURRENT_REPLACEMENT, "launchd current"),
         (LAUNCHD_INSTALL_ANCHOR, LAUNCHD_INSTALL_REPLACEMENT, "launchd install"),
         (LAUNCHD_START_ANCHOR, LAUNCHD_START_REPLACEMENT, "launchd start"),
     ):

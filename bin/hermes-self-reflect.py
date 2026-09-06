@@ -28,6 +28,7 @@ import subprocess
 import sys
 import tempfile
 import uuid
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,6 +41,15 @@ except ImportError:  # Backward-compatible until the papercuts runtime payload l
     papercut_inbox = None
 
 REPORTS_DIR = "workspace/ops/reports/client-day-review"
+STAFF_EVENTS_PATH = "state/specialist-management/events.jsonl"
+LEGACY_STAFF_EVENTS_PATH = "state/client-teams/specialist-management-events.jsonl"
+STAFF_EVENT_PATHS = (STAFF_EVENTS_PATH, LEGACY_STAFF_EVENTS_PATH)
+STAFF_EVENT_SCHEMA = "specialist-management-event/v1"
+STAFF_REFLECTION_SCHEMA = "specialist-staff-reflection/v1"
+MAX_STAFF_EVENT_BYTES = 8 * 1024 * 1024
+MAX_STAFF_EVENTS = 10_000
+STAFF_PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$")
+STAFF_EVENT_ID_PATTERN = re.compile(r"^sme_[0-9a-f]{20}$")
 MAX_RECENT_SKILLS = 24
 MAX_SKILL_USAGE_BYTES = 1_000_000
 MAX_SKILL_BYTES = 1_000_000
@@ -583,6 +593,175 @@ def load_papercut_context(home: Path) -> dict:
         }
 
 
+def _staff_recommendation(counts: Counter) -> tuple[str, list[str]]:
+    reasons = []
+    if counts["retired"]:
+        return "retire", ["manager_recorded_retirement"]
+    if counts["invalid_gate"]:
+        reasons.append("invalid_manager_gate")
+    if counts["failed_or_timeout"]:
+        reasons.append("worker_failed_or_timed_out")
+    if counts["manager_override"]:
+        reasons.append("manager_override_required")
+    if counts["rework"]:
+        reasons.append("manager_rework_required")
+    issue_count = (
+        counts["invalid_gate"]
+        + counts["failed_or_timeout"]
+        + counts["manager_override"]
+        + counts["rework"]
+    )
+    if counts["invalid_gate"] or issue_count >= 2:
+        return "redesign", reasons
+    if issue_count:
+        return "watch", reasons
+    return "retain", []
+
+
+def load_staff_management_context(home: Path, hours: int, now=None) -> dict:
+    """Aggregate content-free manager events for private daily staff review."""
+    sources = []
+    unavailable = False
+    for source_rank, relative_path in enumerate(STAFF_EVENT_PATHS):
+        path = home / relative_path
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            unavailable = True
+            continue
+        raw = _read_regular_bytes(path, MAX_STAFF_EVENT_BYTES)
+        if raw is not None:
+            sources.append((source_rank, raw))
+        else:
+            unavailable = True
+    if unavailable or not sources:
+        return {
+            "schema": STAFF_REFLECTION_SCHEMA,
+            "status": "unavailable" if unavailable else "no_events",
+            "window_hours": max(1, hours),
+            "events_observed": 0,
+            "alert": False,
+            "profiles": [],
+        }
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff = current.timestamp() - max(1, hours) * 3600
+    required = {
+        "schema",
+        "event_id",
+        "occurred_at",
+        "task_id",
+        "profile",
+        "terminal_outcome",
+        "manager_verdict",
+        "manager_action",
+        "gate_status",
+        "delivery_permitted",
+        "external_action_required",
+        "raw_worker_overlap_detected",
+        "error_codes",
+        "input_sha256",
+        "worker_artifact_sha256",
+        "lifecycle_receipt_sha256",
+        "validation_receipt_sha256",
+    }
+    events = {}
+    lines = []
+    for source_rank, raw in sources:
+        lines.extend(
+            (source_rank, line)
+            for line in raw.decode("utf-8", errors="ignore").splitlines()[-MAX_STAFF_EVENTS:]
+        )
+    for source_rank, line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or set(event) != required:
+            continue
+        event_id = str(event.get("event_id") or "")
+        profile = str(event.get("profile") or "")
+        occurred_at = _parse_timestamp(event.get("occurred_at"))
+        if (
+            event.get("schema") != STAFF_EVENT_SCHEMA
+            or STAFF_EVENT_ID_PATTERN.fullmatch(event_id) is None
+            or STAFF_PROFILE_PATTERN.fullmatch(profile) is None
+            or occurred_at is None
+            or occurred_at.timestamp() < cutoff
+            or occurred_at > current
+            or not isinstance(event.get("delivery_permitted"), bool)
+            or not isinstance(event.get("external_action_required"), bool)
+            or not isinstance(event.get("raw_worker_overlap_detected"), bool)
+            or not isinstance(event.get("error_codes"), list)
+            or any(not isinstance(value, str) for value in event["error_codes"])
+        ):
+            continue
+        previous = events.get(event_id)
+        if (
+            previous is None
+            or occurred_at > previous[1]
+            or (occurred_at == previous[1] and source_rank < previous[2])
+        ):
+            events[event_id] = (event, occurred_at, source_rank)
+    selected_events = sorted(
+        (row[0] for row in events.values()),
+        key=lambda event: (_parse_timestamp(event["occurred_at"]), event["event_id"]),
+        reverse=True,
+    )[:MAX_STAFF_EVENTS]
+    grouped = {}
+    for event in selected_events:
+        grouped.setdefault(event["profile"], []).append(event)
+    profiles = []
+    for profile, rows in sorted(grouped.items()):
+        counts = Counter()
+        for event in rows:
+            verdict = event["manager_verdict"]
+            action = event["manager_action"]
+            outcome = event["terminal_outcome"]
+            if verdict == "accepted":
+                counts["accepted"] += 1
+            elif verdict == "rework":
+                counts["rework"] += 1
+            elif verdict == "needs-human":
+                counts["needs_human"] += 1
+            elif verdict == "retired":
+                counts["retired"] += 1
+            if action == "manager_override":
+                counts["manager_override"] += 1
+            if outcome in {"failed", "timeout"}:
+                counts["failed_or_timeout"] += 1
+            if event["gate_status"] != "valid":
+                counts["invalid_gate"] += 1
+        recommendation, reasons = _staff_recommendation(counts)
+        profiles.append(
+            {
+                "profile": profile,
+                "runs": len(rows),
+                "accepted": counts["accepted"],
+                "rework": counts["rework"],
+                "needs_human": counts["needs_human"],
+                "retired": counts["retired"],
+                "manager_overrides": counts["manager_override"],
+                "failed_or_timeout": counts["failed_or_timeout"],
+                "invalid_gates": counts["invalid_gate"],
+                "recommendation": recommendation,
+                "reason_codes": reasons,
+                "event_ids": sorted(event["event_id"] for event in rows),
+            }
+        )
+    return {
+        "schema": STAFF_REFLECTION_SCHEMA,
+        "status": "ok" if profiles else "no_events",
+        "window_hours": max(1, hours),
+        "events_observed": len(selected_events),
+        "alert": any(
+            row["recommendation"] in {"redesign", "retire"} for row in profiles
+        ),
+        "profiles": profiles,
+    }
+
+
 def redact_papercut_value(value):
     if isinstance(value, dict):
         return {
@@ -624,6 +803,9 @@ def build_prompt(deterministic, insights, agent_name, external_context=None, rec
     }
     if recent_skills:
         summary["recent_skill_usage"] = recent_skills[:MAX_RECENT_SKILLS]
+    staff_context = d.get("staff_reflection") or {}
+    if staff_context.get("events_observed"):
+        summary["staff_management"] = staff_context
     papercuts = (d.get("self_reflection_meta") or {}).get("papercut_inbox") or {}
     if papercuts.get("pending_count"):
         summary["papercut_inbox"] = {
@@ -662,6 +844,8 @@ def build_prompt(deterministic, insights, agent_name, external_context=None, rec
         '  "operator_systems_lessons": [short strings: durable operational lessons from today],\n'
         '  "papercut_actions": [{"papercut_ids": [str], "lesson": str, "next_action": str, '
         '"disposition": "monitor"|"repair"|"skill_candidate"|"escalate"}],\n'
+        '  "staff_actions": [{"profile": str, "decision": "retain"|"redesign"|"retire", '
+        '"rationale": str, "evidence_event_ids": [str], "escalate_to_doc": true|false}],\n'
         '  "escalate_to_doc": true|false  (true only if a human operator should look).\n'
         "For proposal_inputs, prefer no proposal. Emit one only for repeated "
         "class-level evidence, not ordinary one-off sessions. "
@@ -671,6 +855,10 @@ def build_prompt(deterministic, insights, agent_name, external_context=None, rec
         "and skill_sha256 exactly from recent_skill_usage and select one evidence_class. "
         "A successful load proves use, not causality; connect it only to repeated day-review "
         "evidence. Never propose or perform a direct skill edit. "
+        "For staff_actions, use only profiles and event IDs present in staff_management. "
+        "Do not downgrade a deterministic redesign or retirement recommendation. "
+        "A redesign changes the worker contract, prompt, tools, model, or validation before more work; "
+        "retire means stop dispatching that profile pending operator review. "
         "Be specific and self-critical. If the day was clean, say so plainly."
     )
     return prompt
@@ -753,6 +941,7 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback, 
         "fallback_no_model": used_fallback,
         "operator_systems_lessons": [],
         "papercut_actions": [],
+        "staff_actions": [],
     }
     open_promises = []
     if isinstance(reflection_obj, dict):
@@ -768,6 +957,38 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback, 
         papercut_actions = reflection_obj.get("papercut_actions", [])
         if isinstance(papercut_actions, list):
             sr["papercut_actions"] = [item for item in papercut_actions[:20] if isinstance(item, dict)]
+        staff_context = rep.get("staff_reflection") or {}
+        profile_events = {
+            str(row.get("profile")): set(str(value) for value in row.get("event_ids") or [])
+            for row in staff_context.get("profiles") or []
+            if isinstance(row, dict) and row.get("profile")
+        }
+        staff_actions = reflection_obj.get("staff_actions", [])
+        if isinstance(staff_actions, list):
+            for item in staff_actions[:20]:
+                if not isinstance(item, dict):
+                    continue
+                profile = str(item.get("profile") or "")
+                decision = str(item.get("decision") or "")
+                evidence_ids = item.get("evidence_event_ids")
+                if (
+                    profile not in profile_events
+                    or decision not in {"retain", "redesign", "retire"}
+                    or not isinstance(evidence_ids, list)
+                ):
+                    continue
+                evidence_ids = [str(value) for value in evidence_ids]
+                if not evidence_ids or not set(evidence_ids).issubset(profile_events[profile]):
+                    continue
+                sr["staff_actions"].append(
+                    {
+                        "profile": profile,
+                        "decision": decision,
+                        "rationale": str(item.get("rationale") or "")[:600],
+                        "evidence_event_ids": sorted(set(evidence_ids)),
+                        "escalate_to_doc": bool(item.get("escalate_to_doc")),
+                    }
+                )
         proposals = []
         model_proposals = reflection_obj.get("proposal_inputs", [])
         if isinstance(model_proposals, list):
@@ -822,6 +1043,32 @@ def merge_report(deterministic, reflection_obj, raw, model_used, used_fallback, 
         if isinstance(op, list):
             open_promises = op[:20]
     rep["open_promises"] = open_promises
+    staff_context = rep.get("staff_reflection")
+    if isinstance(staff_context, dict):
+        action_by_profile = {}
+        rank = {"retain": 0, "watch": 1, "redesign": 2, "retire": 3}
+        for action in sr["staff_actions"]:
+            profile = action["profile"]
+            previous = action_by_profile.get(profile)
+            if previous is None or rank[action["decision"]] > rank[previous["decision"]]:
+                action_by_profile[profile] = action
+        for row in staff_context.get("profiles") or []:
+            action = action_by_profile.get(row.get("profile"))
+            model_decision = action.get("decision") if action else None
+            row["manager_decision"] = model_decision
+            row["effective_decision"] = max(
+                (row.get("recommendation") or "retain", model_decision or "retain"),
+                key=lambda value: rank[value],
+            )
+        staff_context["manager_actions"] = sr["staff_actions"]
+        staff_context["alert"] = bool(staff_context.get("alert")) or any(
+            row.get("effective_decision") in {"redesign", "retire"}
+            for row in staff_context.get("profiles") or []
+        )
+        if staff_context["alert"] or any(
+            action["escalate_to_doc"] for action in sr["staff_actions"]
+        ):
+            sr["escalate_to_doc"] = True
     rep["self_reflection"] = sr
     # let an honest self-escalation bump a green/yellow verdict note (not override red)
     if sr["escalate_to_doc"] and rep.get("verdict", {}).get("level") == "green":
@@ -921,6 +1168,8 @@ def main():
 
     skill_usage = recent_skill_usage(home, args.hours)
     deterministic.setdefault("self_reflection_meta", {})["recent_skill_usage"] = skill_usage
+
+    deterministic["staff_reflection"] = load_staff_management_context(home, args.hours)
 
     # 2. own-model reflection
     reflection_obj, raw, used_fallback = None, "", True

@@ -62,18 +62,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 742
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 33
+    assert manifest["components"]["runtime_payload"]["file_count"] == 820
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 34
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
-        "file_count": 93,
+        "digest": "0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74",
+        "file_count": 125,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 93
+    assert manifest["runtime_fingerprint"]["file_count"] == 125
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -83,7 +83,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 93
+    assert len(manifest["runtime_fingerprint"]["files"]) == 125
     assert set(release) == {
         "schema_version",
         "release",
@@ -191,8 +191,8 @@ def test_release_pins_the_golden_cua_driver_contract():
     contract_path = ROOT / driver["contract"]["path"]
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
 
-    assert driver["version"] == "0.14.2"
-    assert driver["tag"] == "cua-driver-rs-v0.14.2"
+    assert driver["version"] == "0.22.0"
+    assert driver["tag"] == "cua-driver-rs-v0.22.0"
     assert driver["baseline_acceptance"] == "exact_version_present"
     assert driver["gui_acceptance"] == "doctor_ready_and_list_windows"
     assert hashlib.sha256(helper.read_bytes()).hexdigest() == driver["helper"]["sha256"]
@@ -393,6 +393,54 @@ def test_stable_coherence_scheduler_reports_removed_candidate(tmp_path: Path):
     assert json.loads(receipt.read_text(encoding="utf-8"))["kind"] == "binding_missing"
 
 
+@pytest.mark.parametrize("outcome", ["success", "import_failure", "timeout", "spawn_failure"])
+def test_runtime_coherence_import_probe_isolated_and_cleaned(tmp_path, monkeypatch, outcome):
+    checker = load_path("public_coherence_isolation", ROOT / "checks/agent-runtime-coherence.py")
+    home = tmp_path / "live"
+    home.mkdir()
+    protected = [home / name for name in ("state.db", "state.db-wal", "state.db-shm")]
+    for path in protected:
+        path.write_bytes(("original-" + path.name).encode())
+    before = [(p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.read_bytes()) for p in protected]
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    python = runtime / "python"
+    python.write_text("fixture")
+    monkeypatch.setattr(checker, "validate_runtime_binding", lambda **kwargs: {"ok": True})
+    probe_homes = []
+
+    def spawn(command, **kwargs):
+        env = kwargs["env"]
+        probe = Path(env["HERMES_HOME"])
+        probe_homes.append(probe)
+        assert probe.is_dir() and probe != home
+        assert Path(env["HOME"]) != tmp_path / "operator"
+        assert Path(env["USERPROFILE"]) == Path(env["HOME"])
+        assert list(probe.iterdir()) == []
+        assert command[0] == str(python) and kwargs["cwd"] == runtime
+        for name in ("state.db", "state.db-wal", "state.db-shm"):
+            (probe / name).write_text("disposable probe state")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, 45)
+        if outcome == "spawn_failure":
+            raise OSError("fixture spawn failure")
+        return SimpleNamespace(returncode=0 if outcome == "success" else 1,
+            stdout='HERMES_RUNTIME_COHERENCE={"origins":{}}\n', stderr="")
+
+    monkeypatch.setenv("HOME", str(tmp_path / "operator"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "operator"))
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(checker.subprocess, "run", spawn)
+    result = checker.run_probe(runtime_root=runtime, runtime_python=python, hermes_home=home, agent_id="fixture")
+    assert result["kind"] == {"success": "coherent"}.get(outcome, outcome)
+    assert result["hermes_home"] == str(home)
+    assert len(probe_homes) == 1 and not probe_homes[0].parent.exists()
+    assert before == [(p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.read_bytes()) for p in protected]
+    receipt = home / "state/health/runtime-coherence.json"
+    checker.atomic_write(receipt, result)
+    assert json.loads(receipt.read_text())["hermes_home"] == str(home)
+
+
 def test_runtime_coherence_fails_closed_on_service_definition_drift(tmp_path: Path):
     check = load_path(
         "public_runtime_coherence",
@@ -462,11 +510,11 @@ def test_release_payload_keeps_critical_blobs():
     }
     assert (
         blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
-        == "2f402487325e4cc05e95b4e3af391334dd16477c"
+        == "e5cbbcef89aa9635971d77ba9977535cd23aabc6"
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "ba7fde1f94ae40f3ed3eb219826f369b5c646279"
+        == "e91c52c8bb8525dbba25d932d51bcca422ad3147"
     )
 
 
@@ -475,7 +523,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 33
+    assert len(patches) == 49
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -670,7 +718,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
                 {
                     "ok": True,
                     "status": "installed",
-                    "after": {"installed": True, "version": "0.14.2"},
+                    "after": {"installed": True, "version": "0.22.0"},
                     "doctor_ready": False,
                 }
             ),
@@ -680,7 +728,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
     monkeypatch.setattr(installer.subprocess, "run", fake_run)
     receipt = installer.ensure_cua_driver(runtime_python, home)
 
-    assert receipt["after"]["version"] == "0.14.2"
+    assert receipt["after"]["version"] == "0.22.0"
     assert calls[0][0] == sys.executable
     assert calls[0][1] == str(ROOT / "bin" / "ensure-cua-driver.py")
     assert calls[0][calls[0].index("--hermes-python") + 1] == str(runtime_python)
@@ -699,7 +747,7 @@ def test_profile_installer_can_require_gui_driver_readiness(tmp_path, monkeypatc
                 {
                     "ok": False,
                     "status": "blocked_not_ready",
-                    "after": {"installed": True, "version": "0.14.2"},
+                    "after": {"installed": True, "version": "0.22.0"},
                     "doctor_ready": False,
                 }
             ),
@@ -1627,8 +1675,17 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(assembler, "run", fake_run)
+    monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 51, 3]})
+    monkeypatch.setenv("UV_PYTHON", "/unsafe/python")
+    monkeypatch.setenv("UV_PYTHON_PREFERENCE", "system")
+    monkeypatch.setenv("PYTHONPATH", "/unsafe/modules")
+    monkeypatch.setenv("VIRTUAL_ENV", "/unsafe/venv")
 
-    assembler.prepare_posix_dependencies(runtime, staging)
+    proof = assembler.prepare_posix_dependencies(runtime, staging)
+    assert proof["sqlite_version"] == [3, 51, 3]
+    if assembler.sys.platform == "darwin" and assembler.platform.machine() == "arm64":
+        assert proof["download_catalog"]["sha256"] == assembler.MACOS_PYTHON_CATALOG_SHA256
+        assert calls[0][1]["env"]["UV_PYTHON_DOWNLOADS_JSON_URL"] == (ROOT / assembler.MACOS_PYTHON_CATALOG).as_uri()
 
     command, kwargs = calls[0]
     assert command == [
@@ -1646,6 +1703,20 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
     ]
     assert kwargs["env"]["HOME"] == str(staging / ".installer-user")
     assert kwargs["env"]["HERMES_HOME"] == str(staging)
+    assert kwargs["env"]["UV_MANAGED_PYTHON"] == "1"
+    assert "UV_PYTHON_PREFERENCE" not in kwargs["env"]
+    assert kwargs["env"]["UV_PYTHON_INSTALL_DIR"] == str(runtime / ".hermes-runtime" / "python")
+    assert not {"UV_PYTHON", "PYTHONPATH", "VIRTUAL_ENV"} & kwargs["env"].keys()
+    # Exercise uv's real option parser and interpreter discovery without downloads.
+    uv = shutil.which("uv")
+    if uv:
+        discovery_env = dict(kwargs["env"], UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1")
+        discovered = subprocess.run([uv, "python", "find", "3.11"], env=discovery_env,
+                                    capture_output=True, text=True, check=False)
+        assert discovered.returncode != 0
+        assert not discovered.stdout.strip()
+        assert "No interpreter found" in discovered.stderr
+
     assert (
         runtime / ".hermes-bootstrap-complete"
     ).read_text(encoding="utf-8") == "installer-state\n"
@@ -1743,6 +1814,27 @@ def test_windows_runtime_identity_accepts_only_declared_crlf(tmp_path):
     assert "content hash" in reason
 
 
+def test_runtime_manifest_cli_uses_declared_public_files(tmp_path, monkeypatch, capsys):
+    module = load_script("public_manifest_declared", "runtime-payload-manifest.py")
+    manifest = json.loads((ROOT / "runtime-payload-source-manifest.json").read_text())
+    declared = manifest["runtime_fingerprint"]["files"]
+    def fingerprint(runtime, upstream, golden, expected_files):
+        assert runtime == tmp_path.resolve()
+        assert expected_files == declared
+        return {"verified": True}
+    monkeypatch.setattr(module, "runtime_fingerprint", fingerprint)
+    assert module.main(["--source-manifest", str(ROOT / "runtime-payload-source-manifest.json"),
+                        "--runtime-dir", str(tmp_path), "--compact"]) == 0
+    assert json.loads(capsys.readouterr().out)["runtime_fingerprint"]["verified"]
+
+
+def test_runtime_manifest_excludes_only_candidate_private_python_store():
+    module = load_script("public_manifest_managed_python", "runtime-payload-manifest.py")
+    assert module.is_runtime_state_or_artifact(".hermes-runtime/python/cpython/lib/libpython.dylib")
+    assert not module.is_runtime_state_or_artifact(".hermes-runtime/injected.py")
+    assert not module.is_runtime_state_or_artifact("gateway/.hermes-runtime/python/injected.py")
+
+
 def test_profile_install_interrupt_restores_from_pending_receipt(
     tmp_path, monkeypatch
 ):
@@ -1773,7 +1865,7 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
         "ensure_cua_driver",
         lambda *_args, **_kwargs: {
             "ok": True,
-            "after": {"version": "0.14.2"},
+            "after": {"version": "0.22.0"},
             "doctor_ready": False,
         },
     )
@@ -2010,3 +2102,94 @@ def test_public_text_has_no_private_runtime_routes():
     ]["dirty_repo_rule"]
     assert "escalate_to_doc" in reflection
     assert "preserve approval gates" in reflection
+
+
+@pytest.mark.parametrize("version, accepted", [([3, 50, 4], False), ([3, 50, 7], False), ([3, 51, 3], True), ([3, 53, 1], True), ([3, "51", 3], False)])
+def test_candidate_python_sqlite_floor_and_isolation(tmp_path, monkeypatch, version, accepted):
+    assembler = load_script("public_python_floor", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    base = runtime / ".hermes-runtime" / "python" / "cpython"
+    base.mkdir(parents=True)
+    target = base / "python"
+    target.write_text("fixture interpreter")
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(target)
+    probe_homes = []
+
+    def fake_run(argv, **kwargs):
+        assert argv[:3] == [str(python), "-I", "-c"]
+        home = Path(kwargs["env"]["HERMES_HOME"])
+        assert home.is_dir() and home != tmp_path / "live"
+        assert not list(home.iterdir())
+        probe_homes.append(home)
+        return SimpleNamespace(stdout=json.dumps({"python": str(python), "prefix": str(runtime / "venv"), "base_prefix": str(base), "python_version": [3, 11, 15], "sqlite_version": version}))
+
+    monkeypatch.setattr(assembler, "run", fake_run)
+    if accepted:
+        assert assembler.candidate_python_proof(runtime, {"HERMES_HOME": str(tmp_path / "live")})["sqlite_version"] == version
+    else:
+        with pytest.raises(RuntimeError):
+            assembler.candidate_python_proof(runtime, {})
+    assert probe_homes and all(not path.exists() for path in probe_homes)
+
+
+def test_candidate_python_rejects_external_seed(tmp_path, monkeypatch):
+    assembler = load_script("public_python_external", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    monkeypatch.setattr(assembler, "run", lambda *args, **kwargs: pytest.fail("must reject before execution"))
+    with pytest.raises(RuntimeError, match="private managed store"):
+        assembler.candidate_python_proof(runtime, {})
+
+
+def test_candidate_python_cleans_probe_after_execution_failure(tmp_path, monkeypatch):
+    assembler = load_script("public_python_failure", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    target = runtime / ".hermes-runtime" / "python" / "python"
+    target.parent.mkdir(parents=True)
+    target.write_text("fixture")
+    python.symlink_to(target)
+    homes = []
+    def fail(argv, **kwargs):
+        homes.append(Path(kwargs["env"]["HERMES_HOME"]))
+        raise RuntimeError("failed interpreter")
+    monkeypatch.setattr(assembler, "run", fail)
+    with pytest.raises(RuntimeError, match="failed interpreter"):
+        assembler.candidate_python_proof(runtime, {})
+    assert homes and not homes[0].exists()
+
+
+@pytest.mark.parametrize("system,arch,expected", [("darwin", "arm64", True), ("darwin", "x86_64", False), ("linux", "aarch64", False)])
+def test_candidate_python_catalog_is_platform_scoped(tmp_path, monkeypatch, system, arch, expected):
+    assembler = load_script("public_python_catalog_scope", "assemble-runtime.py")
+    monkeypatch.setattr(assembler.sys, "platform", system)
+    monkeypatch.setattr(assembler.platform, "machine", lambda: arch)
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS_JSON_URL", "https://untrusted.invalid/catalog")
+    calls = []
+    monkeypatch.setattr(assembler, "run", lambda argv, **kw: calls.append(kw))
+    monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 53, 1]})
+    proof = assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
+    assert ("download_catalog" in proof) is expected
+    assert ("UV_PYTHON_DOWNLOADS_JSON_URL" in calls[0]["env"]) is expected
+    if expected:
+        catalog = ROOT / assembler.MACOS_PYTHON_CATALOG
+        assert hashlib.sha256(catalog.read_bytes()).hexdigest() == proof["download_catalog"]["sha256"]
+        assert calls[0]["env"]["UV_PYTHON_DOWNLOADS_JSON_URL"] == catalog.as_uri()
+
+
+def test_candidate_python_catalog_tamper_blocks_installer(tmp_path, monkeypatch):
+    assembler = load_script("public_python_catalog_tamper", "assemble-runtime.py")
+    monkeypatch.setattr(assembler.sys, "platform", "darwin")
+    monkeypatch.setattr(assembler.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(assembler, "ROOT", tmp_path)
+    catalog = tmp_path / assembler.MACOS_PYTHON_CATALOG
+    catalog.parent.mkdir()
+    catalog.write_text("{}")
+    monkeypatch.setattr(assembler, "run", lambda *args, **kw: pytest.fail("must not install with changed catalog"))
+    with pytest.raises(RuntimeError, match="catalog digest mismatch"):
+        assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")

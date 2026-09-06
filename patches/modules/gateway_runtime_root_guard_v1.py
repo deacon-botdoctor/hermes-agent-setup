@@ -155,7 +155,7 @@ _load_runtime_ai_agent_class()
 '''
 
 
-def patch_gateway_runtime_root_guard_text(source: str) -> str:
+def patch_gateway_runtime_root_guard_text(source: str, *, split_owner: bool = False) -> str:
     path_anchor_count = source.count(PATH_ANCHOR)
     early_preload_count = source.count(EARLY_PATH_PRELOAD)
     if early_preload_count == 0:
@@ -188,7 +188,7 @@ def patch_gateway_runtime_root_guard_text(source: str) -> str:
         raise RuntimeError("gateway runtime-root path anchor drift")
 
     import_count = len(IMPORT_RE.findall(source))
-    if import_count < 1:
+    if import_count < 1 and not split_owner:
         raise RuntimeError("gateway AIAgent import anchor drift")
 
     patched = source.replace(PATH_ANCHOR, PATH_ANCHOR + HELPER, 1)
@@ -201,12 +201,26 @@ def patch_gateway_runtime_root_guard_text(source: str) -> str:
     return patched
 
 
+def patch_split_agent_imports(source: str, *, expected: int) -> str:
+    replacement = "AIAgent = _load_runtime_ai_agent_class()"
+    if source.count(replacement) == expected:
+        return source
+    if len(IMPORT_RE.findall(source)) != expected:
+        raise RuntimeError("split gateway AIAgent import anchor drift")
+    return IMPORT_RE.sub(
+        lambda match: (
+            f"{match.group('indent')}from gateway.run import _load_runtime_ai_agent_class\n"
+            f"{match.group('indent')}{replacement}"
+        ), source,
+    )
+
+
 def patch_api_server_text(source: str) -> str:
     """Keep API-server agent creation on the same guarded runtime loader."""
     if API_IMPORT_BLOCK_REPLACEMENT in source:
         return source
     if source.count(API_IMPORT_BLOCK_ANCHOR) != 1:
-        raise RuntimeError("API server runtime-root loader anchor drift")
+        return patch_split_agent_imports(source, expected=1)
     return source.replace(
         API_IMPORT_BLOCK_ANCHOR,
         API_IMPORT_BLOCK_REPLACEMENT,
@@ -250,10 +264,14 @@ def patch_fake_runtime_test_text(source: str) -> str:
 def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
     root = Path(hermes_dir)
     gateway_path = root / "gateway" / "run.py"
+    split_path = root / "gateway/run_turn.py"
+    split_owner = split_path.is_file()
     targets = {
-        gateway_path: patch_gateway_runtime_root_guard_text,
+        gateway_path: lambda source: patch_gateway_runtime_root_guard_text(source, split_owner=split_owner),
         root / "gateway" / "platforms" / "api_server.py": patch_api_server_text,
     }
+    if split_owner:
+        targets[split_path] = lambda source: patch_split_agent_imports(source, expected=3)
     gateway_tests = root / "tests" / "gateway"
     for name in FAKE_RUNTIME_TEST_FILES:
         path = gateway_tests / name
@@ -267,7 +285,9 @@ def patch_gateway_runtime_root_guard_v1(hermes_dir: Path) -> bool:
         ),
     }
     clarify_presence = [target.is_file() for target in clarify_targets]
-    if any(clarify_presence):
+    # d363 owns first-wins resolution and rejected-prose release natively;
+    # its existing clarify suites exercise both contracts without Golden edits.
+    if any(clarify_presence) and not split_owner:
         if not all(clarify_presence):
             raise RuntimeError("clarify deadlock guard target set is incomplete")
         targets[gateway_path] = lambda source: patch_clarify_gateway_source(

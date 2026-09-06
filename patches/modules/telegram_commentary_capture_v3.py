@@ -75,7 +75,7 @@ def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str
     return source.replace(anchor, replacement, 1)
 
 
-def patch_telegram_commentary_capture_v3(hermes_dir: Path) -> bool:
+def _patch_legacy_telegram_commentary_capture_v3(hermes_dir: Path) -> bool:
     """Allow hidden Telegram commentary to feed only the checkpoint formatter."""
     root = Path(hermes_dir)
     run_py = root / "gateway/run.py"
@@ -139,3 +139,59 @@ def patch_telegram_commentary_capture_v3(hermes_dir: Path) -> bool:
                 backup.unlink(missing_ok=True)
         raise
     return True
+
+
+# Split d363 dispatch. The legacy three-file bridge above remains available for cb sources.
+_D363_RUNNER_ANCHOR = """        agent.interim_assistant_callback = (
+            interim_assistant_cb
+            if (want_interim_messages or ctx.source.platform == Platform.TELEGRAM)
+            else None
+        )
+"""
+_D363_RUNNER_REPLACEMENT = """        # HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3
+        agent._telegram_checkpoint_commentary_capture = (ctx.source.platform == Platform.TELEGRAM)
+        agent.interim_assistant_callback = (
+            interim_assistant_cb
+            if (want_interim_messages or ctx.source.platform == Platform.TELEGRAM)
+            else None
+        )
+"""
+_D363_COMPLETED_ANCHOR = '        if isinstance(text, str) and text.strip() and getattr(agent, "show_commentary", True):\n'
+_D363_COMPLETED_REPLACEMENT = '''        if (
+            isinstance(text, str) and text.strip()
+            and (getattr(agent, "show_commentary", True)
+                 or getattr(agent, "_telegram_checkpoint_commentary_capture", False))
+        ):
+'''
+_D363_WANTS_ANCHOR = '    wants_commentary = getattr(agent, "interim_assistant_callback", None) is not None and show_commentary\n'
+_D363_WANTS_REPLACEMENT = '''    wants_commentary = (
+        getattr(agent, "interim_assistant_callback", None) is not None
+        and (show_commentary or getattr(agent, "_telegram_checkpoint_commentary_capture", False))
+    )
+'''
+
+def _patch_split_d363(root: Path) -> bool:
+    run_py, runner_py, codex_py = root/'gateway/run_turn.py', root/'gateway/run_turn_runner.py', root/'agent/codex_runtime.py'
+    run, runner, codex = (p.read_text(encoding='utf-8') for p in (run_py, runner_py, codex_py))
+    if MARKER in run:
+        return False
+    if V2_MARKER not in run:
+        raise RuntimeError('Telegram commentary capture v3 requires the d363 v2 base')
+    runner = _replace_once(runner, _D363_RUNNER_ANCHOR, _D363_RUNNER_REPLACEMENT, 'runner callback')
+    codex = _replace_once(codex, _D363_COMPLETED_ANCHOR, _D363_COMPLETED_REPLACEMENT, 'Codex completed callback')
+    codex = _replace_once(codex, _D363_WANTS_ANCHOR, _D363_WANTS_REPLACEMENT, 'Codex stream callback')
+    patched = {run_py: run + f'\n# {MARKER}\n', runner_py: runner + f'\n# {MARKER}\n', codex_py: codex + f'\n# {MARKER}\n'}
+    backups = {p: Path(str(p)+'.bak-pre-telegram-commentary-capture-v3') for p in patched}
+    for p,b in backups.items(): shutil.copy2(p,b)
+    try:
+        for p,text in patched.items(): p.write_text(text,encoding='utf-8')
+    except Exception:
+        for p,b in backups.items(): shutil.copy2(b,p); b.unlink(missing_ok=True)
+        raise
+    return True
+
+def patch_telegram_commentary_capture_v3(hermes_dir: Path) -> bool:
+    root = Path(hermes_dir)
+    if (root/'gateway/run_turn.py').exists():
+        return _patch_split_d363(root)
+    return _patch_legacy_telegram_commentary_capture_v3(root)

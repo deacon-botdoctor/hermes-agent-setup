@@ -98,7 +98,30 @@ def _replace_exact(source: str, old: str, new: str, *, count: int, label: str) -
     return source.replace(old, new, count)
 
 
+
+def _patch_native_source(source: str) -> str:
+    source = _replace_exact(source, COLLECTOR_ANCHOR, HELPER + COLLECTOR_ANCHOR,
+                            count=1, label="native collector")
+    native_collector = TEXT_MEDIA_COLLECTOR_OLD.replace(
+        "        # The regex alone misses quoted and spaced paths that the delivery\n"
+        "        # pipeline's extract_media grammar accepts — collect through the same\n"
+        "        # extractor so the dedup set sees every path that could actually have\n"
+        "        # been delivered.\n",
+        "        # The regex misses quoted/spaced paths extract_media accepts; use the same extractor to dedup.\n",
+    )
+    source = _replace_exact(source, native_collector, TEXT_MEDIA_COLLECTOR_NEW,
+                            count=1, label="native text collector")
+    source = _replace_exact(source, TOOL_MEDIA_CALL_OLD, TOOL_MEDIA_CALL_NEW,
+                            count=1, label="native shared text collector call")
+    source = _replace_exact(source, JSON_ADD_OLD, JSON_ADD_NEW,
+                            count=1, label="native JSON version boundary")
+    ast.parse(source)
+    return source
+
+
 def patch_source(source: str) -> Optional[str]:
+    if MARKER not in source and "Dedup set of media paths already delivered (JSON-payload and assistant-message shapes alike)." in source:
+        return _patch_native_source(source)
     changed = False
     if MARKER not in source:
         source = _replace_exact(

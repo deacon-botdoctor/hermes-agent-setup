@@ -6,50 +6,48 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-
 MARKER = "HERMES_WINDOWS_GATEWAY_TASK_IDENTITY_v1"
 CONFIG_MARKER = "HERMES_WINDOWS_GATEWAY_TASK_IDENTITY_CONFIG_v1"
-CONFIG_ANCHOR = '''    "gateway": {
-'''
-CONFIG_REPLACEMENT = '''    "gateway": {
+CONFIG_ANCHOR = """    "gateway": {
+"""
+CONFIG_REPLACEMENT = """    "gateway": {
         # Windows only: manage this exact Scheduled Task instead of the
         # profile-derived Hermes_Gateway[_profile] default.
         "windows_task_name": "",  # HERMES_WINDOWS_GATEWAY_TASK_IDENTITY_CONFIG_v1
 
-'''
+"""
 CONFIG_EXAMPLE_MARKER = "windows_task_name: My_Hermes_Gateway"
-CONFIG_EXAMPLE_ANCHOR = '''group_sessions_per_user: true
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API Server — per-client model routing
-'''
-CONFIG_EXAMPLE_REPLACEMENT = '''group_sessions_per_user: true
+CONFIG_EXAMPLE_ANCHOR = """group_sessions_per_user: true
+"""
+CONFIG_EXAMPLE_REPLACEMENT = """group_sessions_per_user: true
 
 # Optional Windows Scheduled Task identity. Profiles default to
 # Hermes_Gateway_<profile>; set this only when Hermes must manage an existing
 # externally named task.
 # gateway:
 #   windows_task_name: My_Hermes_Gateway
-
-# ─────────────────────────────────────────────────────────────────────────────
-# API Server — per-client model routing
-'''
-CONSTANT_ANCHOR = '''_TASK_NAME_DEFAULT = "Hermes_Gateway"
+"""
+CONSTANT_ANCHOR = """_TASK_NAME_DEFAULT = "Hermes_Gateway"
 _TASK_DESCRIPTION = "Hermes Agent Gateway - Messaging Platform Integration"
-'''
-CONSTANT_REPLACEMENT = f'''_TASK_NAME_DEFAULT = "Hermes_Gateway"
+"""
+CONSTANT_REPLACEMENT = f"""_TASK_NAME_DEFAULT = "Hermes_Gateway"
 _TASK_DESCRIPTION = "Hermes Agent Gateway - Messaging Platform Integration"
 _TASK_NAME_OVERRIDE_ENV = "HERMES_GATEWAY_TASK_NAME"  # {MARKER}
-'''
-TASK_ANCHOR = '''    # Local import to avoid circular module initialization during hermes_cli boot.
+"""
+TASK_ANCHOR = """    # Local import to avoid circular module initialization during hermes_cli boot.
     from hermes_cli.gateway import _profile_suffix
 
     suffix = _profile_suffix()
     if not suffix:
         return _TASK_NAME_DEFAULT
     return f"{_TASK_NAME_DEFAULT}_{suffix}"
-'''
-TASK_REPLACEMENT_V1 = '''    # Local imports avoid circular module initialization during hermes_cli boot.
+"""
+D363_TASK_ANCHOR = """    from hermes_cli.gateway import _profile_suffix  # local: avoids circular init during boot
+
+    suffix = _profile_suffix()
+    return f"{_TASK_NAME_DEFAULT}_{suffix}" if suffix else _TASK_NAME_DEFAULT
+"""
+TASK_REPLACEMENT_V1 = """    # Local imports avoid circular module initialization during hermes_cli boot.
     from hermes_cli.gateway import _profile_suffix
 
     suffix = _profile_suffix()
@@ -73,8 +71,8 @@ TASK_REPLACEMENT_V1 = '''    # Local imports avoid circular module initializatio
     if not suffix:
         return _TASK_NAME_DEFAULT
     return f"{_TASK_NAME_DEFAULT}_{suffix}"
-'''
-TASK_REPLACEMENT = '''    # Local imports avoid circular module initialization during hermes_cli boot.
+"""
+TASK_REPLACEMENT = """    # Local imports avoid circular module initialization during hermes_cli boot.
     from hermes_cli.config import load_config_readonly
     from hermes_cli.gateway import _profile_suffix
 
@@ -121,60 +119,65 @@ TASK_REPLACEMENT = '''    # Local imports avoid circular module initialization d
     if not suffix:
         return _TASK_NAME_DEFAULT
     return f"{_TASK_NAME_DEFAULT}_{suffix}"
-'''
-CMD_ENV_ANCHOR = '''    lines.append(f'set "HERMES_HOME={hermes_home}"')
+"""
+CMD_ENV_ANCHOR = """    lines.append(f'set "HERMES_HOME={hermes_home}"')
     lines.append('set "PYTHONIOENCODING=utf-8"')
-'''
-CMD_ENV_REPLACEMENT = '''    lines.append(f'set "HERMES_HOME={hermes_home}"')
+"""
+CMD_ENV_REPLACEMENT = """    lines.append(f'set "HERMES_HOME={hermes_home}"')
     lines.append(f'set "HERMES_GATEWAY_TASK_NAME={task_name or _TASK_NAME_DEFAULT}"')
     lines.append('set "PYTHONIOENCODING=utf-8"')
-'''
-VBS_ENV_ANCHOR = '''        f"env.Item({_quote_vbs_string('HERMES_HOME')}) = {_quote_vbs_string(hermes_home)}",
+"""
+VBS_ENV_ANCHOR = """        f"env.Item({_quote_vbs_string('HERMES_HOME')}) = {_quote_vbs_string(hermes_home)}",
         f"env.Item({_quote_vbs_string('PYTHONIOENCODING')}) = {_quote_vbs_string('utf-8')}",
-'''
-VBS_ENV_REPLACEMENT = '''        f"env.Item({_quote_vbs_string('HERMES_HOME')}) = {_quote_vbs_string(hermes_home)}",
-        f"env.Item({_quote_vbs_string('HERMES_GATEWAY_TASK_NAME')}) = {_quote_vbs_string(task_name or _TASK_NAME_DEFAULT)}",
+"""
+VBS_ENV_REPLACEMENT = """        f"env.Item({_quote_vbs_string('HERMES_HOME')}) = {_quote_vbs_string(hermes_home)}",
+        (
+            f"env.Item({_quote_vbs_string('HERMES_GATEWAY_TASK_NAME')}) = "
+            f"{_quote_vbs_string(task_name or _TASK_NAME_DEFAULT)}"
+        ),
         f"env.Item({_quote_vbs_string('PYTHONIOENCODING')}) = {_quote_vbs_string('utf-8')}",
-'''
-CMD_SIGNATURE_ANCHOR = '''def _build_gateway_cmd_script(
+"""
+CMD_SIGNATURE_ANCHOR = """def _build_gateway_cmd_script(
     python_path: str,
     working_dir: str,
     hermes_home: str,
     profile_arg: str,
 ) -> str:
-'''
-CMD_SIGNATURE_REPLACEMENT = '''def _build_gateway_cmd_script(
+"""
+CMD_SIGNATURE_REPLACEMENT = """def _build_gateway_cmd_script(
     python_path: str,
     working_dir: str,
     hermes_home: str,
     profile_arg: str,
     task_name: str = "",
 ) -> str:
-'''
-VBS_SIGNATURE_ANCHOR = '''def _build_gateway_vbs_script(
+"""
+VBS_SIGNATURE_ANCHOR = """def _build_gateway_vbs_script(
     python_path: str,
     working_dir: str,
     hermes_home: str,
     profile_arg: str,
 ) -> str:
-'''
-VBS_SIGNATURE_REPLACEMENT = '''def _build_gateway_vbs_script(
+"""
+VBS_SIGNATURE_REPLACEMENT = """def _build_gateway_vbs_script(
     python_path: str,
     working_dir: str,
     hermes_home: str,
     profile_arg: str,
     task_name: str = "",
 ) -> str:
-'''
-CMD_CALL_ANCHOR = '''    content = _build_gateway_cmd_script(python_path, working_dir, hermes_home, profile_arg)
-'''
-CMD_CALL_REPLACEMENT = '''    task_name = get_task_name()
+"""
+CMD_CALL_ANCHOR = """    content = _build_gateway_cmd_script(python_path, working_dir, hermes_home, profile_arg)
+"""
+CMD_CALL_REPLACEMENT = """    task_name = get_task_name()
     content = _build_gateway_cmd_script(python_path, working_dir, hermes_home, profile_arg, task_name)
-'''
-VBS_CALL_ANCHOR = '''    vbs_content = _build_gateway_vbs_script(python_path, working_dir, hermes_home, profile_arg)
-'''
-VBS_CALL_REPLACEMENT = '''    vbs_content = _build_gateway_vbs_script(python_path, working_dir, hermes_home, profile_arg, task_name)
-'''
+"""
+VBS_CALL_ANCHOR = """    vbs_content = _build_gateway_vbs_script(python_path, working_dir, hermes_home, profile_arg)
+"""
+VBS_CALL_REPLACEMENT = """    vbs_content = _build_gateway_vbs_script(
+        python_path, working_dir, hermes_home, profile_arg, task_name
+    )
+"""
 
 
 def patch_gateway_windows_text(original: str) -> str:
@@ -189,6 +192,32 @@ def patch_gateway_windows_text(original: str) -> str:
             TASK_REPLACEMENT,
             1,
         )
+    # Reuse native launchers, but bake the resolved identity into both so a
+    # later logon/restart does not depend on the installing shell's environment.
+    if D363_TASK_ANCHOR in original:
+        replacements = (
+            (CONSTANT_ANCHOR, CONSTANT_REPLACEMENT),
+            (D363_TASK_ANCHOR, TASK_REPLACEMENT),
+            ("def _build_gateway_cmd_script(python_path: str, working_dir: str, hermes_home: str, profile_arg: str) -> str:",
+             "def _build_gateway_cmd_script(python_path: str, working_dir: str, hermes_home: str, profile_arg: str, task_name: str = \"\") -> str:"),
+            ("def _build_gateway_vbs_script(python_path: str, working_dir: str, hermes_home: str, profile_arg: str) -> str:",
+             "def _build_gateway_vbs_script(python_path: str, working_dir: str, hermes_home: str, profile_arg: str, task_name: str = \"\") -> str:"),
+            ("    settings = _launcher_settings()\n    script_path = get_task_script_path()",
+             "    settings = _launcher_settings()\n    task_name = get_task_name()\n    script_path = get_task_script_path()"),
+            ("_build_gateway_cmd_script(*settings)", "_build_gateway_cmd_script(*settings, task_name=task_name)"),
+            ("_build_gateway_vbs_script(*settings)", "_build_gateway_vbs_script(*settings, task_name=task_name)"),
+            ("        f'set \"HERMES_HOME={hermes_home}\"',\n",
+             "        f'set \"HERMES_HOME={hermes_home}\"',\n        f'set \"HERMES_GATEWAY_TASK_NAME={task_name or _TASK_NAME_DEFAULT}\"',\n"),
+            ("        f\"env.Item({q('HERMES_HOME')}) = {q(hermes_home)}\",\n",
+             "        f\"env.Item({q('HERMES_HOME')}) = {q(hermes_home)}\",\n        f\"env.Item({q('HERMES_GATEWAY_TASK_NAME')}) = {q(task_name or _TASK_NAME_DEFAULT)}\",\n"),
+        )
+        patched = original
+        for anchor, replacement in replacements:
+            if patched.count(anchor) != 1:
+                raise RuntimeError("Windows gateway refactored anchor drift")
+            patched = patched.replace(anchor, replacement, 1)
+        return patched
+
     replacements = (
         (CONSTANT_ANCHOR, CONSTANT_REPLACEMENT, "constant"),
         (TASK_ANCHOR, TASK_REPLACEMENT, "task resolver"),
@@ -210,6 +239,9 @@ def patch_gateway_windows_text(original: str) -> str:
 def patch_config_defaults_text(original: str) -> str:
     if CONFIG_MARKER in original:
         return original
+    refactored = '    "gateway": {  # Gateway settings (messaging platforms: Telegram, Discord, Slack, ...).\n'
+    if original.count(refactored) == 1:
+        return original.replace(refactored, refactored + CONFIG_REPLACEMENT[len(CONFIG_ANCHOR):], 1)
     if original.count(CONFIG_ANCHOR) != 1:
         raise RuntimeError("Windows gateway config default anchor drift")
     return original.replace(
@@ -234,37 +266,18 @@ def patch_config_example_text(original: str) -> str:
 def patch_windows_gateway_task_identity_v1(root: Path) -> bool:
     """Map the owned task identity to native config and restart state."""
     targets = {
-        Path(root) / "hermes_cli/gateway_windows.py": (
-            patch_gateway_windows_text
-        ),
-        Path(root) / "hermes_cli/config_defaults.py": (
-            patch_config_defaults_text
-        ),
+        Path(root) / "hermes_cli/gateway_windows.py": (patch_gateway_windows_text),
+        Path(root) / "hermes_cli/config_defaults.py": (patch_config_defaults_text),
         Path(root) / "cli-config.yaml.example": patch_config_example_text,
     }
     if not all(target.is_file() for target in targets):
         return False
-    originals = {
-        target: target.read_text(encoding="utf-8")
-        for target in targets
-    }
-    patched = {
-        target: patcher(originals[target])
-        for target, patcher in targets.items()
-    }
-    changed = [
-        target for target in targets
-        if patched[target] != originals[target]
-    ]
+    originals = {target: target.read_text(encoding="utf-8") for target in targets}
+    patched = {target: patcher(originals[target]) for target, patcher in targets.items()}
+    changed = [target for target in targets if patched[target] != originals[target]]
     if not changed:
         return False
-    backups = {
-        target: Path(
-            str(target)
-            + ".bak-pre-windows-gateway-task-identity-v1"
-        )
-        for target in changed
-    }
+    backups = {target: Path(str(target) + ".bak-pre-windows-gateway-task-identity-v1") for target in changed}
     for target, backup in backups.items():
         shutil.copy2(target, backup)
     try:

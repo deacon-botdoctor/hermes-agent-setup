@@ -1,0 +1,138 @@
+{
+  "upstream_commit": "d3630f853239e8c41ce7201e09fbdf39bcbc5431",
+  "files": {
+    "gateway/platforms/whatsapp_cloud.py": {
+      "pre": [
+        "658ba762cbabd47e0c076efb8810dbd47d43529eff67db264b5e6f7d1e723a52",
+        "0fccf9c06ced72911efef58f905e2a736d76288a5962751cfaf45edb3a7b7346"
+      ],
+      "post": [
+        "7e71def9a1ff0fc79ca5f65a0d75335b11fca0a5d9667e71855b2de256e239d5",
+        "34d5e4dd23e5e7945cd7e0fa0ed5e3c29985a383acadb94e03742abc8d3afcda"
+      ]
+    },
+    "gateway/relay/adapter.py": {
+      "pre": [
+        "0de89b110185e7c7d945cc7f9c5367a52d528dde722377da2963d9bcbccad575"
+      ],
+      "post": [
+        "57eb5f53e568c63e666e0aa43c4fed0934bbe20ef65068ace3e275a0db2d73ab"
+      ]
+    },
+    "gateway/run.py": {
+      "pre": [
+        "0ac228aa6f766474013565e24aa65d87cea992f5e665e4de2bb5782e5fd3848e",
+        "268b83cdd4c10363bab09338ec3c45838d64e07817d5ce7d681071fb0c09ec9a"
+      ],
+      "post": [
+        "ab8243ca752acfcc813884c6fa653374029871dcb38491bd88db9b7dd0731078",
+        "de3d3b25001953e10f89c0f320c9802c27ce8bf0896080b84c9561b0bca58989"
+      ]
+    },
+    "gateway/slash_commands.py": {
+      "pre": [
+        "d5d6960c2ed1480c92f15a3c7f506f5f8d57f178a0888dc6bad07fb35da8ef40"
+      ],
+      "post": [
+        "8ad6aedb482f2587a31ad257974fcd3785eada3bdce6ef95877b9207d3d8d95b"
+      ]
+    },
+    "plugins/platforms/discord/adapter.py": {
+      "pre": [
+        "61986eb60ea78e54d8fe820cfe2a2f47d2736be496d41ced355f04ec346bd3d1"
+      ],
+      "post": [
+        "743f3720510dbddd1862d08fa808730cd28ca925325737f5dfe3a2cac3b65d05"
+      ]
+    },
+    "plugins/platforms/matrix/adapter.py": {
+      "pre": [
+        "7e5576c21b70e05ca085240154abbf94368d4f033d8437b0f24fe45c9523ac58"
+      ],
+      "post": [
+        "a8be855735656e8d759c2a57dc487f4c23fea9d4e1739b1751a2cebffc1a743e"
+      ]
+    },
+    "plugins/platforms/slack/adapter.py": {
+      "pre": [
+        "f4d64fed969cfc7b0ea99a28fa94a64b4b389e7614ca04002bef0f94cad0924a"
+      ],
+      "post": [
+        "e766f0b1f8371e6433b8c6f8a800a57ffa58a9478b8b250e2fe70f526ad8c477"
+      ]
+    },
+    "plugins/platforms/teams/adapter.py": {
+      "pre": [
+        "8fd1574e6266aa57e184e16cba741a1727079d754c13ee8dc93c750b1cb3ef9d"
+      ],
+      "post": [
+        "868118cf31793391c4a797e5c83c4a5765405c3934dd19bb22cf65dded8f30ee"
+      ]
+    },
+    "plugins/platforms/telegram/adapter.py": {
+      "pre": [
+        "98422313b2c56e73993ec926a5571061c3743fd0c602054f46a4acbed665f398"
+      ],
+      "post": [
+        "92cbc529b050634a35e55b1d2bbddfba12eb5939b9175a2b33cd439cc4b4d7b7"
+      ]
+    },
+    "tests/gateway/relay/test_relay_interactive.py": {
+      "pre": [
+        "ee5171ce09e33ae7e429fe31461b2c4011d7d1df466d7579a858b20c547671f2"
+      ],
+      "post": [
+        "ce98558af7e892e305f0c01dd87ab7a10dd5e8d4df22c132c7cb1a0e04460c45"
+      ]
+    },
+    "tests/gateway/test_discord_view_base_parity.py": {
+      "pre": [
+        "69816a96e448a95aa33391155b923f70580003aecdbe71b0b7e77cbc98d16527"
+      ],
+      "post": [
+        "3755919e1cb6bdd6cc26bb7e639cf6757fc858663528fcd3fba2494f9df666c5"
+      ]
+    },
+    "tests/gateway/test_slack_approval_buttons.py": {
+      "pre": [
+        "d55e656b1ac27ba101c04172b1d0ea44352daa10c574bb2024f1202638f8f4e0"
+      ],
+      "post": [
+        "9f1b38a77435dff97dd2e398bf7d6cd97760362c43da01541ba0c8f0fe30f2b9"
+      ]
+    },
+    "tests/gateway/test_telegram_approval_buttons.py": {
+      "pre": [
+        "781095a336f195b966df3a68679aa54dfb0d1df91a6de77cd0efe316159c6669"
+      ],
+      "post": [
+        "25b27fdddccf2cd1a799fbb18ee9de992823ac68cae51a2c1487f1f1f9fb64dc"
+      ]
+    },
+    "tests/gateway/test_telegram_noise_filter.py": {
+      "pre": [
+        "1338cf7911481e926fdd7bcb867c9b71732c25212961ced6f82af5380a3dfc7f"
+      ],
+      "post": [
+        "5f42f129da30a9ec2faa4971a558fc17a6475a673732b46e974b1513be546c1d"
+      ]
+    },
+    "tests/gateway/test_whatsapp_cloud.py": {
+      "pre": [
+        "91f6a79fe6aa370f6bbce3095e3b2c46d179d1c4fb983b1459b9d8f80817cdf9"
+      ],
+      "post": [
+        "5f8401064b2c8f25d054c2614def422f667592b5e17a3286b8eede8607bc8bac"
+      ]
+    },
+    "tests/gateway/test_silent_lifecycle_native.py": {
+      "pre": [
+        null
+      ],
+      "post": [
+        "ce325d302eea75a87ddf43d9fcc90bdecdf4c5139867be83786f61da03026a6d"
+      ]
+    }
+  },
+  "patch_sha256": "9f2c1e881d9683c554e2de58ba7919e7384691c368d374c39c2b6015938aaf9e"
+}

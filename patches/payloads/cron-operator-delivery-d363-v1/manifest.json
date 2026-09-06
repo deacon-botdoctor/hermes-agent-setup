@@ -1,0 +1,102 @@
+{
+  "upstream_commit": "d3630f853239e8c41ce7201e09fbdf39bcbc5431",
+  "files": {
+    "agent/conversation_loop.py": {
+      "pre": [
+        "86474bf782d9418c4203dd662c46227784698d53090f6664ddb3cdf6119d20df"
+      ],
+      "post": [
+        "cd1ecb60bc26726a5dbeaea3f3e8a094d618f6a371ed0c4e9a20a9628905f10c"
+      ]
+    },
+    "agent/turn_api_error.py": {
+      "pre": [
+        "5aff1dd0bb54f743b924647bff7e695f30062dab0d772f9983a733d7feb8dfb1"
+      ],
+      "post": [
+        "32eb1aefb35dae1fdfac14359577d71f8440a7ffa08b9df5dc7fc782f3b2c62a"
+      ]
+    },
+    "cron/scheduler.py": {
+      "pre": [
+        "adadba40e63409b9fc2cae8e1e46d3f9ffa0a388a9c2f8019dea73481e1a281c"
+      ],
+      "post": [
+        "97bc46e85abbc4e96143c0976edbf81193d9fe3c9ad7979018bbce95befc8d62"
+      ]
+    },
+    "cron/scheduler_delivery.py": {
+      "pre": [
+        "ad9806e0c508282e88640a28eadbd8a617044b77730fa3ba2813c9ab852acdb8"
+      ],
+      "post": [
+        "34f82b91cc945e5e5acb4605039f11dd99b2223e8ca2ed01ad9e11a61aee7b1d"
+      ]
+    },
+    "cron/scheduler_prompt.py": {
+      "pre": [
+        "bc5fecf6dc019ad7dec221c4a0913685d07e33a3a9a974e5fca0cb5962c6654c"
+      ],
+      "post": [
+        "ab44121612ccffe328e27b53ebe6f85034fa7e1c7f511fc1d02d0e68cd3c10cc"
+      ]
+    },
+    "cron/scheduler_script.py": {
+      "pre": [
+        "d423f0db67d83aa1ac82419913e1a316eaea300deda8a53ec0012810f3761950"
+      ],
+      "post": [
+        "dbbaf6c607a92ca401a1ab8272b39ad9b090ddc72a62ae4f57a68d018b1caa49"
+      ]
+    },
+    "tests/cron/test_cron_drift_alert_once.py": {
+      "pre": [
+        "c5f66abff5da5135a79809a43c30e42de75593a7c7992c98edc0cb9142a76b84"
+      ],
+      "post": [
+        "981e023ae798800963ec02712bb8097574ca37814685769961a9054ff6607071"
+      ]
+    },
+    "tests/cron/test_cron_failure_deliver.py": {
+      "pre": [
+        "96a58f13120698f49ee70dcc5b3953d96ef0d7736737d578be56d7f97a7f76df"
+      ],
+      "post": [
+        "8ad8fd270d7646139c0ef3a6ead29366ba7fdb57d3f18b1748af9f40c6bfb912"
+      ]
+    },
+    "tests/cron/test_media_delivery_parity.py": {
+      "pre": [
+        "6605a6200408afc921a91b3d06e62b04f8e85f3bb5a213a97fb87841f8f99eb8"
+      ],
+      "post": [
+        "76ca008233c766ff209242c10ce485c297bd168cca7eb13c65e6e865cf860083"
+      ]
+    },
+    "tests/cron/test_shutdown_interrupt.py": {
+      "pre": [
+        "cc23b6f7d57785edb8a13256a77fcd5014e46aea42da3523408d66e6988dd968"
+      ],
+      "post": [
+        "191f4e1e6054554ac6356339edeee38def00ee0e8ce1abd3c3555b109ee3e590"
+      ]
+    },
+    "cron/scheduler_operator.py": {
+      "pre": [
+        null
+      ],
+      "post": [
+        "0edb2b166380d8679ecdd6e911570bc819c92ab6fbbd1ab5e5121a2bf98cdcaa"
+      ]
+    },
+    "tests/cron/test_operator_delivery_native.py": {
+      "pre": [
+        null
+      ],
+      "post": [
+        "7a6dd1c5882174c9e1a66bc5bae4f08285b47275849870d2484fba0784a4fb9a"
+      ]
+    }
+  },
+  "patch_sha256": "a3f6263f70a98595d1e0b600fb9fad365faed5aaff3d8eb31d28bca5e098d623"
+}

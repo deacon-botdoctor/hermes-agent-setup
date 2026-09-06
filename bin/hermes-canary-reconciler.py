@@ -10,7 +10,6 @@ import re
 import shlex
 import shutil
 import subprocess
-import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -133,7 +132,11 @@ def default_registry() -> list[dict[str, Any]]:
                 "cron_tag": "HERMES_TOOL_READINESS_PROBE",
                 "run_if_stale_seconds": 3600,
                 "timeout_seconds": 120,
-                "args": ["--output", "{hermes}/state/tool-readiness-probe-latest.json"],
+                "args": [
+                    "--smoke",
+                    "--output",
+                    "{hermes}/state/tool-readiness-probe-latest.json",
+                ],
             },
         },
         {
@@ -146,9 +149,9 @@ def default_registry() -> list[dict[str, Any]]:
                 "required": True,
                 "script": "bin/hermes-disk-retention.py",
                 "state": "state/disk-retention-last.json",
-                "interval_minutes": 1440,
+                "interval_minutes": 120,
                 "cron_tag": "HERMES_DISK_RETENTION",
-                "run_if_stale_seconds": 90000,
+                "run_if_stale_seconds": 10800,
                 "timeout_seconds": 300,
                 "args": ["--apply", "--json", "--clear-flags"],
             },
@@ -237,6 +240,9 @@ def cron_line_for(canary: dict[str, Any], script: Path, agent_id: str, agent_nam
     if interval >= 1440:
         minute = hashlib.sha256(jitter_seed + b"\x00daily").digest()[0] % 60
         schedule = f"{minute} 4 * * *"
+    elif interval >= 60 and interval % 60 == 0:
+        minute = hashlib.sha256(jitter_seed + b"\x00hourly").digest()[0] % 60
+        schedule = f"{minute} */{interval // 60} * * *"
     else:
         schedule = f"*/{interval} * * * *"
     return f"{schedule} sleep {jitter}; {cmd} # {tag}"
@@ -552,22 +558,12 @@ def install_cron(
     if dry_run:
         return "would_update"
     payload = "\n".join(lines) + "\n"
-    temp_path: Path | None = None
     try:
-        # Darwin's crontab truncates long file arguments. Keep the install
-        # payload in the OS temp directory rather than beneath a deep profile
-        # path; NamedTemporaryFile remains private (0600) and is always removed.
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=tempfile.gettempdir(),
-            prefix="hermes-cron-",
-            delete=False,
-        ) as handle:
-            handle.write(payload)
-            temp_path = Path(handle.name)
+        # Feed the payload over stdin. On macOS, /usr/bin/crontab is setuid and
+        # cannot reliably read a caller-owned mode-0600 temporary file.
         p = subprocess.run(
-            ["crontab", str(temp_path)],
+            ["crontab", "-"],
+            input=payload,
             text=True,
             capture_output=True,
             timeout=10,
@@ -578,9 +574,6 @@ def install_cron(
         return "failed:crontab_timeout"
     except Exception as exc:
         return "failed:" + type(exc).__name__ + ": " + str(exc)[:160]
-    finally:
-        if temp_path is not None:
-            temp_path.unlink(missing_ok=True)
     if p.returncode != 0:
         return "failed:" + ((p.stderr or p.stdout).strip()[:200])
     return "updated"
@@ -593,6 +586,12 @@ def run_canary(script: Path, canary: dict[str, Any], agent_id: str, agent_name: 
     for k, v in (canary.get("env") or {}).items():
         env[str(k)] = str(v)
     argv = [str(script), *format_args(canary.get("args") or [], agent_id, agent_name)]
+    # The reconciler is the authority for its own current cycle. Its nested
+    # local self-check must not judge the previous reconciler receipt or a
+    # healthy current cycle can remain latched red forever. Independently
+    # scheduled self-checks still validate reconciler freshness normally.
+    if canary.get("id") == "local_selfcheck" and "--skip-canary-reconciler" not in argv:
+        argv.append("--skip-canary-reconciler")
     try:
         p = run(argv, timeout=int(canary.get("timeout_seconds") or 90), env=env, cwd=HOME)
         return {"ran": True, "rc": p.returncode, "detail": ((p.stdout or "") + " " + (p.stderr or "")).strip()[-300:]}
@@ -617,15 +616,32 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
             continue
         else:
             status = install_cron(retired_tag, "", args.dry_run, ensure_present=False, current=cron_lines)
-        actions.append(
-            {
-                "capability": "retired_scheduler_cleanup",
-                "canary": retired_tag,
-                "action": "ensure_retired",
-                "status": status,
-            }
-        )
+        action = {
+            "capability": "retired_scheduler_cleanup",
+            "canary": retired_tag,
+            "action": "ensure_retired",
+            "status": status,
+        }
+        if status.startswith("failed:") and "operation not permitted" in status.casefold():
+            action.update(
+                {
+                    "status": "warning:retired_crontab_write_denied",
+                    "detail": "retired crontab cleanup could not write; retained as maintenance warning",
+                    "raw_status": status,
+                }
+            )
+        actions.append(action)
 
+    # Refresh dependency state before the aggregate local self-check reads it.
+    # Python's sort is stable, so every other registry entry preserves its
+    # declared order and only local_selfcheck is moved to the end.
+    registry = sorted(
+        registry,
+        key=lambda spec: int(
+            isinstance(spec.get("canary"), dict)
+            and spec.get("canary", {}).get("id") == "local_selfcheck"
+        ),
+    )
     for spec in registry:
         ok, reasons = detected(spec, cfg)
         if not ok:
@@ -706,6 +722,7 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         if str(action.get("status") or "").startswith("failed:")
         or (action.get("action") == "run_if_stale" and action.get("ran") and int(action.get("rc") or 0) != 0)
     ]
+    warnings = [action for action in actions if str(action.get("status") or "").startswith("warning:")]
     payload = {
         "schema_version": 1,
         "checked_at": iso(),
@@ -716,6 +733,7 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         "capabilities": capabilities,
         "missing_canaries": missing,
         "optional_canaries_unavailable": optional_unavailable,
+        "warnings": warnings,
         "failed_actions": failed_actions,
         "actions": actions,
         "ok": not missing and not failed_actions,
@@ -731,6 +749,7 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
             "capabilities",
             "missing_canaries",
             "optional_canaries_unavailable",
+            "warnings",
             "failed_actions",
             "ok",
         ]

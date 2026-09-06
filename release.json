@@ -1,27 +1,27 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
-    "file_count": 93
+    "digest": "0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74",
+    "file_count": 125
   },
-  "baseline_wiring_digest": "c43951d5bb638aaf7af6e76f75e3f230991c35b6ca77cbd6cf20571a442f966d",
-  "canonical_upstream_sha": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
+  "baseline_wiring_digest": "da31183806fe2ca357729ccfed71096f73f7c968c1b9e472df332b1bb676917d",
+  "canonical_upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
     "contract": {
       "path": "contracts/cua-driver-release-v1.json",
-      "sha256": "3b1b184d270724326f7b17c302b3627eb322f091b697406eaf525918a9b61c38"
+      "sha256": "3207daaee7e3c673a1b5c19e0e018e8643f17c0e3063d1bf4341d56fd232a818"
     },
     "gui_acceptance": "doctor_ready_and_list_windows",
     "helper": {
       "path": "bin/ensure-cua-driver.py",
-      "sha256": "2ed10b597aafc7e82c220cc1c9369164ef17c1c31ea0d87261533dc710c96b09"
+      "sha256": "440627bd5be7231f5b653c568afb1400c9dd3b35809df1c95ecfca17cba4fbcf"
     },
-    "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
-    "tag": "cua-driver-rs-v0.14.2",
-    "version": "0.14.2"
+    "source_commit": "ac9b1643acb61e20d5af078215e7d1b8c414db89",
+    "tag": "cua-driver-rs-v0.22.0",
+    "version": "0.22.0"
   },
-  "deployment_digest": "efd9ec47e3ea8b9424ca799e892458b5c1cb28859d616f3ec928041c99ce280a",
-  "golden_sha": "d1ff1e9ca6864ff2e1a687b5983b36623d8f2a51",
+  "deployment_digest": "d488ab4d9edb0320f324f512f78d5c66383ae6d49e8358f576df709c8e0ce674",
+  "golden_sha": "6db8386e225d9f16e77ab747609c1017cb7e4f70",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -29,17 +29,21 @@
       "sha256": "119993e5c2aa9be08d90dc4a90672bef8244be74502cee5f1651f9447c83fe74"
     },
     "package_digest": "c0c780d67ce24b8e3033a51e40387b139a44ce9b84e726f129ff67ec1298658e",
-    "platforms": ["linux", "macos", "windows"],
+    "platforms": [
+      "linux",
+      "macos",
+      "windows"
+    ],
     "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
   },
-  "release": "botdoctor-hermes-2026.08.24-golden-d1ff1e9c",
+  "release": "botdoctor-hermes-2026.09.06-golden-6db8386e",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
       "path": "maintenance/bin/install-runtime-coherence.py",
       "sha256": "e66926be076e13e695d4da8ca391b6974ef8e7f56116ae486f2c93692503a537"
     },
-    "package_digest": "67b4ce39a95a46ff724eb185e5b1ce1f84fa74fd18c2cff54b5e4ffcb2d3af06",
+    "package_digest": "83690e953219e1ba36585d25faed728780edb61a4ad97813af1d9639ac4677e4",
     "platforms": [
       "macos",
       "linux",
@@ -47,19 +51,19 @@
     ],
     "probe": {
       "path": "checks/agent-runtime-coherence.py",
-      "sha256": "53a7555a90269571c0bb907acd273225fc18016609645b427a0b73c8134d54bc"
+      "sha256": "77616dd194156875fc6345f6fcf2d8b35bc581fd57f6cc3a697355aef902e9a9"
     },
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "f14a0056e4963b933ea560d27cdc90fcb5beee1d65285267314401692ec6a6b6",
+  "runtime_payload_digest": "ced00952a9d5e52d7d9cd9daf3b29f480ef51222d43a306e78b612f3f0804dc0",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
-  "status": "current",
+  "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "33/33 patches applied on pinned upstream; compile and assembly gates passed; exact 93-file public runtime fingerprint reproduced",
-    "golden_suite": "public suite 86/86; Golden 66 focused tests, 107 related tests, eight preflight tests, Ruff, pinned/latest assembly, idempotence, deterministic double assembly, and zero-finding security gate passed"
+    "clean_upstream_rehearsal": "Runtime assembly inputs are unchanged from the two verified Golden432287ef public builds (49 fresh patches, 0 repeat; private CPython 3.11.15 / SQLite 3.53.1). Fresh current-release verification reproduces the same 125-file fingerprint 0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74.",
+    "golden_suite": "Reviewed Golden 6db8386e225d9f16e77ab747609c1017cb7e4f70; manager-gate and steward owner fixes pass 294 focused tests and independent CLI T1\u2013T3. No production activation claimed."
   }
 }

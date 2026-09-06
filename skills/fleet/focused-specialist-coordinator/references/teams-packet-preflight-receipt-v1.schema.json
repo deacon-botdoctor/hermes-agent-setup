@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "teams.packet-preflight-receipt/v1",
+  "title": "Client Teams Packet Preflight Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "status", "mutation_permitted", "tenant_id", "decision_id",
+    "decision_version", "decision_fingerprint", "packet_id", "idempotency_key",
+    "errors"
+  ],
+  "properties": {
+    "schema": {"const": "teams.packet-preflight-receipt/v1"},
+    "status": {"enum": ["pass", "block"]},
+    "mutation_permitted": {"type": "boolean"},
+    "tenant_id": {"type": "string"},
+    "decision_id": {"type": "string"},
+    "decision_version": {"type": "integer", "minimum": 0},
+    "decision_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "packet_id": {"type": "string"},
+    "idempotency_key": {"type": "string"},
+    "errors": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  }
+}

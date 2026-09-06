@@ -10,13 +10,18 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import hashlib
+import platform
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+MACOS_PYTHON_CATALOG = "contracts/python-downloads-macos-arm64.json"
+MACOS_PYTHON_CATALOG_SHA256 = "cae33933f03d359951da43606430e447ccc8859fffc0940871d115443f18070d"
 
 
 def run(
@@ -153,7 +158,40 @@ def clone_upstream(
     verify_clean_upstream(output, upstream_sha)
 
 
-def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
+def candidate_python_proof(output: Path, env: dict[str, str]) -> dict:
+    """Inspect only the candidate interpreter; never open a Hermes database."""
+    python = output / "venv" / "bin" / "python"
+    store = (output / ".hermes-runtime" / "python").resolve()
+    if (not store.is_relative_to(output.resolve()) or not python.is_file()
+            or not python.resolve().is_relative_to(store)):
+        raise RuntimeError("candidate Python is not in its private managed store")
+    script = (
+        "import json, sqlite3, sys; print(json.dumps({"
+        "'python': sys.executable, 'prefix': sys.prefix, 'base_prefix': sys.base_prefix, "
+        "'python_version': list(sys.version_info[:3]), "
+        "'sqlite_version': list(sqlite3.sqlite_version_info)}))"
+    )
+    with tempfile.TemporaryDirectory(prefix="hermes-python-proof-") as probe_home:
+        probe_env = dict(env, HERMES_HOME=probe_home)
+        result = run([str(python), "-I", "-c", script], env=probe_env, timeout=30)
+    try:
+        proof = json.loads(result.stdout)
+        version = proof["sqlite_version"]
+        if (not isinstance(version, list) or len(version) != 3
+                or any(type(part) is not int for part in version)):
+            raise ValueError("invalid SQLite version")
+        if tuple(version) < (3, 51, 3):
+            raise RuntimeError("candidate Python requires SQLite >= 3.51.3")
+        if (Path(proof["prefix"]).resolve() != (output / "venv").resolve()
+                or not Path(proof["base_prefix"]).resolve().is_relative_to(store)
+                or Path(proof["python"]) != python):
+            raise ValueError("candidate interpreter identity mismatch")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError("candidate Python proof is invalid") from exc
+    return proof
+
+
+def prepare_posix_dependencies(output: Path, profile_home: Path) -> dict:
     if os.name == "nt":
         raise ValueError(
             "--prepare-home is POSIX-only; use the documented isolated "
@@ -173,6 +211,27 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
     isolated_user_home = profile_home / ".installer-user"
     isolated_user_home.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
+    # The pinned installer owns uv provisioning. Force its normal find/install
+    # path into this candidate so a host's old Python cannot seed a new venv.
+    for key in tuple(env):
+        if key.startswith(("UV_", "PYTHON", "CONDA_")) or key == "VIRTUAL_ENV":
+            env.pop(key)
+    env.update({
+        "UV_MANAGED_PYTHON": "1",
+        "UV_PYTHON_INSTALL_DIR": str(output / ".hermes-runtime" / "python"),
+        "UV_PYTHON_INSTALL_BIN": "0",
+        "UV_PYTHON_INSTALL_REGISTRY": "0",
+    })
+    catalog_proof = None
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        # Python patch versions alone do not identify their bundled SQLite.
+        # Older uv catalogs select a vulnerable build of this same 3.11.15.
+        catalog = ROOT / MACOS_PYTHON_CATALOG
+        digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
+        if digest != MACOS_PYTHON_CATALOG_SHA256:
+            raise RuntimeError("managed Python download catalog digest mismatch")
+        env["UV_PYTHON_DOWNLOADS_JSON_URL"] = catalog.resolve().as_uri()
+        catalog_proof = {"path": MACOS_PYTHON_CATALOG, "sha256": digest}
     env["HOME"] = str(isolated_user_home)
     env["HERMES_HOME"] = str(profile_home)
     run(
@@ -192,6 +251,10 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> None:
         env=env,
         timeout=1800,
     )
+    proof = candidate_python_proof(output, env)
+    if catalog_proof is not None:
+        proof["download_catalog"] = catalog_proof
+    return proof
 
 
 def main() -> int:
@@ -242,6 +305,7 @@ def main() -> int:
     if not json.loads(verify.stdout).get("ok"):
         raise RuntimeError("public release source verification failed")
 
+    python_proof = None
     if not args.use_existing_clean_runtime:
         clone_upstream(
             output,
@@ -250,7 +314,7 @@ def main() -> int:
             str(RELEASE["canonical_upstream_sha"]),
         )
         if args.prepare_home:
-            prepare_posix_dependencies(output, args.prepare_home)
+            python_proof = prepare_posix_dependencies(output, args.prepare_home)
     env = os.environ.copy()
     env["HERMES_APPLY_SKIP_SNAPSHOT"] = "1"
     patch = run(
@@ -289,6 +353,7 @@ def main() -> int:
         "runtime_fingerprint": proof["runtime_fingerprint"],
         "runtime_path": str(output),
         "patch_output_tail": patch.stdout[-2000:],
+        "python_runtime": python_proof,
     }
     receipt_path = output.with_name(output.name + ".assembly.json")
     receipt_path.write_text(

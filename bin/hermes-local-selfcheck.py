@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import gzip
 import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -16,6 +18,7 @@ from pathlib import Path
 
 HOME = Path.home()
 HERMES = Path(os.environ.get("HERMES_HOME") or HOME / ".hermes").expanduser()
+PROC_ROOT = Path("/proc")
 AGENT_PROBE_MAX_AGE_S = int(os.environ.get("HERMES_AGENT_PROBE_MAX_AGE_SECONDS", "1800"))
 # Unified search is free-first; Exa is an optional paid escalation backend.
 OPTIONAL_CAPABILITY_ENV_KEYS = {"EXA_API_KEY"}
@@ -216,8 +219,11 @@ def check_gateway_state():
                 and poll_age is not None
                 and 0 <= poll_age <= TELEGRAM_POLL_MAX_AGE_S
             )
+            session_status = (d.get("session_store") or {}).get("status", "unknown")
+            session_failed = session_status in {"unavailable", "retrying"}
             ok = (
-                state == "running"
+                not session_failed
+                and state == "running"
                 and pid_alive
                 and (telegram_ok or not telegram_expected)
             )
@@ -234,6 +240,10 @@ def check_gateway_state():
                 ),
                 "gateway_pid": pid,
                 "pid_alive": pid_alive,
+                "transport_healthy": telegram_ok if telegram_expected else None,
+                "session_store_healthy": False if session_failed else (True if session_status == "ok" else None),
+                "agent_turn_healthy": False if session_failed else None,
+                "session_store_status": session_status,
                 "telegram_state": telegram_state or "unknown",
                 "telegram_expected": telegram_expected,
                 "last_successful_poll_at": telegram.get("last_successful_poll_at"),
@@ -280,6 +290,44 @@ def gateway_runtime_binding():
         "process_alive": process_alive,
         "runtime_root": runtime_root,
         "argv": [str(value) for value in argv[:8]],
+    }
+
+
+def runtime_release_identity():
+    """Return the exact shared release/composition identity activated by Operator Control."""
+    binding = load_json(HERMES / "state/runtime-binding.json", {})
+    target_sha = str(binding.get("target_sha") or "").strip().lower()
+    fingerprint = str(binding.get("runtime_fingerprint_digest") or "").strip().lower()
+    composition = str(binding.get("runtime_composition_digest") or "").strip().lower()
+    valid = (
+        binding.get("kind") == "botdoctor_runtime_binding"
+        and binding.get("status") == "active"
+        and re.fullmatch(r"[0-9a-f]{40}", target_sha) is not None
+        and re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None
+        and re.fullmatch(r"[0-9a-f]{64}", composition) is not None
+    )
+    return {
+        "schema_version": 1,
+        "status": "pass" if valid else "fail",
+        "target_sha": target_sha,
+        "runtime_fingerprint_digest": fingerprint,
+        "runtime_composition_digest": composition,
+    }
+
+
+def check_runtime_release_identity():
+    identity = runtime_release_identity()
+    return {
+        "name": "runtime_release_identity",
+        "status": identity["status"],
+        "severity": "P1",
+        "fix_class": "runtime_contract",
+        "detail": (
+            f"target={identity['target_sha']} composition={identity['runtime_composition_digest']}"
+            if identity["status"] == "pass"
+            else "active runtime binding lacks exact Golden target/fingerprint/composition identity"
+        ),
+        **identity,
     }
 
 
@@ -504,6 +552,7 @@ def check_immersion_quality():
         "cleanup_progress": False,
         "interim_assistant_messages": False,
         "long_running_notifications": False,
+        "progress_on_typing": False,
         "show_cost": False,
         "show_reasoning": False,
         "streaming": False,
@@ -594,6 +643,9 @@ def check_telegram_organic_checkpoints():
     global_enabled = _scalar_from_block(display, "long_running_notifications")
     telegram_enabled = _scalar_from_block(telegram, "long_running_notifications", indent=6)
     telegram_cleanup = _scalar_from_block(telegram, "cleanup_progress", indent=6)
+    telegram_typing_progress = _scalar_from_block(
+        telegram, "progress_on_typing", indent=6
+    )
     exemptions = _overlay_config_exemptions()
     if "agent.gateway_notify_interval" not in exemptions and interval != 300:
         failures.append(f"interval={interval!r} expected=300")
@@ -603,6 +655,13 @@ def check_telegram_organic_checkpoints():
         failures.append(f"telegram={telegram_enabled!r} expected=True")
     if "display.platforms.telegram.cleanup_progress" not in exemptions and telegram_cleanup is not True:
         failures.append(f"cleanup={telegram_cleanup!r} expected=True")
+    if (
+        "display.platforms.telegram.progress_on_typing" not in exemptions
+        and telegram_typing_progress is not True
+    ):
+        failures.append(
+            f"progress_on_typing={telegram_typing_progress!r} expected=True"
+        )
 
     binding = load_json(binding_path, {})
     runtime_raw = str(binding.get("runtime_root") or "").strip()
@@ -628,6 +687,8 @@ def check_telegram_organic_checkpoints():
         marker_hash = hashlib.sha256(b"\0".join(sources)).hexdigest()
         if any(marker.encode() not in source for source in sources):
             failures.append("active runtime v3 commentary-capture marker missing")
+        if b'"progress_on_typing"' not in sources[0]:
+            failures.append("active runtime progress_on_typing implementation missing")
 
     live = gateway_runtime_binding()
     live_root = Path(str(live.get("runtime_root") or "")).expanduser()
@@ -644,7 +705,7 @@ def check_telegram_organic_checkpoints():
 
     detail = (
         f"interval={interval!r} global={global_enabled!r} telegram={telegram_enabled!r} "
-        f"cleanup={telegram_cleanup!r} "
+        f"cleanup={telegram_cleanup!r} progress_on_typing={telegram_typing_progress!r} "
         f"exemptions={','.join(sorted(exemptions)) or 'none'} "
         f"runtime={runtime_root} marker_sha256={marker_hash or 'missing'} "
         f"process_started={process_started.isoformat() if process_started else 'unknown'}"
@@ -710,6 +771,60 @@ def check_agent_probe():
     }
 
 
+
+def check_session_store_errors():
+    """Observe gateway logs without SQLite; retain failures until a new process starts."""
+    binding = gateway_runtime_binding()
+    heartbeat = load_json(HERMES / "state/gateway.heartbeat", {})
+    pid = binding.get("pid")
+    started = heartbeat.get("start_time")
+    result = {"name": "session_store_errors", "status": "warn", "severity": "P1",
+              "gateway_pid": pid, "gateway_started_at": started,
+              "session_store_healthy": None, "agent_turn_healthy": None,
+              "detail": "gateway generation unavailable", "database_error_kinds": []}
+    if (not binding.get("process_alive") or heartbeat.get("pid") != pid
+            or not isinstance(started, (int, float)) or isinstance(started, bool)
+            or not 946684800 < started <= time.time()):
+        return result
+    prior = load_json(HERMES / "state/local-selfcheck-latest.json", {})
+    markers = ("SessionStore SQLite handle unavailable", "file is not a database",
+               "database disk image is malformed", "disk I/O error", "SQLite session store unavailable")
+    kinds = set()
+    for check in prior.get("checks", []):
+        if (isinstance(check, dict) and check.get("name") == result["name"]
+                and check.get("gateway_pid") == pid and check.get("gateway_started_at") == started):
+            kinds.update(kind for kind in (check.get("database_error_kinds") or []) if kind in markers)
+    read_errors = []
+    # Stream current and rotated logs; do not materialize transcripts or expose lines.
+    paths = set((HERMES / "logs").glob("gateway.log*")) | set((HERMES / "logs").glob("gateway.error.log*"))
+    for path in sorted(paths):
+        try:
+            if not path.is_file() or path.stat().st_mtime < started:
+                continue
+            stamp = None
+            opener = gzip.open if path.suffix == ".gz" else open
+            with opener(path, "rt", errors="replace") as stream:
+                for line in stream:
+                    match = re.match(r"^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?)", line)
+                    if match:
+                        try:
+                            stamp = datetime.fromisoformat(match.group(1).replace(",", ".").replace("Z", "+00:00")).timestamp()
+                        except ValueError:
+                            stamp = None
+                    # Whole-second log timestamps overlap the fractional startup second.
+                    # Conservatively retain errors in that first second as current.
+                    if stamp is not None and stamp >= int(started):
+                        kinds.update(marker for marker in markers if marker.lower() in line.lower())
+        except OSError as exc:
+            read_errors.append(type(exc).__name__)
+    result.update(status="fail" if kinds else ("warn" if read_errors else "pass"),
+                  database_error_kinds=sorted(kinds),
+                  detail="database errors since gateway start: " + ", ".join(sorted(kinds)) if kinds else
+                         ("log inspection unavailable: " + ", ".join(sorted(set(read_errors))) if read_errors else "no database errors observed since gateway start"))
+    if kinds:
+        result.update(session_store_healthy=False, agent_turn_healthy=False)
+    return result
+
 def check_logs():
     paths = [HERMES / "logs/gateway.error.log", HERMES / "logs/gateway.log"]
     patterns = re.compile(r"(traceback|authenticationerror|unauthorized|permission denied|fatal|uncaught)", re.I)
@@ -755,6 +870,89 @@ def check_logs():
     }
 
 
+def _normalize_email_auth_choice(text):
+    value = " ".join(str(text or "").lower().replace("’", "'").split()).strip(" .!,")
+    if value.startswith("i was responding to the chat"):
+        return None
+    if re.fullmatch(
+        r"(?:yes[, ]+)?(?:please )?(?:keep|fix|restore|reauthenticate)(?: my)? email(?: access| checks)?",
+        value,
+    ):
+        return "reauth_requested"
+    if value == "stop email checks" or re.fullmatch(
+        r"(?:i )?(?:don't|dont|do not) (?:care(?: about email)?|need email(?: access)?)",
+        value,
+    ) or re.fullmatch(
+        r"stop (?:flagging|checking) (?:it|email|email auth|email access)(?: for me)?",
+        value,
+    ):
+        return "opted_out"
+    return None
+
+
+def email_auth_client_choice():
+    """Recognize explicit choices in checkpointed history; absence remains pending."""
+    marker_path = HERMES / "state/email-auth-client-choice.json"
+    marker = load_json(marker_path, {})
+    if not isinstance(marker, dict):
+        return "unset"
+    status = str(marker.get("status") or "unset")
+    if status != "pending":
+        return status
+
+    chat_id = str(marker.get("chat_id") or "").removeprefix("telegram:").split(":", 1)[0]
+    prompt_message_id = str(marker.get("prompt_message_id") or "")
+    prompted_at = parse_dt(marker.get("prompted_at"))
+    transcript = HERMES / "data/telegram-transcript.db"
+    if not chat_id or not transcript.is_file():
+        return status
+    try:
+        before = transcript.stat()
+        with sqlite3.connect(transcript.resolve().as_uri() + "?mode=ro&immutable=1", uri=True) as connection:
+            rows = connection.execute(
+                """
+                SELECT text, reply_to_message_id, timestamp
+                FROM telegram_messages
+                WHERE role = 'user' AND chat_id IN (?, ?)
+                ORDER BY id DESC
+                LIMIT 50
+                """,
+                (chat_id, f"telegram:{chat_id}"),
+            ).fetchall()
+        connection.close()
+        after = transcript.stat()
+        if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            # A checkpoint overlapped the historical read. Keep the durable
+            # policy untouched instead of acting on an inconsistent result.
+            return status
+    except Exception:
+        return status
+
+    for text, reply_to_message_id, timestamp in rows:
+        observed_at = parse_dt(timestamp)
+        if prompted_at and (not observed_at or observed_at < prompted_at):
+            continue
+        decision = _normalize_email_auth_choice(text)
+        if not decision:
+            continue
+        if prompt_message_id and str(reply_to_message_id or "") not in {"", prompt_message_id}:
+            continue
+        marker.update(
+            {
+                "status": decision,
+                "selected_at": observed_at.isoformat() if observed_at else iso(),
+            }
+        )
+        marker_path.parent.mkdir(parents=True, exist_ok=True)
+        pending_path = marker_path.with_suffix(".json.pending")
+        pending_path.write_text(json.dumps(marker, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        pending_path.replace(marker_path)
+        return decision
+    return status
+
+
 def check_tool_readiness():
     p = HERMES / "state/tool-readiness-probe-latest.json"
     if not p.exists():
@@ -762,7 +960,10 @@ def check_tool_readiness():
     d = load_json(p, {})
     ts = parse_dt(d.get("timestamp") or d.get("generated_at") or d.get("checked_at"))
     age = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else 10**9
+    email_choice = email_auth_client_choice()
     core = {"api_key_validity", "firecrawl", "browser", "email", "mcp_servers"}
+    if email_choice in {"opted_out", "pending"}:
+        core.discard("email")
     unhealthy = []
     for name, body in (d.get("tools") or {}).items():
         st = str((body or {}).get("status") or "")
@@ -773,7 +974,12 @@ def check_tool_readiness():
     return {
         "name": "tool_readiness",
         "status": status,
-        "detail": f"age={age}s firecrawl_smoke={firecrawl_smoke} core_unhealthy={unhealthy[:8]}",
+        "detail": (
+            f"age={age}s firecrawl_smoke={firecrawl_smoke} "
+            f"email_policy={email_choice} "
+            f"transcript_freshness=checkpointed "
+            f"core_unhealthy={unhealthy[:8]}"
+        ),
     }
 
 
@@ -877,6 +1083,46 @@ def check_document_visual_delivery():
     }
 
 
+def check_cron_toolset_preflight():
+    """Fail before rollout when an enabled cron resolves an unknown toolset."""
+    preflight = HERMES / "bin/hermes-cron-toolset-preflight.py"
+    if not preflight.is_file():
+        return {
+            "name": "cron_toolset_preflight",
+            "status": "fail",
+            "severity": "P1",
+            "fix_class": "restart_or_redeploy",
+            "detail": f"cron toolset preflight missing: {preflight}",
+        }
+    probe = run([sys.executable, str(preflight), "--hermes-home", str(HERMES), "--json"], timeout=100)
+    try:
+        payload = json.loads(probe.stdout or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    passed = probe.returncode == 0 and payload.get("status") == "pass"
+    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
+    detail = (
+        f"enabled_inference_jobs={payload.get('enabled_inference_jobs', 0)} "
+        f"jobs_with_unknown_toolsets={payload.get('jobs_with_unknown_toolsets', 0)}"
+    )
+    if payload.get("error"):
+        detail += f" error={str(payload['error'])[:240]}"
+    elif findings:
+        detail += " findings=" + ",".join(
+            f"{item.get('job_id')}:{'|'.join(item.get('unknown_toolsets') or [])}"
+            for item in findings[:8]
+        )
+    return {
+        "name": "cron_toolset_preflight",
+        "status": "pass" if passed else "fail",
+        "severity": "P1",
+        "fix_class": "runtime_contract",
+        "detail": detail,
+        "enabled_inference_jobs": payload.get("enabled_inference_jobs", 0),
+        "jobs_with_unknown_toolsets": payload.get("jobs_with_unknown_toolsets", 0),
+    }
+
+
 def check_canary_reconciler():
     p = HERMES / "state/canary-reconciler-latest.json"
     if not p.exists():
@@ -898,6 +1144,7 @@ def check_canary_reconciler():
             inventory.append(c.get("id"))
     raw_reconciler_ok = d.get("ok") is True
     failed_actions = d.get("failed_actions") or []
+    maintenance_warnings = d.get("warnings") or []
     # The reconciler runs this self-check as one of its canaries. If the last
     # reconciler cycle failed only because this self-check observed the prior
     # red reconciler state, treating that action as a fresh P1 creates a
@@ -924,14 +1171,14 @@ def check_canary_reconciler():
         "fail"
         if missing or not reconciler_ok or blocking_failed_actions
         else "warn"
-        if age > 7200
+        if age > 7200 or maintenance_warnings
         else "pass"
     )
     detail = (
         f"age={age}s capabilities={len(d.get('capabilities') or [])} "
         f"missing={len(missing)} failed_actions={len(blocking_failed_actions)} "
         f"ignored_local_selfcheck_failures={len(local_selfcheck_failures)} ok={reconciler_ok} "
-        f"inventory_only={inventory[:8]}"
+        f"inventory_only={inventory[:8]} maintenance_warnings={len(maintenance_warnings)}"
     )
     result = {
         "name": "canary_reconciler",
@@ -1007,10 +1254,141 @@ def _keychain_has_env_key(key):
     return result.returncode == 0
 
 
+def _linux_process_start_time(stat):
+    """Return immutable /proc stat starttime (field 22)."""
+    closing = stat.rfind(b")")
+    if closing < 0:
+        raise ValueError("process stat has no command terminator")
+    fields = stat[closing + 1 :].split()
+    if len(fields) <= 19:
+        raise ValueError("process stat is truncated")
+    return int(fields[19])
+
+
+def _live_process_start_time(pid):
+    """Return the same PID-reuse fingerprint persisted by gateway.status."""
+    if sys.platform.startswith("linux"):
+        try:
+            return _linux_process_start_time((PROC_ROOT / str(pid) / "stat").read_bytes())
+        except (OSError, ValueError):
+            return None
+    binding_path = HERMES / "state/runtime-binding.json"
+    if not binding_path.is_file() or binding_path.is_symlink():
+        return None
+    binding = load_json(binding_path, {})
+    if (
+        binding.get("schema_version") != 1
+        or binding.get("kind") != "botdoctor_runtime_binding"
+        or binding.get("status") != "active"
+        or runtime_release_identity().get("status") != "pass"
+    ):
+        return None
+    try:
+        expected_home = HERMES.resolve(strict=True)
+        bound_home = Path(str(binding.get("hermes_home") or "")).resolve(strict=True)
+        runtime_root = Path(str(binding.get("runtime_root") or "")).resolve(strict=True)
+        runtime_python = Path(str(binding.get("runtime_python") or "")).expanduser().absolute()
+    except OSError:
+        return None
+    expected_python = runtime_root / (
+        "venv/Scripts/python.exe" if os.name == "nt" else "venv/bin/python"
+    )
+    if (
+        bound_home != expected_home
+        or not runtime_root.is_dir()
+        or runtime_python != expected_python
+        or not runtime_python.is_file()
+    ):
+        return None
+    probe = run(
+        [
+            str(runtime_python),
+            "-c",
+            (
+                "import os, sys, tempfile\n"
+                "with tempfile.TemporaryDirectory(prefix='hermes-process-probe-') as home:\n"
+                " os.environ['HERMES_HOME'] = home\n"
+                " sys.path.insert(0, sys.argv[2])\n"
+                " from gateway.status import get_process_start_time\n"
+                " value=get_process_start_time(int(sys.argv[1]))\n"
+                " print('' if value is None else value)"
+            ),
+            str(pid),
+            str(runtime_root),
+        ],
+        timeout=5,
+    )
+    if probe.returncode != 0:
+        return None
+    try:
+        return int((probe.stdout or "").strip())
+    except ValueError:
+        return None
+
+
+def _gateway_env_receipt_present_keys(config_bytes):
+    """Return names proven present by one exact live-gateway receipt check."""
+    pid_path = HERMES / "gateway.pid"
+    receipt_path = HERMES / "state/gateway-capability-env-presence.json"
+    if (
+        not pid_path.is_file()
+        or pid_path.is_symlink()
+        or not receipt_path.is_file()
+        or receipt_path.is_symlink()
+    ):
+        return frozenset()
+    pid_record = load_json(pid_path, {})
+    receipt = load_json(receipt_path, {})
+    if not isinstance(pid_record, dict) or not isinstance(receipt, dict):
+        return frozenset()
+    if pid_record.get("kind") != "hermes-gateway":
+        return frozenset()
+    if receipt.get("schema") != "botdoctor.gateway-capability-env-presence.v1":
+        return frozenset()
+    try:
+        pid = int(pid_record.get("pid") or 0)
+        start_time = int(pid_record.get("start_time"))
+        receipt_pid = int(receipt.get("pid") or 0)
+        receipt_start_time = int(receipt.get("start_time"))
+        expected_home = HERMES.resolve(strict=True)
+        receipt_home = Path(str(receipt.get("hermes_home") or "")).resolve(strict=True)
+    except (OSError, TypeError, ValueError):
+        return frozenset()
+    if (
+        pid <= 0
+        or receipt_pid != pid
+        or receipt_start_time != start_time
+        or receipt_home != expected_home
+        or not pid_is_alive(pid)
+        or _live_process_start_time(pid) != start_time
+    ):
+        return frozenset()
+    if receipt.get("config_sha256") != hashlib.sha256(config_bytes).hexdigest():
+        return frozenset()
+    observed_keys = receipt.get("observed_keys")
+    present_keys = receipt.get("present_keys")
+    if not isinstance(observed_keys, list) or not isinstance(present_keys, list):
+        return frozenset()
+    if not all(isinstance(item, str) for item in observed_keys + present_keys):
+        return frozenset()
+    observed = frozenset(observed_keys)
+    present = frozenset(present_keys)
+    if len(observed) != len(observed_keys) or len(present) != len(present_keys):
+        return frozenset()
+    if not present.issubset(observed):
+        return frozenset()
+    return present
+
+
 def _sqlite(path: Path, query: str, params=()):
     import sqlite3
 
-    con = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)
+    # A short-lived read-only connection can still join a live WAL database and
+    # remove its shared-memory sidecars when the process exits. Immutable mode
+    # reads the checkpointed database file without touching live WAL state.
+    con = sqlite3.connect(
+        path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True, timeout=3
+    )
     try:
         con.execute("PRAGMA query_only = ON")
         return con.execute(query, params).fetchall()
@@ -1037,25 +1415,57 @@ def check_topic_session_bindings():
     require = os.environ.get("HERMES_REQUIRE_TOPIC_BINDINGS", "").lower() in {"1", "true", "yes"}
     try:
         tables = {row[0] for row in _sqlite(db, "select name from sqlite_master where type='table'")}
-        if "telegram_dm_topic_bindings" not in tables:
+        if "telegram_dm_topic_bindings" in tables:
+            count = _sqlite(db, "select count(*) from telegram_dm_topic_bindings")[0][0]
+            enabled_count = 0
+            if "telegram_dm_topic_mode" in tables:
+                try:
+                    enabled_count = _sqlite(db, "select count(*) from telegram_dm_topic_mode where enabled = 1")[0][0]
+                except Exception:
+                    enabled_count = 0
+            status = "pass" if count or not require else "fail"
             return {
                 "name": "topic_session_bindings",
-                "status": "fail" if require else "warn",
-                "detail": "telegram_dm_topic_bindings table missing"
-                + (" (required)" if require else " (topic mode unverified)"),
+                "status": status,
+                "detail": (
+                    f"backend=legacy bindings={count} enabled_topic_modes={enabled_count} "
+                    f"required={require}"
+                ),
             }
-        count = _sqlite(db, "select count(*) from telegram_dm_topic_bindings")[0][0]
-        enabled_count = 0
-        if "telegram_dm_topic_mode" in tables:
-            try:
-                enabled_count = _sqlite(db, "select count(*) from telegram_dm_topic_mode where enabled = 1")[0][0]
-            except Exception:
-                enabled_count = 0
-        status = "pass" if count or not require else "fail"
+        if "sessions" in tables:
+            columns = {row[1] for row in _sqlite(db, "pragma table_info(sessions)")}
+            required_columns = {"source", "session_key", "thread_id"}
+            if required_columns.issubset(columns):
+                topic_count = _sqlite(
+                    db,
+                    "select count(*) from sessions "
+                    "where source = 'telegram' and thread_id is not null",
+                )[0][0]
+                dm_count = _sqlite(
+                    db,
+                    "select count(*) from sessions "
+                    "where source = 'telegram' and thread_id is null",
+                )[0][0]
+                status = "pass" if topic_count or not require else "fail"
+                return {
+                    "name": "topic_session_bindings",
+                    "status": status,
+                    "detail": (
+                        f"backend=native_sessions topic_sessions={topic_count} "
+                        f"non_topic_sessions={dm_count} required={require}"
+                    ),
+                }
+        else:
+            columns = set()
+        missing_columns = sorted({"source", "session_key", "thread_id"} - columns)
+        if "sessions" in tables and missing_columns:
+            detail = "native sessions schema missing columns=" + ",".join(missing_columns)
+        else:
+            detail = "no supported topic/session binding schema"
         return {
             "name": "topic_session_bindings",
-            "status": status,
-            "detail": f"bindings={count} enabled_topic_modes={enabled_count} required={require}",
+            "status": "fail" if require else "warn",
+            "detail": detail + (" (required)" if require else " (topic mode unverified)"),
         }
     except Exception as e:
         return {
@@ -1080,9 +1490,19 @@ def check_advertised_tool_env():
     env_keys = _read_env_keys()
     refs = sorted(set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", text)))
     capability_refs = [k for k in refs if any(token in k for token in ("API_KEY", "TOKEN", "SECRET", "OAUTH"))]
-    missing = [
-        k for k in capability_refs if not env_keys.get(k) and not os.environ.get(k) and not _keychain_has_env_key(k)
+    unresolved = [
+        k
+        for k in capability_refs
+        if not env_keys.get(k)
+        and not os.environ.get(k)
+        and not _keychain_has_env_key(k)
     ]
+    gateway_present_keys = (
+        _gateway_env_receipt_present_keys(text.encode("utf-8"))
+        if unresolved
+        else frozenset()
+    )
+    missing = [key for key in unresolved if key not in gateway_present_keys]
     required_missing = [key for key in missing if key not in OPTIONAL_CAPABILITY_ENV_KEYS]
     optional_missing = [key for key in missing if key in OPTIONAL_CAPABILITY_ENV_KEYS]
     status = "fail" if required_missing else ("warn" if optional_missing else "pass")
@@ -1227,6 +1647,14 @@ CHECK_METADATA = {
         "fix_class": "runtime_coherence",
         "recommended_action": "Restore one assembled runtime root, restart once, and prove a private agent turn.",
     },
+    "runtime_release_identity": {
+        "title": "Runtime release identity is incomplete",
+        "severity": "P1",
+        "fix_class": "runtime_contract",
+        "recommended_action": (
+            "Restore the target-bound runtime composition receipt and activate through Operator Control."
+        ),
+    },
 }
 
 
@@ -1279,22 +1707,39 @@ def check_disk():
 
 
 def _gateway_resource_metrics(pid):
-    metrics = {"open_descriptors": None, "state_db_handles": None, "rss_bytes": None}
-    proc_fd = Path(f"/proc/{pid}/fd")
-    if proc_fd.is_dir():
+    metrics: dict = {
+        "open_descriptors": None,
+        "state_db_handles": None,
+        "deleted_state_db_handles": None,
+        "deleted_state_db_targets": [],
+        "descriptor_inspection_error": None,
+        "rss_bytes": None,
+    }
+    proc_fd = PROC_ROOT / str(pid) / "fd"
+    if sys.platform.startswith("linux"):
         try:
-            metrics["open_descriptors"] = sum(1 for _ in proc_fd.iterdir())
+            descriptors = list(proc_fd.iterdir())
+            metrics["open_descriptors"] = len(descriptors)
             state_handles = 0
-            for fd in proc_fd.iterdir():
+            deleted_targets = []
+            for fd in descriptors:
                 try:
                     target = os.readlink(fd)
-                except OSError:
+                except FileNotFoundError:
+                    # A descriptor may close between the listing and readlink.
                     continue
-                if re.search(r"/state\.db(?:-(?:wal|shm))?$", target):
+                except OSError as exc:
+                    metrics["descriptor_inspection_error"] = type(exc).__name__
+                    continue
+                if re.search(r"/state\.db(?:-(?:wal|shm))?(?: \(deleted\))?$", target):
                     state_handles += 1
+                    if target.endswith(" (deleted)"):
+                        deleted_targets.append(target)
             metrics["state_db_handles"] = state_handles
-        except OSError:
-            pass
+            metrics["deleted_state_db_handles"] = len(deleted_targets)
+            metrics["deleted_state_db_targets"] = sorted(deleted_targets)
+        except OSError as exc:
+            metrics["descriptor_inspection_error"] = type(exc).__name__
     elif sys.platform == "darwin":
         p = run(["lsof", "-n", "-P", "-p", str(pid)], timeout=8)
         if p.returncode == 0:
@@ -1355,6 +1800,7 @@ def check_gateway_resource_pressure():
     )
     fd = metrics.get("open_descriptors")
     state_handles = metrics.get("state_db_handles")
+    deleted_state_handles = metrics.get("deleted_state_db_handles")
     rss = metrics.get("rss_bytes")
     same_process = prior_check.get("gateway_pid") == pid
     fd_growth = (
@@ -1370,6 +1816,7 @@ def check_gateway_resource_pressure():
     fail = (
         (isinstance(fd, int) and fd >= GATEWAY_FD_FAIL)
         or (isinstance(state_handles, int) and state_handles >= GATEWAY_STATE_DB_HANDLE_FAIL)
+        or (isinstance(deleted_state_handles, int) and deleted_state_handles > 0)
         or (isinstance(rss, int) and rss >= GATEWAY_RSS_FAIL_BYTES)
     )
     warn = (
@@ -1378,13 +1825,16 @@ def check_gateway_resource_pressure():
         or (isinstance(rss, int) and rss >= GATEWAY_RSS_WARN_BYTES)
         or (isinstance(fd_growth, int) and fd_growth >= 32)
         or (isinstance(state_growth, int) and state_growth >= 8)
-        or all(value is None for value in metrics.values())
+        or bool(metrics.get("descriptor_inspection_error"))
+        or all(metrics.get(key) is None for key in ("open_descriptors", "state_db_handles", "rss_bytes"))
     )
     return {
         "name": "gateway_resource_pressure",
         "status": "fail" if fail else ("warn" if warn else "pass"),
+        "severity": "P1" if deleted_state_handles else "P2",
         "detail": (
             f"pid={pid} open_descriptors={fd} state_db_handles={state_handles} "
+            f"deleted_state_db_handles={deleted_state_handles} "
             f"rss_bytes={rss} fd_growth={fd_growth} state_db_growth={state_growth}"
         ),
         "gateway_pid": pid,
@@ -1492,8 +1942,12 @@ $oldest=@($procs | ForEach-Object {
         "oldest_processes": [],
         "absolute_process_limit_enabled": True,
     }
+    # ``comm`` is not consistently argument-free on every BSD/macOS build.
+    # ``ucomm`` asks ps for the executable name, and the token clamp below is
+    # defense in depth: health receipts must never persist credential-bearing
+    # argv strings from processes such as ``tool --api-key=...``.
     proc = run(
-        ["ps", "-u", str(os.getuid()), "-o", "pid=,ppid=,etime=,rss=,comm="],
+        ["ps", "-u", str(os.getuid()), "-o", "pid=,ppid=,etime=,rss=,ucomm="],
         timeout=8,
     )
     if proc.returncode == 0:
@@ -1513,13 +1967,15 @@ $oldest=@($procs | ForEach-Object {
                 continue
             if elapsed is None:
                 continue
+            raw_command = parts[4].strip()
+            command_token = raw_command.split(None, 1)[0] if raw_command else "unknown"
             rows.append(
                 {
                     "pid": pid,
                     "ppid": ppid,
                     "age_seconds": elapsed,
                     "rss_bytes": rss_kb * 1024,
-                    "command": Path(parts[4]).name[:80],
+                    "command": Path(command_token).name[:80],
                 }
             )
         names = [str(row["command"]).lower() for row in rows]
@@ -1770,6 +2226,69 @@ def check_host_capacity():
     }
 
 
+def check_host_steward():
+    """Run the ownership reconciler and expose only bounded lease counts."""
+    steward = HERMES / "bin/hermes-host-steward.py"
+    if not steward.is_file():
+        return {
+            "name": "host_steward",
+            "status": "warn",
+            "detail": "task-owned host resource steward is not installed",
+        }
+    result = run(
+        [
+            sys.executable,
+            str(steward),
+            "--hermes-home",
+            str(HERMES),
+            "reconcile",
+            "--apply",
+        ],
+        timeout=90,
+    )
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {
+            "name": "host_steward",
+            "status": "fail",
+            "detail": f"invalid reconcile receipt rc={result.returncode}",
+        }
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    intent_results = (
+        payload.get("intent_results")
+        if isinstance(payload.get("intent_results"), list)
+        else []
+    )
+    failed_release = any(
+        isinstance(row, dict) and row.get("outcome") in {"failed", "blocked"}
+        for row in [*results, *intent_results]
+    )
+    expired = int(counts.get("expired") or 0)
+    invalid = int(counts.get("invalid") or 0)
+    invalid_intents = int(counts.get("invalid_intents") or 0)
+    status = "pass"
+    if (
+        result.returncode != 0
+        or payload.get("status") not in {"pass", "warn"}
+        or invalid
+        or invalid_intents
+        or failed_release
+    ):
+        status = "fail"
+    elif expired or payload.get("status") == "warn":
+        status = "warn"
+    return {
+        "name": "host_steward",
+        "status": status,
+        "detail": (
+            f"active={int(counts.get('active') or 0)} expired={expired} "
+            f"invalid={invalid} invalid_intents={invalid_intents}"
+        ),
+    }
+
+
 def atomic_write_json(path: Path, payload):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, raw_path = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
@@ -1863,6 +2382,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--agent-id", default=os.environ.get("HERMES_AGENT_ID", "unknown"))
     ap.add_argument("--agent-name", default=os.environ.get("HERMES_AGENT_NAME", "unknown"))
+    ap.add_argument(
+        "--skip-canary-reconciler",
+        action="store_true",
+        help="Skip the recursive reconciler check when invoked by the reconciler itself.",
+    )
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     checks = []
@@ -1870,6 +2394,7 @@ def main():
         check_config,
         check_client_context,
         check_gateway_state,
+        check_runtime_release_identity,
         check_active_client_capabilities,
         check_local_brain,
         check_topic_session_bindings,
@@ -1879,17 +2404,22 @@ def main():
         check_immersion_quality,
         check_telegram_organic_checkpoints,
         check_agent_probe,
+        check_session_store_errors,
         check_logs,
         check_workspace_write,
         check_tool_readiness,
         check_image_quality_surface,
         check_document_visual_delivery,
+        check_cron_toolset_preflight,
         check_canary_reconciler,
         check_disk_retention,
         check_disk,
         check_gateway_resource_pressure,
         check_host_capacity,
+        check_host_steward,
     ]
+    if args.skip_canary_reconciler:
+        check_functions.remove(check_canary_reconciler)
     for fn in check_functions:
         try:
             checks.append(fn())
@@ -1912,6 +2442,7 @@ def main():
         "host": (os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "unknown")),
         "checked_at": iso(),
         "gateway_runtime": gateway_runtime_binding(),
+        "runtime_release": runtime_release_identity(),
         "machine_profile": build_machine_profile(checks),
         "status": "fail" if failures else "pass",
         "checks": checks,

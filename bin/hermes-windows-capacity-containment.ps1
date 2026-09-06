@@ -1,7 +1,8 @@
 param(
   [switch]$Apply,
   [int]$MinimumAgeSeconds = 3600,
-  [string]$ReceiptPath = ""
+  [string]$ReceiptPath = "",
+  [string]$ConfigPath = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,6 +10,9 @@ $scriptHome = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Pat
 $hermesHome = if ($scriptHome -and (Test-Path -LiteralPath $scriptHome)) { $scriptHome } elseif ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:USERPROFILE '.hermes' }
 if (-not $ReceiptPath) {
   $ReceiptPath = Join-Path $hermesHome 'state\windows-capacity-containment-latest.json'
+}
+if (-not $ConfigPath) {
+  $ConfigPath = Join-Path $hermesHome 'config\windows-capacity-containment.json'
 }
 
 function Atomic-Json([string]$Path, $Value) {
@@ -36,6 +40,74 @@ function Capacity-Snapshot {
 function Is-Critical($Snapshot) {
   $freePct = if ($Snapshot.virtual_total_bytes -gt 0) { 100.0 * $Snapshot.virtual_free_bytes / $Snapshot.virtual_total_bytes } else { 100.0 }
   return ($freePct -lt 10.0 -or $Snapshot.total_processes -gt 800 -or $Snapshot.max_handle_count -gt 50000)
+}
+
+function Service-Snapshot([string]$Name) {
+  $service = Get-CimInstance Win32_Service -Filter ("Name='" + $Name + "'")
+  if (-not $service) { return $null }
+  $process = if ($service.ProcessId) { Get-Process -Id $service.ProcessId -ErrorAction SilentlyContinue } else { $null }
+  return [ordered]@{
+    name = [string]$service.Name
+    state = [string]$service.State
+    pid = [int]$service.ProcessId
+    handles = if ($process) { [int64]$process.HandleCount } else { 0 }
+  }
+}
+
+function Reset-WpnUserService([int64]$Threshold) {
+  $service = Get-Service | Where-Object Name -like 'WpnUserService*' | Select-Object -First 1
+  if (-not $service) { throw 'WpnUserService instance not found' }
+  $beforeService = Service-Snapshot $service.Name
+  if ($beforeService.handles -le $Threshold) {
+    return [ordered]@{kind='wpn_user_service';action='below_threshold';before=$beforeService;after=$beforeService}
+  }
+  Restart-Service -Name $service.Name -Force
+  $deadline = (Get-Date).AddSeconds(30)
+  do {
+    Start-Sleep -Milliseconds 500
+    $afterService = Service-Snapshot $service.Name
+  } until (($afterService -and $afterService.state -eq 'Running') -or (Get-Date) -gt $deadline)
+  if (-not $afterService -or $afterService.state -ne 'Running') { throw 'WpnUserService did not recover' }
+  return [ordered]@{kind='wpn_user_service';action='restarted';before=$beforeService;after=$afterService}
+}
+
+function Reset-IPHelperWithTailscale([int64]$Threshold) {
+  $beforeService = Service-Snapshot 'iphlpsvc'
+  if (-not $beforeService) { throw 'iphlpsvc not found' }
+  if ($beforeService.handles -le $Threshold) {
+    return [ordered]@{kind='ip_helper_tailscale';action='below_threshold';before=$beforeService;after=$beforeService;portproxy_preserved=$true}
+  }
+  $beforePorts = @(& netsh interface portproxy show all | ForEach-Object { $_.TrimEnd() })
+  Stop-Service -Name Tailscale -Force -ErrorAction SilentlyContinue
+  try {
+    Stop-Service -Name iphlpsvc -Force
+    Start-Service -Name iphlpsvc
+    Start-Service -Name Tailscale
+    $deadline = (Get-Date).AddSeconds(60)
+    do {
+      Start-Sleep -Seconds 1
+      $ip = Get-Service -Name iphlpsvc
+      $tailscale = Get-Service -Name Tailscale
+    } until (($ip.Status -eq 'Running' -and $tailscale.Status -eq 'Running') -or (Get-Date) -gt $deadline)
+    if ($ip.Status -ne 'Running' -or $tailscale.Status -ne 'Running') {
+      throw "services did not recover: iphlpsvc=$($ip.Status) tailscale=$($tailscale.Status)"
+    }
+    $afterPorts = @(& netsh interface portproxy show all | ForEach-Object { $_.TrimEnd() })
+    $preserved = (@(Compare-Object $beforePorts $afterPorts).Count -eq 0)
+    if (-not $preserved) { throw 'portproxy configuration changed during reset' }
+    return [ordered]@{
+      kind='ip_helper_tailscale'
+      action='restarted'
+      before=$beforeService
+      after=(Service-Snapshot 'iphlpsvc')
+      tailscale=[string](Get-Service -Name Tailscale).Status
+      portproxy_preserved=$true
+    }
+  } catch {
+    try { Start-Service -Name iphlpsvc -ErrorAction SilentlyContinue } catch {}
+    try { Start-Service -Name Tailscale -ErrorAction SilentlyContinue } catch {}
+    throw
+  }
 }
 
 $before = Capacity-Snapshot
@@ -88,6 +160,7 @@ foreach ($row in $shellRows) {
 $critical = Is-Critical $before
 $terminated = @()
 $errors = @()
+$serviceActions = @()
 if ($Apply -and $critical) {
   foreach ($tree in $trees) {
     foreach ($id in @($tree.member_pids | Sort-Object -Descending)) {
@@ -95,10 +168,29 @@ if ($Apply -and $critical) {
       catch { $errors += "pid=$id $($_.Exception.GetType().Name)" }
     }
   }
+  if (Test-Path -LiteralPath $ConfigPath) {
+    try {
+      $config = Get-Content -Raw -LiteralPath $ConfigPath | ConvertFrom-Json
+      if ([int]$config.schema_version -ne 1 -or $config.enabled -ne $true) { throw 'unsupported or disabled capacity config' }
+      foreach ($rule in @($config.rules)) {
+        $threshold = [int64]$rule.max_handles
+        if ($threshold -lt 50000) { throw "unsafe service threshold for $($rule.kind)" }
+        if ([string]$rule.kind -eq 'wpn_user_service') {
+          $serviceActions += Reset-WpnUserService $threshold
+        } elseif ([string]$rule.kind -eq 'ip_helper_tailscale') {
+          $serviceActions += Reset-IPHelperWithTailscale $threshold
+        } else {
+          throw "unsupported service containment kind: $($rule.kind)"
+        }
+      }
+    } catch {
+      $errors += "service_containment $($_.Exception.GetType().Name): $($_.Exception.Message)"
+    }
+  }
 }
 $after = Capacity-Snapshot
 $receipt = [ordered]@{
-  schema = 'windows-capacity-containment/v1'
+  schema = 'windows-capacity-containment/v2'
   generated_at = (Get-Date).ToUniversalTime().ToString('o')
   mode = if ($Apply) { 'apply' } else { 'dry_run' }
   critical = $critical
@@ -107,6 +199,8 @@ $receipt = [ordered]@{
   before = $before
   candidates = @($trees)
   terminated_pids = @($terminated | Sort-Object -Unique)
+  service_actions = @($serviceActions)
+  service_config_path = $ConfigPath
   errors = @($errors)
   after = $after
   reboot_attempted = $false

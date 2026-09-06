@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Launch the read-only refero-styles MCP server."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+
+
+def _executable(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute() or not path.is_file() or not os.access(path, os.X_OK):
+        raise RuntimeError("Refero requires an absolute, executable Hermes Python path")
+    # Retain the venv path: resolving the final Python symlink loses its packages.
+    return Path(os.path.abspath(path))
+
+
+def _selected_python() -> Path:
+    explicit = os.environ.get("HERMES_PYTHON", "").strip()
+    if explicit:
+        return _executable(explicit)
+    home = Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes")).expanduser().resolve()
+    binding_path = home / "state" / "runtime-binding.json"
+    if not binding_path.exists():
+        return _executable(sys.executable)
+    try:
+        binding = json.loads(binding_path.read_text(encoding="utf-8"))
+        if not isinstance(binding, dict) or binding.get("status") != "active":
+            raise ValueError("inactive or malformed runtime binding")
+        if Path(binding["hermes_home"]).resolve() != home:
+            raise ValueError("inactive or foreign runtime binding")
+        root = Path(binding["runtime_root"]).resolve(strict=True)
+        managed_root = False
+        for candidate_root in (home / "runtime-candidates", home / "state" / "runtime-candidates"):
+            try:
+                relative_root = root.relative_to(candidate_root.resolve(strict=True))
+            except (OSError, ValueError):
+                continue
+            if relative_root.parts:
+                managed_root = True
+                break
+        if not managed_root:
+            raise ValueError("runtime binding is outside a managed candidate root")
+        python = _executable(binding["runtime_python"])
+        relative = python.relative_to(root).as_posix()
+        allowed = {
+            f"{venv}/{suffix}"
+            for venv in ("venv", ".venv")
+            for suffix in ("bin/python", "bin/python3", "Scripts/python.exe")
+        }
+        if relative not in allowed:
+            raise ValueError("unexpected runtime interpreter layout")
+        # A normal venv executable may symlink to the system Python; its parent
+        # must still belong to this exact candidate, not another runtime's venv.
+        python.parent.resolve(strict=True).relative_to(root)
+        return python
+    except (OSError, KeyError, TypeError, ValueError, RuntimeError) as exc:
+        raise RuntimeError("Refero active runtime binding is invalid") from exc
+
+
+def _is_current_python(selected: Path) -> bool:
+    current = Path(sys.executable)
+    # samefile alone would equate distinct venvs sharing a system interpreter.
+    return selected.parent.resolve() == current.parent.resolve() and selected.samefile(current)
+
+
+def main() -> None:
+    os.environ.setdefault("HERMES_HOME", str(Path.home() / ".hermes"))
+    selected = _selected_python()
+    if not _is_current_python(selected):
+        os.execv(str(selected), [str(selected), str(Path(__file__).resolve()), *sys.argv[1:]])
+    if str(SRC) not in sys.path:
+        sys.path.insert(0, str(SRC))
+    from refero_styles_mcp.server import mcp
+
+    mcp.run()
+
+
+if __name__ == "__main__":
+    main()

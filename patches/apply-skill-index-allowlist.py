@@ -14,6 +14,7 @@ U1 finding: do not overload ``skills.disabled``. In current hermes-agent,
 so disabled means uninvokable through normal on-demand skill paths. This patch
 therefore reads a separate index-only allowlist inside ``prompt_builder``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -85,8 +86,54 @@ def _replace_once(src: str, old: str, new: str, label: str) -> tuple[str, bool]:
     return src.replace(old, new, 1), True
 
 
+def patch_refactored_source(src: str) -> str:
+    """Use native shared visibility and preserve org/project safety labels."""
+    changes = (
+        ('    disabled = get_disabled_skill_names(_platform_hint or None)\n',
+         '    disabled = get_disabled_skill_names(_platform_hint or None)\n    index_allowlist, index_description_max = _skill_index_config()\n'),
+        ('        _platform_hint, tuple(sorted(disabled)), tuple(sorted(compact_categories or ())),',
+         '        _platform_hint, tuple(sorted(disabled)), tuple(sorted(compact_categories or ())),\n        tuple(sorted(index_allowlist)) if index_allowlist is not None else None, index_description_max,'),
+        ('        return (frontmatter_name in disabled or skill_name in disabled\n',
+         '        return (frontmatter_name in disabled or skill_name in disabled\n                or not _skill_index_allowed(frontmatter_name, skill_name, index_allowlist)\n'),
+        ('    *, desc_prefix: str, log_fmt: str,\n',
+         '    *, desc_prefix: str, log_fmt: str, index_description_max: "int | None" = None,\n'),
+        ("{desc_prefix}{entry['description']}",
+         "{desc_prefix}{_truncate_skill_index_description(entry['description'], index_description_max)}"),
+        ('def _label_visible_entries(visible_entries: list[dict], skills_by_category: dict[str, list[tuple[str, str]]]) -> None:',
+         'def _label_visible_entries(visible_entries: list[dict], skills_by_category: dict[str, list[tuple[str, str]]], index_description_max: "int | None" = None) -> None:'),
+        ('        fm, desc, org_id = _entry_name(entry), entry.get("description", ""), entry.get("org_id")\n',
+         '        fm, desc, org_id = _entry_name(entry), entry.get("description", ""), entry.get("org_id")\n        desc = _truncate_skill_index_description(desc, index_description_max)\n'),
+        ('desc_prefix="[project] ", log_fmt="Error reading project skill %s: %s")',
+         'desc_prefix="[project] ", log_fmt="Error reading project skill %s: %s", index_description_max=index_description_max)'),
+        ('_label_visible_entries([e for e in visible_entries if _entry_name(e) not in project_names], skills_by_category)',
+         '_label_visible_entries([e for e in visible_entries if _entry_name(e) not in project_names], skills_by_category, index_description_max)'),
+        ('desc_prefix="", log_fmt="Error reading external skill %s: %s")',
+         'desc_prefix="", log_fmt="Error reading external skill %s: %s", index_description_max=index_description_max)'),
+    )
+    if MARKER in src:
+        if HELPERS not in src or not all(new in src for _, new in changes):
+            raise RuntimeError("skill index refactored patch is incomplete")
+        return src
+    anchor = "\ndef build_skills_system_prompt(\n"
+    if src.count(anchor) != 1:
+        raise RuntimeError("skill index refactored helper anchor drift")
+    src = src.replace(anchor, "\n" + HELPERS + anchor.lstrip("\n"), 1)
+    for old, new in changes:
+        if src.count(old) != 1:
+            raise RuntimeError("skill index refactored anchor drift: " + old)
+        src = src.replace(old, new, 1)
+    ast.parse(src)
+    return src
+
+
 def patch(path: Path) -> bool:
     src = path.read_text(encoding="utf-8")
+    if "    def hides(frontmatter_name: str, skill_name: str, conditions: dict) -> bool:" in src:
+        patched = patch_refactored_source(src)
+        if patched == src:
+            return False
+        path.write_text(patched, encoding="utf-8")
+        return True
     patched = src
     changed = False
 
@@ -99,60 +146,103 @@ def patch(path: Path) -> bool:
 
     patched, did = _replace_once(
         patched,
-        '''    disabled = get_disabled_skill_names(_platform_hint or None)
-    cache_key = (
-''',
-        '''    disabled = get_disabled_skill_names(_platform_hint or None)
+        """    disabled = get_disabled_skill_names(_platform_hint or None)
+""",
+        """    disabled = get_disabled_skill_names(_platform_hint or None)
     index_allowlist, index_description_max = _skill_index_config()
-    cache_key = (
-''',
+""",
         "config read",
     )
     changed = changed or did
 
+    # Current upstream has a highest-precedence project-skill tier. It must
+    # obey the same prompt-index-only allowlist without changing explicit
+    # skill_view/skills_list access. Older pins do not have this block.
+    project_allowlist_old = """                    if fm_name in disabled or entry["skill_name"] in disabled:
+                        continue
+                    if not _skill_should_show(
+"""
+    project_allowlist_new = """                    if fm_name in disabled or entry["skill_name"] in disabled:
+                        continue
+                    if not _skill_index_allowed(fm_name, entry["skill_name"], index_allowlist):
+                        continue
+                    if not _skill_should_show(
+"""
+    if project_allowlist_old in patched or project_allowlist_new in patched:
+        patched, did = _replace_once(
+            patched,
+            project_allowlist_old,
+            project_allowlist_new,
+            "project allowlist",
+        )
+        changed = changed or did
+
+    project_description_old = """                    skills_by_category.setdefault(entry["category"], []).append(
+                        (fm_name, f"[project] {entry['description']}".strip())
+                    )
+"""
+    project_description_new = """                    skills_by_category.setdefault(entry["category"], []).append(
+                        (
+                            fm_name,
+                            (
+                                "[project] "
+                                + _truncate_skill_index_description(
+                                    entry["description"], index_description_max
+                                )
+                            ).strip(),
+                        )
+                    )
+"""
+    if project_description_old in patched or project_description_new in patched:
+        patched, did = _replace_once(
+            patched,
+            project_description_old,
+            project_description_new,
+            "project truncate",
+        )
+        changed = changed or did
+
     patched, did = _replace_once(
         patched,
-        '''        tuple(sorted(disabled)),
+        """        tuple(sorted(disabled)),
         tuple(sorted(compact_categories or ())),
-''',
-        '''        tuple(sorted(disabled)),
+""",
+        """        tuple(sorted(disabled)),
         tuple(sorted(index_allowlist)) if index_allowlist is not None else None,
         index_description_max,
         tuple(sorted(compact_categories or ())),
-''',
+""",
         "cache key",
     )
     changed = changed or did
 
     patched, did = _replace_once(
         patched,
-        '''            if frontmatter_name in disabled or skill_name in disabled:
+        """            if frontmatter_name in disabled or skill_name in disabled:
                 continue
             if not _skill_should_show(
-''',
-        '''            if frontmatter_name in disabled or skill_name in disabled:
+""",
+        """            if frontmatter_name in disabled or skill_name in disabled:
                 continue
             if not _skill_index_allowed(frontmatter_name, skill_name, index_allowlist):
                 continue
             if not _skill_should_show(
-''',
+""",
         "snapshot allowlist",
     )
     changed = changed or did
 
-    unified_description_old = '''    for entry in visible_entries:
+    unified_description_old = """    for entry in visible_entries:
         fm = entry.get("frontmatter_name") or entry.get("skill_name") or ""
         desc = entry.get("description", "")
-'''
-    unified_description_new = '''    for entry in visible_entries:
+"""
+    unified_description_new = """    for entry in visible_entries:
         fm = entry.get("frontmatter_name") or entry.get("skill_name") or ""
         desc = _truncate_skill_index_description(
             entry.get("description", ""), index_description_max
         )
-'''
-    unified_render = (
-        unified_description_old in patched or unified_description_new in patched
-    )
+"""
+    unified_render = unified_description_old in patched or unified_description_new in patched
     if unified_render:
         patched, did = _replace_once(
             patched,
@@ -164,11 +254,11 @@ def patch(path: Path) -> bool:
     else:
         patched, did = _replace_once(
             patched,
-            '''            skills_by_category.setdefault(category, []).append(
+            """            skills_by_category.setdefault(category, []).append(
                 (frontmatter_name, entry.get("description", ""))
             )
-''',
-            '''            skills_by_category.setdefault(category, []).append(
+""",
+            """            skills_by_category.setdefault(category, []).append(
                 (
                     frontmatter_name,
                     _truncate_skill_index_description(
@@ -176,23 +266,23 @@ def patch(path: Path) -> bool:
                     ),
                 )
             )
-''',
+""",
             "snapshot truncate",
         )
         changed = changed or did
 
     patched, did = _replace_once(
         patched,
-        '''            if entry["frontmatter_name"] in disabled or skill_name in disabled:
+        """            if entry["frontmatter_name"] in disabled or skill_name in disabled:
                 continue
             if not _skill_should_show(
-''',
-        '''            if entry["frontmatter_name"] in disabled or skill_name in disabled:
+""",
+        """            if entry["frontmatter_name"] in disabled or skill_name in disabled:
                 continue
             if not _skill_index_allowed(entry["frontmatter_name"], skill_name, index_allowlist):
                 continue
             if not _skill_should_show(
-''',
+""",
         "cold allowlist",
     )
     changed = changed or did
@@ -200,11 +290,11 @@ def patch(path: Path) -> bool:
     if not unified_render:
         patched, did = _replace_once(
             patched,
-            '''            skills_by_category.setdefault(entry["category"], []).append(
+            """            skills_by_category.setdefault(entry["category"], []).append(
                 (entry["frontmatter_name"], entry["description"])
             )
-''',
-            '''            skills_by_category.setdefault(entry["category"], []).append(
+""",
+            """            skills_by_category.setdefault(entry["category"], []).append(
                 (
                     entry["frontmatter_name"],
                     _truncate_skill_index_description(
@@ -212,34 +302,34 @@ def patch(path: Path) -> bool:
                     ),
                 )
             )
-''',
+""",
             "cold truncate",
         )
         changed = changed or did
 
     patched, did = _replace_once(
         patched,
-        '''                if frontmatter_name in disabled or skill_name in disabled:
+        """                if frontmatter_name in disabled or skill_name in disabled:
                     continue
                 if not _skill_should_show(
-''',
-        '''                if frontmatter_name in disabled or skill_name in disabled:
+""",
+        """                if frontmatter_name in disabled or skill_name in disabled:
                     continue
                 if not _skill_index_allowed(frontmatter_name, skill_name, index_allowlist):
                     continue
                 if not _skill_should_show(
-''',
+""",
         "external allowlist",
     )
     changed = changed or did
 
     patched, did = _replace_once(
         patched,
-        '''                skills_by_category.setdefault(entry["category"], []).append(
+        """                skills_by_category.setdefault(entry["category"], []).append(
                     (frontmatter_name, entry["description"])
                 )
-''',
-        '''                skills_by_category.setdefault(entry["category"], []).append(
+""",
+        """                skills_by_category.setdefault(entry["category"], []).append(
                     (
                         frontmatter_name,
                         _truncate_skill_index_description(
@@ -247,7 +337,7 @@ def patch(path: Path) -> bool:
                         ),
                     )
                 )
-''',
+""",
         "external truncate",
     )
     changed = changed or did

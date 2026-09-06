@@ -23,7 +23,7 @@ from pathlib import Path
 
 MARKER = "HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1"
 
-LONG_TTS_TEST_OLD = '''        assert adapter.sent == [
+LONG_TTS_TEST_OLD = """        assert adapter.sent == [
             {
                 "chat_id": "-1001",
                 "content": long_reply,
@@ -31,11 +31,11 @@ LONG_TTS_TEST_OLD = '''        assert adapter.sent == [
                 "metadata": {"thread_id": "17585", "notify": True},
             }
         ]
-'''
-LONG_TTS_TEST_NEW = '''        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1 — a confirmed voice send is
+"""
+LONG_TTS_TEST_NEW = """        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1 — a confirmed voice send is
         # the one client-visible delivery even when the source prose is long.
         assert adapter.sent == []
-'''
+"""
 
 
 def _write_if_changed(path: Path, content: str) -> bool:
@@ -59,9 +59,7 @@ def patch_base_source(content: str) -> str | None:
     if comment_index < 0:
         return None
     start = content.rfind("\n", 0, comment_index) + 1
-    delivery_index = content.find(
-        "delivery_adapter = self._final_delivery_adapter(event.source)", start
-    )
+    delivery_index = content.find("delivery_adapter = self._final_delivery_adapter(event.source)", start)
     end = content.rfind("\n", start, delivery_index) + 1
     if start < 0 or delivery_index < 0 or end <= start:
         return None
@@ -70,7 +68,7 @@ def patch_base_source(content: str) -> str | None:
     indent = comment_line[: len(comment_line) - len(comment_line.lstrip())]
     replacement = textwrap.indent(
         textwrap.dedent(
-            '''\
+            """\
             # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
             # A voice reply is one delivery surface, not audio plus a
             # caption plus a second body message.  Text remains the
@@ -104,7 +102,7 @@ def patch_base_source(content: str) -> str | None:
             # Send the body only when synthesis or voice delivery did not
             # complete.  This preserves a usable reply on every TTS error.
             if text_content and not _tts_voice_delivered:
-            '''
+            """
         ),
         indent,
     )
@@ -149,15 +147,18 @@ def patch_run_source(content: str) -> str | None:
         return None
     patched = patched.replace(proxy_signature_anchor, proxy_signature_replacement, 1)
 
-    proxy_streaming_anchor = '''        _streaming_enabled = (
+    proxy_streaming_anchor = """        _streaming_enabled = (
             _scfg.enabled and _scfg.transport != "off"
             if _plat_streaming is None
             else bool(_plat_streaming)
         )
-'''
-    proxy_streaming_replacement = proxy_streaming_anchor + '''        if suppress_streaming:
+"""
+    proxy_streaming_replacement = (
+        proxy_streaming_anchor
+        + """        if suppress_streaming:
             _streaming_enabled = False
-'''
+"""
+    )
     proxy_start = patched.find("    async def _run_agent_via_proxy(\n")
     proxy_end = patched.find("\n    async def _run_agent(\n", proxy_start)
     if proxy_start < 0 or proxy_end < 0:
@@ -165,9 +166,7 @@ def patch_run_source(content: str) -> str | None:
     proxy_method = patched[proxy_start:proxy_end]
     if proxy_method.count(proxy_streaming_anchor) != 1:
         return None
-    proxy_method = proxy_method.replace(
-        proxy_streaming_anchor, proxy_streaming_replacement, 1
-    )
+    proxy_method = proxy_method.replace(proxy_streaming_anchor, proxy_streaming_replacement, 1)
     patched = patched[:proxy_start] + proxy_method + patched[proxy_end:]
 
     # The local/profile path uses the message type already carried by Golden's
@@ -190,30 +189,45 @@ def patch_run_source(content: str) -> str | None:
     )
     patched = patched[:inner_start] + inner_prefix + patched[inner_queue:]
 
-    turn_context_anchor = '''            persist_user_timestamp=persist_user_timestamp,
-        )
-        # Periodic Telegram summaries prefer real model commentary from this
-'''
-    turn_context_replacement = '''            persist_user_timestamp=persist_user_timestamp,
-        )
-        turn_ctx.suppress_streaming = self._voice_input_uses_single_delivery(
-            source, message_type
-        )
-        # Periodic Telegram summaries prefer real model commentary from this
-'''
-    if turn_context_anchor not in patched:
+    # Bind to the named TurnContext assignment instead of a neighboring
+    # comment. Other overlays legitimately add per-turn state between this
+    # constructor and TurnRunner, while the assignment itself is the durable
+    # concurrency boundary this patch needs.
+    parsed = ast.parse(patched)
+    turn_context_nodes = [
+        node
+        for node in ast.walk(parsed)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "turn_ctx" for target in node.targets)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "TurnContext"
+    ]
+    if len(turn_context_nodes) != 1:
         return None
-    patched = patched.replace(turn_context_anchor, turn_context_replacement, 1)
+    turn_context_node = turn_context_nodes[0]
+    if turn_context_node.end_lineno is None:
+        return None
+    patched_lines = patched.splitlines(keepends=True)
+    insertion_index = turn_context_node.end_lineno
+    patched_lines.insert(
+        insertion_index,
+        "        turn_ctx.suppress_streaming = "
+        "self._voice_input_uses_single_delivery(\n"
+        "            source, message_type\n"
+        "        )\n",
+    )
+    patched = "".join(patched_lines)
 
-    turn_streaming_anchor = '''        _streaming_enabled = (
+    turn_streaming_anchor = """        _streaming_enabled = (
             _scfg.enabled and _scfg.transport != "off"
             if _plat_streaming is None
             else bool(_plat_streaming)
         )
         _want_stream_deltas = _streaming_enabled
         _want_interim_messages = ctx.interim_assistant_messages_enabled
-'''
-    turn_streaming_replacement = '''        _streaming_enabled = (
+"""
+    turn_streaming_replacement = """        _streaming_enabled = (
             _scfg.enabled and _scfg.transport != "off"
             if _plat_streaming is None
             else bool(_plat_streaming)
@@ -225,7 +239,7 @@ def patch_run_source(content: str) -> str | None:
             ctx.interim_assistant_messages_enabled
             and not getattr(ctx, "suppress_streaming", False)
         )
-'''
+"""
     if turn_streaming_anchor not in patched:
         return None
     patched = patched.replace(turn_streaming_anchor, turn_streaming_replacement, 1)
@@ -278,19 +292,19 @@ def patch_tts_source(content: str) -> str | None:
         return content
     anchor = (
         '    "description": "Convert text to speech audio. Returns a MEDIA: path that the platform delivers as native audio. '
-        'Compatible providers render as a voice bubble on Telegram; otherwise audio is sent as a regular attachment. '
-        'In CLI mode, saves to ~/voice-memos/. Voice and provider are user-configured (built-in providers like edge/openai '
+        "Compatible providers render as a voice bubble on Telegram; otherwise audio is sent as a regular attachment. "
+        "In CLI mode, saves to ~/voice-memos/. Voice and provider are user-configured (built-in providers like edge/openai "
         'or custom command providers under tts.providers.<name>), not model-selected.",\n'
     )
     if anchor not in content:
         return None
     replacement = (
-        '    # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1\n'
+        "    # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1\n"
         '    "description": "Convert text to speech audio. Returns a MEDIA: path that the platform delivers as native audio. '
-        'Compatible providers render as a voice bubble on Telegram; otherwise audio is sent as a regular attachment. '
-        'For a messaging-platform voice memo, use the returned MEDIA directive as the delivery and do not repeat the spoken '
-        'prose in the assistant reply; include at most one short context line when necessary. In CLI mode, saves to '
-        '~/voice-memos/. Voice and provider are user-configured (built-in providers like edge/openai or custom command providers '
+        "Compatible providers render as a voice bubble on Telegram; otherwise audio is sent as a regular attachment. "
+        "For a messaging-platform voice memo, use the returned MEDIA directive as the delivery and do not repeat the spoken "
+        "prose in the assistant reply; include at most one short context line when necessary. In CLI mode, saves to "
+        "~/voice-memos/. Voice and provider are user-configured (built-in providers like edge/openai or custom command providers "
         'under tts.providers.<name>), not model-selected.",\n'
     )
     patched = content.replace(anchor, replacement, 1)
@@ -324,13 +338,100 @@ def _patch_file(path: Path, patcher, label: str) -> bool:
     if patched is None:
         raise RuntimeError(f"{label} anchor missing or produced invalid Python")
     changed = _write_if_changed(path, patched)
-    print(
-        f"[voice_memo_single_delivery_v1] {'PATCHED' if changed else 'already patched'} {path}"
-    )
+    print(f"[voice_memo_single_delivery_v1] {'PATCHED' if changed else 'already patched'} {path}")
+    return changed
+
+
+def _native_once(source: str, before: str, after: str, label: str) -> str:
+    if source.count(before) != 1:
+        raise RuntimeError(f"voice memo native {label} anchor drift")
+    return source.replace(before, after, 1)
+
+
+def _patch_native_voice(hermes_dir: Path) -> bool:
+    """Reuse split turn owners and multi-file synthesis; keep voice-only delivery."""
+    base = hermes_dir / "gateway/platforms/base.py"
+    turn = hermes_dir / "gateway/run_turn.py"
+    runner = hermes_dir / "gateway/run_turn_runner.py"
+    tts = hermes_dir / "tools/tts_tool.py"
+    source = {p: p.read_text(encoding="utf-8") for p in (base, turn, runner, tts)}
+    updated = dict(source)
+    if MARKER not in source[base]:
+        tree = ast.parse(source[base])
+        methods = [n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "_play_tts_file"]
+        if len(methods) != 1:
+            raise RuntimeError("voice memo native TTS owner drift")
+        method = methods[0]
+        lines = source[base].splitlines(keepends=True)
+        replacement = '''    async def _play_tts_file(
+        self, event: MessageEvent, text_content: str, tts_path: str, first: bool,
+        metadata: Dict[str, Any], record_delivery: Callable) -> bool:
+        """Return whether this voice part was accepted; original text is the failure fallback."""
+        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
+        try:
+            result = await self.play_tts(
+                chat_id=event.source.chat_id, audio_path=tts_path, caption=None, metadata=metadata)
+            record_delivery(result)
+            return bool(getattr(result, "success", False))
+        except Exception:
+            logger.warning("Auto-TTS voice send failed; falling back to original text", exc_info=True)
+            return False
+'''
+        updated[base] = "".join(lines[:method.lineno - 1]) + replacement + "".join(lines[method.end_lineno:])
+        updated[base] = _native_once(updated[base], '_tts_caption_delivered = False\n', '_tts_caption_delivered = bool(_tts_paths)\n', "all-parts initial state")
+        updated[base] = _native_once(updated[base], '_tts_caption_delivered |= await self._play_tts_file(', '_tts_caption_delivered &= await self._play_tts_file(', "all-parts acceptance")
+    if MARKER not in source[turn]:
+        helper = '''    def _voice_input_uses_single_delivery(self, source, message_type) -> bool:
+        """Keep voice-only turns off text streaming, using the adapter's effective /voice policy."""
+        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
+        if getattr(message_type, "value", message_type) != "voice":
+            return False
+        decision = getattr(self._adapter_for_source(source), "_should_auto_tts_for_chat", None)
+        try:
+            return bool(decision(source.chat_id)) if callable(decision) else False
+        except Exception:
+            logger.debug("Voice single-delivery decision failed", exc_info=True)
+            return False
+
+'''
+        s = _native_once(source[turn], '    async def _run_agent_via_proxy(\n', helper + '    async def _run_agent_via_proxy(\n', "voice policy")
+        s = _native_once(s, '        run_generation: Optional[int] = None, event_message_id: Optional[str] = None,\n', '        run_generation: Optional[int] = None, event_message_id: Optional[str] = None,\n        suppress_streaming: bool = False,\n', "proxy signature")
+        s = _native_once(s, '        _stream_consumer = self._proxy_stream_consumer(source, event_message_id, _thread_metadata, _run_still_current)\n', '        _stream_consumer = None if suppress_streaming else self._proxy_stream_consumer(source, event_message_id, _thread_metadata, _run_still_current)\n', "proxy consumer")
+        proxy_call = """            return await self._run_agent_via_proxy(
+                message=message, context_prompt=context_prompt, history=history, source=source,
+                session_id=session_id, session_key=session_key, run_generation=run_generation,
+                event_message_id=event_message_id,
+            )
+"""
+        s = _native_once(s, proxy_call, proxy_call.replace(
+            "                event_message_id=event_message_id,\n",
+            "                event_message_id=event_message_id,\n"
+            "                suppress_streaming=self._voice_input_uses_single_delivery(source, message_type),\n",
+        ), "proxy invocation")
+        s = _native_once(s, '        _status_thread_metadata = self._run_agent_bind_turn_wiring(\n', '        turn_ctx.suppress_streaming = self._voice_input_uses_single_delivery(source, message_type)\n        _status_thread_metadata = self._run_agent_bind_turn_wiring(\n', "local context")
+        updated[turn] = s
+    if MARKER not in source[runner]:
+        updated[runner] = _native_once(source[runner], '        want_interim_messages = ctx.interim_assistant_messages_enabled\n', '        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1\n        if getattr(ctx, "suppress_streaming", False):\n            want_stream_deltas = False\n        want_interim_messages = ctx.interim_assistant_messages_enabled and not getattr(ctx, "suppress_streaming", False)\n', "local stream")
+    updated[tts] = patch_tts_source(source[tts])
+    if updated[tts] is None:
+        raise RuntimeError("voice memo native TTS schema drift")
+    for path, content in updated.items():
+        compile(content, str(path), "exec")
+    changed = False
+    for path, content in updated.items():
+        changed = _write_if_changed(path, content) or changed
+    test_path = hermes_dir / "tests/gateway/test_base_topic_sessions.py"
+    if test_path.is_file():
+        content = patch_base_topic_test_source(test_path.read_text())
+        if content is None:
+            raise RuntimeError("voice memo native long-response test drift")
+        changed = _write_if_changed(test_path, content) or changed
     return changed
 
 
 def patch_voice_memo_single_delivery_v1(hermes_dir: Path) -> bool:
+    if (hermes_dir / "gateway/run_turn.py").is_file():
+        return _patch_native_voice(hermes_dir)
     changed = False
     changed |= _patch_file(
         hermes_dir / "gateway" / "platforms" / "base.py",

@@ -9,6 +9,7 @@ display:
   interim_assistant_messages: false
   long_running_notifications: false
   cleanup_progress: false
+  progress_on_typing: false
   tool_progress: false
   tool_progress_command: false
   tool_preview_length: 0

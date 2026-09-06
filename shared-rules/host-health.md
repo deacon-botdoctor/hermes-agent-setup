@@ -31,4 +31,14 @@ Golden never assumes an external disk exists. Use external or archival storage o
 
 The local agent owns safe behavior. Doc independently verifies that the self-check is installed, scheduled, fresh, and structurally valid, then escalates persistent failures. Neither role gains authority to perform destructive cleanup or move client data merely because pressure is observed.
 
+## Task-scoped host resources
+
+- Prefer headless command execution. Do not open visible Terminal windows for routine agent work.
+- When `bin/hermes-host-steward.py` is installed, launch every task-scoped background process through `launch-process` and create every task browser tab through `create-browser-tab`; never attach ownership to an already-running PID or tab. Process jobs must be direct foreground commands—do not use shells, daemon/fork/detach modes, `nohup`, `setsid`, `screen`, or `tmux`; persistent services belong in the host service manager. Use the current stable task/session identifier and a realistic TTL. Windows hosts use browser-tab leases only until safe process termination is implemented.
+- Call `hermes-host-steward.py finish --task-id <id> --apply` before reporting the task complete. This closes only resources carrying an exact matching ownership lease.
+- For work that outlives the lease TTL, call `hermes-host-steward.py renew --task-id <id>` while the task is still active.
+- Persistent authenticated browser profiles and shared infrastructure are protected resources. Claim only the task tab, never the entire user or warm browser profile.
+- Never adopt, close, or kill an unowned resource merely because it is old or exceeds a host budget. Unknown Terminal windows and browser roots remain audit-only and require explicit cleanup authority.
+- If the agent crashes, the local self-check and host-hygiene cadence reconcile expired leases after two observations. Fingerprint drift, interactive TTYs, protected resources, and unsupported mutations fail closed for Doc review.
+
 <!-- HERMES_HOST_HEALTH_v1:END -->
