@@ -136,6 +136,13 @@ def patch_tools_source(source: str) -> str:
         if not all(seam in source for seam in required):
             raise RuntimeError("marked clarify resolver is missing required seams")
         return source
+    native_anchor = "        if entry is None or entry.event.is_set():\n"
+    if source.count(native_anchor) == 1:
+        return source.replace(
+            native_anchor,
+            f"        # [{MARKER}] Native first-resolution-wins contract verified.\n" + native_anchor,
+            1,
+        )
     if source.count(TOOLS_ANCHOR) != 1:
         raise RuntimeError("clarify resolver anchor drift")
     patched = source.replace(TOOLS_ANCHOR, TOOLS_REPLACEMENT, 1)
@@ -153,6 +160,18 @@ def patch_gateway_source(source: str) -> str:
         if not all(seam in source for seam in required):
             raise RuntimeError("marked gateway clarify guard is missing required seams")
         return source
+    native_anchor = "                if _text_outcome == _clarify_mod.TEXT_REJECTED_PROSE:\n"
+    native_required = (
+        "_clarify_mod.resolve_gateway_clarify(",
+        "_pending_clarify.clarify_id,",
+        '"",',
+    )
+    if source.count(native_anchor) == 1 and all(seam in source for seam in native_required):
+        return source.replace(
+            native_anchor,
+            f"                # [{MARKER}] Native rejected-prose release contract verified.\n" + native_anchor,
+            1,
+        )
     if source.count(GATEWAY_ANCHOR) != 1:
         raise RuntimeError("gateway clarify intercept anchor drift")
     patched = source.replace(GATEWAY_ANCHOR, GATEWAY_REPLACEMENT, 1)

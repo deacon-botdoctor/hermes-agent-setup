@@ -20,6 +20,11 @@ Or against a raw config file:
         --exemption platforms.telegram.reply_to_mode \\
         --defaults-dir /path/to/overlay/shared-defaults
 
+Refero-only cold registration (no other defaults and no server startup):
+    merge-shared-defaults.py --scope refero-styles --profile-root /absolute/home \\
+        --hermes-python /absolute/candidate/venv/bin/python --rollback-dir /existing/rollback
+    Add --restore with the same profile-root and rollback-dir to restore both snapshots.
+
 Exit codes:
     0  — merge applied (changes written) or no-op (already in sync)
     1  — error (missing files, parse failure, etc.)
@@ -31,7 +36,11 @@ import argparse
 import difflib
 import hashlib
 import json
+import os
+import stat
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -388,9 +397,624 @@ def _native_image_receipt(
     }
 
 
+REFERO_ID = "visual.refero-styles"
+REFERO_REGISTRY = "mcp-servers/capability-router/registry.json"
+REFERO_CANONICAL = "state/registry-canonical.json"
+REFERO_EXTRAS = "state/registry-local-extras.json"
+REFERO_SYNC = "bin/registry-sync.py"
+REFERO_ROLLBACK = "refero-styles-registration"
+
+
+def _refero_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Refero registration refuses duplicate mapping keys")
+        result[key] = value
+    return result
+
+
+def _refero_yaml(payload: bytes):
+    class UniqueLoader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader, node):
+        loader.flatten_mapping(node)
+        return _refero_pairs((loader.construct_object(k), loader.construct_object(v)) for k, v in node.value)
+
+    UniqueLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    return yaml.load(payload, Loader=UniqueLoader)
+
+
+def _refero_json(payload):
+    return json.loads(payload, object_pairs_hook=_refero_pairs)
+
+
+def _refero_names(value: Any) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError("Refero registration requires string-list configuration")
+    return value
+
+
+def _refero_registry(value: Any) -> list[dict]:
+    if (
+        not isinstance(value, dict)
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] not in {1, 2}
+    ):
+        raise ValueError("Refero registration requires registry schema 1 or 2")
+    for key in ("categories", "capabilities"):
+        rows = value.get(key)
+        if not isinstance(rows, list) or any(
+            not isinstance(row, dict) or not isinstance(row.get("id"), str) or not row["id"]
+            for row in rows
+        ):
+            raise ValueError("Refero registration requires registry rows with string identities")
+        if len({row["id"] for row in rows}) != len(rows):
+            raise ValueError("Refero registration refuses duplicate registry identities")
+    return value["capabilities"]
+
+
+def _refero_managed_declaration(value: Any, hermes_home: str, package_home: str | None = None) -> bool:
+    """Recognize the exact cold declaration written by an earlier Golden runtime."""
+    if not isinstance(value, dict) or set(value) != {"command", "args", "env", "enabled"}:
+        return False
+    command = value.get("command")
+    environment = value.get("env")
+    home = Path(hermes_home)
+    if (
+        value.get("enabled") is not False
+        or not isinstance(command, str)
+        or not isinstance(environment, dict)
+        or set(environment) != {"HERMES_HOME", "HERMES_PYTHON"}
+        or environment.get("HERMES_HOME") != hermes_home
+        or environment.get("HERMES_PYTHON") != command
+        or value.get("args") not in ([str(root / "mcp-servers/refero-styles/bin/launch")] for root in (home, Path(package_home or home)))
+    ):
+        return False
+    command_path = Path(command)
+    roots = [home / "state/runtime-candidates"]
+    if command_path.parts[-3:] == ("venv", "Scripts", "python.exe"):
+        roots.append(home / "runtime-candidates")
+    relative = next((command_path.relative_to(root) for root in roots if command_path.is_relative_to(root)), None)
+    if relative is None:
+        return False
+    return (
+        command_path.is_absolute()
+        and ".." not in command_path.parts
+        and len(relative.parts) >= 4
+        and relative.parts[-3:] in (("venv", "bin", "python"), ("venv", "Scripts", "python.exe"))
+    )
+
+
+def _refero_legacy_hot_declaration(value: Any, hermes_home: str, package_home: str | None = None) -> bool:
+    """Recognize only the retired direct-launch Refero declaration."""
+    home = Path(hermes_home)
+    return (
+        isinstance(value, dict)
+        and set(value) == {"command", "env", "connect_timeout", "enabled"}
+        and value.get("command")
+        in {str(root / "mcp-servers/refero-styles/bin/launch") for root in (home, Path(package_home or home))}
+        and value.get("env") == {"HERMES_HOME": hermes_home}
+        and type(value.get("connect_timeout")) is float
+        and value.get("connect_timeout") == 20.0
+        and value.get("enabled") is True
+    )
+
+
+def reconcile_refero_styles(
+    client_config: dict,
+    registry: dict,
+    source_row: dict,
+    *,
+    hermes_home: str,
+    hermes_python: str,
+    package_home: str | None = None,
+    registry_home: str | None = None,
+    exemptions: Iterable[str] = (),
+) -> tuple[dict, dict, dict]:
+    """Pure, Refero-only cold registration; never enable a plugin or server."""
+    if not isinstance(client_config, dict):
+        raise ValueError("Refero registration requires a config mapping")
+    package_home = package_home or hermes_home
+    registry_home = registry_home or package_home
+    for value in (hermes_home, hermes_python, package_home, registry_home):
+        if not isinstance(value, str) or not Path(value).is_absolute() or ".." in Path(value).parts:
+            raise ValueError("Refero registration requires explicit absolute runtime paths")
+    if package_home != hermes_home and Path(hermes_home).parent != Path(package_home) / "profiles":
+        raise ValueError("Refero package root must own the exact named profile")
+    _refero_validate_registry_root(Path(hermes_home), Path(package_home), Path(registry_home))
+    exempt_set = set(_refero_names(list(exemptions)))
+    rows = _refero_registry(registry)
+    source_keys = {"id", "category", "label", "summary", "mcp_server", "tool_name", "preferred_for"}
+    if not isinstance(source_row, dict) or set(source_row) != source_keys or any(
+        not isinstance(source_row[key], str) or not source_row[key]
+        for key in source_keys - {"preferred_for"}
+    ):
+        raise ValueError("Refero registration requires the exact source-owned capability shape")
+    _refero_names(source_row["preferred_for"])
+    if (source_row["id"], source_row["mcp_server"], source_row["tool_name"], source_row["category"]) != (
+        REFERO_ID, "refero-styles", "refero_search", "visual"
+    ):
+        raise ValueError("Refero registration refuses a foreign source capability")
+    registry_schema = registry["schema_version"]
+    category_ids = {row["id"] for row in registry["categories"]}
+    target_category = "visual" if registry_schema == 1 else "docs-content"
+    expected_row = {**_deep_copy(source_row), "category": target_category}
+    existing_row = next((row for row in rows if row["id"] == REFERO_ID), None)
+    legacy_row = _deep_copy(source_row) if registry_schema == 2 else None
+    if existing_row is not None and existing_row not in (expected_row, legacy_row):
+        raise ValueError("Refero registration refuses a conflicting capability")
+
+    merged = _deep_copy(client_config)
+    merged_registry = _deep_copy(registry)
+    receipt = {"scope": "refero-styles", "status": "unchanged", "changed_paths": []}
+
+    def preserve(status: str):
+        return _deep_copy(client_config), _deep_copy(registry), {**receipt, "status": status}
+
+    servers = merged.get("mcp_servers", {})
+    policy = merged.get("mcp_policy", {})
+    if not isinstance(servers, dict) or not isinstance(policy, dict):
+        raise ValueError("Refero registration requires MCP config mappings")
+    allow_keys = ("on_demand", "active_enabled", "hot_path", "hot_path_enabled")
+    deny_keys = ("disabled", "on_demand_disabled")
+    names = {key: _refero_names(policy.get(key, [])) for key in (*allow_keys, *deny_keys)}
+    # Match the existing control plugin's whitespace handling without rewriting
+    # any client-owned list entries.
+    denied = {name.strip() for key in deny_keys for name in names[key]}
+    allowed = {name.strip() for key in allow_keys for name in names[key]}
+    existing = servers.get("refero-styles", _SENTINEL)
+    if "refero-styles" in denied or "*" in denied:
+        return preserve("preserved_opt_out")
+    if existing is not _SENTINEL and not isinstance(existing, dict):
+        raise ValueError("Refero registration refuses a non-mapping server declaration")
+    if isinstance(existing, dict) and existing.get("enabled") is False and "refero-styles" not in allowed:
+        return preserve("preserved_opt_out")
+    declaration = {
+        "command": hermes_python,
+        "args": [str(Path(package_home) / "mcp-servers/refero-styles/bin/launch")],
+        "env": {"HERMES_HOME": hermes_home, "HERMES_PYTHON": hermes_python},
+        "enabled": False,
+    }
+    if (
+        existing is not _SENTINEL
+        and existing != declaration
+        and not _refero_managed_declaration(existing, hermes_home, package_home)
+        and not _refero_legacy_hot_declaration(existing, hermes_home, package_home)
+    ):
+        raise ValueError("Refero registration refuses a custom server declaration")
+
+    router = servers.get("capability-router")
+    if not isinstance(router, dict) or not isinstance(router.get("env", {}), dict):
+        raise ValueError("Refero registration requires the existing capability-router declaration")
+    router_env = router.get("env", {})
+    effective_router_home = router_env.get("HERMES_HOME", hermes_home)
+    if effective_router_home not in {hermes_home, registry_home} or router_env.get(
+        "CAPABILITY_REGISTRY", str(Path(effective_router_home) / REFERO_REGISTRY)
+    ) != str(Path(registry_home) / REFERO_REGISTRY):
+        raise ValueError("Refero registration refuses an alternate consumed registry")
+    if registry_home != hermes_home and router.get("args") != [str(Path(registry_home) / "mcp-servers/capability-router/src/capability_router/server.py")]:
+        raise ValueError("Refero split registry requires the exact consumed router script")
+
+    plugins = merged.get("plugins")
+    platforms = merged.get("platform_toolsets")
+    if not isinstance(plugins, dict) or "mcp-on-demand-control" not in _refero_names(plugins.get("enabled", [])):
+        raise ValueError("Refero registration requires the existing on-demand-control plugin")
+    if not isinstance(platforms, dict) or any(not isinstance(key, str) or not key for key in platforms):
+        raise ValueError("Refero registration requires platform toolset mappings")
+    exposed = []
+    for platform, tools in platforms.items():
+        _refero_names(tools)
+        if "mcp-capability-router" not in tools:
+            continue
+        if "mcp-on-demand-control" not in tools:
+            raise ValueError("Refero registration requires existing on-demand control on router platforms")
+        exposed.append(platform)
+    if not exposed:
+        raise ValueError("Refero registration requires an already-exposed capability router")
+    if target_category not in category_ids:
+        raise ValueError(
+            f"Refero registration requires the existing {target_category} registry category"
+        )
+
+    changed = []
+    if effective_router_home != hermes_home:
+        merged["mcp_servers"]["capability-router"].setdefault("env", {})["HERMES_HOME"] = hermes_home
+        changed.append("mcp_servers.capability-router.env.HERMES_HOME")
+    if registry_home != hermes_home and "CAPABILITY_REGISTRY" not in router_env:
+        merged["mcp_servers"]["capability-router"].setdefault("env", {})["CAPABILITY_REGISTRY"] = str(Path(registry_home) / REFERO_REGISTRY)
+        changed.append("mcp_servers.capability-router.env.CAPABILITY_REGISTRY")
+    if existing is _SENTINEL or existing != declaration:
+        merged.setdefault("mcp_servers", {})["refero-styles"] = declaration
+        changed.append("mcp_servers.refero-styles")
+    if "refero-styles" not in {name.strip() for name in names["on_demand"]}:
+        merged.setdefault("mcp_policy", {})["on_demand"] = [*names["on_demand"], "refero-styles"]
+        changed.append("mcp_policy.on_demand")
+    for platform in exposed:
+        if "mcp-refero-styles" not in platforms[platform]:
+            platforms[platform].append("mcp-refero-styles")
+            changed.append(f"platform_toolsets.{platform}")
+    if any(
+        path == exempt or path.startswith(exempt + ".") or exempt.startswith(path + ".")
+        for path in changed for exempt in exempt_set
+    ):
+        return preserve("preserved_exemption")
+    if existing_row is None:
+        merged_registry["capabilities"].append(expected_row)
+        changed.append(f"{REFERO_REGISTRY}#{REFERO_ID}")
+    elif existing_row == legacy_row and existing_row != expected_row:
+        merged_registry["capabilities"] = [
+            expected_row if row["id"] == REFERO_ID else row
+            for row in merged_registry["capabilities"]
+        ]
+        changed.append(f"{REFERO_REGISTRY}#{REFERO_ID}")
+    receipt.update(status="changed" if changed else "unchanged", changed_paths=sorted(changed))
+    return merged, merged_registry, receipt
+
+
+def _refero_atomic_write(path: Path, payload: bytes, mode: int, uid=None, gid=None) -> None:
+    descriptor, temporary = tempfile.mkstemp(prefix=".refero-registration-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            if uid is not None and hasattr(os, "fchown"):
+                current = os.fstat(handle.fileno())
+                if (current.st_uid, current.st_gid) != (uid, gid):
+                    os.fchown(handle.fileno(), uid, gid)
+            if hasattr(os, "fchmod"):
+                os.fchmod(handle.fileno(), mode)
+            else:
+                os.chmod(temporary, mode)
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _refero_validate_registry_root(home: Path, package: Path, registry: Path) -> None:
+    if registry == package:
+        return
+    if home != package or home != registry.parent / "AppData/Local/hermes/spark-runtime" or registry.name != ".hermes":
+        raise ValueError("Refero registry root is not the conventional same-user Windows layout")
+
+
+def restore_refero_styles(hermes_home: Path, rollback_dir: Path, package_home: Path | None = None, registry_home: Path | None = None) -> dict:
+    """Restore exact snapshots, including the schema-2 registry source."""
+    home = hermes_home.resolve()
+    package = (package_home or home).resolve()
+    registry = (registry_home or package).resolve()
+    _refero_validate_registry_root(home, package, registry)
+    if package != home and home.parent != package / "profiles":
+        raise ValueError("Refero package root must own the exact named profile")
+    snapshot = rollback_dir / REFERO_ROLLBACK
+    if snapshot.is_symlink() or (snapshot / "receipt.json").is_symlink():
+        raise ValueError("Refero rollback refuses symlink snapshots")
+    metadata = _refero_json((snapshot / "receipt.json").read_bytes())
+    if not isinstance(metadata, dict):
+        raise ValueError("Refero rollback requires snapshot metadata")
+    file_rows = metadata.get("files", {})
+    if metadata.get("hermes_home") != str(home) or metadata.get("package_home", str(home)) != str(package) or metadata.get("registry_home", str(package)) != str(registry) or set(file_rows) not in (
+        {"config.yaml", REFERO_REGISTRY},
+        {"config.yaml", REFERO_REGISTRY, REFERO_EXTRAS},
+    ):
+        raise ValueError("Refero rollback metadata does not match the exact targets")
+    filenames = {
+        "config.yaml": "config.before",
+        REFERO_REGISTRY: "registry.before",
+        REFERO_EXTRAS: "extras.before",
+    }
+    saved = []
+    for relative, row in file_rows.items():
+        root = home if relative == "config.yaml" else registry
+        path = root / relative
+        backup = snapshot / filenames[relative]
+        path.parent.resolve(strict=True).relative_to(root)
+        if path.is_symlink() or backup.is_symlink() or not backup.is_file():
+            raise ValueError("Refero rollback requires regular targets and snapshots")
+        existed = row.get("existed")
+        if not isinstance(row, dict) or not isinstance(existed, bool) or any(
+            not isinstance(row.get(key), int) or isinstance(row[key], bool) or row[key] < 0
+            for key in ("mode", "uid", "gid")
+        ) or row["mode"] > 0o7777:
+            raise ValueError("Refero rollback metadata is invalid")
+        if not existed and relative != REFERO_EXTRAS:
+            raise ValueError("Refero rollback refuses an absent required preimage")
+        payload = backup.read_bytes()
+        current_hash = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+        if hashlib.sha256(payload).hexdigest() != row["before_sha256"] or current_hash not in (
+            row["before_sha256"], row["after_sha256"]
+        ):
+            raise ValueError("Refero rollback refuses changed snapshot or intervening target edits")
+        saved.append((path, payload, row["mode"], row["uid"], row["gid"], existed))
+    errors = []
+    for path, payload, mode, uid, gid, existed in saved:
+        try:
+            if existed:
+                _refero_atomic_write(path, payload, mode, uid, gid)
+            else:
+                path.unlink()
+        except OSError as exc:
+            errors.append(exc)
+    if errors:
+        raise RuntimeError("Refero rollback could not restore both targets")
+    return {"scope": "refero-styles", "status": "restored", "changed_paths": sorted(file_rows),
+            "sha256": {relative: row["before_sha256"] for relative, row in file_rows.items()}}
+
+
+def _run_refero_scope(args) -> int:
+    """Narrow cold-registration transaction; output never includes config values."""
+    try:
+        if args.profile_root is None or args.config_path is not None or args.rollback_dir is None:
+            raise ValueError("Refero scope requires profile-root and rollback-dir only")
+        home = args.profile_root.expanduser().resolve(strict=True)
+        package = (args.package_root or args.profile_root).expanduser().resolve(strict=True)
+        registry_home = (args.registry_root or args.package_root or args.profile_root).expanduser().resolve(strict=True)
+        _refero_validate_registry_root(home, package, registry_home)
+        if package != home and home.parent != package / "profiles":
+            raise ValueError("Refero package root must own the exact named profile")
+        rollback = args.rollback_dir.expanduser().resolve(strict=True)
+        if not home.is_dir() or not rollback.is_dir():
+            raise ValueError("Refero scope requires existing home and rollback directories")
+        if args.restore:
+            if args.dry_run:
+                raise ValueError("Refero restore does not accept dry-run")
+            print(json.dumps(restore_refero_styles(home, rollback, package, registry_home), sort_keys=True))
+            return 0
+        python = args.hermes_python
+        python_path = Path(python) if python else None
+        if (
+            python_path is None
+            or not python_path.is_absolute()
+            or not python_path.is_file()
+            or not os.access(python_path, os.X_OK)
+        ):
+            raise ValueError("Refero scope requires the explicit candidate Python")
+        paths = {"config.yaml": home / "config.yaml", REFERO_REGISTRY: registry_home / REFERO_REGISTRY}
+        if any(path.is_symlink() or not path.is_file() for path in paths.values()):
+            raise ValueError("Refero scope requires existing regular config and consumed registry")
+        for relative, path in paths.items():
+            path.parent.resolve(strict=True).relative_to(home if relative == "config.yaml" else registry_home)
+        original = {relative: path.read_bytes() for relative, path in paths.items()}
+        config = _refero_yaml(original["config.yaml"])
+        registry = _refero_json(original[REFERO_REGISTRY])
+        source = _refero_json(args.refero_source_registry.read_bytes())
+        source_rows = [row for row in _refero_registry(source) if row["id"] == REFERO_ID]
+        if len(source_rows) != 1:
+            raise ValueError("Refero source registry must contain exactly one owned row")
+        exemptions = list(args.exemption)
+        if args.manifest:
+            manifest = _refero_yaml(args.manifest.read_bytes())
+            if not isinstance(manifest, dict):
+                raise ValueError("Refero manifest must be a mapping")
+            exemptions += _refero_names(manifest.get("overlay_config_exemptions", []))
+        merged, merged_registry, receipt = reconcile_refero_styles(
+            config, registry, source_rows[0], hermes_home=str(home),
+            hermes_python=python, package_home=str(package), registry_home=str(registry_home), exemptions=exemptions,
+        )
+        schema_two = (
+            registry.get("schema_version") == 2
+            and receipt["status"] not in {"preserved_opt_out", "preserved_exemption"}
+        )
+        expected_row = next(
+            (row for row in merged_registry["capabilities"] if row["id"] == REFERO_ID),
+            None,
+        )
+        merged_extras = None
+        if schema_two:
+            sync_meta = registry.get("_sync_meta")
+            canonical = registry_home / REFERO_CANONICAL
+            extras = registry_home / REFERO_EXTRAS
+            # The transaction runs before the runtime switch, so the installed
+            # helper may belong to the predecessor.  Verify the registry with
+            # the exact candidate helper shipped beside this merger.
+            candidate_root = Path(__file__).resolve().parent.parent
+            sync = candidate_root / REFERO_SYNC
+            extras_existed = extras.is_file() and not extras.is_symlink()
+            if (
+                not isinstance(sync_meta, dict)
+                or Path(str(sync_meta.get("canonical_path") or "")) != canonical
+                or sync_meta.get("extras_path") not in (None, str(extras))
+                or any(path.is_symlink() or not path.is_file() for path in (canonical, sync))
+                or (extras.exists() and not extras_existed)
+            ):
+                raise ValueError("Refero schema-2 registry source route is invalid")
+            canonical.parent.resolve(strict=True).relative_to(registry_home)
+            sync.parent.resolve(strict=True).relative_to(candidate_root)
+            extras.parent.resolve(strict=True).relative_to(registry_home)
+            paths[REFERO_EXTRAS] = extras
+            original[REFERO_EXTRAS] = extras.read_bytes() if extras_existed else b""
+            extras_doc = (
+                _refero_json(original[REFERO_EXTRAS])
+                if extras_existed else
+                {"schema_version": 1, "categories": [], "capabilities": []}
+            )
+            if extras_doc.get("schema_version") not in (1, 2) or expected_row is None:
+                raise ValueError("Refero schema-2 local extras source is invalid")
+            extra_rows = _refero_registry(extras_doc)
+            existing_extra = [row for row in extra_rows if row["id"] == REFERO_ID]
+            if existing_extra and existing_extra not in ([expected_row], [source_rows[0]]):
+                raise ValueError("Refero schema-2 local extras ownership conflicts")
+            merged_extras = _deep_copy(extras_doc)
+            if not existing_extra:
+                merged_extras["capabilities"].append(expected_row)
+                receipt["changed_paths"].append(f"{REFERO_EXTRAS}#{REFERO_ID}")
+                receipt["status"] = "changed"
+            elif existing_extra == [source_rows[0]] and existing_extra != [expected_row]:
+                merged_extras["capabilities"] = [
+                    expected_row if row["id"] == REFERO_ID else row
+                    for row in merged_extras["capabilities"]
+                ]
+                receipt["changed_paths"].append(f"{REFERO_EXTRAS}#{REFERO_ID}")
+                receipt["status"] = "changed"
+        updated = {
+            "config.yaml": (
+                yaml.safe_dump(merged, sort_keys=False, allow_unicode=True).encode()
+                if merged != config else original["config.yaml"]
+            ),
+            REFERO_REGISTRY: (
+                (json.dumps(merged_registry, indent=2, ensure_ascii=False) + "\n").encode()
+                if merged_registry != registry and not schema_two else original[REFERO_REGISTRY]
+            ),
+        }
+        if schema_two:
+            updated[REFERO_EXTRAS] = (
+                json.dumps(merged_extras, indent=2, ensure_ascii=False) + "\n"
+            ).encode() if merged_extras != extras_doc else original[REFERO_EXTRAS]
+
+        def stage_schema_two(directory: Path) -> bytes:
+            staged_config = directory / "config.after.staged"
+            staged_extras = directory / "extras.after.staged"
+            staged_registry = directory / "registry.after.staged"
+            _refero_atomic_write(staged_config, updated["config.yaml"], 0o600)
+            _refero_atomic_write(staged_extras, updated[REFERO_EXTRAS], 0o600)
+            env = dict(os.environ)
+            env.update(
+                HERMES_HOME=str(registry_home), HERMES_CONFIG=str(staged_config),
+                REGISTRY_CANONICAL=str(registry_home / REFERO_CANONICAL),
+                REGISTRY_LOCAL_EXTRAS=str(staged_extras),
+                REGISTRY_WORKING=str(staged_registry),
+            )
+            synced = subprocess.run(
+                [python, str(sync)], capture_output=True,
+                text=True, timeout=45, env=env, check=False,
+            )
+            if synced.returncode or not staged_registry.is_file():
+                raise ValueError("Refero registry sync failed closed")
+            generated_registry = _refero_json(staged_registry.read_bytes())
+            generated_meta = generated_registry.get("_sync_meta")
+            if not isinstance(generated_meta, dict):
+                raise ValueError("Refero registry sync metadata is invalid")
+            generated_rows = _refero_registry(generated_registry)
+            prior_by_id = {row["id"]: row for row in _refero_registry(registry)}
+            generated_by_id = {row["id"]: row for row in generated_rows}
+            marker_id = "mcp-server.refero-styles"
+            marker = generated_by_id.get(marker_id)
+            if (
+                generated_by_id.get(REFERO_ID) != expected_row
+                or not isinstance(marker, dict)
+                or marker.get("mcp_server") != "refero-styles"
+                or marker.get("tool_name") is not None
+                or marker.get("category") != "runtime-mcp"
+                or marker.get("source") != "auto:mcp-config"
+                or generated_registry.get("categories") != registry.get("categories")
+            ):
+                raise ValueError("Refero registry sync could not prove the owned registration")
+            # registry-sync also reconciles unrelated runtime MCP markers. Refero owns
+            # neither those markers nor the registry's derived metadata, so stage its
+            # output as proof only and persist the exact two Refero-owned additions.
+            # This keeps an existing schema-2 working registry byte-for-byte intact
+            # outside the cold Refero registration.
+            post_registry = _deep_copy(registry)
+            post_by_id = {row["id"]: row for row in post_registry["capabilities"]}
+            if post_by_id.get(REFERO_ID) != expected_row:
+                if REFERO_ID in post_by_id:
+                    # reconcile_refero_styles already accepted this only as the
+                    # exact legacy schema-2 source row; promote that one owned
+                    # row without rewriting any other working-registry entry.
+                    post_registry["capabilities"] = [
+                        expected_row if row["id"] == REFERO_ID else row
+                        for row in post_registry["capabilities"]
+                    ]
+                else:
+                    post_registry["capabilities"].append(expected_row)
+            if marker_id not in post_by_id:
+                post_registry["capabilities"].append(marker)
+                receipt["changed_paths"].append(
+                    f"{REFERO_REGISTRY}#{marker_id}"
+                )
+            return (json.dumps(post_registry, indent=2, ensure_ascii=False) + "\n").encode()
+
+        if schema_two and receipt["changed_paths"]:
+            with tempfile.TemporaryDirectory(prefix=".refero-stage-", dir=rollback) as temporary:
+                updated[REFERO_REGISTRY] = stage_schema_two(Path(temporary))
+        files = {
+            relative: {
+                "before_sha256": hashlib.sha256(original[relative]).hexdigest(),
+                "after_sha256": hashlib.sha256(updated[relative]).hexdigest(),
+                "existed": path.exists(),
+                "mode": stat.S_IMODE(path.stat().st_mode) if path.exists() else 0o600,
+                "uid": path.stat().st_uid if path.exists() else paths[REFERO_REGISTRY].stat().st_uid,
+                "gid": path.stat().st_gid if path.exists() else paths[REFERO_REGISTRY].stat().st_gid,
+            }
+            for relative, path in paths.items()
+        }
+        if receipt["changed_paths"] and not args.dry_run:
+            snapshot = rollback / REFERO_ROLLBACK
+            snapshot.mkdir(mode=0o700)
+            filenames = {
+                "config.yaml": "config.before",
+                REFERO_REGISTRY: "registry.before",
+                REFERO_EXTRAS: "extras.before",
+            }
+            for relative in paths:
+                _refero_atomic_write(snapshot / filenames[relative], original[relative], 0o600)
+            try:
+                for relative in files:
+                    files[relative]["after_sha256"] = hashlib.sha256(
+                        updated[relative]
+                    ).hexdigest()
+                _refero_atomic_write(
+                    snapshot / "receipt.json",
+                    json.dumps({"hermes_home": str(home), "package_home": str(package), "registry_home": str(registry_home), "files": files}, sort_keys=True).encode(),
+                    0o600,
+                )
+                if any(
+                    (path.read_bytes() if path.is_file() else b"") != original[relative]
+                    for relative, path in paths.items()
+                ):
+                    raise ValueError("Refero targets changed while staging snapshots")
+                for relative, path in paths.items():
+                    if updated[relative] != original[relative]:
+                        row = files[relative]
+                        _refero_atomic_write(path, updated[relative], row["mode"], row["uid"], row["gid"])
+            except Exception:
+                unrelated = []
+                for relative, path in paths.items():
+                    current = path.read_bytes() if path.is_file() else b""
+                    if hashlib.sha256(current).hexdigest() not in {
+                        files[relative]["before_sha256"], files[relative]["after_sha256"]
+                    }:
+                        unrelated.append(relative)
+                if unrelated:
+                    raise RuntimeError(
+                        "Refero registration detected concurrent target changes; recovery refused"
+                    )
+                restore_errors = []
+                for relative, path in paths.items():
+                    row = files[relative]
+                    try:
+                        if row["existed"]:
+                            _refero_atomic_write(
+                                path, original[relative], row["mode"], row["uid"], row["gid"]
+                            )
+                        else:
+                            path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        restore_errors.append(exc)
+                if restore_errors:
+                    raise RuntimeError("Refero registration rollback did not restore every target")
+                raise
+        receipt["files"] = {
+            relative: {key: row[key] for key in ("before_sha256", "after_sha256")}
+            for relative, row in files.items()
+        }
+        receipt["changed_paths"] = sorted(set(receipt["changed_paths"]))
+        if args.dry_run:
+            receipt["status"] = "dry_run"
+        print(json.dumps(receipt, sort_keys=True))
+        return 0
+    except Exception:
+        print("error: Refero registration/rollback failed closed; no configuration values emitted", file=sys.stderr)
+        return 1
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile-root", type=Path, help="Client HERMES_HOME (contains config.yaml)")
+    parser.add_argument("--package-root", type=Path, help="Refero package/registry root owning the named profile")
+    parser.add_argument("--registry-root", type=Path, help="Refero consumed registry root in the conventional Windows layout")
     parser.add_argument("--config-path", type=Path, help="Explicit path to client config.yaml")
     parser.add_argument("--manifest", type=Path, help="Path to manifest yaml (for overlay_config_exemptions)")
     parser.add_argument("--exemption", action="append", default=[], help="Extra dotted-path exemption; repeatable")
@@ -407,13 +1031,25 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--dry-run", action="store_true", help="Show diff, do not write")
     parser.add_argument("--quiet", action="store_true", help="Suppress informational output")
+    parser.add_argument("--hermes-python", help="Exact candidate interpreter for Refero-only cold registration")
+    parser.add_argument("--rollback-dir", type=Path, help="Existing rollback directory for Refero-only registration")
+    parser.add_argument("--restore", action="store_true", help="Restore the Refero-only two-file snapshot")
+    parser.add_argument(
+        "--refero-source-registry", type=Path,
+        default=Path(__file__).resolve().parent.parent / "mcp-servers/capability-router/public-floor-registry.json",
+    )
     parser.add_argument(
         "--scope",
-        choices=("all", "native-image"),
+        choices=("all", "native-image", "refero-styles"),
         default="all",
-        help="Apply all shared defaults or only executable native-image routing",
+        help="Apply all defaults, native-image routing, or exact Refero-only cold registration",
     )
     args = parser.parse_args(argv)
+
+    if args.scope == "refero-styles":
+        return _run_refero_scope(args)
+    if args.restore or args.hermes_python or args.rollback_dir or args.package_root or args.registry_root:
+        parser.error("Refero registration options require --scope refero-styles")
 
     if args.config_path:
         config_path = args.config_path.expanduser().resolve()

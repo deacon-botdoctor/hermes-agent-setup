@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -190,18 +191,23 @@ def run_probe(
     if not runtime_root.is_dir() or not runtime_python.is_file():
         result["kind"] = "binding_missing"
         return result
-    env = os.environ.copy()
-    env.update({"HERMES_HOME": str(hermes_home), "PYTHONNOUSERSITE": "1"})
     try:
-        proc = subprocess.run(
-            [str(runtime_python), "-I", "-c", probe_program(runtime_root)],
-            cwd=runtime_root,
-            env=env,
-            text=True,
-            capture_output=True,
-            timeout=45,
-            check=False,
-        )
+        # Imports may initialize SQLite stores. Never join the live profile's WAL.
+        with tempfile.TemporaryDirectory(prefix="hermes-runtime-coherence-") as temporary:
+            probe_home = Path(temporary) / ".hermes"
+            probe_home.mkdir()
+            env = os.environ.copy()
+            env.update({"HOME": temporary, "USERPROFILE": temporary,
+                        "HERMES_HOME": str(probe_home), "PYTHONNOUSERSITE": "1"})
+            proc = subprocess.run(
+                [str(runtime_python), "-I", "-c", probe_program(runtime_root)],
+                cwd=runtime_root,
+                env=env,
+                text=True,
+                capture_output=True,
+                timeout=45,
+                check=False,
+            )
     except subprocess.TimeoutExpired:
         result["kind"] = "timeout"
         return result

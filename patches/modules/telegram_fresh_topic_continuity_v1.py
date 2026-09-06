@@ -135,10 +135,42 @@ def patch_run_text(source: str) -> str:
     )
 
 
+
+def patch_native_run_text(source: str) -> str:
+    if MARKER in source:
+        return source
+    source = _replace_once(
+        source, "        persist_user_display_kind: Optional[str]\n",
+        "        persist_user_display_kind: Optional[str]\n        fresh_telegram_rehydrate: bool = False\n",
+        "native prepared continuity state",
+    )
+    open_line = "        _was_auto_reset, _is_new_session = await self._hmwa_open_session(session_entry, session_key, source)\n"
+    if open_line not in source:
+        open_line = open_line.replace("session_key, source)", "session_key, source, preserve_reset_state=preserve_reset_state)")
+    # Reuse the same policy as the legacy hook; only its owner changes.
+    condition = HOOK_FIELDS.split('"fresh_telegram_rehydrate": ', 1)[1].rstrip().removesuffix(",")
+    condition = "\n".join(line[16:] if line.startswith("                ") else line for line in condition.splitlines())
+    source = _replace_once(source, open_line, RESET_CAPTURE + open_line
+        + "        fresh_telegram_rehydrate = " + condition.replace("\n", "\n        ") + "\n",
+        "native continuity decision")
+    ret = "            persist_user_display_kind,\n        ), _session_env_tokens"
+    source = _replace_once(source, ret,
+        "            persist_user_display_kind, fresh_telegram_rehydrate,\n        ), _session_env_tokens",
+        "native continuity propagation")
+    source = _replace_once(source, HOOK_MESSAGE_ANCHOR, HOOK_MESSAGE_ANCHOR
+        + '                "full_message": message_text,\n'
+        + '                "fresh_telegram_rehydrate": prepared.fresh_telegram_rehydrate,\n',
+        "native continuity hook fields")
+    return _replace_once(source, HOOK_EMIT_ANCHOR, HOOK_EMIT_ANCHOR + CONSUME_OVERRIDE,
+                         "native continuity override")
+
+
 def patch_telegram_fresh_topic_continuity_v1(hermes_dir: Path) -> bool:
-    target = Path(hermes_dir) / "gateway" / "run.py"
+    split = Path(hermes_dir) / "gateway/run_turn.py"
+    target = split if split.is_file() else Path(hermes_dir) / "gateway/run.py"
     original = target.read_text(encoding="utf-8")
-    patched = patch_run_text(original)
+    patched = patch_native_run_text(original) if split.is_file() else patch_run_text(original)
+    compile(patched, str(target), "exec")
     if patched == original:
         return False
     target.write_text(patched, encoding="utf-8")

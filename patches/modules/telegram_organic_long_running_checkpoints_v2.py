@@ -8,7 +8,7 @@ from pathlib import Path
 
 V1_MARKER = "HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1"
 MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2"
-REVISION_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2_r4"
+REVISION_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2_r6"
 
 MARKER_ANCHOR = f"# {V1_MARKER}\n"
 MARKER_REPLACEMENT = f"# {V1_MARKER}\n# {MARKER}\n# {REVISION_MARKER}\n"
@@ -29,6 +29,29 @@ SLEEP_REPLACEMENT = """            # The counter belongs to this coroutine. Keep
                 _notify_tick += 1
                 _notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)
                 await asyncio.sleep(max(0.0, _notify_deadline - time.monotonic()))
+"""
+
+IMMEDIATE_SLEEP_ANCHOR = """            while True:
+                _is_immediate_heartbeat = _first_heartbeat and _progress_on_typing
+                if not _is_immediate_heartbeat:
+                    if _NOTIFY_INTERVAL is None:
+                        break
+                    await asyncio.sleep(_NOTIFY_INTERVAL)
+"""
+IMMEDIATE_TICK_ANCHOR = "                _is_immediate_heartbeat = _first_heartbeat and _progress_on_typing\n"
+IMMEDIATE_TICK_REPLACEMENT = "                _is_immediate_heartbeat = _first_heartbeat and _progress_on_typing and source.platform != Platform.TELEGRAM\n"
+
+IMMEDIATE_SLEEP_REPLACEMENT = """            # Telegram waits for the first custom checkpoint; typing remains a
+            # separate indicator. Other platforms retain their typing-start bubble.
+            _notify_tick = 0
+            while True:
+                _is_immediate_heartbeat = _first_heartbeat and _progress_on_typing and source.platform != Platform.TELEGRAM
+                if not _is_immediate_heartbeat:
+                    if _NOTIFY_INTERVAL is None:
+                        break
+                    _notify_tick += 1
+                    _notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)
+                    await asyncio.sleep(max(0.0, _notify_deadline - time.monotonic()))
 """
 
 ELAPSED_ANCHOR = "                _elapsed_mins = int((time.time() - _notify_start) // 60)\n"
@@ -130,7 +153,7 @@ HELPER = r'''
 def _telegram_checkpoint_minutes_v2(tick, interval_seconds):
     """Return the scheduled milestone, never a wall-clock-derived near miss."""
     try:
-        tick_value = max(1, int(tick))
+        tick_value = max(0, int(tick))
         interval_value = max(0.0, float(interval_seconds))
     except (TypeError, ValueError):
         return 0
@@ -150,8 +173,11 @@ def _sanitize_telegram_checkpoint_commentary_v2(value):
         r"(?:^|\s)(?:~?/|\.{1,2}/|[A-Za-z]:\\)\S+",
         r"(?:^|\s)(?:[A-Za-z0-9_.-]+/){2,}[A-Za-z0-9_.-]+",
         r"\b(?:exec_command|tool[_ -]?(?:call|name|output|result)|stdout|stderr|"
-        r"arguments?|argv|system prompt|developer message|chain[- ]of[- ]thought|"
+        r"toolset|tooling|arguments?|argv|system prompt|developer message|chain[- ]of[- ]thought|"
         r"hidden reasoning|token budget)\b",
+        r"\b(?:gbrain|mcp|capability[- ]router)\b",
+        r"\b(?:pulling|loading|opening|reading|using)\b.{0,80}\bskills?\b",
+        r"\b(?:identifying|checking|working)\b.{0,80}\blocally\b",
         r"\b(?:python3?|bash|zsh|pwsh|powershell|curl|wget|ssh)\s+[-\w]",
         r"\b(?:sk-|gh[pousr]_)[A-Za-z0-9_-]{8,}\b",
         r"^(?:analysis|reasoning|thought process)\s*:",
@@ -220,21 +246,32 @@ DELIVERY_ACK_REPLACEMENT = """                    if (
 """
 
 
-def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool:
+def _patch_legacy_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool:
     """Upgrade both clean and already-v1-patched runtimes to the v2 contract."""
     run_py = Path(hermes_dir) / "gateway/run.py"
     original = run_py.read_text(encoding="utf-8")
     if MARKER in original:
         if REVISION_MARKER not in original:
             raise RuntimeError("Telegram organic checkpoints stale v2 revision requires a clean candidate rebuild")
-        return False
+        if IMMEDIATE_TICK_REPLACEMENT in original or IMMEDIATE_TICK_ANCHOR not in original:
+            return False
+        if original.count(IMMEDIATE_TICK_ANCHOR) != 1:
+            raise RuntimeError("Telegram immediate checkpoint anchor drift")
+        return _write_checkpoint_source(
+            run_py, original.replace(IMMEDIATE_TICK_ANCHOR, IMMEDIATE_TICK_REPLACEMENT, 1)
+        )
     if V1_MARKER not in original:
         raise RuntimeError("Telegram organic checkpoints v2 requires the v1 base")
 
+    immediate_first = IMMEDIATE_SLEEP_ANCHOR in original
+    sleep_anchor = IMMEDIATE_SLEEP_ANCHOR if immediate_first else SLEEP_ANCHOR
+    sleep_replacement = (
+        IMMEDIATE_SLEEP_REPLACEMENT if immediate_first else SLEEP_REPLACEMENT
+    )
     replacements = (
         (MARKER_ANCHOR, MARKER_REPLACEMENT, "version marker"),
         (START_ANCHOR, START_REPLACEMENT, "monotonic origin"),
-        (SLEEP_ANCHOR, SLEEP_REPLACEMENT, "scheduled cadence"),
+        (sleep_anchor, sleep_replacement, "scheduled cadence"),
         (ELAPSED_ANCHOR, ELAPSED_REPLACEMENT, "scheduled milestone"),
         (PENDING_ANCHOR, PENDING_REPLACEMENT, "bounded pending milestones"),
         (
@@ -255,6 +292,10 @@ def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool
             raise RuntimeError(f"Telegram organic checkpoints v2 {label} anchor drift")
         patched = patched.replace(anchor, replacement, 1)
 
+    return _write_checkpoint_source(run_py, patched)
+
+
+def _write_checkpoint_source(run_py: Path, patched: str) -> bool:
     backup = Path(str(run_py) + ".bak-pre-telegram-organic-checkpoints-v2")
     shutil.copy2(run_py, backup)
     try:
@@ -264,3 +305,106 @@ def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool
         backup.unlink(missing_ok=True)
         raise
     return True
+
+
+# Split d363 dispatch. The recovered legacy implementation above remains available for cb sources.
+_D363_V2_NOTIFIER = r'''    async def _run_agent_notify_long_running(
+        self, disp: "GatewayRunner._RunAgentDisplay", turn_ctx: TurnContext, _executor_task_holder: list,
+    ) -> None:
+        if turn_ctx.source.platform != Platform.TELEGRAM:
+            return await self._run_agent_native_notify_long_running(disp, turn_ctx, _executor_task_holder)
+        from gateway.run import _float_env, _interim_metadata, _non_conversational_metadata
+        _notify_start = time.monotonic()
+        _configured_interval = _float_env("HERMES_AGENT_NOTIFY_INTERVAL", 180)
+        if _configured_interval <= 0:
+            return
+        _notify_interval = max(300.0, _configured_interval)
+        _long_running_mode = disp._display_surface_mode("long_running_notifications", default=True, allow_generic=True)
+        if _notify_interval <= 0 or _long_running_mode == "off":
+            return
+        source, session_key, agent_holder = turn_ctx.source, turn_ctx.session_key, turn_ctx.agent_holder
+        _notify_adapter = self._adapter_for_source(source)
+        if not _notify_adapter:
+            return
+        _heartbeat_msg_id = None
+        _notify_tick = 0
+        while True:
+            _notify_tick += 1
+            _deadline = _notify_start + (_notify_tick * _notify_interval)
+            await asyncio.sleep(max(0.0, _deadline - time.monotonic()))
+            if not self._should_emit_long_running_notification(session_key, agent_holder[0], _executor_task_holder[0]):
+                break
+            _elapsed_mins = _telegram_checkpoint_minutes_v2(_notify_tick, _notify_interval)
+            if source.platform == Platform.TELEGRAM:
+                with turn_ctx.model_checkpoint_lock:
+                    _start = turn_ctx.model_checkpoint_cursor[0]
+                    _stop = _start
+                    _pending = []
+                    while _stop < len(turn_ctx.model_checkpoint_updates) and len(_pending) < 3:
+                        _value = _telegram_checkpoint_commentary_bullet_v2(turn_ctx.model_checkpoint_updates[_stop])
+                        _stop += 1
+                        if _value:
+                            _pending.append(_value)
+                    _tool_start = turn_ctx.model_checkpoint_tool_cursor[0]
+                    _tool_stop = min(len(turn_ctx.model_checkpoint_tool_completed), _tool_start + max(0, 3 - len(_pending)))
+                    _tool_pending = list(turn_ctx.model_checkpoint_tool_completed[_tool_start:_tool_stop])
+                    _current = list(turn_ctx.model_checkpoint_tool_current)
+                _heartbeat_text = _format_telegram_model_checkpoint(_elapsed_mins, _pending, task=turn_ctx.model_checkpoint_task, completed=_tool_pending, current=_current)
+                if not _heartbeat_text:
+                    with turn_ctx.model_checkpoint_lock:
+                        turn_ctx.model_checkpoint_cursor[0] = max(turn_ctx.model_checkpoint_cursor[0], _stop)
+                        turn_ctx.model_checkpoint_tool_cursor[0] = max(turn_ctx.model_checkpoint_tool_cursor[0], _tool_stop)
+                    continue
+            else:
+                _heartbeat_text = disp._generic_status_phrase("status") if _long_running_mode == "generic" else f"⏳ Working — {_elapsed_mins} min"
+            try:
+                _notify_res = None
+                if _heartbeat_msg_id:
+                    with suppress(Exception):
+                        _notify_res = await _notify_adapter.edit_message(source.chat_id, _heartbeat_msg_id, _heartbeat_text)
+                    if source.platform == Platform.TELEGRAM and not getattr(_notify_res, "success", False):
+                        continue
+                if not (_notify_res and getattr(_notify_res, "success", False)):
+                    _notify_res = await _notify_adapter.send(source.chat_id, _heartbeat_text, metadata=_interim_metadata(_non_conversational_metadata(turn_ctx._status_thread_metadata, platform=source.platform)))
+                    if getattr(_notify_res, "success", False) and getattr(_notify_res, "message_id", None):
+                        _heartbeat_msg_id = str(_notify_res.message_id)
+                        if turn_ctx._cleanup_progress:
+                            turn_ctx._cleanup_msg_ids.append(_heartbeat_msg_id)
+                if source.platform == Platform.TELEGRAM and getattr(_notify_res, "success", False):
+                    with turn_ctx.model_checkpoint_lock:
+                        turn_ctx.model_checkpoint_cursor[0] = max(turn_ctx.model_checkpoint_cursor[0], _stop)
+                        turn_ctx.model_checkpoint_tool_cursor[0] = max(turn_ctx.model_checkpoint_tool_cursor[0], _tool_stop)
+            except Exception as _ne:
+                logger.debug("Long-running notification error: %s", _ne)
+
+'''
+
+def _patch_split_d363(root: Path) -> bool:
+    run_py = root / 'gateway/run_turn.py'
+    run = run_py.read_text(encoding='utf-8')
+    if MARKER in run:
+        return False
+    if V1_MARKER not in run:
+        raise RuntimeError('Telegram organic checkpoints v2 requires the d363 v1 base')
+    start = run.index('    async def _run_agent_notify_long_running(')
+    end = run.index('    async def _run_agent_inner(', start)
+    run = run[:start] + _D363_V2_NOTIFIER + run[end:]
+    helper_anchor = '\ndef _format_telegram_model_checkpoint(\n'
+    if run.count(helper_anchor) != 1:
+        raise RuntimeError('Telegram organic checkpoints v2 d363 helper anchor drift')
+    run = run.replace(helper_anchor, '\n' + HELPER + helper_anchor, 1)
+    run = run.replace(f'# {V1_MARKER}\n', f'# {V1_MARKER}\n# {MARKER}\n# {REVISION_MARKER}\n', 1)
+    backup = Path(str(run_py) + '.bak-pre-telegram-organic-checkpoints-v2')
+    shutil.copy2(run_py, backup)
+    try:
+        run_py.write_text(run, encoding='utf-8')
+    except Exception:
+        shutil.copy2(backup, run_py); backup.unlink(missing_ok=True)
+        raise
+    return True
+
+def patch_telegram_organic_long_running_checkpoints_v2(hermes_dir: Path) -> bool:
+    root = Path(hermes_dir)
+    if (root / 'gateway/run_turn.py').exists():
+        return _patch_split_d363(root)
+    return _patch_legacy_telegram_organic_long_running_checkpoints_v2(root)

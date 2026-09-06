@@ -8,8 +8,11 @@ controller parented to the owning process, so it is never selected.
 from __future__ import annotations
 
 import os
+import json
+import re
 import subprocess
 import time
+import urllib.parse
 from pathlib import Path
 
 HERMES = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
@@ -17,6 +20,8 @@ LOG = HERMES / "logs" / "agent-browser-orphan-reaper.log"
 MIN_AGE_SECONDS = 600
 NODE_MARK = "node_modules/agent-browser/bin/agent-browser"
 CHROME_MARK = "Chrome for Testing"
+LEASES = HERMES / "state" / "host-steward" / "leases"
+STEWARD = HERMES / "bin" / "hermes-host-steward.py"
 
 
 def log(msg: str) -> None:
@@ -90,23 +95,63 @@ def kill(pid: int) -> bool:
         return False
 
 
-def eligible_roots(processes: list[dict]) -> list[dict]:
-    return [
-        process
-        for process in processes
-        if process["ppid"] == 1
-        and process["etimes"] >= MIN_AGE_SECONDS
-        and (NODE_MARK in process["cmd"] or CHROME_MARK in process["cmd"])
-    ]
+def protected_debug_ports() -> set[int]:
+    ports: set[int] = set()
+    if not LEASES.is_dir():
+        return ports
+    for path in LEASES.glob("*.json"):
+        try:
+            lease = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(lease, dict):
+                continue
+            resource = lease.get("resource")
+            if not isinstance(resource, dict):
+                continue
+            endpoint = urllib.parse.urlparse(str(resource.get("endpoint") or ""))
+            if (
+                lease.get("schema") == "hermes-host-steward/v1"
+                and lease.get("kind") == "browser_tab"
+                and endpoint.hostname in {"127.0.0.1", "localhost"}
+                and endpoint.port
+            ):
+                ports.add(int(endpoint.port))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return ports
+
+
+def eligible_roots(processes: list[dict], protected_ports: set[int]) -> list[dict]:
+    def protected(process: dict) -> bool:
+        match = re.search(r"--remote-debugging-port(?:=|\s+)(\d+)", process["cmd"])
+        return bool(match and int(match.group(1)) in protected_ports)
+
+    by_ppid: dict[int, list[dict]] = {}
+    for process in processes:
+        by_ppid.setdefault(process["ppid"], []).append(process)
+    roots = []
+    for process in processes:
+        if not (
+            process["ppid"] == 1
+            and process["etimes"] >= MIN_AGE_SECONDS
+            and (NODE_MARK in process["cmd"] or CHROME_MARK in process["cmd"])
+        ):
+            continue
+        tree = [process] + descendants(process["pid"], by_ppid)
+        if not any(protected(member) for member in tree):
+            roots.append(process)
+    return roots
 
 
 def main() -> int:
+    if STEWARD.is_file():
+        log("disabled: Host Steward owns all resource mutation")
+        return 0
     processes = snapshot()
     by_ppid: dict[int, list[dict]] = {}
     for process in processes:
         by_ppid.setdefault(process["ppid"], []).append(process)
 
-    roots = eligible_roots(processes)
+    roots = eligible_roots(processes, protected_debug_ports())
     if not roots:
         log("clean: no orphaned browser trees")
         return 0

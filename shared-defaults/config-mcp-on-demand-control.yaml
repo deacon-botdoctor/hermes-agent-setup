@@ -3,6 +3,7 @@ plugins:
     - botdoctor-immersion
     - composio-onboarding
     - mcp-on-demand-control
+    - telegram-email-card-qa
 platform_toolsets:
   cli:
     - image_gen

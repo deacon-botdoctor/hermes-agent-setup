@@ -1,0 +1,116 @@
+{
+  "schema_version": 2,
+  "name": "tool-guardrail-answer-v1",
+  "base_commit": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "source_seed_head": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "reviewed_source_head": "968583fc02608818caf2e76b8827955f0c2d6eed",
+  "reviewed_source_parent": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "reviewed_source_tree": "6e81edc5277fdf4e598cdbfe17451d5879e3f3c4",
+  "source_seed_commit": "source-seed.commit",
+  "source_seed_commit_sha256": "3e215b9077b0022cf4eb095095e6e752bb8d7bfef3012ff01638de404902e8eb",
+  "payload_finalized_against_golden_parent": "ed7a51de453d57bcaf14ba0b082edf7951867ce7",
+  "patch": "hermes-agent-85207247-tool-guardrail-answer-v1.patch",
+  "patch_sha256": "f0c3aa594e51c819a970cd437c0a584104caa3bd650c7c3748414ee58a452d04",
+  "provenance_bundle": "reviewed-source.bundle",
+  "provenance_bundle_sha256": "b43887889fac25ae5e7431c62c2626ca48520a9ef7e0c0840e4716d14fb43227",
+  "impact": {
+    "commits": 1,
+    "files": 9,
+    "insertions": 1122,
+    "deletions": 45
+  },
+  "postimage_git_blobs": {
+    "agent/anthropic_adapter.py": "a37c0277111ca046e32e77e51fbb983e13f617f2",
+    "agent/conversation_loop.py": "d8f7ccc3733a8d22038de81652d7223b3305f8cb",
+    "agent/tool_executor.py": "7ca78e2dcb6191c4bb894c0711864410c3215011",
+    "agent/tool_guardrails.py": "f7ba53f27e55209a455c1c070ec46727cc59371c",
+    "agent/turn_finalizer.py": "d1a5342472c7e6aff0e6c2ffb99596da80a2825b",
+    "run_agent.py": "c5b85952a4dedff35925d01b83f2fe33ededfffe",
+    "tests/agent/test_tool_guardrails.py": "f6dc4184e5dfea01be07174ad1818808b7f4ca7f",
+    "tests/run_agent/test_background_review_input_budget.py": "9f7f849e1838b33763ec71e14b27f64e95fb066f",
+    "tests/run_agent/test_tool_call_guardrail_runtime.py": "91d0e220a79d6a6bc7261035ce386f67a2c17980"
+  },
+  "required_fragments": {
+    "agent/anthropic_adapter.py": [
+      "kwargs[\"tool_choice\"] = {\"type\": \"none\"}",
+      "base_url_hostname(base_url or \"https://api.anthropic.com\")"
+    ],
+    "agent/conversation_loop.py": [
+      "_guardrail_recovery_attempted = False",
+      "finishing from collected results",
+      "tools_for_api = agent.tools",
+      "max_retries = 1 if _guardrail_recovery_attempted else agent._api_max_retries",
+      "_guardrail_recovery_request_sent = True",
+      "next_api_kwargs[\"tools\"] = api_kwargs[\"tools\"]",
+      "next_api_kwargs[\"tool_choice\"] = \"none\"",
+      "_filtered_request_overrides[\"extra_body\"] = {",
+      "next_api_kwargs[\"toolConfig\"] = _tool_config",
+      "and not _guardrail_recovery_request_sent",
+      "Guardrail answer-only request was refused by the",
+      "Nous rate-limit guard blocked the bounded",
+      "Content filter terminated the guardrail",
+      "def _finish_guardrail_recovery_with_answer(",
+      "and finish_reason in {\"length\", \"incomplete\"}",
+      "agent.stream_delta_callback(final_response)",
+      "if _use_streaming and not _guardrail_recovery_attempted:",
+      "_recovery_extra_body.update(",
+      "if assistant_message.tool_calls:\n                if _guardrail_recovery_attempted:\n                    decision = agent._tool_guardrail_halt_decision"
+    ],
+    "agent/tool_guardrails.py": [
+      "def _web_search_result_is_empty(",
+      "EMPTY_WEB_SEARCH_HALT_AFTER = 8",
+      "if not failed and _web_search_result_is_empty(result):",
+      "parsed = safe_json_loads(payload)",
+      "if empty_count >= EMPTY_WEB_SEARCH_HALT_AFTER:",
+      "self._same_tool_failure_counts: dict[str, int] = {}\n        self._empty_web_search_streak = 0\n        self._no_progress: dict[ToolCallSignature, tuple[str, int]] = {}",
+      "            else:\n                self._empty_web_search_streak = 0\n\n        if failed:",
+      "repeated_empty_web_search_halt"
+    ],
+    "agent/tool_executor.py": [
+      "if kind == \"parallel\" and not any(",
+      "call.function.name == \"web_search\" for call in calls"
+    ],
+    "agent/turn_finalizer.py": [
+      "successful_guardrail_recovery = (",
+      "or successful_text_response",
+      "and not successful_guardrail_recovery"
+    ],
+    "run_agent.py": [
+      "tool_call.function.name == \"web_search\"",
+      "return self._execute_tool_calls_sequential("
+    ],
+    "tests/agent/test_tool_guardrails.py": [
+      "def test_varied_empty_web_searches_halt_before_the_absolute_cap(",
+      "def test_successful_web_search_resets_empty_result_streak(",
+      "def test_failed_non_empty_web_search_resets_empty_result_streak(",
+      "def test_nonempty_web_search_result_may_contain_empty_web_json_text(",
+      "def test_wrapped_empty_web_search_result_is_detected_structurally(",
+      "def test_post_call_halt_blocks_later_calls_in_the_same_batch("
+    ],
+    "tests/run_agent/test_background_review_input_budget.py": [
+      "def test_review_budget_preserves_pending_guardrail_halt_response("
+    ],
+    "tests/run_agent/test_tool_call_guardrail_runtime.py": [
+      "def test_guardrail_halt_gets_one_bounded_answer_from_collected_results(",
+      "def test_web_search_cap_returns_an_answer_instead_of_the_guardrail_template(",
+      "def test_guardrail_final_answer_cannot_dispatch_another_tool(",
+      "def test_guardrail_final_answer_normalizes_tool_request_overrides(",
+      "def test_guardrail_recovery_provider_error_does_not_retry_or_fallback(",
+      "def test_streaming_guardrail_recovery_uses_one_nonstreaming_request(",
+      "def test_guardrail_recovery_empty_response_skips_continuation_scaffolding(",
+      "def test_guardrail_recovery_salvages_truncated_visible_text_without_continuation(",
+      "def test_guardrail_recovery_gets_one_grace_call_after_iteration_budget_exhaustion(",
+      "def test_guardrail_recovery_content_filter_does_not_activate_fallback(",
+      "def test_guardrail_recovery_nous_rate_guard_does_not_activate_fallback(",
+      "def test_web_search_batch_stops_dispatch_after_eighth_empty_result(",
+      "def test_segmented_web_search_batch_stops_before_later_calls("
+    ]
+  },
+  "semantic_checks": [
+    "answer_only_guardrail_recovery",
+    "consecutive_empty_web_search",
+    "guardrail_recovery_finalization",
+    "sequential_web_search_batches"
+  ],
+  "retirement_condition": "Remove when upstream.lock contains equivalent varied-query empty-search detection and bounded post-halt answer synthesis."
+}

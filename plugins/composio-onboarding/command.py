@@ -136,12 +136,12 @@ def _auth_config_id(toolkit: str) -> str:
     query = urlencode(
         {
             "toolkit_slug": toolkit,
-            "is_composio_managed": "true",
             "show_disabled": "false",
-            "limit": "10",
+            "limit": "50",
         }
     )
     response = _composio_request("GET", f"/api/v3/auth_configs?{query}")
+    candidates = []
     for item in response.get("items") or []:
         if not isinstance(item, dict):
             continue
@@ -151,20 +151,19 @@ def _auth_config_id(toolkit: str) -> str:
             and str(item.get("status") or "").upper() == "ENABLED"
             and item.get("id")
         ):
-            return str(item["id"])
+            candidates.append(item)
+    # OAuth toolkits normally use Composio-managed auth, while API-key and
+    # other provider schemes require an enabled custom auth config. Prefer the
+    # managed config when both exist, but never hide a valid custom config.
+    candidates.sort(key=lambda item: not bool(item.get("is_composio_managed")))
+    if candidates:
+        return str(candidates[0]["id"])
     return ""
-
-
-def _bootstrap_url(client_slug: str, toolkit: str) -> str:
-    base = os.environ.get("COMPOSIO_PROJECT_BOOTSTRAP_URL", "https://app.composio.dev/").strip()
-    if not base.startswith("https://"):
-        raise core.OnboardingError("COMPOSIO_PROJECT_BOOTSTRAP_URL must be https")
-    return f"{base.rstrip('/')}?{urlencode({'client': client_slug, 'toolkit': toolkit})}"
 
 
 def _bootstrap_message(req: ConnectRequest, client_slug: str, reason: str) -> str:
     lines = [
-        f"Composio setup needed for {client_slug}",
+        f"Composio setup is not ready for {client_slug}",
         f"Requested tool: {req.toolkit}",
         f"Account slot: {req.alias}",
     ]
@@ -173,11 +172,10 @@ def _bootstrap_message(req: ConnectRequest, client_slug: str, reason: str) -> st
     lines.extend(
         [
             "",
-            f"Open this client's Composio project: {_bootstrap_url(client_slug, req.toolkit)}",
-            "Create or select the app's auth config there. If this client project key is not installed yet, "
-            "the authorized client may send it here in this private lane; the agent should store it without "
-            "echoing it or demanding rotation solely because chat was used.",
-            "Then retry /connect.",
+            "Do not open a generic Composio login, dashboard, toolkit page, or provider sign-in page. "
+            "None of those is an account-bound connection link.",
+            "Operator action: repair this client-owned Composio configuration, then retry /connect so "
+            "the agent can send the hosted connect.composio.dev/link/... URL directly in this chat.",
             "",
             f"Reason: {reason}",
         ]
@@ -373,6 +371,10 @@ def handle_connect_command(raw_args: str | None, hook_ctx: dict[str, Any] | None
             [
                 "",
                 f"Reconnect this account: {link}",
+                "Open this hosted link directly; do not substitute a generic Composio login, dashboard, "
+                "toolkit page, or provider sign-in page.",
+                "If the provider asks for an API key, create or retrieve it in that provider's own account "
+                "settings and enter it only in this hosted link—never paste it into Telegram.",
                 "This refreshes the existing client-owned route; it does not create a requester-scoped replacement.",
                 "After OAuth, verify the existing route with a live read before resuming dependent automation.",
             ]
@@ -412,7 +414,15 @@ def handle_connect_command(raw_args: str | None, hook_ctx: dict[str, Any] | None
     if link_context.get("expected_email"):
         lines.append(f"Expected account: {link_context['expected_email']}")
     lines.extend(
-        ["", f"Connect this account: {link}", "After OAuth, I will verify the account before using it."]
+        [
+            "",
+            f"Connect this account: {link}",
+            "Open this hosted link directly; do not substitute a generic Composio login, dashboard, "
+            "toolkit page, or provider sign-in page.",
+            "If the provider asks for an API key, create or retrieve it in that provider's own account "
+            "settings and enter it only in this hosted link—never paste it into Telegram.",
+            "After the provider connection completes, I will verify the account before using it.",
+        ]
     )
     return "\n".join(lines)
 

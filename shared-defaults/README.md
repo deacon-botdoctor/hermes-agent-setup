@@ -11,8 +11,10 @@ in favor of pinned-upstream defaults and client-local configuration.
 ## Files
 
 - `config-mcp-on-demand-control.yaml` enables the policy-gated MCP activation
-  tools while the cold-backend compatibility path remains necessary, and
-  additively exposes `image_gen` on CLI, Telegram, and cron surfaces.
+  tools while the cold-backend compatibility path remains necessary, additively
+  exposes `image_gen` on CLI, Telegram, and cron surfaces, and additively
+  enables `telegram-email-card-qa` so Gmail send/draft and assembled
+  email cards cannot keep dirty spacing.
 - `config-native-tool-search.yaml` turns on native tool-search deferral.
 - `config-native-image-generation.yaml` configures Hermes' native
   `image_generate` provider and model at the top-level schema Hermes reads.
@@ -95,6 +97,46 @@ With `--receipt-json`, a successful scoped write or no-op emits the before/after
 config hashes, changed, skipped, and exempt managed paths, and the effective
 route and platform exposure. A repeated merge is a no-op with identical hashes
 and an empty `changed_paths` list.
+
+For the Refero-only cold declaration, Operator Control invokes the bounded
+scope with the exact candidate interpreter and an existing rollback directory:
+
+```sh
+scripts/merge-shared-defaults.py \
+  --scope refero-styles \
+  --profile-root /absolute/hermes-home \
+  --hermes-python /absolute/candidate/venv/bin/python \
+  --rollback-dir /existing/rollback-directory
+```
+
+This scope reads and may update only `config.yaml` and the capability router's
+consumed `registry.json`. It adds an `enabled: false` Refero server declaration
+when absent, allows only `refero-styles` on demand, exposes its backend only on
+platforms that already expose both the router and on-demand control, and adds
+the single exact Refero row from Golden's public floor registry. Explicit
+disables and matching exemptions preserve both files unchanged. Custom server
+declarations, alternate consumed-registry routes, or missing, malformed, and
+duplicate registry/config structures fail closed without emitting their
+contents.
+
+Before either target is written, the command snapshots both files under
+`refero-styles-registration/` in the rollback directory. Restore the byte-exact
+preimage, including mode and ownership, with the same profile and rollback
+directory:
+
+```sh
+scripts/merge-shared-defaults.py \
+  --scope refero-styles \
+  --profile-root /absolute/hermes-home \
+  --rollback-dir /existing/rollback-directory \
+  --restore
+```
+
+Restore refuses snapshot drift or unrelated intervening target edits. The
+Refero scope emits only sanitized JSON receipts; it does not deliver source,
+start the server, call tools or models, or perform fleet dispatch. Source
+delivery is owned by `install_default_mcp_floor` as described in the
+[runtime composition contract](../docs/runtime-composition-contract.md).
 
 ## Client opt-out
 

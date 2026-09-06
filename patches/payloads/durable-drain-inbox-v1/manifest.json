@@ -1,33 +1,46 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "name": "durable-drain-inbox-v1",
-  "base_commit": "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb",
-  "source_seed_head": "aceebe5dd6a5f1741932c040399330f637b3cc5b",
-  "payload_finalized_in_golden_commit": "c99cb16b3db40df6754d4fc3cc2c99da783f49b8",
-  "patch": "hermes-agent-9da6d455-durable-drain-v1.patch",
-  "patch_sha256": "312d9bf764c1e10b6d9c3bde67d66475a32add922be034ba36113ff38771fbc9",
+  "base_commit": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "source_seed_head": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "reviewed_source_head": "d77bb7fe3f23b7b873b4fb6eab7adc354a1ec57d",
+  "payload_finalized_against_golden_parent": "ea7986adf46512328a6692c2a34a40dc7b621516",
+  "patch": "hermes-agent-85207247-durable-drain-v1.patch",
+  "patch_sha256": "ee428d18d22c0b7a6de33b1db2edf1eb124a72c846d7d0e3fa43c1f39b76605d",
   "impact": {
-    "commits": 1,
-    "files": 15,
-    "insertions": 6316,
-    "deletions": 263
+    "commits": 6,
+    "files": 27,
+    "insertions": 9132,
+    "deletions": 437
   },
   "postimage_git_blobs": {
-    "gateway/drain_inbox.py": "301ed6669497df05ac0225801b1fe9487fea040c",
-    "gateway/platforms/base.py": "02defeec008d0354467ac43e8ba6170917d10449",
-    "gateway/platforms/bluebubbles.py": "7ae4fe2f7be331cebbbe25b846803bd432710b5e",
-    "gateway/platforms/msgraph_webhook.py": "0b7fbe17ff37a5369933ae5f626b449e82a0416b",
-    "gateway/platforms/qqbot/adapter.py": "c9aa3b100c574e4237e818da20cf91e990794b61",
-    "gateway/platforms/webhook.py": "ff594f7b6ca4c436540f58a682fb9561a9ab7f5d",
-    "gateway/platforms/whatsapp_cloud.py": "655cf4a6fa99898fa95ef832d79b374fbdb1ed0d",
-    "gateway/run.py": "7a005a6555422f70788fe4d04b7254529cb81ed8",
-    "gateway/session.py": "9e639a4f331a1161fbec8a5bcf10d55454f3d37f",
-    "gateway/slash_commands.py": "c26a0035f5e960e15300146adb912a34a36bbde4",
-    "hermes_state.py": "fcc5676bfd0d7d055bfc4bd583c2e9eee96f5e24",
-    "tests/gateway/restart_test_helpers.py": "54cff48f94eb31e864155f97fccd11735eeb182f",
-    "tests/gateway/test_drain_inbox.py": "3e88b5e9ce9af9013cc69d07ea906d4fc7dba6e8",
-    "tests/gateway/test_external_drain_control.py": "a58d50de2d308d23c5a846e285bd42793f76a8ee",
-    "tests/gateway/test_restart_resume_pending.py": "6d8e1ba29a1e6fd073d5f68eb3577b45cc2fe9be"
+    "cli-config.yaml.example": "d070b61d2cf21023f269d0434d6e533bd800ecf0",
+    "gateway/display_config.py": "b775d1fec0c084c1c649d1c7cc867eddf83b11e7",
+    "gateway/drain_inbox.py": "ef7407f9219d4ab3b77bd4920b2e11eea7573f87",
+    "gateway/platforms/base.py": "540f7308615c9bf08e7fb2082a7b5895cf7874d6",
+    "gateway/platforms/bluebubbles.py": "897e22334d9d93c948859d93854a9600981154e2",
+    "gateway/platforms/msgraph_webhook.py": "e5538dd817ef8b84c85e241742b74d898cd4b06e",
+    "gateway/platforms/qqbot/adapter.py": "30240ea4e143e00ba0982733c1b6f54643e54fa7",
+    "gateway/platforms/signal.py": "6f6f992d535bdcc6cd2d81eb9c19177e9928eab8",
+    "gateway/platforms/webhook.py": "e824205ca2e94c43f7e9907707f71a6e75779cc9",
+    "gateway/platforms/whatsapp_cloud.py": "d0a8255ccffdc40258ae1f55b0000f0d659fa7b5",
+    "gateway/run.py": "c8b5b6c0bed480373505ec3d7f7b2cd757b9e93d",
+    "gateway/session.py": "1e81f80db227d74b210f8feca151e48cf0f29af4",
+    "gateway/slash_commands.py": "031c6f6b085b595421dc74efd99e0ced6fd420f8",
+    "hermes_state.py": "c364378b16b02ce316b5a1a7717a11cb27194d39",
+    "tests/gateway/restart_test_helpers.py": "4a4dac80fab004cf0484505f837d827ea62d4261",
+    "tests/gateway/test_bluebubbles.py": "68d514533a0257c856a00e407920104e6190423d",
+    "tests/gateway/test_display_config.py": "94df5ce27da12da588de85d1c678a7a3da372a45",
+    "tests/gateway/test_drain_inbox.py": "5c132e0f975239ae697979e512e7407c966372c5",
+    "tests/gateway/test_external_drain_control.py": "d8fb770280348b0289ae082d9dc54c63f2d3c6b8",
+    "tests/gateway/test_msgraph_webhook.py": "9574f3c8252bb7d776af90d91ba507f011888b61",
+    "tests/gateway/test_multiplex_session_db_profile_scope.py": "0a3672bbbbc777421865fbeea413408a712f77aa",
+    "tests/gateway/test_restart_resume_pending.py": "c28d039927f2dd8bf0585c4baeba508ff08f7fd2",
+    "tests/gateway/test_run_cleanup_progress.py": "cd99d196b7fd2da4f99fdf8b835ffdedb3af6526",
+    "tests/gateway/test_startup_connect_parallel.py": "af615abd9eeedd17e5d773e54f40bee18c7720de",
+    "tests/gateway/test_webhook_adapter.py": "3e67516284a1d72f2fdc0d23ff18ef4d04b1dbbe",
+    "tests/gateway/test_whatsapp_cloud.py": "b6efc0393ce0f6c051cec81ea2a02a8dd42d1488",
+    "website/docs/user-guide/messaging/index.md": "5fe706b3ff83d7f12890ea882b190d9f138d6453"
   },
   "downstream_mutable_postimages": {
     "gateway/drain_inbox.py": [
@@ -35,29 +48,34 @@
       "def _ensure_trusted_directory(path: Path) -> None:",
       "rows.append((raw, value if isinstance(value, dict) else None))",
       "def pending_records(path: Path | None = None) -> list[dict[str, Any]]:",
-      "\"\"\"Atomically remove one matching record while retaining malformed rows.\"\"\""
+      "\"\"\"Atomically remove one matching record while retaining malformed rows.\"\"\"",
+      "def record_queued_ack("
     ],
     "gateway/platforms/base.py": [
       "durable_ingress: bool = False",
       "def replaced(self, **changes: Any) -> \"MessageEvent\":"
     ],
     "gateway/platforms/whatsapp_cloud.py": [
-      "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1",
-      "if count:\n                try:\n                    confirm_text = (",
-      "await self.send(str(raw_message.get(\"from\") or \"\"), confirm_text)"
+      "async def _dispatch_payload(self, payload: Dict[str, Any]) -> bool:",
+      "startup_handled = await self._preflight_startup_gate(event)",
+      "return web.Response(status=503)"
     ],
     "gateway/run.py": [
       "from gateway.drain_inbox import (",
-      "self._startup_restore_barrier = asyncio.Lock()"
+      "self._startup_restore_barrier = asyncio.Lock()",
+      "self._startup_replay_session_owners: Dict[str, set[asyncio.Task]] = {}",
+      "def _startup_gate_active_for_session(self, session_key: str) -> bool:",
+      "self._protect_background_replay_session(session_key)",
+      "record_queued_ack as record_drain_queued_ack",
+      "await self._delete_drain_ack_before_replay(",
+      "\"progress_on_typing\""
     ],
     "gateway/session.py": [
       "def replay_marker_status(",
       "def persist_replay_marker("
     ],
     "gateway/slash_commands.py": [
-      "HERMES_CLIENT_CONVERSATION_CONTINUITY_v1",
-      "return None",
-      "return t(\"gateway.approve.no_pending\")"
+      "resume_event = event.replaced(text=f\"/resume {target}\")"
     ],
     "hermes_state.py": [
       "content: Optional[str] = None,",
@@ -68,12 +86,47 @@
       "def test_persisted_event_round_trips_exact_user_instruction(",
       "def test_queue_file_is_jsonl_for_operator_inspection(",
       "def test_acknowledge_retains_malformed_rows_for_recovery(",
-      "async def test_runner_replays_and_acknowledges_durable_drain_event("
+      "async def test_runner_replays_and_acknowledges_durable_drain_event(",
+      "async def test_startup_preflight_binds_drain_ack_before_replay(",
+      "async def test_startup_preflight_schedules_replay_when_both_ack_sends_fail(",
+      "async def test_busy_drain_ack_binding_failure_sends_visible_fallback(",
+      "def test_drain_ack_rejects_invalid_thread_metadata_without_raising(",
+      "async def test_slow_drain_ack_does_not_block_an_independent_queue(",
+      "async def test_replay_waits_for_inflight_drain_ack_binding(",
+      "async def test_restart_keeps_drain_ack_when_replay_cannot_be_claimed(",
+      "async def test_timed_out_replay_keeps_its_session_behind_durable_gate("
     ],
     "tests/gateway/test_restart_resume_pending.py": [
       "def test_early_listener_has_startup_gate_before_connect(",
       "def test_startup_gate_waits_for_final_barrier_then_dispatches_normally("
+    ],
+    "tests/gateway/test_run_cleanup_progress.py": [
+      "def test_progress_on_typing_sends_first_heartbeat_before_interval_and_keeps_ticks(",
+      "def test_progress_on_typing_still_sends_once_when_periodic_notifications_are_off(",
+      "def test_fast_success_waits_for_typing_heartbeat_id_before_cleanup(",
+      "def test_slow_typing_heartbeat_does_not_block_agent_and_is_still_cleaned_up(",
+      "def test_shutdown_of_deferred_heartbeat_owner_cancels_underlying_send(",
+      "def test_slow_typing_heartbeat_is_cancelled_when_failed_run_finishes_first(",
+      "def test_cancellation_during_typing_heartbeat_grace_cleans_up_tasks(",
+      "def test_failed_run_leaves_typing_start_heartbeat_as_breadcrumb("
+    ],
+    "cli-config.yaml.example": [
+      "progress_on_typing: false"
     ]
+  },
+  "downstream_exact_fragment_counts": {
+    "gateway/run.py": {
+      "deadline = loop.time() + timeout if timeout > 0 else loop.time()": 1,
+      "timeout=max(0.0, deadline - loop.time()),": 3
+    },
+    "gateway/drain_inbox.py": {
+      "    control_command = event.is_command()": 1,
+      "                except _PostReplaceError:\n                    try:\n                        _replace_rows(path, claimed_rows)\n                    except Exception:\n                        return queue_id, _CLAIMED\n": 1
+    },
+    "gateway/platforms/whatsapp_cloud.py": {
+      "                    inflight = getattr(self, \"_inflight_wamids\", None)\n": 1,
+      "                    finally:\n                        inflight.discard(wamid)\n": 1
+    }
   },
   "retirement_condition": "Remove this payload, module, registry entry, and generated carrier marker when upstream.lock pins a canonical Hermes commit whose tree already contains the equivalent durable drain inbox and paired tests."
 }

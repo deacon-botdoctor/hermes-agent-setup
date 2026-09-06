@@ -95,9 +95,23 @@ def _json_value(value: Any) -> Any:
 
 def _write_event(path: Path, event: dict[str, Any]) -> None:
     payload = (json.dumps(_json_value(event), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    fd = os.open(path, os.O_APPEND | os.O_CREAT | os.O_RDWR, 0o600)
     try:
-        os.write(fd, payload)
+        # Serialize framing checks and the append across processes using the
+        # journal itself. Closing the descriptor releases either OS lock.
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        if os.lseek(fd, 0, os.SEEK_END):
+            os.lseek(fd, -1, os.SEEK_END)
+            if os.read(fd, 1) != b"\n":
+                raise OSError("receipt journal has an incomplete final record")
+        if os.write(fd, payload) != len(payload):
+            raise OSError("receipt journal write was incomplete")
     finally:
         os.close(fd)
 
@@ -348,9 +362,7 @@ def _usage_payload(
 ) -> dict[str, Any]:
     raw_usage = _obj_get(response, "usage")
     route_host = _base_url_host(base_url)
-    if (
-        str(provider or "").lower() == "openrouter" or route_host == "openrouter.ai"
-    ) and openrouter_generation_id != "id_unavailable":
+    if route_host == "openrouter.ai" and openrouter_generation_id != "id_unavailable":
         token_hint = 0
         for name in (
             "prompt_tokens",
@@ -452,6 +464,15 @@ def _usage_payload(
     return result
 
 
+def _runtime_performance_turn_id() -> str:
+    try:
+        from agent.runtime_performance_events import current_turn_id
+
+        return str(current_turn_id() or "")
+    except Exception:
+        return ""
+
+
 @dataclass
 class Attempt:
     surface: str
@@ -468,6 +489,10 @@ class Attempt:
     provenance_ref: str = ""
     attempt_kind: str = "initial"
     fallback_cause: Optional[str] = None
+    payload_breakdown: Optional[dict[str, Any]] = None
+    runtime_performance_turn_id: str = field(
+        default_factory=_runtime_performance_turn_id
+    )
     api_key: Any = None
     attempt_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     started_at: float = field(default_factory=time.time)
@@ -513,6 +538,23 @@ class Attempt:
                 "started_at": self.started_at,
             }
         )
+        if self.surface == "main" and isinstance(self.payload_breakdown, dict):
+            try:
+                from agent.runtime_performance_events import (
+                    record_model_request_started,
+                )
+
+                record_model_request_started(
+                    turn_id=self.runtime_performance_turn_id,
+                    api_request_id=self.attempt_id,
+                    logical_request_id=self.logical_request_id,
+                    provider=self.provider,
+                    model=self.model,
+                    payload_breakdown=self.payload_breakdown,
+                    observed_at=self.started_at,
+                )
+            except Exception:
+                pass
 
     def finish(
         self,
@@ -570,18 +612,43 @@ class Attempt:
             "completed_at": ended_at,
             "duration_ms": round((ended_at - self.started_at) * 1000, 3),
         }
-        payload.update(
-            _usage_payload(
-                response,
-                provider=self.provider,
-                model=resolved_model,
-                base_url=self.base_url,
-                api_mode=self.api_mode,
-                api_key=self.api_key,
-                openrouter_generation_id=generation_id,
-            )
+        usage_payload = _usage_payload(
+            response,
+            provider=self.provider,
+            model=resolved_model,
+            base_url=self.base_url,
+            api_mode=self.api_mode,
+            api_key=self.api_key,
+            openrouter_generation_id=generation_id,
         )
+        payload.update(usage_payload)
+        if isinstance(self.payload_breakdown, dict):
+            payload["payload_breakdown"] = self.payload_breakdown
         _append_terminal(payload)
+        if (
+            self.surface == "main"
+            and outcome == "success"
+            and isinstance(self.payload_breakdown, dict)
+        ):
+            try:
+                from agent.runtime_performance_events import (
+                    record_model_request_complete,
+                )
+
+                record_model_request_complete(
+                    turn_id=self.runtime_performance_turn_id,
+                    api_request_id=self.attempt_id,
+                    logical_request_id=self.logical_request_id,
+                    provider=self.provider,
+                    model=resolved_model,
+                    payload_breakdown=self.payload_breakdown,
+                    observed_at=ended_at,
+                    input_tokens=usage_payload.get("input_tokens"),
+                    cache_read_tokens=usage_payload.get("cache_read_tokens"),
+                    cache_write_tokens=usage_payload.get("cache_write_tokens"),
+                )
+            except Exception:
+                pass
 
 
 def _base_url_host(base_url: str) -> str:
@@ -1119,6 +1186,7 @@ def execute_main_attempt(
     retry_count: int,
     is_fallback: bool,
     fallback_cause: Optional[str],
+    payload_breakdown: Optional[dict[str, Any]] = None,
     defer_success: bool = False,
 ) -> Any:
     attempt = Attempt(
@@ -1134,18 +1202,24 @@ def execute_main_attempt(
         platform=platform,
         attempt_kind=("fallback" if is_fallback else ("retry" if retry_count else "initial")),
         fallback_cause=fallback_cause if is_fallback else None,
+        payload_breakdown=payload_breakdown,
         api_key=api_key,
     )
     attempt.start()
-    try:
-        response = call()
-    except BaseException as exc:
-        attempt.finish("error", error=exc)
-        raise
     if defer_success:
         pending = dict(_PENDING_MAIN.get())
         pending[logical_request_id] = attempt
         _PENDING_MAIN.set(pending)
+    try:
+        response = call()
+    except BaseException as exc:
+        if defer_success:
+            pending = dict(_PENDING_MAIN.get())
+            pending.pop(logical_request_id, None)
+            _PENDING_MAIN.set(pending)
+        attempt.finish("error", error=exc)
+        raise
+    if defer_success:
         return response
     attempt.finish("success", response=response)
     return response
@@ -1165,6 +1239,24 @@ def finish_main_attempt(
         return False
     attempt.finish(outcome, response=response, error=error)
     return True
+
+
+def record_main_first_byte(logical_request_id: str) -> bool:
+    attempt = _PENDING_MAIN.get().get(logical_request_id)
+    if attempt is None:
+        return False
+    try:
+        from agent.runtime_performance_events import record_model_first_byte
+
+        return record_model_first_byte(
+            turn_id=attempt.runtime_performance_turn_id,
+            api_request_id=attempt.attempt_id,
+            logical_request_id=attempt.logical_request_id,
+            provider=attempt.provider,
+            model=attempt.model,
+        )
+    except Exception:
+        return False
 
 
 def reconcile_events(events: list[dict[str, Any]]) -> dict[str, Any]:

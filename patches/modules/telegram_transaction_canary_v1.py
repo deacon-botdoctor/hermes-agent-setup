@@ -24,9 +24,7 @@ PAYLOAD = (
 )
 OLD_FINISH = '            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n            _telegram_tx.finish(failed=not processing_ok, error=None if processing_ok else "processing or delivery failed")\n'
 NEW_FINISH = '            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n            semantic_failure = _telegram_tx.is_error_envelope(response)\n            _telegram_tx.finish(\n                failed=not processing_ok or semantic_failure,\n                error="agent error envelope" if semantic_failure else None if processing_ok else "processing or delivery failed",\n            )\n'
-NORMAL_FINISH = (
-    "            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n"
-)
+NORMAL_FINISH = "            processing_ok = delivery_succeeded if delivery_attempted else not bool(response)\n"
 NORMAL_FINISH_BLOCK = NEW_FINISH
 OLD_FINISH_BLOCK = OLD_FINISH
 NORMAL_FINISH_WITHOUT_TERMINAL = (
@@ -47,6 +45,18 @@ NORMAL_DELIVERY_BLOCK_V1 = NORMAL_DELIVERY + (
 )
 NORMAL_DELIVERY_BLOCK = NORMAL_DELIVERY + (
     '                _telegram_tx.accepted(getattr(result, "message_id", None))\n'
+    "                try:\n"
+    "                    from agent.runtime_performance_events import record_turn_event\n"
+    "                    record_turn_event(\n"
+    '                        "first_visible_response_chunk",\n'
+    '                        timing_semantics="platform_delivery_ack_exact",\n'
+    "                    )\n"
+    "                    record_turn_event(\n"
+    '                        "response_sent",\n'
+    '                        timing_semantics="platform_delivery_ack_exact",\n'
+    "                    )\n"
+    "                except Exception:\n"
+    "                    pass\n"
     "            else:\n"
     '                _telegram_tx.delivery_failed(getattr(result, "error", "delivery failed"))\n'
 )
@@ -65,14 +75,20 @@ NORMAL_EXCEPTION_BLOCK = (
     "            _telegram_tx.finish(failed=True, error=e)\n"
     '            await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)\n'
 )
+NORMAL_EXCEPTION_LATEST = (
+    "        except BaseException as e:\n"
+    '            await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)\n'
+)
+NORMAL_EXCEPTION_LATEST_BLOCK = (
+    "        except BaseException as e:\n"
+    "            _telegram_tx.finish(failed=True, error=e)\n"
+    '            await self._run_processing_hook("on_processing_complete", event, ProcessingOutcome.FAILURE)\n'
+)
 NORMAL_MODEL_FINISHED = "            response, _ephemeral_ttl = self._unwrap_ephemeral(response)\n"
 NORMAL_MODEL_FINISHED_BLOCK = NORMAL_MODEL_FINISHED + "            _telegram_tx.model_finished()\n"
 STREAM_IMPORT = "from gateway.platforms.base import MEDIA_TAG_CLEANUP_RE\n"
 STREAM_IMPORT_BLOCK = STREAM_IMPORT + "from gateway import telegram_transaction_ledger as _telegram_tx\n"
-STREAM_MODEL_FINISHED = (
-    "                        if item is _DONE:\n"
-    "                            got_done = True\n"
-)
+STREAM_MODEL_FINISHED = "                        if item is _DONE:\n                            got_done = True\n"
 STREAM_MODEL_FINISHED_BLOCK = (
     "                        if item is _DONE:\n"
     "                            _telegram_tx.model_finished()\n"
@@ -354,9 +370,11 @@ NORMAL_BEGIN = (
 )
 NORMAL_BEGIN_BLOCK = NORMAL_BEGIN + '        _telegram_tx.begin(event, getattr(self, "name", "hermes"))\n'
 PINNED_CLEAR = "        finally:\n            # Stop typing before any deferred callback work."
-LEGACY_PINNED_CLEAR_BLOCK = (
-    "        finally:\n            _telegram_tx.finalize_progress_cleanup()\n            # Stop typing before any deferred callback work."
+PERFORMANCE_PINNED_CLEAR = PINNED_CLEAR.replace(
+    "        finally:\n",
+    "        finally:\n            _finish_response_delivery(trace=_runtime_delivery_trace, aborted=True)\n",
 )
+LEGACY_PINNED_CLEAR_BLOCK = "        finally:\n            _telegram_tx.finalize_progress_cleanup()\n            # Stop typing before any deferred callback work."
 OVERLAY_CLEAR = "        finally:\n            # Fire any one-shot post-delivery callback registered for this\n"
 LEGACY_OVERLAY_CLEAR_BLOCK = (
     "        finally:\n"
@@ -709,7 +727,7 @@ def _with_clear_hook(text: str) -> str:
                 1,
             )
             break
-    if PINNED_CLEAR not in text and OVERLAY_CLEAR not in text:
+    if not any(anchor in text for anchor in (PINNED_CLEAR, PERFORMANCE_PINNED_CLEAR, OVERLAY_CLEAR)):
         raise RuntimeError("clear: anchor drift")
     return _wrap_finally_cleanup(text)
 
@@ -733,11 +751,7 @@ def _wrap_finally_cleanup(text: str) -> str:
     lines = text.splitlines(keepends=True)
     first_body_line = final_try.finalbody[0].lineno - 2
     finally_line = next(
-        (
-            index
-            for index in range(first_body_line, final_try.lineno - 2, -1)
-            if lines[index].strip() == "finally:"
-        ),
+        (index for index in range(first_body_line, final_try.lineno - 2, -1) if lines[index].strip() == "finally:"),
         None,
     )
     if finally_line is None or final_try.finalbody[-1].end_lineno is None:
@@ -746,9 +760,7 @@ def _wrap_finally_cleanup(text: str) -> str:
     body_indent = lines[finally_line][: -len(lines[finally_line].lstrip())] + "    "
     original_body = lines[finally_line + 1 : body_end]
     wrapped_body = [f"{body_indent}try:\n"]
-    wrapped_body.extend(
-        f"    {line}" if line.strip() else line for line in original_body
-    )
+    wrapped_body.extend(f"    {line}" if line.strip() else line for line in original_body)
     wrapped_body.extend(CLEANUP_FINALIZE_BLOCK.splitlines(keepends=True))
     return "".join(lines[: finally_line + 1] + wrapped_body + lines[body_end:])
 
@@ -764,10 +776,7 @@ def _unwrap_finally_cleanup(text: str) -> str:
     start = cleanup_try.lineno - 2
     body_end = cleanup_try.body[-1].end_lineno - 1
     end = cleanup_try.end_lineno - 1
-    original_body = [
-        line[4:] if line.startswith("    ") else line
-        for line in lines[start + 1 : body_end]
-    ]
+    original_body = [line[4:] if line.startswith("    ") else line for line in lines[start + 1 : body_end]]
     return "".join(lines[:start] + original_body + lines[end:])
 
 
@@ -790,9 +799,9 @@ def _core_hooks_current(text: str) -> bool:
                 NORMAL_FINISH_BLOCK,
                 NORMAL_MODEL_FINISHED_BLOCK,
                 NORMAL_CANCEL_BLOCK,
-                NORMAL_EXCEPTION_BLOCK,
             )
         )
+        and (NORMAL_EXCEPTION_BLOCK in process or NORMAL_EXCEPTION_LATEST_BLOCK in process)
         and _normal_clear_current(process)
         and _has_ledger_alias(tree)
     )
@@ -862,13 +871,22 @@ def _with_core_method_hooks(text: str) -> str:
         "cancel",
         (_without_line(NORMAL_CANCEL_BLOCK, "_telegram_tx.finish"),),
     )
-    text = _ensure(
-        text,
-        NORMAL_EXCEPTION,
-        NORMAL_EXCEPTION_BLOCK,
-        "exception",
-        (_without_line(NORMAL_EXCEPTION_BLOCK, "_telegram_tx.finish"),),
-    )
+    if NORMAL_EXCEPTION_LATEST in text or NORMAL_EXCEPTION_LATEST_BLOCK in text:
+        text = _ensure(
+            text,
+            NORMAL_EXCEPTION_LATEST,
+            NORMAL_EXCEPTION_LATEST_BLOCK,
+            "exception",
+            (_without_line(NORMAL_EXCEPTION_LATEST_BLOCK, "_telegram_tx.finish"),),
+        )
+    else:
+        text = _ensure(
+            text,
+            NORMAL_EXCEPTION,
+            NORMAL_EXCEPTION_BLOCK,
+            "exception",
+            (_without_line(NORMAL_EXCEPTION_BLOCK, "_telegram_tx.finish"),),
+        )
     return _with_clear_hook(text)
 
 
@@ -961,9 +979,7 @@ def _with_stream_method_hooks(text: str) -> str:
                 "stream native-finally",
             )
         else:
-            prior_legacy = STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK.split(
-                "\n\n    # Strip MEDIA:", 1
-            )[0]
+            prior_legacy = STREAM_FINAL_EXIT_MODEL_FINISHED_BLOCK.split("\n\n    # Strip MEDIA:", 1)[0]
             text = _ensure(
                 text,
                 old,
@@ -1138,16 +1154,21 @@ def _validate_pre_canary_text(text: str, kind: str, label: str) -> None:
                 "BasePlatformAdapter",
                 "_dispatch_active_session_command",
             )
-            if not all(
+            base_anchors_ok = all(
                 process.count(anchor) == 1
                 for anchor in (
                     NORMAL_BEGIN,
                     NORMAL_DELIVERY,
                     NORMAL_FINISH,
                     NORMAL_CANCEL,
-                    NORMAL_EXCEPTION,
                 )
-            ) or (PINNED_CLEAR not in process and OVERLAY_CLEAR not in process):
+            )
+            exception_anchor_ok = process.count(NORMAL_EXCEPTION) == 1 or process.count(NORMAL_EXCEPTION_LATEST) == 1
+            if (
+                not base_anchors_ok
+                or not exception_anchor_ok
+                or not any(anchor in process for anchor in (PINNED_CLEAR, PERFORMANCE_PINNED_CLEAR, OVERLAY_CLEAR))
+            ):
                 raise RuntimeError
             if dispatch.count(BYPASS_RESET_BEGIN) != 1:
                 raise RuntimeError
@@ -1159,9 +1180,7 @@ def _validate_pre_canary_text(text: str, kind: str, label: str) -> None:
             if (
                 run.count(STREAM_MODEL_FINISHED) != 1
                 or not (has_native_tail or has_legacy_tail)
-                or not _has_import(
-                    tree, "gateway.platforms.base", "MEDIA_TAG_CLEANUP_RE"
-                )
+                or not _has_import(tree, "gateway.platforms.base", "MEDIA_TAG_CLEANUP_RE")
             ):
                 raise RuntimeError
         elif kind == "telegram":
@@ -1237,12 +1256,20 @@ def _without_historical_core_hooks(method: str) -> str:
         NORMAL_CANCEL,
         "historical cancel rollback",
     )
-    method = _once(
-        method,
-        NORMAL_EXCEPTION_BLOCK,
-        NORMAL_EXCEPTION,
-        "historical exception rollback",
-    )
+    if NORMAL_EXCEPTION_LATEST_BLOCK in method:
+        method = _once(
+            method,
+            NORMAL_EXCEPTION_LATEST_BLOCK,
+            NORMAL_EXCEPTION_LATEST,
+            "historical exception rollback",
+        )
+    else:
+        method = _once(
+            method,
+            NORMAL_EXCEPTION_BLOCK,
+            NORMAL_EXCEPTION,
+            "historical exception rollback",
+        )
     if not _normal_clear_current(method):
         raise RuntimeError("historical clear rollback: anchor drift")
     return _unwrap_finally_cleanup(method)
@@ -1421,7 +1448,146 @@ def _matches_ordered_base_predecessors(backup_text: str, installed_text: str) ->
         return False
 
 
+def _native_core_hooks(text: str) -> str:
+    text = _ensure(text, NORMAL_BEGIN, NORMAL_BEGIN_BLOCK, "native begin")
+    text = _ensure(text, NORMAL_MODEL_FINISHED, NORMAL_MODEL_FINISHED_BLOCK, "native model finished")
+    receipt = '                delivery_succeeded = delivery_succeeded or bool(getattr(result, "success", False))\n'
+    text = _ensure(text, receipt, receipt + '''                if getattr(result, "success", False):
+                    _telegram_tx.accepted(getattr(result, "message_id", None))
+                else:
+                    _telegram_tx.delivery_failed(getattr(result, "error", "delivery failed"))
+''', "native delivery receipt")
+    text = _ensure(text, NORMAL_FINISH, NORMAL_FINISH_BLOCK, "native finish")
+    cancel = '        except asyncio.CancelledError:\n            expected = asyncio.current_task() in self._expected_cancelled_tasks\n'
+    text = _ensure(text, cancel, cancel.replace('            expected =', '            _telegram_tx.finish(failed=True, error="cancelled")\n            expected ='), "native cancellation")
+    text = _ensure(text, NORMAL_EXCEPTION_LATEST, NORMAL_EXCEPTION_LATEST_BLOCK, "native failure")
+    if CLEANUP_FINALIZE_BLOCK not in text:
+        text = _wrap_finally_cleanup(text)
+    return text
+
+
+def _native_inline_receipts(text: str) -> str:
+    line = '        text, eph_ttl = self._unwrap_ephemeral(response)\n'
+    text = _ensure(text, line, line + '''        _telegram_tx.model_finished()
+        if _telegram_tx.is_error_envelope(text):
+            _telegram_tx.finish(failed=True, error="agent error envelope")
+''', "native inline model")
+    line = '        if eph_ttl > 0 and result.success and result.message_id:\n'
+    return _ensure(text, line, '''        if result.success:
+            _telegram_tx.accepted(result.message_id)
+        else:
+            _telegram_tx.delivery_failed(getattr(result, "error", "delivery failed"))
+''' + line, "native inline delivery")
+
+
+def _native_busy_receipts(text: str) -> str:
+    line = '        if should_bypass_active_session(cmd):\n            try:\n'
+    text = _ensure(text, line, '''        if should_bypass_active_session(cmd):
+            _telegram_tx.begin(event, getattr(self, "name", "hermes"))
+            _tx_error = None
+            try:
+''', "native bypass begin")
+    line = '''            except Exception as e:
+                logger.error("[%s] Command '/%s' dispatch failed: %s", self.name, cmd, e, exc_info=True)
+            return
+'''
+    return _ensure(text, line, '''            except asyncio.CancelledError:
+                _tx_error = "cancelled"
+                raise
+            except Exception as e:
+                _tx_error = e
+                logger.error("[%s] Command '/%s' dispatch failed: %s", self.name, cmd, e, exc_info=True)
+            finally:
+                _telegram_tx.finish(failed=_tx_error is not None, error=_tx_error)
+                _telegram_tx.clear()
+            return
+''', "native bypass completion")
+
+
+def _native_stream_receipts(text: str) -> str:
+    text = _ensure(text, '            if item is _DONE:\n                tick.got_done = True\n',
+                   '            if item is _DONE:\n                _telegram_tx.model_finished()\n                tick.got_done = True\n', "native stream model")
+    tail = '        finally:\n            self._wake_flush_waiters()\n'
+    text = _ensure(text, tail, '''        finally:
+            if self._final_response_sent:
+                _telegram_tx.accepted(getattr(self, "_message_id", None))
+            self._wake_flush_waiters()
+''', "native stream accepted final")
+    return _ensure_ledger_import(text, "base")
+
+
+def _native_confirm_receipts(text: str) -> str:
+    line = '''        return await self._send_prompt(
+            "send_slash_confirm", chat_id, metadata, build, thread_id=self._metadata_thread_id(metadata), reply_to_mode=self._reply_to_mode)
+'''
+    text = _ensure(text, line, '''        result = await self._send_prompt(
+            "send_slash_confirm", chat_id, metadata, build, thread_id=self._metadata_thread_id(metadata), reply_to_mode=self._reply_to_mode)
+        # HERMES_TELEGRAM_SLASH_CONFIRM_ACCEPTANCE_v1
+        if result.success and result.message_id:
+            _telegram_tx.accepted(result.message_id)
+            _telegram_tx.slash_confirm_requested(
+                result.message_id, session_key, confirm_id, getattr(self, "_session_store", None))
+        return result
+''', "native confirmation send")
+    line = '        cb = self._callback_ctx(query)\n'
+    text = _ensure(text, line, line + '        cb["update_id"] = getattr(update, "update_id", None)\n', "native callback update identity")
+    line = '            result_text = await _slash_confirm_mod.resolve(session_key, confirm_id, choice)\n'
+    text = _ensure(text, line, line + '''            # HERMES_TELEGRAM_SLASH_CONFIRM_RESOLUTION_v1
+            if result_text and query.message:
+                _telegram_tx.slash_confirm_resolved(
+                    query.message.message_id, session_key, confirm_id, choice, data,
+                    session_store=getattr(self, "_session_store", None), update_id=cb.get("update_id"),
+                    chat_id=cb.get("chat_id"), thread_id=cb.get("thread_id"),
+                    sender_user_id=getattr(query.from_user, "id", None))
+''', "native confirmation resolution")
+    return _ensure_ledger_import(text, "telegram")
+
+
+def _patch_native_canary(root: Path) -> bool:
+    """Bind receipts to native split callbacks; no historical carrier recovery on d363."""
+    media_plan = _media_resend_plan(root)
+    base = root / "gateway/platforms/base.py"
+    stream = root / "gateway/stream_consumer.py"
+    telegrams = _telegram_adapters(root)
+    originals = {p: p.read_text() for p in (base, stream, *telegrams)}
+    b = originals[base]
+    for name, transform in (
+        ("_process_message_background", _native_core_hooks),
+        ("_dispatch_inline_reply", _native_inline_receipts),
+        ("_handle_message_while_active", _native_busy_receipts),
+    ):
+        b = _patch_method_lexical(b, "BasePlatformAdapter", name, transform)
+    updated = {base: _ensure_ledger_import(b, "base"), stream: _native_stream_receipts(originals[stream])}
+    updated.update({p: _native_confirm_receipts(originals[p]) for p in telegrams})
+    payload = root / "gateway/telegram_transaction_ledger.py"
+    payload_original = payload.read_text() if payload.exists() else None
+    updated[payload] = PAYLOAD.read_text()
+    media_target = media_plan[1]
+    originals[media_target] = media_plan[2]
+    updated[media_target] = media_plan[3] or media_plan[2]
+    for p, content in updated.items():
+        compile(content, str(p), "exec")
+    changed = [p for p in updated if updated[p] != (payload_original if p == payload else originals[p])]
+    if not changed:
+        return False
+    # Build and validate every output before writing; restore this exact invocation on failure.
+    try:
+        for p in changed:
+            p.write_text(updated[p])
+    except Exception:
+        for p in changed:
+            previous = payload_original if p == payload else originals[p]
+            if previous is None:
+                p.unlink(missing_ok=True)
+            else:
+                p.write_text(previous)
+        raise
+    return True
+
+
 def patch_telegram_transaction_canary_v1(root: Path) -> bool:
+    if (Path(root) / "gateway/run_turn.py").is_file():
+        return _patch_native_canary(Path(root))
     root = Path(root)
     media_plan = _media_resend_plan(root)
     payload_text = PAYLOAD.read_text()

@@ -732,7 +732,13 @@ def check_anamnesis(cfg: dict, env: dict, smoke: bool) -> dict:
 
 
 def check_email(cfg: dict, env: dict, smoke: bool) -> dict:
-    result = {"status": "ok", "config": "ok", "plumbing": "ok", "smoke": "skip"}
+    result = {
+        "status": "ok",
+        "config": "ok",
+        "plumbing": "ok",
+        "smoke": "skip",
+        "evidence_scope": "configuration_only",
+    }
 
     # Current Google/Gmail tooling may use Composio remote MCP URLs. A local
     # COMPOSIO_API_KEY is not required for that path; only degrade if neither the
@@ -752,7 +758,8 @@ def check_email(cfg: dict, env: dict, smoke: bool) -> dict:
     if composio_servers:
         result["detail"] = (
             "Composio remote MCP configured for email/google tooling "
-            f"({len(composio_servers)} server(s)); COMPOSIO_API_KEY not required"
+            f"({len(composio_servers)} server(s)); COMPOSIO_API_KEY not required. "
+            "This check covers only the configured email route, not other Composio app connections."
         )
         if smoke:
             preferred = next(
@@ -793,6 +800,8 @@ def check_email(cfg: dict, env: dict, smoke: bool) -> dict:
                 )
                 if probe.returncode == 0:
                     result["smoke"] = "ok"
+                    result["evidence_scope"] = "email_profile_action"
+                    result["verified_capabilities"] = ["email_profile"]
                 else:
                     result["smoke"] = "fail"
                     result["status"] = "degraded"
@@ -806,12 +815,14 @@ def check_email(cfg: dict, env: dict, smoke: bool) -> dict:
     composio_key = env.get("COMPOSIO_API_KEY", "")
     if composio_key:
         result["detail"] = "Legacy Composio API key configured; Maton not required"
+        result["evidence_scope"] = "credential_presence_only"
         return result
 
     maton_key = env.get("MATON_API_KEY", "")
     if not maton_key:
         result["config"] = "not_configured"
         result["detail"] = "No email tooling configured; optional for this runtime"
+        result["evidence_scope"] = "none"
         return result
 
     return result
@@ -898,10 +909,13 @@ def check_mcp_servers(cfg: dict, env: dict, smoke: bool) -> dict:
 def _mcp_launch_readiness(cmd: str, server_cfg: dict) -> dict | None:
     """Verify an MCP server entrypoint can load, without fully starting it.
 
-    - ``python -m <module>``: resolve the module with the server's own env
-      (notably PYTHONPATH) via importlib.find_spec in a subprocess. A missing
-      module (e.g. an upgrade that orphaned the package) reports ``broken``.
-    - script-path entrypoint: confirm the .py file exists on disk.
+    - ``python -m <module>``: import the module with the server's own env
+      (notably PYTHONPATH) in a subprocess. Importing, rather than merely
+      resolving, catches transitive dependency breaks introduced by a runtime
+      upgrade.
+    - script-path entrypoint: execute it through ``runpy`` under a non-main
+      module name. This loads imports and decorators without starting the MCP
+      transport.
     Returns None when the launch shape is unrecognized (treated as ok).
     """
     args = server_cfg.get("args", []) or []
@@ -911,30 +925,59 @@ def _mcp_launch_readiness(cmd: str, server_cfg: dict) -> dict | None:
             server_env[k] = os.path.expandvars(v)
     base = os.path.basename(cmd).lower()
     is_python = base.startswith("python")
+    cwd = server_cfg.get("cwd") or None
+
+    def run_import_probe(argv: list[str]) -> tuple[subprocess.CompletedProcess[str] | None, int, Exception | None]:
+        """Retry only a cold-start timeout; deterministic failures stay fail-closed."""
+        for attempt in (1, 2):
+            try:
+                return (
+                    subprocess.run(
+                        argv,
+                        env=server_env,
+                        cwd=cwd,
+                        capture_output=True,
+                        text=True,
+                        timeout=20,
+                    ),
+                    attempt,
+                    None,
+                )
+            except subprocess.TimeoutExpired as exc:
+                if attempt == 2:
+                    return None, attempt, exc
+            except Exception as exc:  # noqa: BLE001
+                return None, attempt, exc
+        raise AssertionError("bounded MCP import probe exhausted unexpectedly")
+
     if is_python and "-m" in args:
         mi = args.index("-m")
         if mi + 1 < len(args):
             module = args[mi + 1]
-            try:
-                probe = subprocess.run(
-                    [
-                        cmd,
-                        "-c",
-                        "import importlib.util,sys;sys.exit(0 if importlib.util.find_spec(sys.argv[1]) else 3)",
-                        module,
-                    ],
-                    env=server_env,
-                    capture_output=True,
-                    text=True,
-                    timeout=20,
-                )
-            except Exception as exc:  # noqa: BLE001
-                return {"status": "broken", "detail": f"module probe error for {module}: {exc}"}
+            probe, attempts, error = run_import_probe(
+                [
+                    cmd,
+                    "-c",
+                    "import importlib,sys;importlib.import_module(sys.argv[1])",
+                    module,
+                ]
+            )
+            if error is not None:
+                return {
+                    "status": "broken",
+                    "detail": f"module probe error for {module}: {error}",
+                    "import_attempts": attempts,
+                }
+            assert probe is not None
             if probe.returncode != 0:
                 tail = (probe.stderr or probe.stdout or "").strip().splitlines()
-                detail = tail[-1] if tail else f"module not importable: {module}"
-                return {"status": "broken", "detail": f"{module}: {detail}"}
-            return {"status": "ok"}
+                detail = tail[-1] if tail else f"module import failed: {module}"
+                return {
+                    "status": "broken",
+                    "detail": f"{module}: {detail}",
+                    "import_attempts": attempts,
+                }
+            return {"status": "ok", "import_attempts": attempts}
     shell_names = {"sh", "bash", "zsh"}
     is_shell = base in shell_names or base.endswith("/sh") or base.endswith("/bash") or base.endswith("/zsh")
     if is_shell:
@@ -959,6 +1002,35 @@ def _mcp_launch_readiness(cmd: str, server_cfg: dict) -> dict | None:
     )
     if script and not Path(os.path.expandvars(script)).exists():
         return {"status": "broken", "detail": f"Entrypoint script not found: {script}"}
+    if is_python and script:
+        expanded_script = os.path.expandvars(script)
+        probe, attempts, error = run_import_probe(
+            [
+                cmd,
+                "-c",
+                (
+                    "import runpy,sys;"
+                    "runpy.run_path(sys.argv[1], run_name='__mcp_readiness__')"
+                ),
+                expanded_script,
+            ]
+        )
+        if error is not None:
+            return {
+                "status": "broken",
+                "detail": f"script probe error for {script}: {error}",
+                "import_attempts": attempts,
+            }
+        assert probe is not None
+        if probe.returncode != 0:
+            tail = (probe.stderr or probe.stdout or "").strip().splitlines()
+            detail = tail[-1] if tail else f"script import failed: {script}"
+            return {
+                "status": "broken",
+                "detail": f"{script}: {detail}",
+                "import_attempts": attempts,
+            }
+        return {"status": "ok", "import_attempts": attempts}
     return None
 
 

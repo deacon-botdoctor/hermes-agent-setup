@@ -38,6 +38,7 @@ CANONICAL_RULE_NAMES = frozenset(
     {"knowledge-store-policy.md", "capability-discovery.md", "knowledge-routing.md"}
 )
 KNOWN_TEXT_REWRITES = {
+    "- memory: `anamnesis`": "- memory: native Hermes memory and session recall",
     "Hot by default: anamnesis, ": "Hot by default: ",
     "Configured MCP connectors visible to this runtime: anamnesis, ":
         "Configured MCP connectors visible to this runtime: ",

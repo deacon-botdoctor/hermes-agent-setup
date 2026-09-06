@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import re
 import sys
 from pathlib import Path
 
@@ -85,6 +86,18 @@ def patch_executor_scope_source(content: str) -> str | None:
     if "    async def _preflight_startup_gate(" not in content:
         return content
     if content.count(PREFLIGHT_RECOVERY_OLD) != 1:
+        start = content.find("    async def _preflight_startup_gate(")
+        next_method = re.search(
+            r"^    (?:async )?def ",
+            content[start + 1 :],
+            flags=re.MULTILINE,
+        )
+        end = start + 1 + next_method.start() if next_method else len(content)
+        if "_apply_topic_recovery" not in content[start:end]:
+            # Durable startup-gate variants already keep topic recovery in the
+            # DM-only handle_message seam. Preserve the root-message guard
+            # instead of treating the absent legacy duplicate as an anchor miss.
+            return content
         return None
     patched = content.replace(
         PREFLIGHT_RECOVERY_OLD,

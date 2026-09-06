@@ -4,6 +4,147 @@ receipt:
   roster_key_env: HERMES_ROSTER_KEY
 
 installers:
+  - name: install_default_mcp_floor
+    owner_lane: baseline_wiring
+    current_registry_entry: default_mcp_floor
+    description: Install the exact cross-platform router, search, and read-only visual-reference source floor without changing tenant MCP configuration or policy.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    existing_profile_overlays: false
+    sources:
+      - source: mcp-servers/capability-router/browser-routing.capability-entry.json
+        destination: "{hermes_home}/mcp-servers/capability-router/browser-routing.capability-entry.json"
+        mode: "0644"
+      - source: mcp-servers/capability-router/operating-patterns.capability-entry.json
+        destination: "{hermes_home}/mcp-servers/capability-router/operating-patterns.capability-entry.json"
+        mode: "0644"
+      - source: mcp-servers/capability-router/public-floor-registry.json
+        destination: "{hermes_home}/mcp-servers/capability-router/public-floor-registry.json"
+        mode: "0644"
+      - source: mcp-servers/capability-router/pyproject.toml
+        destination: "{hermes_home}/mcp-servers/capability-router/pyproject.toml"
+        mode: "0644"
+      - source: mcp-servers/capability-router/src/capability_router/__init__.py
+        destination: "{hermes_home}/mcp-servers/capability-router/src/capability_router/__init__.py"
+        mode: "0644"
+        existing_profile_overlays: true
+      - source: mcp-servers/capability-router/src/capability_router/server.py
+        destination: "{hermes_home}/mcp-servers/capability-router/src/capability_router/server.py"
+        mode: "0644"
+        existing_profile_overlays: true
+      - source: mcp-servers/capability-router/src/capability_router/__init__.py
+        destination: "{hermes_home}/capability-router/src/capability_router/__init__.py"
+        mode: "0644"
+        existing_only: true
+      - source: mcp-servers/capability-router/src/capability_router/server.py
+        destination: "{hermes_home}/capability-router/src/capability_router/server.py"
+        mode: "0644"
+        existing_only: true
+      - source: mcp-servers/search/src/search_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/search/src/search_mcp/__init__.py"
+        mode: "0644"
+        existing_profile_overlays: true
+      - source: mcp-servers/search/src/search_mcp/harness.py
+        destination: "{hermes_home}/mcp-servers/search/src/search_mcp/harness.py"
+        mode: "0644"
+        existing_profile_overlays: true
+      - source: mcp-servers/search/src/search_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/search/src/search_mcp/server.py"
+        mode: "0644"
+        existing_profile_overlays: true
+      - source: mcp-servers/shared/hermes_resilient_fetch.py
+        destination: "{hermes_home}/mcp-servers/shared/hermes_resilient_fetch.py"
+        mode: "0644"
+      - source: kit/bin/refero-styles
+        destination: "{hermes_home}/bin/refero-styles"
+        mode: "0755"
+      - source: kit/bin/visual-reference-lookup
+        destination: "{hermes_home}/bin/visual-reference-lookup"
+        mode: "0755"
+      - source: kit/bin/visual-reference-qa
+        destination: "{hermes_home}/bin/visual-reference-qa"
+        mode: "0755"
+      - source: mcp-servers/refero-styles/bin/launch
+        destination: "{hermes_home}/mcp-servers/refero-styles/bin/launch"
+        mode: "0755"
+      - source: mcp-servers/refero-styles/src/refero_styles_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/refero-styles/src/refero_styles_mcp/__init__.py"
+        mode: "0644"
+      - source: mcp-servers/refero-styles/src/refero_styles_mcp/client.py
+        destination: "{hermes_home}/mcp-servers/refero-styles/src/refero_styles_mcp/client.py"
+        mode: "0644"
+      - source: mcp-servers/refero-styles/src/refero_styles_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/refero-styles/src/refero_styles_mcp/server.py"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/SKILL.md
+        destination: "{hermes_home}/skills/curated/visual-reference-library/SKILL.md"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/registry.jsonl
+        destination: "{hermes_home}/skills/curated/visual-reference-library/registry.jsonl"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/schema.json
+        destination: "{hermes_home}/skills/curated/visual-reference-library/schema.json"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/overlay.example.json
+        destination: "{hermes_home}/skills/curated/visual-reference-library/overlay.example.json"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/references/refero-design-md.md
+        destination: "{hermes_home}/skills/curated/visual-reference-library/references/refero-design-md.md"
+        mode: "0644"
+      - source: skills/curated/visual-reference-library/references/ui-component-libraries.md
+        destination: "{hermes_home}/skills/curated/visual-reference-library/references/ui-component-libraries.md"
+        mode: "0644"
+    owner: preserve
+    post_install_check:
+      type: files_exist
+      paths:
+        - "{hermes_home}/mcp-servers/capability-router/src/capability_router/server.py"
+        - "{hermes_home}/mcp-servers/search/src/search_mcp/server.py"
+        - "{hermes_home}/mcp-servers/shared/hermes_resilient_fetch.py"
+    rollback: Restore per-file receipt backups; remove only receipt-listed destinations whose previous_sha256 is null. Tenant configuration, credentials, MCP policy, and schedules are unchanged.
+
+  - name: sync_existing_optional_mcp_servers
+    owner_lane: baseline_wiring
+    current_registry_entry: optional_mcp_source_sync
+    description: Update only already-installed optional Golden MCP server sources without adding new client capabilities or changing configuration.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    existing_only: true
+    sources:
+      - source: mcp-servers/fleet-rollout/src/fleet_rollout_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/fleet-rollout/src/fleet_rollout_mcp/__init__.py"
+      - source: mcp-servers/fleet-rollout/src/fleet_rollout_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/fleet-rollout/src/fleet_rollout_mcp/server.py"
+      - source: mcp-servers/mac-control/server.py
+        destination: "{hermes_home}/mcp-servers/mac-control/server.py"
+      - source: mcp-servers/pdf/src/pdf_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/pdf/src/pdf_mcp/__init__.py"
+      - source: mcp-servers/pdf/src/pdf_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/pdf/src/pdf_mcp/server.py"
+      - source: mcp-servers/runtime-control/src/runtime_control_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/runtime-control/src/runtime_control_mcp/__init__.py"
+      - source: mcp-servers/runtime-control/src/runtime_control_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/runtime-control/src/runtime_control_mcp/server.py"
+      - source: mcp-servers/telegram-admin/src/telegram_admin_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/telegram-admin/src/telegram_admin_mcp/__init__.py"
+      - source: mcp-servers/telegram-admin/src/telegram_admin_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/telegram-admin/src/telegram_admin_mcp/server.py"
+      - source: mcp-servers/visual-identity/src/visual_identity_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/visual-identity/src/visual_identity_mcp/__init__.py"
+      - source: mcp-servers/visual-identity/src/visual_identity_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/visual-identity/src/visual_identity_mcp/server.py"
+      - source: mcp-servers/web-search/src/web_search_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/web-search/src/web_search_mcp/__init__.py"
+      - source: mcp-servers/web-search/src/web_search_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/web-search/src/web_search_mcp/server.py"
+      - source: mcp-servers/windows-runtime/src/windows_runtime_mcp/__init__.py
+        destination: "{hermes_home}/mcp-servers/windows-runtime/src/windows_runtime_mcp/__init__.py"
+      - source: mcp-servers/windows-runtime/src/windows_runtime_mcp/server.py
+        destination: "{hermes_home}/mcp-servers/windows-runtime/src/windows_runtime_mcp/server.py"
+    owner: preserve
+    mode: "0644"
+    rollback: restore per-file .bak-host-artifact-* backups
+
   - name: retire_legacy_memory_surfaces
     owner_lane: baseline_wiring
     current_registry_entry: retire_legacy_memory_surfaces
@@ -18,14 +159,16 @@ installers:
   - name: install_runtime_health_tools
     owner_lane: baseline_wiring
     current_registry_entry: install_runtime_health_tools
-    description: Install the cross-platform local self-check, canary reconciler, disk-retention guard, and runtime summary probes used by the client health floor.
+    description: Install the cross-platform local self-check, canary reconciler, disk-retention guard, macOS File Provider relief tool, and runtime summary probes used by the client health floor.
     platforms: [linux, macos, windows]
     operation: copy_many
     sources:
       - bin/hermes-local-selfcheck.py
+      - bin/hermes-cron-toolset-preflight.py
       - bin/hermes-canary-reconciler.py
       - bin/hermes-canary-reconciler.ps1
       - bin/hermes-disk-retention.py
+      - bin/hermes-fileprovider-online-only.swift
       - bin/hermes-windows-capacity-containment.ps1
       - bin/tool-readiness-probe.py
       - bin/composio-remote-mcp-verify.py
@@ -40,17 +183,66 @@ installers:
       type: files_exist
       paths:
         - "{hermes_home}/bin/hermes-local-selfcheck.py"
+        - "{hermes_home}/bin/hermes-cron-toolset-preflight.py"
         - "{hermes_home}/bin/hermes-windows-capacity-containment.ps1"
         - "{hermes_home}/bin/hermes-canary-reconciler.py"
         - "{hermes_home}/bin/hermes-disk-retention.py"
+        - "{hermes_home}/bin/hermes-fileprovider-online-only.swift"
         - "{hermes_home}/bin/tool-readiness-probe.py"
         - "{hermes_home}/bin/operator-handoff.py"
     rollback: restore per-file .bak-host-artifact-* backups
 
+  - name: install_native_agent_continuity
+    owner_lane: baseline_wiring
+    current_registry_entry: native_agent_continuity_v1
+    description: Install the cross-platform tenant GBrain baseline, provider reconciler, sanitized native-session projector, Luna carder, and their closed support contract.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    sources:
+      - source: kit/bin/native-agent-continuity.py
+        destination: "{hermes_home}/bin/native-agent-continuity.py"
+        mode: "0755"
+      - source: kit/bin/gbrain-mcp.py
+        destination: "{hermes_home}/bin/gbrain-mcp.py"
+        mode: "0755"
+      - source: kit/bin/tenant-gbrain-baseline.py
+        destination: "{hermes_home}/bin/tenant-gbrain-baseline.py"
+        mode: "0755"
+      - source: kit/bin/session-redact-export.py
+        destination: "{hermes_home}/bin/session-redact-export.py"
+        mode: "0755"
+      - source: kit/bin/native-session-sync.py
+        destination: "{hermes_home}/bin/native-session-sync.py"
+        mode: "0755"
+      - source: kit/bin/native-session-luna-carder.py
+        destination: "{hermes_home}/bin/native-session-luna-carder.py"
+        mode: "0755"
+      - source: kit/bin/native-session-runner.py
+        destination: "{hermes_home}/bin/native-session-runner.py"
+        mode: "0755"
+      - source: kit/bin/client-selfheal-heartbeat.sh
+        destination: "{hermes_home}/bin/client-selfheal-heartbeat.sh"
+        mode: "0755"
+      - source: kit/bin/client-selfheal-heartbeat.ps1
+        destination: "{hermes_home}/bin/client-selfheal-heartbeat.ps1"
+        mode: "0644"
+      - source: kit/config/native-agent-continuity-v1.json
+        destination: "{hermes_home}/config/native-agent-continuity-v1.json"
+        mode: "0644"
+    owner: preserve
+    post_install_check:
+      type: python_json
+      path: "{hermes_home}/bin/tenant-gbrain-baseline.py"
+      args: ["--self-test"]
+      expected:
+        status: pass
+        schema: tenant-gbrain-baseline/v1
+    rollback: restore per-file .bak-host-artifact-* backups; tenant baseline, manifests, provider config, and projection state remain receipt-owned by their controllers
+
   - name: install_host_hygiene
     owner_lane: baseline_wiring
     current_registry_entry: install_host_hygiene
-    description: Install the shared host-hygiene audit and conservative agent-browser orphan reaper on supported Unix hosts.
+    description: Install Mac Calm Mode's host audit, TCC access attribution, and conservative agent-browser orphan reaper on supported Unix hosts.
     platforms: [linux, macos]
     operation: copy_many
     sources:
@@ -66,16 +258,62 @@ installers:
         - "{hermes_home}/bin/agent-browser-orphan-reaper.py"
     rollback: restore per-file .bak-host-artifact-* backups; scheduler lifecycle remains operator-control-owned
 
+  - name: install_host_steward
+    owner_lane: baseline_wiring
+    current_registry_entry: install_host_steward
+    description: Atomically install the Unix task-owned lifecycle interface and its lease-aware hygiene pair for periodic ownership reconciliation.
+    platforms: [linux, macos]
+    operation: copy_many
+    sources:
+      - kit/bin/agent-browser-orphan-reaper.py
+      - bin/hermes-host-hygiene.py
+      - bin/hermes-host-steward.py
+    destination_dir: "{hermes_home}/bin"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: python_json
+      path: "{hermes_home}/bin/hermes-host-steward.py"
+      args: ["snapshot"]
+      expected:
+        # Initialization proof only; snapshot warns remain visible in health.
+        # The CLI still rejects fail/invalid/error with a nonzero exit.
+        schema: hermes-host-steward/v1
+    rollback: restore per-file .bak-host-artifact-* backups; local ownership leases and the inert capability marker remain state
+
+  - name: install_host_steward_windows
+    owner_lane: baseline_wiring
+    current_registry_entry: install_host_steward_windows
+    description: Install the Windows browser-tab lifecycle interface for periodic ownership reconciliation without Unix process hygiene.
+    platforms: [windows]
+    operation: copy_many
+    sources:
+      - bin/hermes-host-steward.py
+    destination_dir: "{hermes_home}/bin"
+    owner: preserve
+    mode: "0755"
+    post_install_check:
+      type: python_json
+      path: "{hermes_home}/bin/hermes-host-steward.py"
+      args: ["snapshot"]
+      expected:
+        # Initialization proof only; snapshot warns remain visible in health.
+        # The CLI still rejects fail/invalid/error with a nonzero exit.
+        schema: hermes-host-steward/v1
+    rollback: restore per-file .bak-host-artifact-* backups; local browser ownership leases and the inert capability marker remain state
+
   - name: sync_kit_bin_scripts
     owner_lane: baseline_wiring
     current_registry_entry: sync_kit_bin_scripts
-    description: Sync already-present client-safe kit/bin artifacts into the host bin directory.
+    description: Sync the explicit client-safe compatibility helpers only when they already exist on the host.
     platforms: [linux, macos, windows]
-    operation: sync_glob
-    source: kit/bin/*
+    operation: sync_existing_files
+    sources:
+      - kit/bin/check-sqlite-wal.py
+      - kit/bin/hermes-safe-restart.sh
+      - kit/bin/telegram_delivery.py
     destination_dir: "{hermes_home}/bin"
     existing_only: true
-    exclude_from_file: kit/bin/.control-plane-exclude
     state_file: "{hermes_home}/state/kit-bin-sync.json"
     owner: preserve
     mode: preserve_source

@@ -75,6 +75,61 @@ case "$PROFILE" in
     ;;
 esac
 
+# The rollout executor uses this same target-local lease. Acquire it before
+# any restart mutation, then keep it through health and binding verification.
+runtime_mutation_lease_is_held() {
+    [ "${HERMES_RUNTIME_MUTATION_LEASE_HELD:-0}" = "1" ] || return 1
+    [ "${HERMES_RUNTIME_MUTATION_LEASE_FD:-}" = "9" ] || return 1
+    python3 - "$PROFILE_HOME/state/promotion/executor/runtime-mutation.lock" <<'PY' >/dev/null 2>&1
+import os
+import sys
+
+expected = os.stat(sys.argv[1])
+actual = os.fstat(9)
+raise SystemExit(0 if (actual.st_dev, actual.st_ino) == (expected.st_dev, expected.st_ino) else 1)
+PY
+}
+
+if ! runtime_mutation_lease_is_held \
+    && [ "${HERMES_SAFE_RESTART_DRY_RUN:-0}" != "1" ]; then
+    exec python3 - "$PROFILE_HOME/state/promotion/executor/runtime-mutation.lock" "$0" "$@" <<'PY'
+import fcntl
+import os
+import sys
+import time
+from pathlib import Path
+
+lock_path = Path(sys.argv[1])
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+with lock_path.open("a+", encoding="utf-8") as lock:
+    deadline = time.monotonic() + 10.0
+    while True:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                print("runtime_mutation_busy")
+                raise SystemExit(75)
+            time.sleep(0.1)
+    environment = os.environ.copy()
+    environment["HERMES_RUNTIME_MUTATION_LEASE_HELD"] = "1"
+    # Keep the advisory lock on the same process across exec. Cancellation can
+    # no longer release the lease while a separately spawned restart survives.
+    os.dup2(lock.fileno(), 9, inheritable=True)
+    environment["HERMES_RUNTIME_MUTATION_LEASE_FD"] = "9"
+    os.execvpe("bash", ["bash", *sys.argv[2:]], environment)
+PY
+fi
+
+release_runtime_mutation_lease() {
+    if [ "${HERMES_RUNTIME_MUTATION_LEASE_FD:-}" = "9" ]; then
+        exec 9>&-
+        unset HERMES_RUNTIME_MUTATION_LEASE_FD
+        unset HERMES_RUNTIME_MUTATION_LEASE_HELD
+    fi
+}
+
 mkdir -p "$HERMES_HOME/logs" "$RESTART_INTENT_DIR"
 RESTART_REASON="${HERMES_RESTART_REASON:-manual}"
 log() { echo "$(date -u +%Y-%m-%dT%H:%M:%SZ) [safe-restart][$PROFILE] $*" >> "$LOG"; }
@@ -327,6 +382,385 @@ signal_post_restart_resume() {
     log "updated post-restart trigger at $RESTART_TRIGGER"
 }
 
+# [HERMES_SAFE_RESTART_RUNTIME_BINDING_REFRESH_v1]
+# A same-runtime restart changes the process identity without changing the
+# immutable release.  Refresh only that process tuple after the new gateway is
+# healthy, while revalidating every release-owned launcher/service byte.
+refresh_runtime_binding() {
+    local new_pid="$1" mode="${2:-refresh}" binding="$PROFILE_HOME/state/runtime-binding.json"
+    [ -f "$binding" ] || return 0
+
+    if ! python3 - "$binding" "$new_pid" "$PROFILE_HOME" "$mode" <<'PY'
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+from datetime import datetime
+from pathlib import Path
+
+binding_path = Path(sys.argv[1])
+profile_home = Path(sys.argv[3]).resolve()
+mode = sys.argv[4]
+
+
+def fail(message: str) -> None:
+    raise SystemExit(message)
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+if binding_path.is_symlink() or not binding_path.is_file() or binding_path.resolve() != binding_path:
+    fail("runtime binding path is unsafe")
+raw = binding_path.read_bytes()
+try:
+    binding = json.loads(raw)
+except Exception:
+    fail("runtime binding is invalid JSON")
+if not isinstance(binding, dict) or binding.get("schema_version") != 1:
+    fail("runtime binding schema is invalid")
+if binding.get("kind") != "botdoctor_runtime_binding" or binding.get("status") != "active":
+    fail("runtime binding is not active")
+runtime_root = Path(str(binding.get("runtime_root") or ""))
+if not runtime_root.is_absolute() or not runtime_root.is_dir() or runtime_root.resolve() != runtime_root:
+    fail("runtime root is invalid")
+runtime_python = Path(str(binding.get("runtime_python") or ""))
+expected_python = runtime_root / ("venv/Scripts/python.exe" if os.name == "nt" else "venv/bin/python")
+if (
+    not runtime_python.is_absolute()
+    or runtime_python != expected_python
+    or not runtime_python.is_file()
+):
+    fail("runtime interpreter binding is invalid")
+bound_home = Path(str(binding.get("hermes_home") or ""))
+if not bound_home.is_absolute() or bound_home.resolve() != profile_home:
+    fail("runtime binding belongs to another Hermes home")
+release = binding.get("release")
+target_sha = str(binding.get("target_sha") or "")
+if (
+    not isinstance(release, dict)
+    or not re.fullmatch(r"[0-9a-f]{40}", str(release.get("base_sha") or ""))
+    or not re.fullmatch(r"[0-9a-f]{40}", str(release.get("target_sha") or ""))
+    or target_sha != release.get("target_sha")
+):
+    fail("runtime release binding is invalid")
+fingerprint_digest = str(binding.get("runtime_fingerprint_digest") or "")
+fingerprint_path = runtime_root / ".operator-control/runtime-fingerprint.json"
+if fingerprint_path.is_symlink() or not fingerprint_path.is_file():
+    fail("runtime fingerprint manifest is unavailable")
+try:
+    fingerprint = json.loads(fingerprint_path.read_text(encoding="utf-8"))
+except Exception:
+    fail("runtime fingerprint manifest is invalid")
+files = fingerprint.get("files") if isinstance(fingerprint, dict) else None
+if (
+    fingerprint.get("verified") is not True
+    or fingerprint.get("exact_assembly") is not True
+    or fingerprint.get("runtime_dir") != str(runtime_root)
+    or fingerprint.get("golden_sha") != target_sha
+    or fingerprint.get("digest") != fingerprint_digest
+    or not isinstance(files, dict)
+    or fingerprint.get("file_count") != len(files)
+):
+    fail("runtime fingerprint identity is invalid")
+canonical_rows = []
+for relative, row in sorted(files.items()):
+    path = Path(str(relative))
+    if path.is_absolute() or ".." in path.parts or not isinstance(row, dict):
+        fail("runtime fingerprint row is invalid")
+    target = runtime_root / path
+    kind = row.get("type")
+    file_mode = row.get("mode")
+    expected = row.get("sha256")
+    if kind == "deleted":
+        if target.exists() or target.is_symlink() or file_mode != "000000" or expected:
+            fail("runtime fingerprint deletion drifted")
+        canonical_rows.append(f"{relative}\t000000\tdeleted\t-\n")
+        continue
+    if kind != "blob" or file_mode not in {"100644", "100755", "120000"}:
+        fail("runtime fingerprint row is invalid")
+    if file_mode == "120000":
+        if not target.is_symlink():
+            fail("runtime fingerprint symlink drifted")
+        content = os.readlink(target).encode()
+    else:
+        if target.is_symlink() or not target.is_file():
+            fail("runtime fingerprint file drifted")
+        actual_mode = "100755" if target.stat().st_mode & 0o100 else "100644"
+        if actual_mode != file_mode:
+            fail("runtime fingerprint mode drifted")
+        content = target.read_bytes()
+    actual_sha = hashlib.sha256(content).hexdigest()
+    if actual_sha != expected:
+        fail("runtime fingerprint content drifted")
+    canonical_rows.append(f"{relative}\t{file_mode}\t{kind}\t{expected}\n")
+if hashlib.sha256("".join(canonical_rows).encode()).hexdigest() != fingerprint_digest:
+    fail("runtime fingerprint digest does not match manifest")
+
+service = binding.get("service")
+if not isinstance(service, dict):
+    fail("runtime service binding is invalid")
+definition_path = service.get("definition_path")
+definition_sha = service.get("definition_sha256")
+if definition_path is not None or definition_sha is not None:
+    definition = Path(str(definition_path or ""))
+    if (
+        not definition.is_absolute()
+        or definition.is_symlink()
+        or not definition.is_file()
+        or definition.resolve() != definition
+        or sha256(definition) != str(definition_sha or "")
+    ):
+        fail("runtime service definition drifted")
+launchers = service.get("launchers")
+if not isinstance(launchers, list):
+    fail("runtime launcher binding is invalid")
+if not launchers and definition_path is None:
+    fail("runtime service binding has no verified executable owner")
+launcher_rows = []
+for row in launchers:
+    if not isinstance(row, dict) or set(row) != {"path", "sha256"}:
+        fail("runtime launcher row is invalid")
+    path = Path(str(row["path"]))
+    expected = str(row["sha256"])
+    if (
+        not path.is_absolute()
+        or path.is_symlink()
+        or not path.is_file()
+        or path.resolve() != path
+        or sha256(path) != expected
+    ):
+        fail("runtime launcher drifted")
+    launcher_rows.append((str(path), expected))
+
+if mode == "preflight":
+    raise SystemExit(0)
+if mode != "refresh":
+    fail("runtime binding operation is invalid")
+pid = int(sys.argv[2])
+
+try:
+    os.kill(pid, 0)
+except OSError:
+    fail("new gateway process is not alive")
+runtime_environment_bound = False
+if sys.platform.startswith("linux"):
+    proc = Path(f"/proc/{pid}")
+    command = proc.joinpath("cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", "replace")
+    environment = {}
+    for item in proc.joinpath("environ").read_bytes().split(b"\0"):
+        if b"=" in item:
+            key, value = item.split(b"=", 1)
+            environment[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    if Path(environment.get("HERMES_HOME", "")).resolve() != profile_home:
+        fail("new gateway Hermes home does not match binding")
+    try:
+        if not proc.joinpath("exe").samefile(runtime_python):
+            fail("new gateway interpreter does not match binding")
+    except OSError:
+        fail("new gateway interpreter is unavailable")
+    fields = proc.joinpath("stat").read_text(encoding="utf-8").split()
+    ticks = int(fields[21])
+    boot = next(
+        int(line.split()[1])
+        for line in Path("/proc/stat").read_text(encoding="utf-8").splitlines()
+        if line.startswith("btime ")
+    )
+    started_at = boot + ticks / os.sysconf("SC_CLK_TCK")
+else:
+    command = subprocess.check_output(
+        ["ps", "-p", str(pid), "-o", "command="], text=True, stderr=subprocess.DEVNULL
+    ).strip()
+    started_text = subprocess.check_output(
+        ["ps", "-p", str(pid), "-o", "lstart="], text=True, stderr=subprocess.DEVNULL
+    ).strip()
+    started_at = datetime.strptime(started_text, "%a %b %d %H:%M:%S %Y").astimezone().timestamp()
+    environment_command = subprocess.check_output(
+        ["ps", "eww", "-p", str(pid), "-o", "command="],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    )
+    def environment_has_exact(key: str, value: Path) -> bool:
+        return re.search(
+            rf"(?:^|\s){re.escape(key)}={re.escape(str(value))}(?=\s|$)",
+            environment_command,
+        ) is not None
+
+    def environment_path(key: str):
+        match = re.search(
+            rf"(?:^|\s){re.escape(key)}=(\S+)(?=\s|$)",
+            environment_command,
+        )
+        return Path(match.group(1)) if match else None
+
+    if not environment_has_exact("HERMES_HOME", profile_home):
+        fail("new gateway Hermes home does not match binding")
+    executable_rows = subprocess.check_output(
+        ["/usr/sbin/lsof", "-a", "-p", str(pid), "-d", "txt", "-Fn"],
+        text=True,
+        stderr=subprocess.DEVNULL,
+    ).splitlines()
+    executable_paths = [Path(row[1:]) for row in executable_rows if row.startswith("n")]
+    try:
+        bound_executables = [runtime_python]
+        if sys.platform == "darwin":
+            base_executable = Path(
+                subprocess.check_output(
+                    [
+                        str(runtime_python),
+                        "-I",
+                        "-c",
+                        (
+                            "import os,sys; "
+                            "print(os.path.realpath(getattr(sys, '_base_executable', sys.executable)))"
+                        ),
+                    ],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                ).strip()
+            )
+            if (
+                not base_executable.is_absolute()
+                or not base_executable.is_file()
+                or not base_executable.samefile(runtime_python)
+            ):
+                fail("bound runtime interpreter reported an invalid base executable")
+            framework_executable = (
+                base_executable.parent.parent
+                / "Resources/Python.app/Contents/MacOS/Python"
+            )
+            if framework_executable.is_file():
+                bound_executables.append(framework_executable)
+        if not any(
+            process_path.samefile(bound_executable)
+            for process_path in executable_paths
+            for bound_executable in bound_executables
+        ):
+            fail("new gateway interpreter does not match binding")
+    except (OSError, subprocess.SubprocessError):
+        fail("new gateway interpreter is unavailable")
+    if sys.platform == "darwin" and environment_has_exact(
+        "VIRTUAL_ENV", runtime_root / "venv"
+    ):
+        process_launcher = environment_path("__PYVENV_LAUNCHER__")
+        try:
+            runtime_environment_bound = bool(
+                process_launcher
+                and process_launcher.is_absolute()
+                and process_launcher.parent == runtime_python.parent
+                and process_launcher.is_file()
+                and process_launcher.samefile(runtime_python)
+            )
+        except OSError:
+            runtime_environment_bound = False
+if (
+    "gateway run" not in " ".join(command.split())
+    or (str(runtime_root) not in command and not runtime_environment_bound)
+):
+    fail("new process is not the bound gateway runtime")
+
+generation = hashlib.sha256(
+    json.dumps(
+        {"pid": pid, "started_at": float(started_at), "launchers": launcher_rows},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()
+binding["process"] = {
+    "pid": pid,
+    "started_at": float(started_at),
+    "generation": generation,
+}
+payload = (json.dumps(binding, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
+stat = binding_path.stat()
+
+
+def atomic_binding_write(content: bytes) -> None:
+    fd, temporary = tempfile.mkstemp(prefix=f".{binding_path.name}.", dir=binding_path.parent)
+    try:
+        os.fchmod(fd, stat.st_mode & 0o777)
+        os.write(fd, content)
+        os.fsync(fd)
+        os.close(fd)
+        fd = -1
+        os.replace(temporary, binding_path)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+    directory_fd = os.open(binding_path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+atomic_binding_write(payload)
+try:
+    os.kill(pid, 0)
+    persisted = json.loads(binding_path.read_text(encoding="utf-8"))
+    if persisted.get("process") != binding["process"]:
+        raise RuntimeError("runtime binding refresh did not persist")
+except (OSError, ValueError, RuntimeError) as exc:
+    atomic_binding_write(raw)
+    fail(f"runtime binding refresh rolled back ({exc})")
+PY
+    then
+        log "runtime binding refresh failed for pid=$new_pid"
+        echo "runtime_binding_refresh_failed"
+        return 1
+    fi
+    log "refreshed runtime binding for pid=$new_pid"
+}
+
+preflight_runtime_binding() {
+    refresh_runtime_binding 0 preflight
+}
+
+gateway_state_is_healthy_for_pid() {
+    local expected_pid="$1" state_file
+    for state_file in \
+        "$PROFILE_HOME/gateway_state.json" \
+        "$HERMES_HOME/gateway_state.json" \
+        "$HERMES_HOME/state/gateway_state.json"; do
+        [ -f "$state_file" ] || continue
+        if python3 - "$state_file" "$expected_pid" <<'PY' >/dev/null 2>&1
+import json
+import os
+import sys
+from pathlib import Path
+
+state = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+pid = int(state.get("pid") or 0)
+platforms = state.get("platforms") or {}
+telegram_row = platforms.get("telegram")
+telegram = telegram_row.get("state") if isinstance(telegram_row, dict) else None
+if pid != int(sys.argv[2]) or state.get("gateway_state") != "running":
+    raise SystemExit(1)
+if telegram_row is not None and telegram != "connected":
+    raise SystemExit(1)
+if telegram_row is None and not any(
+    isinstance(row, dict) and row.get("state") == "connected"
+    for row in platforms.values()
+):
+    raise SystemExit(1)
+os.kill(pid, 0)
+PY
+        then
+            return 0
+        fi
+    done
+    return 1
+}
+
 # [HERMES_SAFE_RESTART_LINUX_GATEWAY_ROUTE_v1]
 # The general helper is distributed by several Golden sync paths. A Linux
 # client must never fall through to the launchd branch merely because it was
@@ -362,6 +796,7 @@ PY
         echo "compile_check_failed"
         return 1
     fi
+    preflight_runtime_binding || return 1
     checkpoint_durable_db
     cleanup_request_dumps || true
     log "restarting $systemd_unit via systemd (reason=$RESTART_REASON)"
@@ -400,7 +835,9 @@ PY
                 telegram_state=${state_line%% *}
                 state_pid=${state_line#* }
                 if [ "$gateway_state" = "running" ] && [ "$telegram_state" = "connected" ] && [ "$state_pid" = "$new_pid" ]; then
+                    refresh_runtime_binding "$new_pid" || return 1
                     signal_post_restart_resume
+                    release_runtime_mutation_lease
                     log "verified healthy after Linux gateway restart (unit=$systemd_unit state_file=$state_file attempt=$try)"
                     echo "ok"
                     return 0
@@ -440,6 +877,7 @@ payload = {"profile": sys.argv[2], "reason": sys.argv[3], "ts": int(time.time())
 path.write_text(json.dumps(payload))
 PY
 
+    preflight_runtime_binding || exit 1
     signal_post_restart_resume
 
     checkpoint_durable_db
@@ -500,6 +938,20 @@ PY
     fi
 
     log "gateway restarted pid=$NEW_PID"
+
+    _health_attempts="${HERMES_HEALTH_ATTEMPTS:-24}"
+    _health_sleep="${HERMES_HEALTH_SLEEP:-2}"
+    for _i in $(seq 1 "$_health_attempts"); do
+        gateway_state_is_healthy_for_pid "$NEW_PID" && break
+        [ "$_i" -ge "$_health_attempts" ] || sleep "$_health_sleep"
+    done
+    if ! gateway_state_is_healthy_for_pid "$NEW_PID"; then
+        log "gateway process did not reach healthy state pid=$NEW_PID"
+        echo "restart_unverified"
+        exit 1
+    fi
+    refresh_runtime_binding "$NEW_PID" || exit 1
+    release_runtime_mutation_lease
 
     if [ -f "$POST_RESTART_RESUME" ]; then
         HERMES_HOME="$PROFILE_HOME" HERMES_RESUME_WAIT_SECONDS="${HERMES_RESUME_WAIT_SECONDS:-12}" \
@@ -674,9 +1126,25 @@ if [ -f "$PROFILE_PID_FILE" ]; then
 fi
 checkpoint_durable_db
 cleanup_request_dumps
+preflight_runtime_binding || exit 1
 log "compile check passed; restarting $UNIT.service (reason=$RESTART_REASON)"
 systemctl --user restart "$UNIT.service"
 if VERIFY_RESULT=$(verify_profile_health); then
+  DOC_NEW_PID=$(systemctl --user show -p MainPID --value "$UNIT.service" 2>/dev/null || true)
+  case "$DOC_NEW_PID" in
+    ''|0|*[!0-9]*)
+      log "Doc restart did not expose a valid MainPID"
+      echo "runtime_binding_refresh_failed"
+      exit 1
+      ;;
+  esac
+  kill -0 "$DOC_NEW_PID" 2>/dev/null || {
+    log "Doc restart MainPID is not alive pid=$DOC_NEW_PID"
+    echo "runtime_binding_refresh_failed"
+    exit 1
+  }
+  refresh_runtime_binding "$DOC_NEW_PID" || exit 1
+  release_runtime_mutation_lease
   launch_post_restart_hooks
   log "restart verified healthy via systemd"
   echo "ok"

@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-21",
+  "catalog_version": "2026-08-28",
   "entries": [
     {
       "bundles": [
@@ -79,6 +79,24 @@
     },
     {
       "bundles": [
+        "core-baseline"
+      ],
+      "id": "focused-specialist-coordinator",
+      "install_path": "skills/fleet/focused-specialist-coordinator",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "3ddc7290258595e44e9e2e4b1c703a7fd082b01108d23a1cac0bd1dfb6caf584",
+      "stage": "baseline",
+      "summary": "Coordinate one bounded specialist under a root manager with typed ownership, artifact review, five-minute progress, manager-safe delivery, and credentialless idle."
+    },
+    {
+      "bundles": [
         "core-baseline",
         "creative-production"
       ],
@@ -110,7 +128,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "d909f6528bc82c24cac1ccdd57d23a7688b9c5ca6e3f972af5e10724e96a71f5",
+      "source_sha256": "5bb4f40f1add9f44a0a00b5b949c6b600caca16390d5edcbd69e2a2756ed59ac",
       "stage": "endorsed",
       "summary": "Perform read-only, citation-aware X research through the calling runtime's brokered xai-oauth capability."
     },
@@ -414,7 +432,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "75797c1d8bd44d7d4fed6ac1f6bf5144bf907d49db552db6dfcb82cd44d72905",
+      "source_sha256": "e70f3eb624fafd67f46dfdae23f390c6ac5b126f75dc636f12aa45e97c109e57",
       "stage": "endorsed",
       "summary": "Load client-neutral visual patterns, production lanes, inputs, and QA gates before producing visual artifacts."
     }

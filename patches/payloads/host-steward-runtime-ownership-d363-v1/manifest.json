@@ -1,0 +1,30 @@
+{
+  "upstream_commit": "d3630f853239e8c41ce7201e09fbdf39bcbc5431",
+  "files": {
+    "tests/tools/test_process_registry.py": {
+      "pre": [
+        "cafbab8a03ab7e6d6c234561ab636a9cf5613c0d26bd5e6508d438f374fef629"
+      ],
+      "post": [
+        "146aaee1a32eb3b1a192b9a26f6c5a10d40c367e4b6971ee770e4f9299328531"
+      ]
+    },
+    "tools/process_registry.py": {
+      "pre": [
+        "542ea13c7f97a0449b31fdd68ac2ea7ef532e616ee7b5736939ee809a54e16b6"
+      ],
+      "post": [
+        "22998f311d936e11a628c539e3da1c4169f384e2729ffdc2b63a72b5519142fe"
+      ]
+    },
+    "tests/tools/test_process_registry_host_steward.py": {
+      "pre": [
+        null
+      ],
+      "post": [
+        "e9ecc1382270c5d00695d1690c65f23e1d39b2c0390e3c57101464b25e85779d"
+      ]
+    }
+  },
+  "patch_sha256": "11b0603fb5ac1087f802eb25ce8b3bfbbedc73034e512306d7618f2ede51352e"
+}

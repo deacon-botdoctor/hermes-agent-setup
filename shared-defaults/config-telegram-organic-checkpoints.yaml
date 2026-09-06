@@ -11,3 +11,4 @@ display:
     telegram:
       long_running_notifications: true
       cleanup_progress: true
+      progress_on_typing: true

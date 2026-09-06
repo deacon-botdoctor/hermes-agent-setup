@@ -5,6 +5,7 @@ Design: kit/docs/host-hygiene-loop.md
 
 Default: dry-run audit of host pressure + orphan candidates.
 --apply: runs already-deployed specialized safe tools only:
+  - hermes-host-steward.py (exact task-owned leases only)
   - agent-browser-orphan-reaper.py
   - disposable hermes tmp cleanup (age-gated)
 Never deletes user data / auth / configs. Never touches gateway.
@@ -12,8 +13,11 @@ Never deletes user data / auth / configs. Never touches gateway.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -22,6 +26,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+_TCC_MSG_ID_RE = re.compile(r"\bmsgID=([^,\s]+)")
+_TCC_SERVICE_RE = re.compile(r"\bservice=kTCCService([^,\s]+)")
+_TCC_RESULT_RE = re.compile(r"\bauthValue=(\d+),\s*authReason=(\d+)")
+_TCC_PROCESS_RE = re.compile(
+    r"\b(responsible|accessing)=\{<?TCCDProcess:\s*(.*?)"
+    r"(?=>?\},\s*(?:responsible|accessing|requesting)=|>?\},\s*\},|$)"
+)
+_TCC_FIELD_RE = re.compile(r"\b(identifier|pid|auid|euid|binary_path)=([^,}>]+)")
 
 
 def utc_now() -> str:
@@ -40,6 +54,181 @@ def env_int(name: str, default: int) -> int:
 
 def env_truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+@contextlib.contextmanager
+def single_instance_lease(path: Path):
+    """Yield whether this process owns the non-blocking worker lease."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(path.parent, 0o700)
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    os.fchmod(descriptor, 0o600)
+    handle = os.fdopen(descriptor, "a+", encoding="utf-8")
+    acquired = False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except BlockingIOError:
+            pass
+        yield acquired
+    finally:
+        if acquired:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+
+
+def _compact_tcc_process(raw: str) -> dict[str, Any]:
+    fields = {key: value.strip() for key, value in _TCC_FIELD_RE.findall(raw)}
+    result: dict[str, Any] = {}
+    if fields.get("identifier"):
+        identifier = fields["identifier"]
+        result["identifier"] = (
+            "[path-redacted]"
+            if "/" in identifier or "\\" in identifier or identifier.casefold().startswith("file:")
+            else identifier
+        )
+    try:
+        result["pid"] = int(fields["pid"])
+    except (KeyError, ValueError):
+        pass
+    if fields.get("binary_path"):
+        result["binary"] = Path(fields["binary_path"]).name
+    uids: set[int] = set()
+    for key in ("auid", "euid"):
+        try:
+            uids.add(int(fields[key]))
+        except (KeyError, ValueError):
+            pass
+    result["_uids"] = sorted(uids)
+    return result
+
+
+def parse_tcc_access_events(
+    raw: str, *, self_uid: int, limit: int = 50
+) -> list[dict[str, Any]]:
+    """Pair non-preflight TCC requests with redacted process attribution."""
+    contexts: dict[str, dict[str, Any]] = {}
+    attributions: dict[str, dict[str, dict[str, Any]]] = {}
+    results: dict[str, tuple[int, int]] = {}
+    for line in raw.splitlines():
+        message_id_match = _TCC_MSG_ID_RE.search(line)
+        if not message_id_match:
+            continue
+        message_id = message_id_match.group(1)
+        if "AUTHREQ_CTX:" in line:
+            service_match = _TCC_SERVICE_RE.search(line)
+            if not service_match or "preflight=no" not in line:
+                continue
+            service = service_match.group(1)
+            timestamp = line[:23].replace(" ", "T", 1) + "Z"
+            contexts[message_id] = {
+                "timestamp": timestamp,
+                "message_id": message_id,
+                "service": service,
+            }
+        elif "AUTHREQ_ATTRIBUTION:" in line:
+            processes: dict[str, dict[str, Any]] = {}
+            for role, process_raw in _TCC_PROCESS_RE.findall(line):
+                compact = _compact_tcc_process(process_raw)
+                if compact:
+                    processes[role] = compact
+            attributions[message_id] = processes
+        elif "AUTHREQ_RESULT:" in line:
+            result_match = _TCC_RESULT_RE.search(line)
+            if result_match:
+                results[message_id] = (int(result_match.group(1)), int(result_match.group(2)))
+
+    events: list[dict[str, Any]] = []
+    for message_id, event in contexts.items():
+        attributed = attributions.get(message_id, {})
+        if not any(self_uid in process.get("_uids", []) for process in attributed.values()):
+            continue
+        if message_id in results:
+            event["auth_value"], event["auth_reason"] = results[message_id]
+        for role in ("responsible", "accessing"):
+            if role in attributed:
+                event[role] = {
+                    key: value
+                    for key, value in attributed[role].items()
+                    if key != "_uids"
+                }
+        events.append(event)
+    if limit <= 0:
+        return []
+    return sorted(events, key=lambda event: str(event["timestamp"]))[-limit:]
+
+
+def audit_macos_tcc_access(
+    lookback_minutes: int,
+    *,
+    platform_name: str | None = None,
+    self_uid: int | None = None,
+    runner=subprocess.run,
+) -> dict[str, Any]:
+    platform_name = platform_name or sys.platform
+    if platform_name != "darwin":
+        return {"supported": False, "events": []}
+    predicate = (
+        'subsystem == "com.apple.TCC" AND '
+        '(eventMessage CONTAINS "AUTHREQ_CTX" OR '
+        'eventMessage CONTAINS "AUTHREQ_ATTRIBUTION" OR '
+        'eventMessage CONTAINS "AUTHREQ_RESULT")'
+    )
+    try:
+        result = runner(
+            [
+                "/usr/bin/log",
+                "show",
+                "--last",
+                f"{max(1, lookback_minutes)}m",
+                "--style",
+                "compact",
+                "--timezone",
+                "UTC",
+                "--predicate",
+                predicate,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=20,
+        )
+    except Exception as exc:
+        return {"supported": True, "available": False, "events": [], "error": str(exc)[:200]}
+    if result.returncode != 0:
+        error = (result.stderr or f"log exited {result.returncode}").strip()[:200]
+        return {"supported": True, "available": False, "events": [], "error": error}
+    return {
+        "supported": True,
+        "available": True,
+        "lookback_minutes": max(1, lookback_minutes),
+        "events": parse_tcc_access_events(
+            result.stdout or "", self_uid=os.getuid() if self_uid is None else self_uid
+        ),
+    }
+
+
+def atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(temporary, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            handle.write(json.dumps(payload, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
 
 
 def parse_etime(raw: str) -> int:
@@ -330,7 +519,12 @@ def run_specialized_apply(hermes_home: Path) -> dict[str, Any]:
     """Apply path uses existing specialized tools only."""
     notes: dict[str, Any] = {}
     reaper = hermes_home / "bin" / "agent-browser-orphan-reaper.py"
-    if reaper.is_file():
+    steward = hermes_home / "bin" / "hermes-host-steward.py"
+    if steward.is_file():
+        notes["agent_browser_orphan_reaper"] = {
+            "skipped": "host_steward_owns_resource_mutation"
+        }
+    elif reaper.is_file():
         try:
             r = subprocess.run(
                 [sys.executable, str(reaper)],
@@ -351,11 +545,148 @@ def run_specialized_apply(hermes_home: Path) -> dict[str, Any]:
     return notes
 
 
+def run_host_steward(hermes_home: Path, apply: bool) -> dict[str, Any]:
+    """Reconcile exact ownership leases and return a content-free summary."""
+    steward = hermes_home / "bin" / "hermes-host-steward.py"
+    if not steward.is_file():
+        return {"status": "missing"}
+    argv = [sys.executable, str(steward), "--hermes-home", str(hermes_home), "reconcile"]
+    if apply:
+        argv.append("--apply")
+    try:
+        result = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except Exception as exc:
+        return {"status": "error", "error": type(exc).__name__}
+    try:
+        payload = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {"status": "error", "error": "invalid_json", "rc": result.returncode}
+    if not isinstance(payload, dict):
+        return {"status": "error", "error": "invalid_shape", "rc": result.returncode}
+    results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    outcomes: dict[str, int] = {}
+    for row in results:
+        if not isinstance(row, dict):
+            continue
+        outcome = str(row.get("outcome") or "unknown")
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+    failed = outcomes.get("failed", 0) > 0
+    return {
+        "status": "pass" if result.returncode == 0 and payload.get("status") == "pass" and not failed else "error",
+        "mode": payload.get("mode"),
+        "counts": payload.get("counts") if isinstance(payload.get("counts"), dict) else {},
+        "census": payload.get("census") if isinstance(payload.get("census"), dict) else {},
+        "outcomes": outcomes,
+        "invalid_leases_seen": int(payload.get("invalid_leases_seen") or 0),
+    }
+
+
 def append_log(hermes_home: Path, line: str) -> None:
     log = hermes_home / "logs" / "host-hygiene.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("a", encoding="utf-8") as f:
         f.write(line.rstrip() + "\n")
+
+
+def run_cycle(
+    *,
+    hermes_home: Path,
+    apply: bool,
+    min_age: int,
+    max_purge: int,
+    cache_min_age: int,
+    tcc_lookback_minutes: int,
+    json_output: bool,
+) -> int:
+    started = time.time()
+    self_uid = os.getuid()
+    snap = host_snapshot()
+    procs = load_procs()
+    orphans = find_orphan_candidates(procs, min_age, self_uid)
+    recs = recommendations_from(procs, snap, self_uid)
+    tcc_access = audit_macos_tcc_access(tcc_lookback_minutes)
+    host_steward = run_host_steward(hermes_home, apply)
+
+    apply_notes = run_specialized_apply(hermes_home) if apply else None
+    purge_results = purge_targets(
+        iter_purge_targets(hermes_home, cache_min_age), max_purge, apply
+    )
+    purged_bytes = sum(
+        int(x.get("bytes") or 0)
+        for x in purge_results
+        if x.get("action") in {"purged", "would_purge"}
+    )
+
+    status = "ok"
+    if recs or orphans:
+        status = "audit" if not apply else "actioned"
+    if any(x.get("action") == "error" for x in purge_results):
+        status = "error"
+    if host_steward.get("status") == "error":
+        status = "error"
+
+    receipt = {
+        "schema_version": 2,
+        "checked_at": utc_now(),
+        "host": snap.get("host"),
+        "hermes_home": str(hermes_home),
+        "mode": "apply" if apply else "dry_run",
+        "status": status,
+        "duration_ms": int((time.time() - started) * 1000),
+        "snapshot": snap,
+        "orphan_candidates": orphans,
+        "orphan_rss_kb_est": sum(int(o.get("rss_kb") or 0) for o in orphans),
+        "recommendations": recs,
+        "macos_tcc_access_attribution": tcc_access,
+        "purges": purge_results,
+        "purge_bytes": purged_bytes,
+        "apply_notes": apply_notes,
+        "host_steward": host_steward,
+        "safety": {
+            "apply_uses_specialized_tools_only": True,
+            "never_delete_user_data": True,
+            "self_uid_inventory_only": True,
+            "single_instance": True,
+            "tcc_paths_redacted": True,
+            "interactive_apps_audit_only": True,
+            "browser_process_mutation_lease_only": (
+                not apply
+                or (apply_notes.get("agent_browser_orphan_reaper") or {}).get(
+                    "skipped"
+                )
+                == "host_steward_owns_resource_mutation"
+            ),
+        },
+        "design": "kit/docs/host-hygiene-loop.md",
+    }
+
+    state_dir = hermes_home / "state"
+    atomic_write_json(state_dir / "host-hygiene-latest.json", receipt)
+
+    tcc_access_count = len(tcc_access.get("events") or [])
+    summary = (
+        f"{receipt['checked_at']} status={status} mode={receipt['mode']} "
+        f"orphans={len(orphans)} orphan_rss_kb~={receipt['orphan_rss_kb_est']} "
+        f"purge_bytes={purged_bytes} recs={len(recs)} tcc_access={tcc_access_count}"
+    )
+    append_log(hermes_home, summary)
+    if json_output:
+        print(json.dumps(receipt, indent=2))
+    else:
+        print(summary)
+        if orphans:
+            print(f"  orphan_candidates: {len(orphans)}")
+        if recs:
+            print(f"  recommendations: {len(recs)}")
+        if tcc_access_count:
+            print(f"  macos_tcc_access_events: {tcc_access_count}")
+    return 0 if status != "error" else 2
 
 
 def main() -> int:
@@ -373,74 +704,27 @@ def main() -> int:
     min_age = env_int("HERMES_HOST_HYGIENE_MIN_AGE", 600)
     max_purge = env_int("HERMES_HOST_HYGIENE_MAX_PURGE_BYTES", 2 * 1024 * 1024 * 1024)
     cache_min_age = env_int("HERMES_HOST_HYGIENE_CACHE_MIN_AGE", 86400)
-    self_uid = os.getuid()
-
-    started = time.time()
-    snap = host_snapshot()
-    procs = load_procs()
-    orphans = find_orphan_candidates(procs, min_age, self_uid)
-    recs = recommendations_from(procs, snap, self_uid)
-
-    apply_notes = run_specialized_apply(hermes_home) if apply else None
-    purge_results = purge_targets(
-        iter_purge_targets(hermes_home, cache_min_age), max_purge, apply
-    )
-    purged_bytes = sum(
-        int(x.get("bytes") or 0)
-        for x in purge_results
-        if x.get("action") in {"purged", "would_purge"}
-    )
-
-    status = "ok"
-    if recs or orphans:
-        status = "audit" if not apply else "actioned"
-    if any(x.get("action") == "error" for x in purge_results):
-        status = "error"
-
-    receipt = {
-        "schema_version": 1,
-        "checked_at": utc_now(),
-        "host": snap.get("host"),
-        "hermes_home": str(hermes_home),
-        "mode": "apply" if apply else "dry_run",
-        "status": status,
-        "duration_ms": int((time.time() - started) * 1000),
-        "snapshot": snap,
-        "orphan_candidates": orphans,
-        "orphan_rss_kb_est": sum(int(o.get("rss_kb") or 0) for o in orphans),
-        "recommendations": recs,
-        "purges": purge_results,
-        "purge_bytes": purged_bytes,
-        "apply_notes": apply_notes,
-        "safety": {
-            "apply_uses_specialized_tools_only": True,
-            "never_delete_user_data": True,
-            "self_uid_inventory_only": True,
-        },
-        "design": "kit/docs/host-hygiene-loop.md",
-    }
-
-    state_dir = hermes_home / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    (state_dir / "host-hygiene-latest.json").write_text(
-        json.dumps(receipt, indent=2) + "\n", encoding="utf-8"
-    )
-
-    summary = (
-        f"{receipt['checked_at']} status={status} mode={receipt['mode']} "
-        f"orphans={len(orphans)} orphan_rss_kb~={receipt['orphan_rss_kb_est']} "
-        f"purge_bytes={purged_bytes} recs={len(recs)}"
-    )
-    append_log(hermes_home, summary)
-    if args.json:
-        print(json.dumps(receipt, indent=2))
-    else:
-        print(summary)
-        if orphans:
-            print(f"  orphan_candidates: {len(orphans)}")
-        if recs:
-            print(f"  recommendations: {len(recs)}")
-    return 0 if status != "error" else 2
+    tcc_lookback_minutes = env_int("HERMES_HOST_HYGIENE_TCC_LOOKBACK_MINUTES", 30)
+    lock_path = hermes_home / "state" / "locks" / "host-hygiene.lock"
+    with single_instance_lease(lock_path) as acquired:
+        if not acquired:
+            skipped = {
+                "schema_version": 1,
+                "checked_at": utc_now(),
+                "status": "skipped_already_running",
+                "lock": str(lock_path),
+            }
+            print(json.dumps(skipped, indent=2) if args.json else "host hygiene already running; skipped")
+            return 0
+        return run_cycle(
+            hermes_home=hermes_home,
+            apply=apply,
+            min_age=min_age,
+            max_purge=max_purge,
+            cache_min_age=cache_min_age,
+            tcc_lookback_minutes=tcc_lookback_minutes,
+            json_output=args.json,
+        )
 
 
 if __name__ == "__main__":

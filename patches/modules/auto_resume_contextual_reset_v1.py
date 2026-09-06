@@ -308,7 +308,90 @@ def patch_run_text(source: str) -> str:
     )
 
 
+def patch_native_session_text(source: str) -> str:
+    if TIMEZONE_MARKER in source:
+        return source
+    source = _replace_once(source, SESSION_IMPORT_ANCHOR,
+        SESSION_IMPORT_ANCHOR + "from hermes_time import now as _hermes_now\n", "native configured clock")
+    source = _replace_once(source, SESSION_NOW_ANCHOR,
+        SESSION_NOW_ANCHOR + SESSION_TIMEZONE_HELPER, "native daily boundary helper")
+    daily = '''        if policy.mode in {"daily", "both"}:
+            today_reset = now.replace(hour=policy.at_hour, minute=0, second=0, microsecond=0)
+            if now.hour < policy.at_hour:
+                today_reset -= timedelta(days=1)
+            if updated_at < today_reset:
+                return "daily"
+'''
+    return _replace_once(source, daily, '''        if policy.mode in {"daily", "both"}:
+            if updated_at < _daily_reset_boundary(policy):
+                return "daily"
+''', "native daily reset policy")
+
+
+def patch_native_run_text(source: str) -> str:
+    if MARKER in source:
+        return source
+    helper = RUN_HELPER.replace('            cfg = _load_gateway_config()\n',
+        '            from gateway.run import _load_gateway_config\n            cfg = _load_gateway_config()\n')
+    helper = helper.replace('        normalized = ', '        import re\n        normalized = ', 1)
+    source = _replace_once(source, '    async def _hmwa_resolve_session(self, event, source):\n',
+        helper + '    async def _hmwa_resolve_session(self, event, source):\n', "native contextual helper")
+    source = _replace_once(source, RUN_DECISION_ANCHOR, RUN_DECISION_ANCHOR + RUN_DECIDE,
+                           "native contextual decision")
+    source = _replace_once(source, RUN_TOPIC_BINDING_ANCHOR,
+        '        if not _skip_telegram_topic_recovery and await asyncio.to_thread(self._is_telegram_topic_lane, source):\n',
+        "native reset binding protection")
+    source = _replace_once(source,
+        '        if bound_session_id and bound_session_id != session_entry.session_id:\n',
+        '        if (bound_session_id and bound_session_id != session_entry.session_id\n'
+        '                and bound_session_id != getattr(session_entry, "prev_session_id", None)):\n',
+        "native stale previous binding")
+    source = _replace_once(source, '        return source, session_entry, session_key\n',
+        '        return source, session_entry, session_key, (_defer_contextual_reset_decision_for_internal_event or _auto_resumed_previous)\n',
+        "native reset decision propagation")
+    source = source.replace('Returns ``(source, session_entry, session_key)``',
+                            'Returns ``(source, session_entry, session_key, preserve_reset_state)``', 1)
+    old = '    async def _hmwa_open_session(self, session_entry, session_key, source):\n'
+    source = _replace_once(source, old,
+        '    async def _hmwa_open_session(self, session_entry, session_key, source, *, preserve_reset_state=False):\n',
+        "native session open signature")
+    old = '        # Consume was_auto_reset immediately so it cannot re-fire and wipe overrides set between turns.\n'
+    source = _replace_once(source, old,
+        '        if preserve_reset_state:\n            return False, False\n' + old, "native deferred flags")
+    source = _replace_once(source,
+        '    async def _hmwa_prepare_turn(self, event, source, session_entry, session_key, _quick_key, run_generation):\n',
+        '    async def _hmwa_prepare_turn(self, event, source, session_entry, session_key, _quick_key, run_generation, *, preserve_reset_state=False):\n',
+        "native prepare signature")
+    source = _replace_once(source,
+        '        _was_auto_reset, _is_new_session = await self._hmwa_open_session(session_entry, session_key, source)\n',
+        '        _was_auto_reset, _is_new_session = await self._hmwa_open_session(session_entry, session_key, source, preserve_reset_state=preserve_reset_state)\n',
+        "native prepare decision")
+    source = _replace_once(source, '        source, session_entry, session_key = resolved\n',
+        '        source, session_entry, session_key, preserve_reset_state = resolved\n', "native resolve unpack")
+    source = _replace_once(source,
+        '            event, source, session_entry, session_key, _quick_key, run_generation,\n        )\n        if not isinstance(prepared, self._PreparedTurn):\n',
+        '            event, source, session_entry, session_key, _quick_key, run_generation,\n            preserve_reset_state=preserve_reset_state,\n        )\n        if not isinstance(prepared, self._PreparedTurn):\n', "native prepare caller")
+    return source
+
+
+def _patch_native_auto(root: Path) -> bool:
+    targets = {root / "gateway/session_lifecycle.py": patch_native_session_text,
+               root / "gateway/run_turn.py": patch_native_run_text}
+    changes = {}
+    for path, transform in targets.items():
+        original = path.read_text()
+        updated = transform(original)
+        compile(updated, str(path), "exec")
+        if updated != original:
+            changes[path] = updated
+    for path, content in changes.items():
+        path.write_text(content)
+    return bool(changes)
+
+
 def patch_auto_resume_contextual_reset_v1(hermes_dir: Path) -> bool:
+    if (Path(hermes_dir) / "gateway/run_turn.py").is_file():
+        return _patch_native_auto(Path(hermes_dir))
     targets = {
         hermes_dir / "gateway" / "session.py": patch_session_text,
         hermes_dir / "gateway" / "run.py": patch_run_text,

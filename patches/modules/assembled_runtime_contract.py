@@ -5,7 +5,9 @@ from __future__ import annotations
 import ast
 import asyncio
 import copy
+from contextlib import suppress
 import inspect
+import os
 import re
 import sys
 import threading
@@ -17,7 +19,14 @@ class AssembledRuntimeContractError(RuntimeError):
     pass
 
 
+def _is_native_d363(root: Path) -> bool:
+    import subprocess
+    result = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return result.returncode == 0 and result.stdout.strip() == "d3630f853239e8c41ce7201e09fbdf39bcbc5431"
+
+
 _TELEGRAM_CHECKPOINT_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2"
+_KANBAN_DELEGATED_PROGRESS_MARKER = "HERMES_KANBAN_DELEGATED_PROGRESS_CHECKPOINTS_v1"
 _TELEGRAM_CHECKPOINT_HELPERS = {
     "_telegram_checkpoint_task_label",
     "_telegram_checkpoint_preview_subject",
@@ -136,6 +145,14 @@ def _probe_telegram_checkpoint_notifier(
             raise _CheckpointProbeStop
 
     probe_notifier = _CheckpointProbeLoopGuard().visit(copy.deepcopy(notifier))
+    native = notifier.name == "_run_agent_notify_long_running"
+    if native:
+        probe_notifier.returns = None
+        for arg in [*probe_notifier.args.args, *probe_notifier.args.kwonlyargs]:
+            arg.annotation = None
+        probe_notifier.body = [n for n in probe_notifier.body if not (
+            isinstance(n, ast.ImportFrom) and n.module == "gateway.run"
+            and [a.name for a in n.names] == ["_float_env", "_interim_metadata", "_non_conversational_metadata"])]
     module = ast.Module(
         body=[*copy.deepcopy(helper_nodes), probe_notifier],
         type_ignores=[],
@@ -150,8 +167,11 @@ def _probe_telegram_checkpoint_notifier(
         "_executor_task": None,
         "_generic_status_phrase": lambda _kind: "Working",
         "_long_running_mode": "full",
+        "_interim_metadata": lambda metadata: metadata,
         "_non_conversational_metadata": lambda metadata, **_kwargs: metadata,
         "_notify_start": 0.0,
+        "_progress_on_typing": False,
+        "_initial_heartbeat_done": SimpleNamespace(set=lambda: None),
         "_redact_gateway_user_facing_secrets": lambda value: value,
         "_status_thread_metadata": {},
         "agent_holder": [None],
@@ -176,15 +196,22 @@ def _probe_telegram_checkpoint_notifier(
         capture(context, "tool.completed", "read_file", None, {"is_error": False})
         capture(context, "tool.started", "write_file", "runtime-config.json", {})
         capture(context, "tool.completed", "write_file", None, {"is_error": True})
-        asyncio.run(namespace[notifier.name]())
+        if native:
+            from contextlib import suppress
+            namespace["suppress"] = suppress
+            namespace["_float_env"] = lambda *_a: 180
+            context.source, context.session_key, context.agent_holder = source, "probe-session", [None]
+            context._cleanup_progress, context._cleanup_msg_ids, context._status_thread_metadata = False, [], {}
+            display = SimpleNamespace(_display_surface_mode=lambda *_a, **_kw: "full")
+            asyncio.run(namespace[notifier.name](namespace["self"], display, context, [None]))
+        else:
+            asyncio.run(namespace[notifier.name]())
     except (_CheckpointProbeStop, asyncio.CancelledError):
         pass
     except Exception as exc:
         raise AssembledRuntimeContractError(f"Telegram checkpoint notifier probe failed: {exc}") from exc
     expected_sent = "10 minutes in on the verification\n\nThe focused regression tests now pass."
-    expected_edited = (
-        "15 minutes in on the verification\n\nThe immutable candidate is ready for canary."
-    )
+    expected_edited = "15 minutes in on the verification\n\nThe immutable candidate is ready for canary."
     if (
         clock.sleeps != [300.0, 300.0, 300.0, 300.0]
         or context.model_checkpoint_tool_current
@@ -230,6 +257,42 @@ def _function_signature(function: ast.FunctionDef) -> inspect.Signature:
     return inspect.Signature(parameters)
 
 
+def _native_init_keyword_names(agent_dir: Path, tree: ast.Module, call: ast.Call) -> list[str] | None:
+    """Bind only d363's canonical locals-comprehension forwarder, never arbitrary **kwargs."""
+    import subprocess
+
+    head = subprocess.run(["git", "-C", str(agent_dir), "rev-parse", "HEAD"],
+                          capture_output=True, text=True, check=False)
+    if head.returncode or head.stdout.strip() != "d3630f853239e8c41ce7201e09fbdf39bcbc5431":
+        return None
+    owners = [method for cls in tree.body if isinstance(cls, ast.ClassDef) and cls.name == "AIAgent"
+              for method in cls.body if isinstance(method, ast.FunctionDef) and method.name == "__init__"
+              if call in list(ast.walk(method))]
+    if len(owners) != 1:
+        return None
+    owner = owners[0]
+    canonical = ast.parse("""
+init_kwargs = {k: v for k, v in locals().items() if k not in ("self", "tool_delay")}
+if tool_delay is not None:
+    warnings.warn("tool_delay is deprecated and ignored; sequential tool calls "
+                  "no longer sleep between executions.", DeprecationWarning, stacklevel=2)
+from agent.agent_init import init_agent
+init_agent(self, **init_kwargs)
+""").body
+    body = owner.body
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+        body = body[1:]
+    if [ast.dump(n) for n in body] != [ast.dump(n) for n in canonical]:
+        return None
+    args = owner.args
+    if args.vararg or args.kwarg or args.posonlyargs or owner.decorator_list:
+        return None
+    names = [arg.arg for arg in [*args.args, *args.kwonlyargs]]
+    if not names or names[0] != "self" or "tool_delay" not in names:
+        return None
+    return [name for name in names if name not in {"self", "tool_delay"}]
+
+
 def verify_agent_init_forwarder_contract(agent_dir: Path) -> None:
     """Prove every explicit ``init_agent`` call binds to the shipped callee."""
     agent_path = agent_dir / "run_agent.py"
@@ -261,13 +324,18 @@ def verify_agent_init_forwarder_contract(agent_dir: Path) -> None:
         if any(isinstance(arg, ast.Starred) for arg in call.args) or any(
             keyword.arg is None for keyword in call.keywords
         ):
-            raise AssembledRuntimeContractError(
-                "init_agent forwarder uses dynamic argument expansion; the assembly contract cannot bind it statically"
-            )
+            native_names = _native_init_keyword_names(agent_dir, agent_tree, call)
+            if native_names is None:
+                raise AssembledRuntimeContractError(
+                    "init_agent forwarder uses dynamic argument expansion; the assembly contract cannot bind it statically"
+                )
+            keyword_names = native_names
+        else:
+            keyword_names = [keyword.arg for keyword in call.keywords]
         try:
             signature.bind(
                 *([None] * len(call.args)),
-                **{keyword.arg: None for keyword in call.keywords},
+                **{name: None for name in keyword_names},
             )
         except TypeError as exc:
             raise AssembledRuntimeContractError(f"init_agent forwarder cannot bind to shipped callee: {exc}") from exc
@@ -275,7 +343,8 @@ def verify_agent_init_forwarder_contract(agent_dir: Path) -> None:
 
 def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
     """Reject assembled runtimes that weaken custom Telegram checkpoints."""
-    gateway_path = agent_dir / "gateway" / "run.py"
+    native = _is_native_d363(agent_dir)
+    gateway_path = agent_dir / "gateway" / ("run_turn.py" if native else "run.py")
     if not gateway_path.exists():
         return
 
@@ -288,7 +357,10 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
     if _TELEGRAM_CHECKPOINT_MARKER not in source:
         raise AssembledRuntimeContractError("assembled gateway is missing the Telegram checkpoint marker")
 
-    compact = re.sub(r"\s+", " ", source)
+    wiring_source = source
+    if native:
+        wiring_source += (agent_dir / "gateway/run_turn_runner.py").read_text()
+    compact = re.sub(r"\s+", " ", wiring_source)
     required_wiring = {
         "commentary capture": "ctx.model_checkpoint_updates.append(checkpoint_text)",
         "interim-message privacy boundary": "if not _want_interim_messages: return",
@@ -300,6 +372,13 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         "scheduled checkpoint deadline": ("_notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)"),
         "same-message Telegram failure boundary": ("_heartbeat_msg_id and source.platform == Platform.TELEGRAM"),
     }
+    if native:
+        required_wiring.update({
+            "interim-message privacy boundary": "if not want_interim_messages: return",
+            "Telegram commentary callback": "want_interim_messages or ctx.source.platform == Platform.TELEGRAM",
+            "scheduled checkpoint deadline": "_deadline = _notify_start + (_notify_tick * _notify_interval)",
+            "same-message Telegram failure boundary": "source.platform == Platform.TELEGRAM and not getattr(_notify_res, \"success\", False)",
+        })
     missing_wiring = [label for label, snippet in required_wiring.items() if snippet not in compact]
     if missing_wiring:
         raise AssembledRuntimeContractError(
@@ -309,7 +388,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
     notifier_nodes = [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_notify_long_running"
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == ("_run_agent_notify_long_running" if native else "_notify_long_running")
     ]
     if len(notifier_nodes) != 1:
         raise AssembledRuntimeContractError("assembled Telegram checkpoint notifier is missing or ambiguous")
@@ -337,7 +416,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
             "assembled Telegram checkpoint tick must initialize inside the notifier before its first increment"
         )
 
-    calls = {node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    calls = {node.func.id for node in ast.walk(ast.parse(wiring_source)) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
     missing_calls = sorted(
         {
             "_capture_telegram_tool_checkpoint",
@@ -377,8 +456,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
             current=["Reviewing the pending changes"],
         )
         expected_factual = (
-            "10 minutes in on the verification\n\n"
-            "I found the stale checkpoint fallback and I’m removing it now."
+            "10 minutes in on the verification\n\nI found the stale checkpoint fallback and I’m removing it now."
         )
         if factual != expected_factual:
             raise AssembledRuntimeContractError("Telegram checkpoint factual summary semantics changed")
@@ -447,6 +525,18 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
 
 def verify_restart_recovery_contract(agent_dir: Path) -> None:
     """Reject client-visible or replaying restart recovery in assembled Golden."""
+    if _is_native_d363(agent_dir):
+        path = agent_dir / "gateway/run_startup.py"
+        tree = ast.parse(path.read_text())
+        schedulers = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_schedule_resume_pending_sessions"]
+        if len(schedulers) != 1:
+            raise AssembledRuntimeContractError("native restart scheduler missing or ambiguous")
+        body = schedulers[0].body
+        if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+            body = body[1:]
+        if len(body) != 1 or not isinstance(body[0], ast.Return) or not isinstance(body[0].value, ast.Constant) or body[0].value.value != 0:
+            raise AssembledRuntimeContractError("native restart scheduler emits, clears, or replays ambiguous work")
+        return
     gateway_path = agent_dir / "gateway" / "run.py"
     if not gateway_path.exists():
         return
@@ -469,8 +559,7 @@ def verify_restart_recovery_contract(agent_dir: Path) -> None:
     helpers = [
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.AsyncFunctionDef)
-        and node.name == "_send_restart_interruption_checkin"
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "_send_restart_interruption_checkin"
     ]
     schedulers = [
         node
@@ -500,8 +589,7 @@ def verify_restart_recovery_contract(agent_dir: Path) -> None:
     )
     if unsafe_helper_actions:
         raise AssembledRuntimeContractError(
-            "restart recovery emits, clears, or replays ambiguous work: "
-            + ", ".join(unsafe_helper_actions)
+            "restart recovery emits, clears, or replays ambiguous work: " + ", ".join(unsafe_helper_actions)
         )
 
     scheduler_calls = {
@@ -533,6 +621,12 @@ def verify_native_session_liveness_contract(agent_dir: Path) -> None:
             gateway_path.read_text(encoding="utf-8", errors="strict"),
             filename=str(gateway_path),
         )
+        if _is_native_d363(agent_dir):
+            owner = _runtime_class(gateway_tree, "GatewayRunner", gateway_path)
+            for relative in ("gateway/run_agent_cache.py", "gateway/run_inbound.py"):
+                part = ast.parse((agent_dir / relative).read_text())
+                owner.body.extend(method for cls in part.body if isinstance(cls, ast.ClassDef)
+                                  for method in cls.body if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)))
         _probe_adapter_stale_lock_recovery(adapter_path, adapter_tree)
         _probe_gateway_stale_state_eviction(gateway_path, gateway_tree)
     except AssembledRuntimeContractError:
@@ -592,6 +686,29 @@ def _compile_probe_class(
 
 
 def _probe_adapter_stale_lock_recovery(path: Path, tree: ast.Module) -> None:
+    # Native lifecycle methods now retire their real event-owned telemetry
+    # carrier. Resolve that dependency from the assembled tree, not the
+    # operator's interpreter or a no-op substitute, then restore import state.
+    root = path.parents[2]
+    names = ("agent", "agent.runtime_performance_events", "hermes_constants")
+    missing = object()
+    previous = {name: sys.modules.get(name, missing) for name in names}
+    previous_path = list(sys.path)
+    try:
+        sys.path.insert(0, str(root))
+        for name in names:
+            sys.modules.pop(name, None)
+        _probe_adapter_stale_lock_recovery_inner(path, tree)
+    finally:
+        sys.path[:] = previous_path
+        for name, module in previous.items():
+            if module is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+def _probe_adapter_stale_lock_recovery_inner(path: Path, tree: ast.Module) -> None:
     class_node = _runtime_class(tree, "BasePlatformAdapter", path)
     methods = [
         _runtime_method(class_node, name, path)
@@ -601,6 +718,9 @@ def _probe_adapter_stale_lock_recovery(path: Path, tree: ast.Module) -> None:
             "handle_message",
         )
     ]
+    if any(isinstance(n, ast.FunctionDef) and n.name == "_event_session_key" for n in class_node.body):
+        methods.extend(_runtime_method(class_node, name, path) for name in
+                       ("_preflight_startup_gate", "_event_session_key", "_handle_message_while_active"))
     namespace = {
         "asyncio": asyncio,
         "logger": SimpleNamespace(
@@ -618,6 +738,7 @@ def _probe_adapter_stale_lock_recovery(path: Path, tree: ast.Module) -> None:
     adapter.config = SimpleNamespace(extra={})
     adapter._message_handler = object()
     adapter._topic_recovery_fn = None
+    adapter._session_key_profile = lambda _source: None
     discarded = []
     started = []
     adapter._discard_text_debounce = discarded.append
@@ -645,6 +766,10 @@ def _probe_adapter_stale_lock_recovery(path: Path, tree: ast.Module) -> None:
     live_event = SimpleNamespace(
         source=SimpleNamespace(platform="other", chat_type="dm"),
         _hermes_startup_gate_checked=True,
+        admission_checked=True,
+        durable_replay=False,
+        allow_gateway_control=True,
+        metadata={},
         get_command=lambda: "probe",
     )
     commands = ModuleType("hermes_cli.commands")
@@ -689,6 +814,10 @@ def _probe_adapter_stale_lock_recovery(path: Path, tree: ast.Module) -> None:
     event = SimpleNamespace(
         source=SimpleNamespace(platform="other", chat_type="dm"),
         _hermes_startup_gate_checked=True,
+        admission_checked=True,
+        durable_replay=False,
+        allow_gateway_control=True,
+        metadata={},
     )
     try:
         coroutine = adapter.handle_message(event)
@@ -752,25 +881,28 @@ def _probe_gateway_stale_state_eviction(path: Path, tree: ast.Module) -> None:
     probe_body = []
     for statement in handler.body[start:]:
         probe_body.append(statement)
-        if _calls_method(statement, "_release_running_agent_state"):
+        if _calls_method(statement, "_release_running_agent_state") or _calls_method(statement, "_hm_evict_running_agent"):
             break
-    if not probe_body or not _calls_method(
-        ast.Module(body=probe_body, type_ignores=[]),
-        "_release_running_agent_state",
-    ):
+    if not probe_body or not any(_calls_method(ast.Module(body=probe_body, type_ignores=[]), name)
+                                 for name in ("_release_running_agent_state", "_hm_evict_running_agent")):
         raise AssembledRuntimeContractError("gateway stale eviction is not connected to running-state cleanup")
     probe = ast.parse("def _probe_stale_eviction(self, _quick_key):\n    pass\n").body[0]
     probe.body = probe_body
     namespace = {
         "_float_env": lambda _name, _default: 30.0,
         "_AGENT_PENDING_SENTINEL": object(),
-        "time": SimpleNamespace(time=lambda: 1000.0),
+        # The extracted probe intentionally runs without importing the entire
+        # candidate as a package. Use an age beyond the native emergency TTL
+        # so the atomic invalidation/release contract remains testable even
+        # when the candidate-local activity resolver is not importable here.
+        "time": SimpleNamespace(time=lambda: 10000.0),
+        "suppress": suppress,
         "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None, debug=lambda *_args, **_kwargs: None),
     }
     probe_class = _compile_probe_class(
         path,
         "GatewayRunner",
-        [release, probe],
+        [release, probe, *[m for m in class_node.body if isinstance(m, ast.FunctionDef) and m.name == "_hm_evict_running_agent"]],
         namespace,
     )
 
@@ -823,6 +955,203 @@ def _probe_gateway_stale_state_eviction(path: Path, tree: ast.Module) -> None:
         raise AssembledRuntimeContractError("gateway stale-state eviction did not invalidate and release atomically")
 
 
+def verify_native_cua_existing_profile_grant_contract(agent_dir: Path) -> None:
+    """Reject a reintroduced retired CUA existing-profile transport.
+
+    Hermes d363 splits the CUA backend/session classes while cb5a8 keeps them
+    monolithic; neither shape has an existing-profile transport. The release
+    contract verifies either source-owned layout rather than relying on
+    Golden-owned marker comments. If a legacy transport returns, this fails
+    closed until its authorization contract is restored deliberately.
+    """
+    backend_path = agent_dir / "tools" / "computer_use" / "cua_backend.py"
+    cua_dir = backend_path.parent
+    backend_sources = sorted(cua_dir.glob("cua_backend*.py")) if cua_dir.exists() else []
+    if not backend_path.exists():
+        # Other assembled-contract fixtures intentionally omit CUA entirely.
+        # A candidate runtime and a partial CUA tree must both fail closed.
+        if not (agent_dir / "pyproject.toml").exists() and not backend_sources:
+            return
+        raise AssembledRuntimeContractError("native Cua backend source is missing")
+
+    source_paths = [*backend_sources]
+    defaults_path = agent_dir / "hermes_cli" / "config_defaults.py"
+    if defaults_path.exists():
+        source_paths.append(defaults_path)
+
+    try:
+        sources = {
+            path: path.read_text(encoding="utf-8", errors="strict") for path in source_paths
+        }
+        trees = {path: ast.parse(text, filename=str(path)) for path, text in sources.items()}
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise AssembledRuntimeContractError(
+            f"cannot inspect native Cua existing-profile transport: {exc}"
+        ) from exc
+
+    for expected in ("CuaDriverBackend", "_CuaDriverSession"):
+        owners = [
+            path
+            for path in backend_sources
+            if any(isinstance(node, ast.ClassDef) and node.name == expected for node in trees[path].body)
+        ]
+        if len(owners) != 1:
+            raise AssembledRuntimeContractError(
+                f"native Cua owner {expected} is missing or ambiguous across backend sources"
+            )
+
+    legacy_surface = (
+        "grant_existing_profile",
+        "typed_browser_",
+        "HERMES_CUA_EXISTING_PROFILE",
+        "_cua_grant_existing_profile",
+    )
+    introduced = sorted(
+        marker
+        for marker in legacy_surface
+        if any(marker in ast.unparse(tree) for tree in trees.values())
+    )
+    if introduced:
+        raise AssembledRuntimeContractError(
+            "legacy Cua existing-profile transport remains: " + ", ".join(introduced)
+        )
+
+
+def verify_kanban_delegated_progress_contract(agent_dir: Path) -> None:
+    """Reject assemblies that weaken delegated Telegram progress invariants."""
+    watcher_path = agent_dir / "gateway" / "kanban_watchers.py"
+    db_path = agent_dir / "hermes_cli" / "kanban_db.py"
+    run_path = agent_dir / "gateway" / "run.py"
+    present = [path.exists() for path in (watcher_path, db_path)]
+    if not any(present):
+        return
+    if not all(present):
+        raise AssembledRuntimeContractError(
+            "delegated Kanban progress DB and watcher must be assembled together"
+        )
+    native = _is_native_d363(agent_dir)
+    watcher = watcher_path.read_text(encoding="utf-8", errors="strict")
+    database = db_path.read_text(encoding="utf-8", errors="strict")
+    if native:
+        watcher += "\n" + (agent_dir / "gateway/kanban_watchers_notifier.py").read_text()
+        database += "\n" + (agent_dir / "hermes_cli/kanban_db_notify.py").read_text()
+        database += "\n" + (agent_dir / "hermes_cli/kanban_db_connect.py").read_text()
+    if (
+        _KANBAN_DELEGATED_PROGRESS_MARKER not in watcher
+        or _KANBAN_DELEGATED_PROGRESS_MARKER not in database
+    ):
+        raise AssembledRuntimeContractError(
+            "delegated Kanban progress marker is missing from DB or watcher"
+        )
+    required_watcher = {
+        "five-minute cadence": "_KANBAN_DELEGATED_PROGRESS_INTERVAL_SECONDS = 300",
+        "heartbeat-backed claim": "claim_due_notify_progress(",
+        "same-message edit": "result = await adapter.edit_message(",
+        "failed-edit no-fanout": "edit failed; retaining the existing progress message id",
+        "delivery acknowledgement": "self._kanban_complete_progress,",
+        "pre-delivery run revalidation": "self._kanban_progress_claim_current,",
+        "delivery rewind": "self.runner._kanban_rewind_progress," if native else "self._kanban_rewind_progress,",
+    }
+    missing = [label for label, seam in required_watcher.items() if seam not in watcher]
+    if missing:
+        raise AssembledRuntimeContractError(
+            "delegated Kanban progress watcher wiring is incomplete: "
+            + ", ".join(missing)
+        )
+    required_db = {
+        "independent progress cursor": "progress_last_event_id INTEGER NOT NULL DEFAULT 0",
+        "durable message id": "progress_message_id TEXT",
+        "active-run clock": "JOIN task_runs r ON r.id = t.current_run_id",
+        "active-run heartbeat fence": "run_id = ? AND kind = 'heartbeat'",
+        "pre-delivery run revalidation": "notify_progress_claim_is_current(",
+        "minimum cadence floor": "interval = max(300, int(interval_seconds))",
+        "running-task gate": 'task["status"] != "running"',
+    }
+    missing = [label for label, seam in required_db.items() if seam not in database]
+    if missing:
+        raise AssembledRuntimeContractError(
+            "delegated Kanban progress DB wiring is incomplete: "
+            + ", ".join(missing)
+        )
+
+    try:
+        tree = ast.parse(watcher)
+    except SyntaxError as exc:
+        raise AssembledRuntimeContractError(
+            f"cannot inspect delegated Kanban progress watcher: {exc}"
+        ) from exc
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    notifier = functions.get("_kanban_notifier_watcher")
+    dispatcher = functions.get("_kanban_dispatcher_watcher")
+    progress_delivery = functions.get("_deliver_kanban_progress")
+    if not notifier or not dispatcher or not progress_delivery:
+        raise AssembledRuntimeContractError(
+            "delegated Kanban progress requires notifier, dispatcher, and delivery methods"
+        )
+    notifier_text = ast.get_source_segment(watcher, notifier) or ""
+    dispatcher_text = ast.get_source_segment(watcher, dispatcher) or ""
+    progress_text = ast.get_source_segment(watcher, progress_delivery) or ""
+    if "dispatch_in_gateway" in notifier_text:
+        raise AssembledRuntimeContractError(
+            "Kanban notifier is incorrectly gated by dispatcher activation"
+        )
+    if native:
+        boot = functions.get("_kanban_dispatcher_boot")
+        if boot is None or "self._kanban_dispatcher_boot()" not in dispatcher_text:
+            raise AssembledRuntimeContractError("native Kanban dispatcher boot gate missing")
+        dispatcher_text += ast.get_source_segment(watcher, boot) or ""
+    if 'kanban_cfg.get("dispatch_in_gateway", True)' not in dispatcher_text:
+        raise AssembledRuntimeContractError(
+            "Kanban dispatcher activation gate is missing"
+        )
+    if "deliver_wake" in progress_text:
+        raise AssembledRuntimeContractError(
+            "routine delegated progress must not wake the coordinator model"
+        )
+    edit_index = progress_text.find("await adapter.edit_message(")
+    else_index = progress_text.find("\n        else:", edit_index)
+    if edit_index < 0 or else_index < 0:
+        raise AssembledRuntimeContractError(
+            "delegated progress edit/send branches are ambiguous"
+        )
+    if "adapter.send(" in progress_text[edit_index:else_index]:
+        raise AssembledRuntimeContractError(
+            "failed delegated progress edits may fan out into duplicate sends"
+        )
+    if re.search(r"_WAKE_KINDS\s*=\s*\([^)]*heartbeat", watcher, re.DOTALL):
+        raise AssembledRuntimeContractError(
+            "heartbeat progress entered the coordinator wake set"
+        )
+
+    if native:
+        startup = ast.parse((agent_dir / "gateway/run_startup.py").read_text())
+        lists = [n for n in ast.walk(startup) if isinstance(n, ast.Assign) and any(isinstance(x, ast.Name) and x.id == "_PRE_RECONNECT_WATCHERS" for x in n.targets)]
+        if len(lists) != 1:
+            raise AssembledRuntimeContractError("native Kanban watcher startup list missing or ambiguous")
+        names = ast.literal_eval(lists[0].value)
+        if names.count("_kanban_notifier_watcher") != 1 or names.count("_kanban_dispatcher_watcher") != 1 or names.index("_kanban_notifier_watcher") > names.index("_kanban_dispatcher_watcher"):
+            raise AssembledRuntimeContractError("native Kanban startup ownership changed")
+        methods = [n for n in ast.walk(startup) if isinstance(n, ast.FunctionDef) and n.name == "_start_spawn_background_watchers"]
+        if len(methods) != 1 or 'for method in self._PRE_RECONNECT_WATCHERS:' not in ast.unparse(methods[0]) or 'self._spawn_supervised(getattr(self, method), method[1:])' not in ast.unparse(methods[0]):
+            raise AssembledRuntimeContractError("native Kanban supervised startup wiring changed")
+    elif run_path.exists():
+        run_text = run_path.read_text(encoding="utf-8", errors="strict")
+        notifier_spawn = "self._spawn_supervised(self._kanban_notifier_watcher"
+        dispatcher_spawn = "self._spawn_supervised(self._kanban_dispatcher_watcher"
+        if (
+            run_text.count(notifier_spawn) != 1
+            or run_text.count(dispatcher_spawn) != 1
+            or run_text.index(notifier_spawn) > run_text.index(dispatcher_spawn)
+        ):
+            raise AssembledRuntimeContractError(
+                "Kanban notifier/dispatcher startup ownership changed"
+            )
+
+
 def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     """Verify incident-backed cross-file AIAgent contracts.
 
@@ -832,8 +1161,10 @@ def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     """
     verify_agent_init_forwarder_contract(agent_dir)
     verify_telegram_checkpoint_contract(agent_dir)
+    verify_kanban_delegated_progress_contract(agent_dir)
     verify_restart_recovery_contract(agent_dir)
     verify_native_session_liveness_contract(agent_dir)
+    verify_native_cua_existing_profile_grant_contract(agent_dir)
 
     loop_path = agent_dir / "agent" / "conversation_loop.py"
     agent_path = agent_dir / "run_agent.py"

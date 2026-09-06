@@ -1,7 +1,8 @@
 # Single source of truth for the upstream Hermes version pinned by hermes-golden.
-# Exact post-v0.20.0 upstream main selected by the 2026-08-11 rehearsal.
-tag: main
-commit: 9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb
-hermes_version: 0.20.0
-pinned_at: 2026-08-11
-source_repo: https://github.com/NousResearch/hermes-agent.git
+# Exact reviewed Hermes 0.21 line with upstream's case-collision cleanup
+# backported onto the Bot Doctor runtime-policy seed.
+tag: v2026.8.31
+commit: cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4
+hermes_version: 0.21.0
+pinned_at: 2026-09-03
+source_repo: https://github.com/deacon-botdoctor/hermes-agent.git

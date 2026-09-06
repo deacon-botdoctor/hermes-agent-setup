@@ -95,8 +95,8 @@ SESSION_METHODS = f'''    # [{MARKER}] Small durable compare-and-set state for o
 
 '''
 
-RUN_METHOD_ANCHOR = '''    async def _run_startup_resume_event(
-'''
+RUN_METHOD_ANCHOR = """    async def _run_startup_resume_event(
+"""
 RUN_METHODS = f'''    # [{MARKER}]
     async def _edit_inactivity_recovery_card(
         self, source, session_key: str, content: str
@@ -266,10 +266,12 @@ RUN_METHODS = f'''    # [{MARKER}]
 
 '''
 
-REAL_INBOUND_ANCHOR = '''        _quick_key = self._session_key_for_source(source)
+REAL_INBOUND_ANCHOR = """        _quick_key = self._session_key_for_source(source)
         _up_state = self._peek_session_state(_quick_key)
-'''
-REAL_INBOUND_REPLACEMENT = REAL_INBOUND_ANCHOR + f'''
+"""
+REAL_INBOUND_REPLACEMENT = (
+    REAL_INBOUND_ANCHOR
+    + f"""
         # [{MARKER}] A real inbound turn supersedes any completed or
         # pending timeout-recovery chain. Internal recovery events retain it.
         if not is_internal:
@@ -277,7 +279,26 @@ REAL_INBOUND_REPLACEMENT = REAL_INBOUND_ANCHOR + f'''
                 await self.async_session_store.clear_inactivity_recovery(_quick_key)
             except Exception:
                 logger.debug("Could not clear prior inactivity recovery state", exc_info=True)
-'''
+"""
+)
+REAL_INBOUND_CURRENT_ANCHOR = """        _quick_key = self._session_key_for_source(source)
+        allow_gateway_control = event.allow_gateway_control
+        _up_state = self._peek_session_state(_quick_key)
+"""
+REAL_INBOUND_CURRENT_REPLACEMENT = (
+    """        _quick_key = self._session_key_for_source(source)
+"""
+    + f"""        # [{MARKER}] A real inbound turn supersedes any completed or
+        # pending timeout-recovery chain. Internal recovery events retain it.
+        if not is_internal:
+            try:
+                await self.async_session_store.clear_inactivity_recovery(_quick_key)
+            except Exception:
+                logger.debug("Could not clear prior inactivity recovery state", exc_info=True)
+        allow_gateway_control = event.allow_gateway_control
+        _up_state = self._peek_session_state(_quick_key)
+"""
+)
 
 HEARTBEAT_INIT_ANCHOR = "            _heartbeat_msg_id: Optional[str] = None\n"
 HEARTBEAT_INIT_REPLACEMENT = f'''            # [{MARKER}] A recovery turn inherits the previous turn's
@@ -295,11 +316,11 @@ HEARTBEAT_INIT_REPLACEMENT = f'''            # [{MARKER}] A recovery turn inheri
                 _cleanup_msg_ids.append(_heartbeat_msg_id)
 '''
 
-HEARTBEAT_RECORD_ANCHOR = '''                            _heartbeat_msg_id = str(_notify_res.message_id)
+HEARTBEAT_RECORD_ANCHOR = """                            _heartbeat_msg_id = str(_notify_res.message_id)
                             if _cleanup_progress:
                                 _cleanup_msg_ids.append(_heartbeat_msg_id)
-'''
-HEARTBEAT_RECORD_REPLACEMENT = '''                            _heartbeat_msg_id = str(_notify_res.message_id)
+"""
+HEARTBEAT_RECORD_REPLACEMENT = """                            _heartbeat_msg_id = str(_notify_res.message_id)
                             try:
                                 await self.async_session_store.record_inactivity_checkpoint(
                                     session_key, _heartbeat_msg_id
@@ -308,9 +329,9 @@ HEARTBEAT_RECORD_REPLACEMENT = '''                            _heartbeat_msg_id 
                                 logger.debug("Could not persist checkpoint card id", exc_info=True)
                             if _cleanup_progress:
                                 _cleanup_msg_ids.append(_heartbeat_msg_id)
-'''
+"""
 
-TIMEOUT_RESPONSE_ANCHOR = '''                response = {
+TIMEOUT_RESPONSE_ANCHOR = """                response = {
                     "final_response": "\\n".join(_diag_lines),
                     "messages": result_holder[0].get("messages", []) if result_holder[0] else [],
                     "api_calls": _iter_n,
@@ -318,8 +339,8 @@ TIMEOUT_RESPONSE_ANCHOR = '''                response = {
                     "history_offset": 0,
                     "failed": True,
                 }
-'''
-TIMEOUT_RESPONSE_REPLACEMENT = f'''                # [{MARKER}] Spend one durable attempt and keep the raw
+"""
+TIMEOUT_RESPONSE_REPLACEMENT = f"""                # [{MARKER}] Spend one durable attempt and keep the raw
                 # timeout diagnostic in logs only. The outer handler persists the
                 # original user row, then either dispatches a fresh worker or stops.
                 try:
@@ -356,15 +377,15 @@ TIMEOUT_RESPONSE_REPLACEMENT = f'''                # [{MARKER}] Spend one durabl
                     "inactivity_recovery_terminal": not _recovery_scheduled,
                     "_inactivity_recovery_worker_done": _turn_worker_done,
                 }}
-'''
+"""
 
-OUTER_RESULT_ANCHOR = '''            await self._refresh_agent_cache_message_count(
+OUTER_RESULT_ANCHOR = """            await self._refresh_agent_cache_message_count(
                 session_key, session_entry.session_id
             )
 
             # Intentional silence is a delivery decision, not a transcript
-'''
-OUTER_RESULT_REPLACEMENT = f'''            await self._refresh_agent_cache_message_count(
+"""
+OUTER_RESULT_REPLACEMENT = f"""            await self._refresh_agent_cache_message_count(
                 session_key, session_entry.session_id
             )
 
@@ -385,7 +406,7 @@ OUTER_RESULT_REPLACEMENT = f'''            await self._refresh_agent_cache_messa
                 logger.debug("Could not clear inactivity recovery state", exc_info=True)
 
             # Intentional silence is a delivery decision, not a transcript
-'''
+"""
 
 
 def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str:
@@ -394,8 +415,127 @@ def _replace_once(source: str, anchor: str, replacement: str, label: str) -> str
     return source.replace(anchor, replacement, 1)
 
 
+def _replace_real_inbound_reset(source: str) -> str:
+    if source.count(REAL_INBOUND_ANCHOR) == 1:
+        return source.replace(REAL_INBOUND_ANCHOR, REAL_INBOUND_REPLACEMENT, 1)
+    if source.count(REAL_INBOUND_CURRENT_ANCHOR) == 1:
+        return source.replace(
+            REAL_INBOUND_CURRENT_ANCHOR,
+            REAL_INBOUND_CURRENT_REPLACEMENT,
+            1,
+        )
+    raise RuntimeError("inactivity recovery real inbound reset anchor drift")
+
+
+def _patch_native_inactivity_recovery(root: Path) -> bool:
+    """Attach the existing one-attempt policy to native timeout/persistence owners."""
+    paths = [root / "gateway" / name for name in ("session.py", "run_turn.py", "run_inbound.py")]
+    originals = {path: path.read_text(encoding="utf-8") for path in paths}
+    if all(MARKER in value for value in originals.values()):
+        return False
+    if any(MARKER in value for value in originals.values()):
+        raise RuntimeError("partial native inactivity recovery requires clean rebuild")
+    session, turn, inbound = (originals[path] for path in paths)
+    if "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2" not in turn:
+        raise RuntimeError("native inactivity recovery requires Telegram organic checkpoints v2")
+    # Metadata receipts must not refresh the native user-activity/reset clock.
+    session_methods = "\n".join(line for line in SESSION_METHODS.split("\n") if "entry.updated_at = _now()" not in line)
+    session = _replace_once(session, "    def set_model_override(", session_methods + "    def set_model_override(", "native session methods")
+    methods = RUN_METHODS.replace(
+        '        adapter = self._adapter_for_source(source)\n',
+        '        from gateway.run import _non_conversational_metadata\n        adapter = self._adapter_for_source(source)\n',
+    ).replace(
+        '        deadline = asyncio.get_running_loop().time() + 30.0\n',
+        '        from gateway.run import _AGENT_PENDING_SENTINEL\n        from gateway.platforms.base import MessageType\n        deadline = asyncio.get_running_loop().time() + 30.0\n',
+    )
+    turn = _replace_once(turn, '    async def _run_agent_inactivity_warning(', methods + '    async def _run_agent_inactivity_warning(', "native recovery methods")
+    prepare = f'''    async def _prepare_inactivity_recovery(self, worker, turn_ctx, response):
+        # [{MARKER}] Native timeout interruption and diagnostics already ran.
+        # Persist/claim once, then defer replacement until outer persistence and
+        # native worker/turn ownership have unwound.
+        source, session_key = turn_ctx.source, turn_ctx.session_key
+        try:
+            claim = await self.async_session_store.claim_inactivity_recovery(session_key)
+        except Exception:
+            logger.exception("Could not claim inactivity recovery for %s", session_key)
+            claim = {{"decision": "terminal", "reason": "claim_failed"}}
+        scheduled = claim.get("decision") == "recover"
+        if scheduled:
+            await self._edit_inactivity_recovery_card(
+                source, session_key,
+                "Quick update:\\n• The last step stopped responding.\\n"
+                "• Now: Resuming from the last confirmed point.",
+            )
+        else:
+            await self._stop_inactivity_recovery(source, session_key, str(claim.get("reason") or "attempt_exhausted"))
+        return {{**response, "final_response": "", "failed": True,
+                "inactivity_recovery_scheduled": scheduled,
+                "inactivity_recovery_terminal": not scheduled,
+                "_inactivity_recovery_worker_done": worker.worker_done}}
+
+'''
+    turn = _replace_once(turn, '    def _run_agent_timeout_result(', prepare + '    def _run_agent_timeout_result(', "native prepare")
+    turn = _replace_once(turn,
+        '        return self._run_agent_timeout_result(worker, turn_ctx)\n',
+        '        response = self._run_agent_timeout_result(worker, turn_ctx)\n        return await self._prepare_inactivity_recovery(worker, turn_ctx, response)\n', "native timeout handoff")
+    deliver = '        # Intentional silence is a delivery decision: the [SILENT] turn stays persisted (alternation).\n'
+    turn = _replace_once(turn, deliver, f'''        # [{MARKER}] This phase runs only after native transcript persistence.
+        if agent_result.get("inactivity_recovery_scheduled"):
+            self._schedule_inactivity_recovery(source, session_key, agent_result["_inactivity_recovery_worker_done"])
+            return None
+        if agent_result.get("inactivity_recovery_terminal"):
+            return None
+        try:
+            await self.async_session_store.clear_inactivity_recovery(session_key)
+        except Exception:
+            logger.debug("Could not clear inactivity recovery state", exc_info=True)
+
+''' + deliver, "native post-persistence delivery")
+    init = '        _heartbeat_msg_id = None\n'
+    turn = _replace_once(turn, init, f'''        # [{MARKER}] Reuse only an accepted checkpoint ID from this recovery chain.
+        try:
+            _recovery_card_state = await self.async_session_store.get_session_metadata(session_key, "{METADATA_KEY}", {{}})
+        except Exception:
+            _recovery_card_state = {{}}
+        _heartbeat_msg_id = str((_recovery_card_state or {{}}).get("checkpoint_message_id") or "") or None
+        if _heartbeat_msg_id and turn_ctx._cleanup_progress:
+            turn_ctx._cleanup_msg_ids.append(_heartbeat_msg_id)
+''', "native checkpoint inheritance")
+    record = '                        _heartbeat_msg_id = str(_notify_res.message_id)\n'
+    notifier_start = turn.index("    async def _run_agent_notify_long_running(")
+    notifier_end = turn.index("    async def _run_agent_inner(", notifier_start)
+    notifier = turn[notifier_start:notifier_end]
+    notifier = _replace_once(notifier, record, record + '''                        try:
+                            await self.async_session_store.record_inactivity_checkpoint(session_key, _heartbeat_msg_id)
+                        except Exception:
+                            logger.debug("Could not persist checkpoint card id", exc_info=True)
+''', "native checkpoint receipt")
+    turn = turn[:notifier_start] + notifier + turn[notifier_end:]
+    reset = '        _quick_key = self._session_key_for_source(source)\n'
+    inbound = _replace_once(inbound, reset, reset + f'''        # [{MARKER}] Real input supersedes the previous recovery chain.
+        if not is_internal:
+            try:
+                await self.async_session_store.clear_inactivity_recovery(_quick_key)
+            except Exception:
+                logger.debug("Could not clear prior inactivity recovery state", exc_info=True)
+''', "native inbound reset")
+    changed = dict(zip(paths, (session, turn, inbound)))
+    for value in changed.values():
+        ast.parse(value)
+    try:
+        for path, value in changed.items():
+            path.write_text(value, encoding="utf-8")
+    except Exception:
+        for path, value in originals.items():
+            path.write_text(value, encoding="utf-8")
+        raise
+    return True
+
+
 def patch_inactivity_fresh_worker_recovery_v1(hermes_dir: Path) -> bool:
     root = Path(hermes_dir)
+    if (root / "gateway/run_turn.py").is_file():
+        return _patch_native_inactivity_recovery(root)
     session_py = root / "gateway" / "session.py"
     run_py = root / "gateway" / "run.py"
     session_original = session_py.read_text(encoding="utf-8")
@@ -419,13 +559,13 @@ def patch_inactivity_fresh_worker_recovery_v1(hermes_dir: Path) -> bool:
     run_patched = run_original
     for anchor, replacement, label in (
         (RUN_METHOD_ANCHOR, RUN_METHODS + RUN_METHOD_ANCHOR, "runner methods"),
-        (REAL_INBOUND_ANCHOR, REAL_INBOUND_REPLACEMENT, "real inbound reset"),
         (HEARTBEAT_INIT_ANCHOR, HEARTBEAT_INIT_REPLACEMENT, "checkpoint initialization"),
         (HEARTBEAT_RECORD_ANCHOR, HEARTBEAT_RECORD_REPLACEMENT, "checkpoint persistence"),
         (TIMEOUT_RESPONSE_ANCHOR, TIMEOUT_RESPONSE_REPLACEMENT, "timeout result"),
         (OUTER_RESULT_ANCHOR, OUTER_RESULT_REPLACEMENT, "outer recovery dispatch"),
     ):
         run_patched = _replace_once(run_patched, anchor, replacement, label)
+    run_patched = _replace_real_inbound_reset(run_patched)
 
     ast.parse(session_patched)
     ast.parse(run_patched)

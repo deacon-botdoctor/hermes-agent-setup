@@ -17,7 +17,7 @@ from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_MEDIA_DOWNLOAD_RETRY_v1"
 
-HELPER = '''    async def _download_telegram_media_with_retry(
+_PRE_RATE_LIMIT_HELPER = '''    async def _download_telegram_media_with_retry(
         self,
         source: Any,
         *,
@@ -57,6 +57,22 @@ HELPER = '''    async def _download_telegram_media_with_retry(
         raise RuntimeError("unreachable Telegram media retry state")
 
 '''
+
+# Server rate limits are authoritative on both supported upstream layouts.
+HELPER = _PRE_RATE_LIMIT_HELPER.replace(
+    "                delay = base_delay * (2 ** (attempt - 1))\n",
+    """                delay = base_delay * (2 ** (attempt - 1))
+                if exc.__class__.__name__.lower() == "retryafter":
+                    value = getattr(exc, "retry_after", None)
+                    try:
+                        delay = float(value.total_seconds() if hasattr(value, "total_seconds") else value)
+                    except (TypeError, ValueError, OverflowError) as invalid_delay:
+                        raise RuntimeError("Telegram media RetryAfter has no valid retry interval") from invalid_delay
+                    if not 0 <= delay <= 30:
+                        raise RuntimeError("Telegram media RetryAfter exceeds the bounded 30s retry interval") from exc
+                    delay = max(delay, base_delay)
+""",
+)
 
 HELPER_ANCHOR = "    async def _surface_media_cache_failure(\n"
 
@@ -145,6 +161,69 @@ CALLSITE_REPLACEMENTS = (
     ),
 )
 
+# d363 consolidated inbound audio/video handling into ``_cache_inbound_av``
+# and removed the replied-media duplicate. Keep its single adapter owner and
+# do not recreate the former ingestion paths or timeout configuration splice.
+D363_CALLSITE_REPLACEMENTS = (
+    (
+        "            file_obj = await source.get_file()\n"
+        "            data = bytes(await file_obj.download_as_bytearray())\n",
+        "            file_obj, data = await self._download_telegram_media_with_retry(\n"
+        "                source, kind=what\n"
+        "            )\n",
+        "observed media",
+    ),
+    (
+        "            file_obj = await source.get_file()\n"
+        "            data = await file_obj.download_as_bytearray()\n",
+        "            file_obj, data = await self._download_telegram_media_with_retry(\n"
+        "                source, kind=kind\n"
+        "            )\n",
+        "audio/video media",
+    ),
+    (
+        "                file_obj = await doc.get_file()\n"
+        "                image_bytes = await file_obj.download_as_bytearray()\n",
+        "                file_obj, image_bytes = await self._download_telegram_media_with_retry(\n"
+        "                    doc, kind=\"image document\"\n"
+        "                )\n",
+        "image document",
+    ),
+    (
+        "                file_obj = await doc.get_file()\n"
+        "                video_bytes = await file_obj.download_as_bytearray()\n",
+        "                file_obj, video_bytes = await self._download_telegram_media_with_retry(\n"
+        "                    doc, kind=\"video document\"\n"
+        "                )\n",
+        "video document",
+    ),
+    (
+        "            file_obj = await doc.get_file()\n"
+        "            raw_bytes = bytes(await file_obj.download_as_bytearray())\n",
+        "            file_obj, raw_bytes = await self._download_telegram_media_with_retry(\n"
+        "                doc, kind=\"document\"\n"
+        "            )\n",
+        "document",
+    ),
+    (
+        "                file_obj = await msg.photo[-1].get_file()  # PhotoSize list sorted by size; largest last\n"
+        "                image_bytes = await file_obj.download_as_bytearray()\n",
+        "                file_obj, image_bytes = await self._download_telegram_media_with_retry(\n"
+        "                    msg.photo[-1], kind=\"photo\"\n"
+        "                )\n",
+        "photo",
+    ),
+    (
+        "            file_obj = await sticker.get_file()\n"
+        "            image_bytes = await file_obj.download_as_bytearray()\n",
+        "            file_obj, image_bytes = await self._download_telegram_media_with_retry(\n"
+        "                sticker, kind=\"sticker\"\n"
+        "            )\n",
+        "sticker",
+    ),
+)
+D363_FINGERPRINT = "    async def _cache_inbound_av("
+
 ENV_FLOAT_ANCHOR = '''            def _env_float(name: str, default: float) -> float:
                 try:
                     return float(os.getenv(name, str(default)))
@@ -193,10 +272,26 @@ def patch_telegram_media_download_retry_v1(hermes_dir: Path) -> bool:
 
     src = target.read_text(encoding="utf-8")
     if MARKER in src:
+        if HELPER not in src:
+            src = _replace_exact(src, _PRE_RATE_LIMIT_HELPER, HELPER, 1, "RetryAfter upgrade")
+            ast.parse(src)
+            target.write_text(src, encoding="utf-8")
+            return True
         print(f"[telegram_media_download_retry] already patched ({target.name})")
         return False
 
     src = _replace_exact(src, HELPER_ANCHOR, HELPER + HELPER_ANCHOR, 1, "helper")
+    if D363_FINGERPRINT in src:
+        for old, new, label in D363_CALLSITE_REPLACEMENTS:
+            src = _replace_exact(src, old, new, 1, label)
+        ast.parse(src)
+        backup = target.with_suffix(
+            target.suffix + f".bak-{time.strftime('%Y%m%d-%H%M%S')}-media-download-retry"
+        )
+        shutil.copy2(target, backup)
+        target.write_text(src, encoding="utf-8")
+        print(f"[telegram_media_download_retry] PATCHED {target} (backup {backup.name})")
+        return True
     for old, new, count, label in CALLSITE_REPLACEMENTS:
         src = _replace_exact(src, old, new, count, label)
     src = _replace_exact(

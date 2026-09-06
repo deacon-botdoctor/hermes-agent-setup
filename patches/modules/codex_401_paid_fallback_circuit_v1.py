@@ -200,15 +200,27 @@ def paid_fallback_allowed(
         and str(turn_id) == str(state.get("client_turn_id") or "")
     )
     if matching_client_turn:
-        # The claim file is the cross-process authority for the single paid
-        # activation. The operator controller may rewrite the JSON state while
-        # moving open -> refreshing -> probing, but it cannot recreate this
-        # O_EXCL claim and accidentally grant a second activation.
+        # The claim file is the cross-process authority for one activation of
+        # this configured fallback entry.  A two-model emergency chain may
+        # therefore advance once from Grok to GLM, while retries or concurrent
+        # workers targeting the same entry remain denied.
+        entry_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "provider": provider,
+                    "model": str(entry.get("model") or ""),
+                    "base_url": base_url,
+                },
+                sort_keys=True,
+            ).encode("utf-8", "replace")
+        ).hexdigest()[:16]
         claim = _state_path().with_name(
             "."
             + _state_path().name
             + ".paid-"
             + str(state.get("incident_fingerprint") or "unknown")
+            + "-"
+            + entry_fingerprint
             + ".claim"
         )
         try:
@@ -412,7 +424,59 @@ def _guard_optional_agent_methods(content: str) -> str:
 
 
 def _patch_selector(content: str) -> str:
+    availability_old = '''    fallback_reason = getattr(reason, "value", reason)
+    # The paid-fallback circuit limits 401/403 amplification. A subscription
+    # rate limit is a separate provider-availability incident and must be able
+    # to use the configured OpenRouter emergency chain.
+    if not (str(fallback_reason or "").strip().lower() == "rate_limit" and is_openrouter_fallback):
+'''
+    availability_new = '''    fallback_reason = getattr(reason, "value", reason)
+    fallback_reason_value = str(fallback_reason or "").strip().lower()
+    availability_reasons = {
+        "rate_limit",
+        "upstream_rate_limit",
+        "overloaded",
+        "server_error",
+        "timeout",
+        "model_not_found",
+    }
+    current_turn_id = str(getattr(agent, "_current_turn_id", "") or "")
+    current_provider = str(getattr(agent, "provider", "") or "").strip().lower()
+    event_origin = str(
+        getattr(agent, "_codex_auth_event_origin", "internal") or "internal"
+    ).strip().lower()
+    client_origin = event_origin == "client" and not (
+        getattr(agent, "is_subagent", False)
+        or getattr(agent, "_parent_session_id", None)
+    )
+    if (
+        is_openrouter_fallback
+        and fallback_reason_value in availability_reasons
+        and current_provider == "openai-codex"
+        and current_turn_id
+        and client_origin
+    ):
+        agent._codex_availability_fallback_turn_id = current_turn_id
+    availability_allowed = (
+        is_openrouter_fallback
+        and fallback_reason_value in availability_reasons
+        and current_turn_id
+        and current_turn_id
+        == str(getattr(agent, "_codex_availability_fallback_turn_id", "") or "")
+        and client_origin
+    )
+    # Availability gets a bounded same-turn route through the configured
+    # emergency chain. Auth failures continue through the durable circuit.
+    if not availability_allowed:
+'''
     if "paid_fallback_allowed" in content:
+        if availability_old in content:
+            return _replace_once(
+                content,
+                availability_old,
+                availability_new,
+                "availability fallback selector upgrade",
+            )
         return content
     class_anchor = """        fb_provider = (fb.get("provider") or "").strip().lower()
         fb_model = (fb.get("model") or "").strip()
@@ -464,12 +528,7 @@ def _patch_selector(content: str) -> str:
     is_openrouter_fallback = (
         fb_provider == "openrouter" or "openrouter.ai" in str(fb.get("base_url") or "").lower()
     )
-    fallback_reason = getattr(reason, "value", reason)
-    # The paid-fallback circuit limits 401/403 amplification. A subscription
-    # rate limit is a separate provider-availability incident and must be able
-    # to use the configured OpenRouter emergency chain.
-    if not (str(fallback_reason or "").strip().lower() == "rate_limit" and is_openrouter_fallback):
-        try:
+""" + availability_new + """        try:
             if (
                 getattr(agent, "_codex_auth_circuit_unavailable", False)
                 and str(getattr(agent, "_current_turn_id", "")) == str(
@@ -502,7 +561,63 @@ def _patch_selector(content: str) -> str:
     return _replace_once(content, module_anchor, module_replacement, "module fallback selector")
 
 
+def _patch_native_codex401(hermes_dir: Path) -> bool:
+    """Reuse reviewed policy at d363's recovery and candidate-selection owners."""
+    import textwrap
+    recovery_path = hermes_dir / "agent/turn_recovery.py"
+    error_path = hermes_dir / "agent/turn_api_error.py"
+    selector_path = hermes_dir / "agent/chat_completion_helpers.py"
+    recovery = recovery_path.read_text(encoding="utf-8")
+    error = error_path.read_text(encoding="utf-8")
+    selector = selector_path.read_text(encoding="utf-8")
+    if MARKER not in recovery:
+        # Native decomposition moved the reviewed block from loop indentation
+        # to a module function; the substantive policy remains identical.
+        recovery = textwrap.dedent(_patch_primary_auth_path(textwrap.indent(recovery, " " * 12)))
+        recovery = _replace_once(recovery,
+            "    effective_task_id: Any,\n) -> ClassifiedErrorVerdict:",
+            "    effective_task_id: Any, turn_id: Any = '', api_request_id: Any = '',\n"
+            "    original_user_message: Any = '',\n) -> ClassifiedErrorVerdict:",
+            "native request identity parameters")
+        recovery = _replace_once(recovery, '    status_code = getattr(api_error, "status_code", None)\n\n    def _verdict', '    status_code = getattr(api_error, "status_code", None)\n    # Bind availability origin to this primary request, never stale agent state.\n    agent._codex_auth_event_origin = "internal"\n    if (api_request_id == getattr(agent, "_current_api_request_id", None)\n            and turn_id and str(api_request_id).startswith(f"{turn_id}:api:")):\n        agent._codex_auth_event_origin = (\n            "internal" if getattr(agent, "is_subagent", False)\n            or getattr(agent, "_parent_session_id", None)\n            or str(original_user_message or "").lstrip().startswith("[ASYNC DELEGATION")\n            else "client"\n        )\n\n    def _verdict', "native trusted request origin")
+        recovery = recovery.replace('if getattr(agent, "_parent_session_id", None)', 'if getattr(agent, "is_subagent", False) or getattr(agent, "_parent_session_id", None)', 1)
+        summary = "    _nonretryable_summary = agent._summarize_api_error(api_error)\n"
+        guarded = _patch_client_safe_result(" " * 16 + summary)
+        guarded = textwrap.dedent(guarded).replace("_provider", "provider")
+        recovery = _replace_once(recovery, summary, textwrap.indent(guarded, "    "), "native safe summary")
+    if "original_user_message: Any = ''" not in error:
+        error = _replace_once(error,
+            "    api_request_id: Any, api_start_time: Any, effective_task_id: Any, turn_id: Any,\n",
+            "    api_request_id: Any, api_start_time: Any, effective_task_id: Any, turn_id: Any,\n"
+            "    original_user_message: Any = '',\n", "native error phase message parameter")
+        error = _replace_once(error,
+            "        effective_task_id=effective_task_id,\n    )\n    status_code = _ce.status_code",
+            "        effective_task_id=effective_task_id, turn_id=turn_id, api_request_id=api_request_id,\n"
+            "        original_user_message=original_user_message,\n    )\n    status_code = _ce.status_code",
+            "native recovery request identity caller")
+    if "paid_fallback_allowed" not in selector:
+        seed = ('    fb_provider = (fb.get("provider") or "").strip().lower()\n'
+                '    fb_model = (fb.get("model") or "").strip()\n'
+                '    if not fb_provider or not fb_model:\n')
+        residual = _patch_selector(seed).split('    fb_model = (fb.get("model") or "").strip()\n', 1)[1]
+        residual = residual.removesuffix('    if not fb_provider or not fb_model:\n')
+        native = '    if _should_skip_fallback_candidate(agent, fb, fb_key, fb_provider, fb_model, unavailable):\n'
+        selector = _replace_once(selector, native, residual + native, "native candidate admission")
+    proposed = {recovery_path: recovery, error_path: error, selector_path: selector,
+                hermes_dir / HELPER_PATH: HELPER_SOURCE.strip() + "\n"}
+    for path, source in proposed.items():
+        compile(source, str(path), "exec")
+    changed = False
+    for path, source in proposed.items():
+        if not path.is_file() or path.read_text(encoding="utf-8") != source:
+            path.write_text(source, encoding="utf-8")
+            changed = True
+    return changed
+
+
 def patch_codex_401_paid_fallback_circuit_v1(hermes_dir: Path) -> bool:
+    if (hermes_dir / "agent/turn_recovery.py").is_file():
+        return _patch_native_codex401(hermes_dir)
     selector_target = hermes_dir / "agent" / "chat_completion_helpers.py"
     client_target = hermes_dir / "run_agent.py"
     if not client_target.exists() or "if is_client_error" not in client_target.read_text(encoding="utf-8"):

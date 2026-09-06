@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://botdoctor.dev/schemas/specialist-staff-map-v1.json",
+  "title": "Specialist Staff Map",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "runtime", "roles", "jobs", "dispatch"],
+  "properties": {
+    "schema": {"const": "specialist-staff-map/v1"},
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "primary_manager", "platform"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "primary_manager": {"type": "string", "minLength": 1},
+        "platform": {"enum": ["linux", "mac", "windows"]}
+      }
+    },
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id", "display_name", "profile", "board", "one_job", "status",
+          "skill_bundle", "connector_allowlist", "authority", "input_schema",
+          "output_schema", "max_runtime_seconds", "retry_limit"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "display_name": {"type": "string", "minLength": 1},
+          "profile": {"type": "string", "minLength": 1},
+          "board": {"type": "string", "minLength": 1},
+          "one_job": {"type": "string", "minLength": 1},
+          "status": {"enum": ["manual", "shadow", "on-demand", "retired"]},
+          "skill_bundle": {"type": "string", "minLength": 1},
+          "connector_allowlist": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "authority": {"enum": ["read-only", "proposal-only", "draft-only"]},
+          "input_schema": {"type": "string", "minLength": 1},
+          "output_schema": {"type": "string", "minLength": 1},
+          "max_runtime_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+          "retry_limit": {"type": "integer", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "jobs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source", "id", "enabled", "disposition", "deterministic_executor",
+          "specialist_role", "side_effect_owner", "review_owner"
+        ],
+        "properties": {
+          "source": {"enum": ["hermes-cron", "os-scheduler", "manual"]},
+          "id": {"type": "string", "minLength": 1},
+          "enabled": {"type": "boolean"},
+          "disposition": {"enum": ["primary", "deterministic-service", "specialist", "operator-service", "retire"]},
+          "deterministic_executor": {"type": ["string", "null"]},
+          "specialist_role": {"type": ["string", "null"]},
+          "side_effect_owner": {"type": "string", "minLength": 1},
+          "review_owner": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["shared_dispatcher", "new_schedule"],
+      "properties": {
+        "shared_dispatcher": {"const": false},
+        "new_schedule": {"const": false}
+      }
+    }
+  }
+}

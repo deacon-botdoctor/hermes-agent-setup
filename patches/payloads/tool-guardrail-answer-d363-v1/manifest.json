@@ -1,0 +1,108 @@
+{
+  "base_commit": "d3630f853239e8c41ce7201e09fbdf39bcbc5431",
+  "composed_postimage_git_blobs": {
+    "agent/anthropic_adapter.py": "816f103dc650f2f17e9aa0c4a0cfd2460fd77e16",
+    "agent/conversation_loop.py": "013e1431df44da888e579c21bae29f55b9bdb35a",
+    "agent/tool_dispatch_helpers.py": "b666eff73b6a792cb38533937e527ef50c274ef9",
+    "agent/tool_guardrails.py": "37738f53ee1cf0ac2cc0bed0599cee4bb9685a6f",
+    "agent/turn_api_call.py": "6593b4068e836dc7233f0f815490a824ff520744",
+    "agent/turn_api_error.py": "d184d5eca0580abaceb0bbe62085dbce559892c7",
+    "agent/turn_api_request.py": "ef0b416f7568ccfc5acc57990d909275e1e01b28",
+    "agent/turn_final_response.py": "7c13d7ffa09202b27bca5d70f820e956fbc60400",
+    "agent/turn_finalizer.py": "7f7444ad5b0effbce733e2c5462bb6d9fd0f3df4",
+    "agent/turn_guardrail_recovery.py": "b1da024aedeb4926609880b00079258adff12afb",
+    "agent/turn_iteration_prep.py": "a26439a892c431d3f7499b8cd9fab0e9eb7d9201",
+    "agent/turn_response_check.py": "0a155cd2ef5523e2c4924bfee93c671173a81531",
+    "agent/turn_response_intake.py": "3940a5f2284d063fb673c2184b0e196a81c6c663",
+    "agent/turn_tool_round.py": "9a2758a0b2b45b36dcfe5e22c5c85379e3d2c7bf",
+    "tests/agent/test_anthropic_adapter.py": "79428e1c15156cf6351c6dd350d093fcdaf205fc",
+    "tests/agent/test_tool_dispatch_helpers.py": "edee15f2525a9b24e4e6a6b92f90d92c37b27b17",
+    "tests/agent/test_tool_guardrails.py": "b0924d0bcbca6dcad70abfdfd487df90e92c54e6",
+    "tests/run_agent/test_tool_call_guardrail_runtime.py": "3ebdb643e386bf76934b34d17b6833b5eee22be6"
+  },
+  "patch": "d363-tool-guardrail-answer.patch",
+  "patch_sha256": "259ea6b8124f2dc0e61f4cc2b0d66e6a7c1b13d92c0d8e5fa4c40e811d958d24",
+  "postimage_git_blobs": {
+    "agent/anthropic_adapter.py": "816f103dc650f2f17e9aa0c4a0cfd2460fd77e16",
+    "agent/conversation_loop.py": "fef70a58a75a261fe700b325efd64413f91c5876",
+    "agent/tool_dispatch_helpers.py": "b666eff73b6a792cb38533937e527ef50c274ef9",
+    "agent/tool_guardrails.py": "37738f53ee1cf0ac2cc0bed0599cee4bb9685a6f",
+    "agent/turn_api_call.py": "75b25b910b76fbc26007d8410d3b9d520744f5f9",
+    "agent/turn_api_error.py": "73dd2c8bb93a955cac2c22d67e882d4165d7f8c8",
+    "agent/turn_api_request.py": "ef0b416f7568ccfc5acc57990d909275e1e01b28",
+    "agent/turn_final_response.py": "1096d8b0fd7cefd4b75652343bff92f8832f66b4",
+    "agent/turn_finalizer.py": "db3fe980a2c97db9b771cb91a176832c72ec2a5b",
+    "agent/turn_guardrail_recovery.py": "b1da024aedeb4926609880b00079258adff12afb",
+    "agent/turn_iteration_prep.py": "a26439a892c431d3f7499b8cd9fab0e9eb7d9201",
+    "agent/turn_response_check.py": "0a3acfa4b3a358e010672413af9bb326b1e86844",
+    "agent/turn_response_intake.py": "3940a5f2284d063fb673c2184b0e196a81c6c663",
+    "agent/turn_tool_round.py": "9a2758a0b2b45b36dcfe5e22c5c85379e3d2c7bf",
+    "tests/agent/test_anthropic_adapter.py": "79428e1c15156cf6351c6dd350d093fcdaf205fc",
+    "tests/agent/test_tool_dispatch_helpers.py": "edee15f2525a9b24e4e6a6b92f90d92c37b27b17",
+    "tests/agent/test_tool_guardrails.py": "b0924d0bcbca6dcad70abfdfd487df90e92c54e6",
+    "tests/run_agent/test_tool_call_guardrail_runtime.py": "4c96755b84e9d5623081370c275bed1c2912d25a"
+  },
+  "required_fragments": {
+    "agent/anthropic_adapter.py": [
+      "base_url_hostname, normalize_proxy_env_vars",
+      "\"type\": \"none\""
+    ],
+    "agent/conversation_loop.py": [
+      "_guardrail_recovery_pending: bool = False",
+      "_guardrail_recovery_sent: bool = False"
+    ],
+    "agent/tool_dispatch_helpers.py": [
+      "\"web_extract\","
+    ],
+    "agent/tool_guardrails.py": [
+      "EMPTY_WEB_SEARCH_HALT_AFTER = 8",
+      "def _web_search_result_is_empty",
+      "repeated_empty_web_search_halt"
+    ],
+    "agent/turn_api_call.py": [
+      "guardrail recovery attempted more than once",
+      "shape_answer_only_request(agent, next_api_kwargs)"
+    ],
+    "agent/turn_api_error.py": [
+      "guardrail_recovery_error",
+      "must not\n        # enter credential rotation, retry, or fallback"
+    ],
+    "agent/turn_api_request.py": [
+      "shape_answer_only_request(agent, api_kwargs)",
+      "_guardrail_recovery_pending: Any"
+    ],
+    "agent/turn_final_response.py": [
+      "guardrail_recovery_answer",
+      "guardrail_recovery_refused"
+    ],
+    "agent/turn_finalizer.py": [
+      "successful_guardrail_recovery"
+    ],
+    "agent/turn_guardrail_recovery.py": [
+      "def shape_answer_only_request",
+      "def controlled_halt_text"
+    ],
+    "agent/turn_iteration_prep.py": [
+      "if _guardrail_recovery_terminal:"
+    ],
+    "agent/turn_response_check.py": [
+      "guardrail_recovery_refused",
+      "if finish_reason == \"length\" and not _guardrail_recovery_pending:"
+    ],
+    "agent/turn_response_intake.py": [
+      "if _guardrail_recovery_pending:"
+    ],
+    "agent/turn_tool_round.py": [
+      "guardrail_recovery_pending",
+      "finishing from collected results"
+    ]
+  },
+  "schema_version": 1,
+  "tests": [
+    "tests/agent/test_tool_guardrails.py",
+    "tests/agent/test_tool_dispatch_helpers.py",
+    "tests/agent/test_anthropic_adapter.py",
+    "tests/run_agent/test_tool_call_guardrail_runtime.py",
+    "tests/run_agent/test_background_review_input_budget.py"
+  ]
+}

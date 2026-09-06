@@ -8,7 +8,8 @@ import shutil
 from pathlib import Path
 
 MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1"
-REVISION_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_r3"
+PRIOR_REVISION_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_r4"
+REVISION_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_r5"
 TARGET = Path("tools/browser_use_cli.py")
 TEST_TARGET = Path("tests/tools/test_browser_use_cli.py")
 MODEL_TOOLS_TARGET = Path("model_tools.py")
@@ -126,6 +127,11 @@ ENV_REPLACEMENT = """def _base_subprocess_env() -> dict:
         for key, value in source_env.items()
         if key.upper() in _INHERITED_ENV_NAMES or key.upper().startswith("LC_")
     }
+    # Preserve upstream's profile-worker PATH floor after applying Golden's
+    # stricter environment allowlist.  Browser Use's POSIX trampoline needs
+    # coreutils such as dirname and realpath even when cron inherits only a
+    # version-manager PATH.
+    env["PATH"] = _floor_subprocess_path(env.get("PATH", ""))
     env.update(_PRIVACY_ENV)
     env.pop("BU_CDP_URL", None)
     env.pop("BU_CDP_WS", None)
@@ -797,7 +803,7 @@ INSTALL_REPLACEMENT = '''def install_cli(timeout_s: int = 600):
 '''
 
 INSTALL_SH_MARKER = "Golden's exact host-artifact installer"
-INSTALL_SH_ANCHOR = '''install_browser_use_cli() {
+INSTALL_SH_ANCHOR = """install_browser_use_cli() {
     # The Browser Use CLI is the default browser backend when it is runnable
     # (tools/browser_use_cli.py). Provision it here so fresh installs don't
     # silently fall back to the built-in browser tools. Best-effort: any
@@ -830,8 +836,8 @@ INSTALL_SH_ANCHOR = '''install_browser_use_cli() {
         log_info "Install later with: $UV_CMD tool install browser-use  (or via 'hermes tools')"
     fi
 }
-'''
-INSTALL_SH_REPLACEMENT = '''install_browser_use_cli() {
+"""
+INSTALL_SH_REPLACEMENT = """install_browser_use_cli() {
     if [ "$SKIP_BROWSER" = true ]; then
         log_info "Skipping Browser Use CLI install (--skip-browser)"
         return 0
@@ -841,10 +847,10 @@ INSTALL_SH_REPLACEMENT = '''install_browser_use_cli() {
     fi
     log_info "Browser Use CLI provisioning is owned by Golden's exact host-artifact installer."
 }
-'''
+"""
 
 INSTALL_PS1_MARKER = "Golden's exact host-artifact installer"
-INSTALL_PS1_ANCHOR = '''# The Browser Use CLI is the default browser backend when it is runnable
+INSTALL_PS1_ANCHOR = """# The Browser Use CLI is the default browser backend when it is runnable
 # (tools/browser_use_cli.py). Provision it at install time so fresh installs
 # don't silently fall back to the built-in browser tools. Best-effort: any
 # failure is non-fatal (browser_exec can still run via uvx, and `hermes tools`
@@ -885,14 +891,14 @@ function Install-BrowserUseCli {
         Remove-Item Env:\\UV_NO_CONFIG -ErrorAction SilentlyContinue
     }
 }
-'''  # noqa: E501
-INSTALL_PS1_REPLACEMENT = '''function Install-BrowserUseCli {
+"""  # noqa: E501
+INSTALL_PS1_REPLACEMENT = """function Install-BrowserUseCli {
     Write-Info "Browser Use CLI provisioning is owned by Golden's exact host-artifact installer."
 }
-'''
+"""
 
 TOOLS_CONFIG_MARKER = "Golden's managed Browser Use host artifact installer"
-TOOLS_CONFIG_ANCHOR = '''    elif post_setup_key == "browser_use_cli":
+TOOLS_CONFIG_ANCHOR = """    elif post_setup_key == "browser_use_cli":
         if shutil.which("browser-use"):
             _print_success("    browser-use CLI found on PATH")
         else:
@@ -914,8 +920,8 @@ TOOLS_CONFIG_ANCHOR = '''    elif post_setup_key == "browser_use_cli":
                     _print_info("    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")
         _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
         _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
-'''
-TOOLS_CONFIG_REPLACEMENT = '''    elif post_setup_key == "browser_use_cli":
+"""
+TOOLS_CONFIG_REPLACEMENT = """    elif post_setup_key == "browser_use_cli":
         try:
             from tools.browser_use_cli import install_cli
 
@@ -928,6 +934,24 @@ TOOLS_CONFIG_REPLACEMENT = '''    elif post_setup_key == "browser_use_cli":
             for line in str(message).splitlines():
                 _print_warning(f"    {line[:200]}")
             _print_info("    Golden's managed Browser Use host artifact installer owns provisioning.")
+        _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
+        _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
+"""
+TOOLS_CONFIG_FUNCTION_REPLACEMENT = '''def _ensure_browser_use_cli(*, verbose_hints: bool = False) -> None:
+    """Verify Golden's receipt-bound Browser Use host artifact."""
+    try:
+        from tools.browser_use_cli import install_cli
+
+        ok, message = install_cli()
+    except Exception as exc:  # pragma: no cover — defensive
+        ok, message = False, f"managed Browser Use check failed: {exc}"
+    if ok:
+        _print_success(f"    {message}")
+    else:
+        for line in str(message).splitlines():
+            _print_warning(f"    {line[:200]}")
+        _print_info("    Golden's managed Browser Use host artifact installer owns provisioning.")
+    if verbose_hints:
         _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
         _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
 '''
@@ -985,11 +1009,21 @@ SESSION_ANCHOR = """        env["BU_NAME"] = session
 SESSION_REPLACEMENT = """        env["BU_NAME"] = _profile_session_name(session)
 """
 
-WORKSPACE_ANCHOR = """    existing = os.environ.get("BH_AGENT_WORKSPACE")
-    if existing:
-        return existing
-"""
-WORKSPACE_REPLACEMENT = """"""
+LEGACY_WORKSPACE_REPLACEMENT = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
+    """Stable collision-resistant task workspace beneath Hermes state."""
+    try:
+        from hermes_constants import get_hermes_home
+    
+        identity = str(task_id or "default")
+        safe_prefix = _TASK_ID_SAFE_RE.sub("_", identity)[:63] or "default"
+        workspace_name = f"{safe_prefix}_{hashlib.sha256(identity.encode('utf-8', 'surrogatepass')).hexdigest()[:16]}"
+        path = Path(get_hermes_home()) / "cache" / "browser-use" / "workspace" / workspace_name
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    except Exception as e:
+        logger.debug("browser_exec workspace unavailable: %s", e)
+        return None
+'''
 
 MISSING_ANCHOR = """        return tool_error(
             "browser-use CLI not found on PATH, and uvx is unavailable for a "
@@ -1143,9 +1177,10 @@ NOTICE_HINT_REPLACEMENT = """            "Run Golden's managed Browser Use host 
 NOTICE_TEST_ANCHOR = '        assert "hermes tools" in notice\n'
 NOTICE_TEST_REPLACEMENT = '        assert "managed Browser Use" in notice\n'
 SESSION_TEST_ANCHOR = '        assert "bu:r7k2" in result["output"]\n'
-SESSION_TEST_REPLACEMENT = (
-    '        assert result["output"].strip().endswith("_r7k2")\n'
-)
+SESSION_TEST_REPLACEMENT = '        assert "bu:hermes_" in result["output"] and "_r7k2" in result["output"]\n'
+
+UNRELATED_ENV_TEST_ANCHOR = '        assert env["KEEP_ME"] == "yes"\n'
+UNRELATED_ENV_TEST_REPLACEMENT = '        assert "KEEP_ME" not in env\n'
 
 STATIC_HINT_TEST_ANCHOR = """        assert "uv tool install browser-use" in desc
 """
@@ -1245,8 +1280,7 @@ def _replace_named_node(
     matches = [
         node
         for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-        and node.name == name
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == name
     ]
     if not matches:
         if required:
@@ -1262,6 +1296,32 @@ def _replace_named_node(
     return "".join(lines[:start]) + replacement_text + "".join(lines[end:])
 
 
+def _replace_braced_function(source: str, signature: str, replacement: str, label: str) -> str:
+    """Replace one Bash/PowerShell function while tolerating body drift."""
+    start = source.find(signature)
+    if start < 0 or source.find(signature, start + 1) >= 0:
+        raise RuntimeError(f"native Browser Use {label} anchor drift")
+    brace = source.find("{", start, start + len(signature) + 4)
+    if brace < 0:
+        raise RuntimeError(f"native Browser Use {label} opening brace drift")
+    depth = 0
+    end = None
+    for index in range(brace, len(source)):
+        char = source[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                end = index + 1
+                break
+    if end is None:
+        raise RuntimeError(f"native Browser Use {label} closing brace drift")
+    while end < len(source) and source[end] in "\r\n":
+        end += 1
+    return source[:start] + replacement.rstrip() + "\n\n" + source[end:]
+
+
 def patch_native_browser_use_safety_v1(root: Path) -> bool:
     root = Path(root)
     target = root / TARGET
@@ -1271,13 +1331,25 @@ def patch_native_browser_use_safety_v1(root: Path) -> bool:
     install_ps1_target = root / INSTALL_PS1_TARGET
     tools_config_target = root / TOOLS_CONFIG_TARGET
     source = target.read_text(encoding="utf-8")
+    if D363_MARKER in source or _is_d363_browser_use_source(source):
+        return _patch_d363_browser_use(root, source)
     test_source = test_target.read_text(encoding="utf-8")
     model_tools_source = model_tools_target.read_text(encoding="utf-8")
     install_sh_source = install_sh_target.read_text(encoding="utf-8")
     install_ps1_source = install_ps1_target.read_text(encoding="utf-8")
     tools_config_source = tools_config_target.read_text(encoding="utf-8")
     if MARKER in source and REVISION_MARKER not in source:
-        raise RuntimeError("native Browser Use stale patch revision requires a clean candidate rebuild")
+        if PRIOR_REVISION_MARKER not in source:
+            raise RuntimeError("native Browser Use stale patch revision requires a clean candidate rebuild")
+        patched = _replace_named_node(
+            source,
+            "_workspace_dir",
+            LEGACY_WORKSPACE_REPLACEMENT,
+            "collision-resistant workspace upgrade",
+        ).replace(PRIOR_REVISION_MARKER, REVISION_MARKER, 1)
+        ast.parse(patched)
+        target.write_text(patched, encoding="utf-8")
+        return True
     if (
         REVISION_MARKER in source
         and MARKER in test_source
@@ -1306,11 +1378,14 @@ def patch_native_browser_use_safety_v1(root: Path) -> bool:
         )
         patched = _replace_once(patched, CONSTANT_ANCHOR, CONSTANT_REPLACEMENT, "constants")
         patched = _replace_once(patched, MODE_ANCHOR, MODE_REPLACEMENT, "mode gating")
-        patched = _replace_once(patched, ENV_ANCHOR, ENV_REPLACEMENT, "environment")
-        patched = _replace_once(patched, SESSION_ANCHOR, SESSION_REPLACEMENT, "session namespace")
         patched = _replace_named_node(
-            patched, "_find_cli", FIND_REPLACEMENT, "CLI resolver"
+            patched,
+            "_base_subprocess_env",
+            ENV_REPLACEMENT,
+            "environment",
         )
+        patched = _replace_once(patched, SESSION_ANCHOR, SESSION_REPLACEMENT, "session namespace")
+        patched = _replace_named_node(patched, "_find_cli", FIND_REPLACEMENT, "CLI resolver")
         patched = _replace_named_node(
             patched,
             "install_cli",
@@ -1318,11 +1393,11 @@ def patch_native_browser_use_safety_v1(root: Path) -> bool:
             "unpinned installer",
             required=False,
         )
-        patched = _replace_once(
+        patched = _replace_named_node(
             patched,
-            WORKSPACE_ANCHOR,
-            WORKSPACE_REPLACEMENT,
-            "ambient workspace override",
+            "_workspace_dir",
+            LEGACY_WORKSPACE_REPLACEMENT,
+            "collision-resistant workspace",
         )
         patched = _replace_once(patched, MISSING_ANCHOR, MISSING_REPLACEMENT, "missing-CLI response")
         patched = _replace_once(patched, SCHEMA_ANCHOR, SCHEMA_REPLACEMENT, "static schema hint")
@@ -1421,28 +1496,59 @@ def patch_native_browser_use_safety_v1(root: Path) -> bool:
                 SESSION_TEST_ANCHOR,
                 SESSION_TEST_REPLACEMENT,
             )
+        if UNRELATED_ENV_TEST_ANCHOR in patched_test:
+            patched_test = _replace_once(
+                patched_test,
+                UNRELATED_ENV_TEST_ANCHOR,
+                UNRELATED_ENV_TEST_REPLACEMENT,
+                "environment allowlist test",
+            )
 
     if INSTALL_SH_MARKER not in patched_install_sh:
-        patched_install_sh = _replace_once(
-            patched_install_sh,
-            INSTALL_SH_ANCHOR,
-            INSTALL_SH_REPLACEMENT,
-            "POSIX installer ownership",
-        )
+        if INSTALL_SH_ANCHOR in patched_install_sh:
+            patched_install_sh = _replace_once(
+                patched_install_sh,
+                INSTALL_SH_ANCHOR,
+                INSTALL_SH_REPLACEMENT,
+                "POSIX installer ownership",
+            )
+        else:
+            patched_install_sh = _replace_braced_function(
+                patched_install_sh,
+                "install_browser_use_cli() {",
+                INSTALL_SH_REPLACEMENT,
+                "POSIX installer ownership",
+            )
     if INSTALL_PS1_MARKER not in patched_install_ps1:
-        patched_install_ps1 = _replace_once(
-            patched_install_ps1,
-            INSTALL_PS1_ANCHOR,
-            INSTALL_PS1_REPLACEMENT,
-            "PowerShell installer ownership",
-        )
+        if INSTALL_PS1_ANCHOR in patched_install_ps1:
+            patched_install_ps1 = _replace_once(
+                patched_install_ps1,
+                INSTALL_PS1_ANCHOR,
+                INSTALL_PS1_REPLACEMENT,
+                "PowerShell installer ownership",
+            )
+        else:
+            patched_install_ps1 = _replace_braced_function(
+                patched_install_ps1,
+                "function Install-BrowserUseCli {",
+                INSTALL_PS1_REPLACEMENT,
+                "PowerShell installer ownership",
+            )
     if TOOLS_CONFIG_MARKER not in patched_tools_config:
-        patched_tools_config = _replace_once(
-            patched_tools_config,
-            TOOLS_CONFIG_ANCHOR,
-            TOOLS_CONFIG_REPLACEMENT,
-            "tools installer ownership",
-        )
+        if TOOLS_CONFIG_ANCHOR in patched_tools_config:
+            patched_tools_config = _replace_once(
+                patched_tools_config,
+                TOOLS_CONFIG_ANCHOR,
+                TOOLS_CONFIG_REPLACEMENT,
+                "tools installer ownership",
+            )
+        else:
+            patched_tools_config = _replace_named_node(
+                patched_tools_config,
+                "_ensure_browser_use_cli",
+                TOOLS_CONFIG_FUNCTION_REPLACEMENT,
+                "tools installer ownership",
+            )
 
     ast.parse(patched)
     ast.parse(patched_test)
@@ -1461,3 +1567,317 @@ def patch_native_browser_use_safety_v1(root: Path) -> bool:
         shutil.copy2(path, Path(str(path) + BACKUP_SUFFIX))
         path.write_text(content, encoding="utf-8")
     return True
+
+D363_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363"
+D363_POST_SETUP_TARGET = Path("hermes_cli/tools_config_post_setup.py")
+D363_IMPORT_ANCHOR = "import contextlib\n"
+D363_IMPORT_REPLACEMENT = "import contextlib\nimport hashlib\nimport tempfile\n"
+D363_CONSTANT_ANCHOR = '_BACKEND_KEY = "browser-use"\nBACKEND_DISABLED = "off"\n'
+D363_CONSTANT_REPLACEMENT = '''_BACKEND_KEY = "browser-use"
+BACKEND_DISABLED = "off"
+
+# HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363: receipt-bound binary and private state.
+_MANAGED_RECEIPT = "browser-use-cli-install-v1.json"
+_MANAGED_PACKAGE = "browser-use==0.13.7"
+_MAX_MANAGED_CLI_BYTES = 8 * 1024 * 1024
+_PRIVACY_ENV = {"ANONYMIZED_TELEMETRY": "false", "BH_TELEMETRY": "0",
+                "BROWSER_HARNESS_TELEMETRY": "0", "BROWSER_USE_CLOUD_SYNC": "false"}
+
+def _browser_use_state_root() -> Path:
+    return Path(get_hermes_home()) / "state" / "browser-use"
+
+def _managed_receipt_path() -> Path:
+    return Path(get_hermes_home()) / "state" / _MANAGED_RECEIPT
+
+def _sha256_file(path: Path) -> Optional[str]:
+    try:
+        if not path.is_file() or path.stat().st_size > _MAX_MANAGED_CLI_BYTES:
+            return None
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+def _verified_managed_cli() -> Optional[str]:
+    try:
+        cli = Path(_managed_bin_dir()) / ("browser-use.exe" if os.name == "nt" else "browser-use")
+        receipt = json.loads(_managed_receipt_path().read_text(encoding="utf-8"))
+        digest = _sha256_file(cli)
+        if (not digest or not isinstance(receipt, dict) or receipt.get("schema") != 1
+                or receipt.get("package") != _MANAGED_PACKAGE or receipt.get("path") != str(cli)
+                or receipt.get("sha256") != digest):
+            return None
+        if os.name != "nt" and not os.access(cli, os.X_OK):
+            return None
+        return str(cli)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+def _profile_session_name(session: str) -> str:
+    try:
+        receipt = _managed_receipt_path().read_bytes()
+    except OSError:
+        receipt = b""
+    prefix = "hermes_" + hashlib.sha256(receipt).hexdigest()[:16] + "_"
+    suffix = session if len(session) <= 40 else session[:23] + "_" + hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]
+    return prefix + suffix
+
+def _run_isolated_cli(*args, env: dict, **kwargs):
+    with tempfile.TemporaryDirectory(prefix="hermes-browser-use-pycache-") as pycache:
+        isolated = dict(env)
+        isolated.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPYCACHEPREFIX": pycache})
+        return subprocess.run(*args, env=isolated, **kwargs)
+'''
+D363_ENV_REPLACEMENT = '''def _base_subprocess_env() -> dict:
+    from tools.browser_tool import _build_browser_env
+    env = _build_browser_env()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    env["PATH"] = _floor_subprocess_path(env.get("PATH", ""))
+    state = _browser_use_state_root()
+    profile = state / "browser-profile"
+    env.update(_PRIVACY_ENV)
+    env.update({"BH_HOME": str(state), "BH_CONFIG_DIR": str(state / "config"),
+                "BH_RUNTIME_DIR": str(state / "runtime"), "BH_TMP_DIR": str(state / "tmp"),
+                "BH_AGENT_WORKSPACE": str(state / "workspace"), "HOME": str(profile),
+                "USERPROFILE": str(profile), "XDG_CONFIG_HOME": str(profile / ".config"),
+                "XDG_CACHE_HOME": str(profile / ".cache"),
+                "BROWSER_USE_CONFIG_DIR": str(profile / ".config" / "browser-use")})
+    return env'''
+D363_FIND_REPLACEMENT = '''def _find_cli() -> Optional[List[str]]:
+    """Resolve only the receipt-bound Hermes-managed Browser Use executable."""
+    managed = _verified_managed_cli()
+    return [managed] if managed else None'''
+D363_INSTALL_REPLACEMENT = '''def install_cli(timeout_s: int = 600) -> Tuple[bool, str]:
+    """Install the pinned managed CLI and atomically receipt-bind its executable."""
+    managed = _verified_managed_cli()
+    if managed:
+        return True, f"browser-use CLI already installed ({managed})"
+    def _managed_uv() -> Optional[str]:
+        from hermes_cli.managed_uv import ensure_uv
+        return str(ensure_uv() or "") or None
+    uv_bin = _quiet(_managed_uv, None, "Managed uv bootstrap unavailable") or shutil.which("uv")
+    if not uv_bin:
+        return False, "managed uv is unavailable; Browser Use remains disabled"
+    bin_dir = _managed_bin_dir()
+    env = {**os.environ, "UV_NO_CONFIG": "1", "UV_TOOL_BIN_DIR": bin_dir}
+    try:
+        Path(bin_dir).mkdir(parents=True, exist_ok=True)
+        result = subprocess.run([uv_bin, "tool", "install", _MANAGED_PACKAGE], capture_output=True,
+                                text=True, encoding="utf-8", errors="replace", env=env,
+                                timeout=timeout_s, stdin=subprocess.DEVNULL)
+        if result.returncode != 0:
+            return False, "managed Browser Use install failed"
+        cli = Path(bin_dir) / ("browser-use.exe" if os.name == "nt" else "browser-use")
+        digest = _sha256_file(cli)
+        if not digest:
+            return False, "managed Browser Use install did not produce a readable executable"
+        receipt_path = _managed_receipt_path()
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = receipt_path.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"schema": 1, "package": _MANAGED_PACKAGE,
+                                         "path": str(cli), "sha256": digest}, sort_keys=True), encoding="utf-8")
+        temporary.replace(receipt_path)
+    except subprocess.TimeoutExpired:
+        return False, f"managed Browser Use install timed out after {timeout_s}s"
+    except OSError as exc:
+        return False, f"managed Browser Use install failed: {exc}"
+    found = _verified_managed_cli()
+    return (True, f"browser-use CLI installed ({found})") if found else (False, "managed Browser Use receipt verification failed")'''
+D363_WORKSPACE_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_workspace_r1"
+D363_WORKSPACE_OLD = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
+    """Stable per-task workspace beneath the private Browser Use state root."""
+    try:
+        safe = _TASK_ID_SAFE_RE.sub("_", str(task_id or "default"))[:80] or "default"
+        path = _browser_use_state_root() / "workspace" / safe
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    except OSError as e:
+        logger.debug("browser_exec workspace unavailable: %s", e)
+        return None'''
+D363_WORKSPACE_REPLACEMENT = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
+    """Stable collision-resistant task workspace beneath private Browser Use state."""
+    try:
+        # HERMES_NATIVE_BROWSER_USE_SAFETY_v1_workspace_r1
+        identity = str(task_id or "default")
+        safe_prefix = _TASK_ID_SAFE_RE.sub("_", identity)[:63] or "default"
+        workspace_name = f"{safe_prefix}_{hashlib.sha256(identity.encode('utf-8', 'surrogatepass')).hexdigest()[:16]}"
+        path = _browser_use_state_root() / "workspace" / workspace_name
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)
+    except OSError as e:
+        logger.debug("browser_exec workspace unavailable: %s", e)
+        return None'''
+D363_EXEC_ERROR_OLD = '''return tool_error("browser-use CLI not found on PATH, and uvx is unavailable for a zero-install run. "
+                          "Install it with `uv tool install browser-use` (or `pipx install browser-use`), "
+                          "then run `browser-use --doctor` to verify the setup.")'''
+D363_EXEC_ERROR_NEW = '''return tool_error("managed Browser Use CLI is unavailable or failed receipt verification. "
+                          "Run `hermes tools` to install the managed Browser Use CLI.")'''
+D363_POST_SETUP_OLD = '''        _print_info("    Falling back to zero-install runs via `uvx browser-use`" if shutil.which("uvx")
+                    else "    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")'''
+D363_POST_SETUP_NEW = '''        _print_info("    Browser Use stays disabled until its managed install completes and verifies.")
+        # HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363'''
+
+def _is_d363_browser_use_source(source: str) -> bool:
+    return ("Camofox always falls back" in source and "return backend == _BACKEND_KEY if backend else" in source
+            and "UV_TOOL_BIN_DIR" in source)
+
+def _patch_d363_browser_use(root: Path, source: str) -> bool:
+    target = root / TARGET
+    post_target = root / D363_POST_SETUP_TARGET
+    post_source = post_target.read_text(encoding="utf-8")
+    test_target = root / TEST_TARGET
+    test_source = test_target.read_text(encoding="utf-8")
+    if D363_MARKER in source:
+        if D363_MARKER not in post_source or D363_MARKER not in test_source:
+            raise RuntimeError("native Browser Use d363 split patch is incomplete")
+        expected_verifier = next(node for node in ast.parse(D363_CONSTANT_REPLACEMENT).body
+                                 if isinstance(node, ast.FunctionDef) and node.name == "_verified_managed_cli")
+        actual_verifiers = [node for node in ast.parse(source).body
+                            if isinstance(node, ast.FunctionDef) and node.name == "_verified_managed_cli"]
+        if len(actual_verifiers) != 1 or ast.dump(actual_verifiers[0]) != ast.dump(expected_verifier):
+            raise RuntimeError("native Browser Use d363 executable verification drift")
+        old_session = '    return ("hermes_" + hashlib.sha256(receipt).hexdigest()[:16] + "_" + session)[:64]'
+        new_session = '    prefix = "hermes_" + hashlib.sha256(receipt).hexdigest()[:16] + "_"\n    suffix = session if len(session) <= 40 else session[:23] + "_" + hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]\n    return prefix + suffix'
+        patched = source
+        if old_session in patched:
+            patched = _replace_once(patched, old_session, new_session, "d363 full session identity")
+        elif new_session not in patched:
+            raise RuntimeError("native Browser Use d363 session identity drift")
+        if D363_WORKSPACE_MARKER not in patched:
+            if D363_WORKSPACE_OLD not in patched:
+                raise RuntimeError("native Browser Use d363 workspace identity drift")
+            patched = _replace_named_node(
+                patched,
+                "_workspace_dir",
+                D363_WORKSPACE_REPLACEMENT,
+                "d363 collision-resistant workspace upgrade",
+            )
+        if patched == source:
+            return False
+        ast.parse(patched)
+        target.write_text(patched, encoding="utf-8")
+        return True
+    patched = _replace_once(source, D363_IMPORT_ANCHOR, D363_IMPORT_REPLACEMENT, "d363 imports")
+    patched = _replace_once(patched, D363_CONSTANT_ANCHOR, D363_CONSTANT_REPLACEMENT, "d363 constants")
+    patched = _replace_named_node(patched, "is_browser_use_cli_mode", D363_MODE_REPLACEMENT, "d363 mode")
+    patched = _replace_named_node(patched, "_base_subprocess_env", D363_ENV_REPLACEMENT, "d363 environment")
+    patched = _replace_named_node(patched, "_find_cli", D363_FIND_REPLACEMENT, "d363 resolver")
+    patched = _replace_named_node(patched, "install_cli", D363_INSTALL_REPLACEMENT, "d363 installer")
+    patched = _replace_named_node(patched, "_workspace_dir", D363_WORKSPACE_REPLACEMENT, "d363 workspace")
+    patched = _replace_once(patched, D363_EXEC_ERROR_OLD, D363_EXEC_ERROR_NEW, "d363 missing CLI error")
+    patched = _replace_once(patched, D363_SCHEMA_OLD, D363_SCHEMA_NEW, "d363 schema hint")
+    patched = _replace_once(patched, 'env["BU_NAME"] = session', 'env["BU_NAME"] = _profile_session_name(session)', "d363 session namespace")
+    patched = _replace_once(patched, '''proc = subprocess.run(
+            cmd, input=code, capture_output=True, text=True, timeout=timeout, env=env,''', '''proc = _run_isolated_cli(
+            cmd, input=code, capture_output=True, text=True, timeout=timeout, env=env,''', "d363 isolated subprocess")
+    patched_post = _replace_once(post_source, D363_POST_SETUP_OLD, D363_POST_SETUP_NEW, "d363 post setup")
+    patched_test = _patch_d363_tests(test_source)
+    ast.parse(patched)
+    ast.parse(patched_post)
+    ast.parse(patched_test)
+    for path, content in ((target, patched), (post_target, patched_post), (test_target, patched_test)):
+        shutil.copy2(path, Path(str(path) + BACKUP_SUFFIX))
+        path.write_text(content, encoding="utf-8")
+    return True
+
+D363_MODE_REPLACEMENT = '''def is_browser_use_cli_mode() -> bool:
+    """Enable Browser Use only when the receipt-bound managed CLI is runnable."""
+    if _camofox_active():
+        return False
+    backend = get_browser_backend()
+    if backend and backend != _BACKEND_KEY:
+        return False
+    return _find_cli() is not None'''
+D363_SCHEMA_OLD = '''# Static fallback description, used only when the CLI (and uvx) is unavailable
+    "description": (_HEADER_BASE + _HELPERS_DIGEST
+                    + "\\n\\n(The browser-use CLI is not installed yet. Install it with `uv tool install browser-use`.)"),'''
+D363_SCHEMA_NEW = '''# Static fallback description when the managed receipt-bound CLI is unavailable.
+    "description": (_HEADER_BASE + _HELPERS_DIGEST
+                    + "\\n\\n(The managed Browser Use CLI is unavailable. Run `hermes tools` to install it.)"),'''
+D363_TEST_FIND_REPLACEMENT = '''class TestFindCli:
+    """Only receipt-bound $HERMES_HOME/bin/browser-use may execute."""
+    def test_rejects_path_and_uvx(self, monkeypatch):
+        monkeypatch.setattr(bu_cli.shutil, "which", lambda *args, **kwargs: "/usr/local/bin/uvx")
+        assert bu_cli._find_cli_unpatched() is None
+
+    def test_none_when_no_receipt(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+        assert bu_cli._find_cli_unpatched() is None
+'''
+D363_TEST_MANAGED_REPLACEMENT = '''class TestFindCliManagedBin:
+    @pytest.fixture(autouse=True)
+    def _hermetic_home(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+    def test_receipt_binds_managed_binary(self, tmp_path):
+        cli = tmp_path / "home" / "bin" / "browser-use"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("#!/bin/sh\\n")
+        cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
+        receipt = tmp_path / "home" / "state" / bu_cli._MANAGED_RECEIPT
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(json.dumps({"schema": 1, "package": bu_cli._MANAGED_PACKAGE,
+                                       "path": str(cli), "sha256": bu_cli._sha256_file(cli)}))
+        assert bu_cli._find_cli_unpatched() == [str(cli)]
+        cli.write_text("changed")
+        assert bu_cli._find_cli_unpatched() is None
+'''
+D363_TEST_INSTALL_REPLACEMENT = '''class TestInstallCli:
+    def test_successful_managed_install_writes_receipt(self, tmp_path, monkeypatch):
+        home = tmp_path / "home"
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+        uv = tmp_path / "uv"
+        uv.write_text("#!/bin/sh\\n"
+                      'printf "#!/bin/sh\\\\n" > "$UV_TOOL_BIN_DIR/browser-use"\\n'
+                      '/bin/chmod +x "$UV_TOOL_BIN_DIR/browser-use"\\n')
+        uv.chmod(uv.stat().st_mode | stat.S_IXUSR)
+        import sys as _sys
+        import types as _types
+        fake = _types.ModuleType("hermes_cli.managed_uv")
+        fake.ensure_uv = lambda **kw: str(uv)
+        monkeypatch.setitem(_sys.modules, "hermes_cli.managed_uv", fake)
+        ok, msg = bu_cli.install_cli()
+        assert ok, msg
+        assert (home / "state" / bu_cli._MANAGED_RECEIPT).is_file()
+        assert bu_cli._find_cli_unpatched() == [str(home / "bin" / "browser-use")]
+'''
+
+def _patch_d363_tests(source: str) -> str:
+    patched = "# HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363\n" + _replace_named_node(source, "TestFindCli", D363_TEST_FIND_REPLACEMENT, "d363 resolver tests")
+    patched = _replace_named_node(patched, "TestFindCliManagedBin", D363_TEST_MANAGED_REPLACEMENT, "d363 receipt tests")
+    patched = _replace_named_node(patched, "TestInstallCli", D363_TEST_INSTALL_REPLACEMENT, "d363 installer tests")
+    patched = patched.replace('assert "uv tool install browser-use" in desc', 'assert "managed Browser Use" in desc')
+    patched = patched.replace('assert "uv tool install browser-use" in result["error"]', 'assert "managed Browser Use" in result["error"]')
+    patched = patched.replace('assert "bu:r7k2" in result["output"]', 'assert "bu:hermes_" in result["output"] and result["output"].strip().endswith("r7k2")')
+    # Explicit or legacy Browser Use selection cannot re-enable an unverified binary.
+    patched = patched.replace('''        assert bu_cli.is_browser_use_cli_mode() is True
+
+    def test_other_backend_value_is_not_cli_mode''', '''        assert bu_cli.is_browser_use_cli_mode() is False
+
+    def test_other_backend_value_is_not_cli_mode''', 1)
+    patched = patched.replace("""        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
+        assert bu_cli.is_browser_use_cli_mode() is True
+
+    def test_gateway_config_stays_on_legacy_path""", """        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
+        assert bu_cli.is_browser_use_cli_mode() is False
+
+    def test_gateway_config_stays_on_legacy_path""", 1)
+    patched = patched.replace("""        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
+        assert bu_cli.is_browser_use_cli_mode() is True
+
+    def test_auto_detect_without_key_does_not_migrate""", """        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
+        assert bu_cli.is_browser_use_cli_mode() is False
+
+    def test_auto_detect_without_key_does_not_migrate""", 1)
+    patched = patched.replace('''        assert bu_cli.is_browser_use_cli_mode() is True
+
+    def test_gateway_config_stays_on_legacy_path''', '''        assert bu_cli.is_browser_use_cli_mode() is False
+
+    def test_gateway_config_stays_on_legacy_path''', 1)
+    return patched

@@ -16,6 +16,62 @@ class PatchError(RuntimeError):
     pass
 
 
+def _route_replay_marker_read_through_pool(source: str, *, native: bool) -> str:
+    """Keep the durable-drain replay lookup off the long-lived writer handle."""
+    method = "def has_platform_message_id_for_session_key("
+    if method not in source:
+        return source
+    if native and "def _read_ctx(" not in source:
+        raise PatchError("native replay-marker pooled read context is unavailable")
+    native_read = """        with self._read_ctx() as conn:
+            cursor = conn.execute(
+                "SELECT 1 FROM sessions s "
+                "JOIN messages m ON m.session_id = s.id "
+                "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1",
+                (session_key, platform_message_id),
+            )
+            return cursor.fetchone() is not None
+"""
+    legacy_read = """        conn = self._get_read_conn()
+        if conn is not None:
+            cursor = conn.execute(
+                "SELECT 1 FROM sessions s "
+                "JOIN messages m ON m.session_id = s.id "
+                "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1",
+                (session_key, platform_message_id),
+            )
+            return cursor.fetchone() is not None
+        with self._lock:
+            cursor = self._conn.execute(  # ty:ignore[unresolved-attribute]
+                "SELECT 1 FROM sessions s "
+                "JOIN messages m ON m.session_id = s.id "
+                "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1",
+                (session_key, platform_message_id),
+            )
+            return cursor.fetchone() is not None
+"""
+    replacement = native_read if native else legacy_read
+    if replacement in source:
+        return source
+    direct = """        with self._lock:
+            cursor = self._conn.execute(  # ty:ignore[unresolved-attribute]
+                "SELECT 1 FROM sessions s "
+                "JOIN messages m ON m.session_id = s.id "
+                "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1",
+                (session_key, platform_message_id),
+            )
+            return cursor.fetchone() is not None
+"""
+    if not native and native_read in source:
+        return _replace_once(
+            source,
+            native_read,
+            legacy_read,
+            "durable-drain replay marker legacy migration",
+        )
+    return _replace_once(source, direct, replacement, "durable-drain replay marker pooled read")
+
+
 def _native_pool_shape(source: str) -> tuple[bool, bool]:
     tree = ast.parse(source)
     limit = any(
@@ -36,7 +92,7 @@ def _native_pool_shape(source: str) -> tuple[bool, bool]:
         isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "_checkout_read_conn"
         for node in session_db.body
     )
-    permit = any(
+    per_instance_permit = any(
         isinstance(node, ast.Assign)
         and any(
             isinstance(target, ast.Attribute)
@@ -55,6 +111,34 @@ def _native_pool_shape(source: str) -> tuple[bool, bool]:
         and node.value.args[0].id == "_READ_POOL_MAX"
         for node in ast.walk(session_db)
     )
+    # Hermes 0.21 replaced the instance-only semaphore with a stronger
+    # path/process budget. Recognize only the complete native contract: both
+    # the process-wide permit and the SessionDB-owned path budget must exist.
+    process_permit = any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_process_read_permits"
+            for target in node.targets
+        )
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and isinstance(node.value.func.value, ast.Name)
+        and node.value.func.value.id == "threading"
+        and node.value.func.attr == "BoundedSemaphore"
+        for node in tree.body
+    )
+    path_budget = any(
+        isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute)
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "self"
+            and target.attr == "_read_budget"
+            for target in node.targets
+        )
+        for node in ast.walk(session_db)
+    )
+    permit = per_instance_permit or (process_permit and path_budget)
     cross_thread = any(
         isinstance(node, ast.Call)
         and any(
@@ -65,7 +149,47 @@ def _native_pool_shape(source: str) -> tuple[bool, bool]:
         )
         for node in ast.walk(session_db)
     )
-    return all((limit, checkout, permit, cross_thread)), any((limit, checkout, permit))
+    return all((limit, checkout, permit, cross_thread)), any(
+        (limit, checkout, per_instance_permit, process_permit, path_budget)
+    )
+
+
+def _native_refactored_pool_shape(
+    state_source: str, readpool_source: str
+) -> tuple[bool, bool]:
+    """Recognize the 0.21 split read-pool contract without re-implementing it.
+
+    The old pool lived entirely in ``hermes_state.py``.  The refactor owns the
+    process and path permits in ``hermes_state_readpool.py`` while ``SessionDB``
+    owns checkout, fallback, and teardown.  Both halves are required; a partial
+    split is unsafe to treat as native coverage.
+    """
+    state_required = (
+        "from hermes_state_readpool import _READ_POOL_MAX, _proc_fd_targets, _read_budget_for",
+        "self._read_budget = _read_budget_for(self.db_path)",
+        "self._read_budget.register(self)",
+        "def _checkout_read_conn(",
+        "def _read_ctx(",
+        "def _close_read_conn(",
+        "self._read_budget.release()",
+        "self._read_conns_closed = True",
+    )
+    readpool_required = (
+        "_READ_POOL_MAX =",
+        "_READ_POOL_PROCESS_MAX =",
+        "_process_read_permits = threading.BoundedSemaphore(",
+        "class _PathReadBudget:",
+        "def _read_budget_for(",
+        "def acquire(self, requester",
+        "def release(self)",
+    )
+    state_present = any(item in state_source for item in state_required[1:])
+    readpool_present = any(item in readpool_source for item in readpool_required[2:])
+    return (
+        all(item in state_source for item in state_required)
+        and all(item in readpool_source for item in readpool_required),
+        state_present or readpool_present,
+    )
 
 
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -81,7 +205,7 @@ def patch_hermes_state_source(source: str) -> str:
         # Current Hermes owns the bounded connection pool, pre-open permits,
         # cross-thread teardown, and locked-writer fallback. Do not layer the
         # retired per-thread-cache transform over that stronger native design.
-        return source
+        return _route_replay_marker_read_through_pool(source, native=True)
     if native_pool_present:
         raise PatchError("native SessionDB descriptor contract is incomplete")
 
@@ -94,7 +218,7 @@ def patch_hermes_state_source(source: str) -> str:
         )
         if not all(item in source for item in required):
             raise PatchError("marked hermes_state.py is incomplete")
-        return source
+        return _route_replay_marker_read_through_pool(source, native=False)
 
     source = _replace_once(
         source,
@@ -193,6 +317,7 @@ def patch_hermes_state_source(source: str) -> str:
 """,
         "SessionDB slot release",
     )
+    source = _route_replay_marker_read_through_pool(source, native=False)
     ast.parse(source)
     return source
 
@@ -205,6 +330,23 @@ def patch_gateway_source(source: str) -> str:
         )
         if not all(item in source for item in required):
             raise PatchError("marked gateway/run.py is incomplete")
+        return source
+
+    # Current Hermes owns one recoverable AsyncSessionDB handle per resolved
+    # profile path and deterministically sweeps every handle at shutdown. That
+    # is stronger than the old single-root SessionStore alias in multiplexed
+    # gateways, so preserve it and retain only Golden's local-resource error
+    # classification in the conversation loop.
+    native_handle_contract = (
+        "def _open_session_db_for_active_scope(",
+        "def close_all_session_db_handles(",
+        "_session_db_handle_cache.close_all(_close)",
+    )
+    native_handle_opener = (
+        "return AsyncSessionDB(SessionDB())" in source
+        or "return AsyncSessionDB(acquire())" in source
+    )
+    if all(token in source for token in native_handle_contract) and native_handle_opener:
         return source
 
     source = _replace_once(
@@ -276,6 +418,29 @@ import logging
 """,
         "conversation errno import",
     )
+    # Hermes 0.21 inserts its answer-only guardrail recovery between spinner
+    # cleanup and Unicode recovery. Lift that complete block temporarily so
+    # the descriptor guard still lands at the stable error-classification
+    # seam, then restore it immediately after the new local-resource branch.
+    unicode_anchor = """                # -----------------------------------------------------------
+                # UnicodeEncodeError recovery.  Two common causes:
+"""
+    guardrail_anchor = """                if _guardrail_recovery_attempted:
+"""
+    guardrail_block = ""
+    spinner_anchor = """                if agent.thinking_callback:
+                    agent.thinking_callback("")
+
+"""
+    unicode_start = source.find(unicode_anchor)
+    spinner_start = source.rfind(spinner_anchor, 0, unicode_start)
+    guardrail_start = source.find(
+        guardrail_anchor,
+        spinner_start + len(spinner_anchor),
+    )
+    if guardrail_start >= 0 and unicode_start > guardrail_start:
+        guardrail_block = source[guardrail_start:unicode_start]
+        source = source[:guardrail_start] + source[unicode_start:]
     source = _replace_once(
         source,
         """                if agent.thinking_callback:
@@ -334,16 +499,106 @@ import logging
 """,
         "conversation local exhaustion branch",
     )
+    if guardrail_block:
+        source = _replace_once(
+            source,
+            unicode_anchor,
+            guardrail_block + unicode_anchor,
+            "conversation guardrail recovery restoration",
+        )
+    ast.parse(source)
+    return source
+
+
+def patch_turn_api_error_source(source: str) -> str:
+    """Classify descriptor exhaustion at the refactored turn-error seam."""
+    if MARKER in source:
+        required = (
+            "import errno",
+            "errno.EMFILE",
+            '"failure_reason": "local_resource_exhaustion"',
+            '"local_runtime_error": True',
+        )
+        if not all(item in source for item in required):
+            raise PatchError("marked agent/turn_api_error.py is incomplete")
+        return source
+    source = _replace_once(
+        source,
+        "from dataclasses import dataclass\nimport json\n",
+        "from dataclasses import dataclass\nimport errno\nimport json\n",
+        "turn-error errno import",
+    )
+    source = _replace_once(
+        source,
+        "    if _recovered:\n"
+        "        return _verdict(\"continue\")\n\n"
+        "    status_code = getattr(api_error, \"status_code\", None)\n",
+        "    if _recovered:\n"
+        "        return _verdict(\"continue\")\n\n"
+        "    # HERMES_STATE_DB_DESCRIPTOR_LIFECYCLE_v1\n"
+        "    # EMFILE/ENFILE are host resource failures, not provider failures.\n"
+        "    # Retrying can repeat a paid request while descriptors remain full.\n"
+        "    if (\n"
+        "        isinstance(api_error, OSError)\n"
+        "        and getattr(api_error, \"errno\", None) in {errno.EMFILE, errno.ENFILE}\n"
+        "    ):\n"
+        "        _local_summary = agent._summarize_api_error(api_error)\n"
+        "        logger.error(\n"
+        "            \"%sLocal runtime file-descriptor exhaustion; not retrying the model provider. %s\",\n"
+        "            agent.log_prefix, _local_summary,\n"
+        "        )\n"
+        "        try:\n"
+        "            agent._persist_session(messages, conversation_history)\n"
+        "        except Exception as _persist_error:\n"
+        "            logger.error(\n"
+        "                \"%sCould not persist the interrupted turn during local descriptor exhaustion: %s\",\n"
+        "                agent.log_prefix, _persist_error,\n"
+        "            )\n"
+        "        _local_response = (\n"
+        "            \"The agent's local runtime hit a file-handle limit before it could complete this turn. \"\n"
+        "            \"This was not a model-provider failure; the local gateway needs recovery.\"\n"
+        "        )\n"
+        "        return _verdict(\"return\", {\n"
+        "            \"final_response\": _local_response, \"messages\": messages, \"api_calls\": api_call_count,\n"
+        "            \"completed\": False, \"failed\": True, \"error\": _local_summary,\n"
+        "            \"failure_reason\": \"local_resource_exhaustion\", \"local_runtime_error\": True,\n"
+        "        })\n\n"
+        "    status_code = getattr(api_error, \"status_code\", None)\n",
+        "turn-error local exhaustion branch",
+    )
     ast.parse(source)
     return source
 
 
 def patch_state_db_descriptor_lifecycle_v1(hermes_dir: Path) -> bool:
     root = Path(hermes_dir)
+    state_path = root / "hermes_state.py"
+    readpool_path = root / "hermes_state_readpool.py"
+    if not state_path.is_file():
+        raise PatchError(f"required file missing: {state_path}")
+    state_source = state_path.read_text(encoding="utf-8")
+    if readpool_path.is_file():
+        native_complete, native_present = _native_refactored_pool_shape(
+            state_source, readpool_path.read_text(encoding="utf-8")
+        )
+        if native_complete:
+            state_transform = lambda source: _route_replay_marker_read_through_pool(source, native=True)
+        elif native_present:
+            raise PatchError("native refactored SessionDB descriptor contract is incomplete")
+        else:
+            state_transform = patch_hermes_state_source
+    else:
+        state_transform = patch_hermes_state_source
+    error_path = root / "agent/turn_api_error.py"
+    if not error_path.is_file():
+        error_path = root / "agent/conversation_loop.py"
+        error_transform = patch_conversation_loop_source
+    else:
+        error_transform = patch_turn_api_error_source
     transforms = (
-        (root / "hermes_state.py", patch_hermes_state_source),
+        (state_path, state_transform),
         (root / "gateway/run.py", patch_gateway_source),
-        (root / "agent/conversation_loop.py", patch_conversation_loop_source),
+        (error_path, error_transform),
     )
     originals: dict[Path, str] = {}
     updates: dict[Path, str] = {}

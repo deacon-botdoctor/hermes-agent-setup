@@ -30,6 +30,9 @@ HELPER_METHOD = '''    def _hermes_write_poll_liveness_stamp(self, *, require_up
             from datetime import datetime as _dt, timezone as _tz
             from pathlib import Path as _Path
 
+            # A running updater/getMe does not prove a new polling generation ready.
+            if getattr(self, "_send_path_degraded", False):
+                return
             updater = getattr(self._app, "updater", None) if self._app else None
             updater_running = bool(getattr(updater, "running", False))
             if require_updater and not updater_running:
@@ -78,6 +81,8 @@ HELPER_METHOD = '''    def _hermes_write_poll_liveness_stamp(self, *, require_up
 
 '''
 
+_PREVIOUS_HELPER_METHOD = HELPER_METHOD.replace('            # A running updater/getMe does not prove a new polling generation ready.\n            if getattr(self, "_send_path_degraded", False):\n                return\n', "", 1)
+
 LOOP_DEF_ANCHOR = "    async def _polling_heartbeat_loop(self) -> None:"
 PROBE_TIMEOUT_ANCHOR = (
     "        PROBE_TIMEOUT = 15        # seconds before declaring the path dead\n"
@@ -96,7 +101,10 @@ PROBE_SUCCESS_STAMP = (
     PROBE_SUCCESS_ANCHOR
     + "                # [HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1] export only\n"
     + "                # after the native Bot API probe succeeds.\n"
-    + "                self._hermes_write_poll_liveness_stamp()\n"
+    + "                self._hermes_write_poll_liveness_stamp(require_updater=True)\n"
+)
+_PREVIOUS_PROBE_SUCCESS_STAMP = PROBE_SUCCESS_STAMP.replace(
+    "(require_updater=True)", "()", 1
 )
 
 
@@ -120,8 +128,21 @@ def patch_telegram_poll_liveness_writer_v1(hermes_dir: Path) -> bool:
 
     src = target.read_text(encoding="utf-8")
     if MARKER in src:
-        print(f"[telegram_poll_liveness_writer] already patched ({target.name})")
-        return False
+        original = src
+        if _PREVIOUS_PROBE_SUCCESS_STAMP in src:
+            src = _replace_once(src, _PREVIOUS_PROBE_SUCCESS_STAMP, PROBE_SUCCESS_STAMP, "installed probe upgrade")
+        if INITIAL_STAMP not in src or PROBE_SUCCESS_STAMP not in src:
+            raise RuntimeError("[telegram_poll_liveness_writer] installed hooks drifted")
+        if HELPER_METHOD not in src:
+            src = _replace_once(src, _PREVIOUS_HELPER_METHOD, HELPER_METHOD, "installed helper upgrade")
+        if src == original:
+            print(f"[telegram_poll_liveness_writer] already patched ({target.name})")
+            return False
+        ast.parse(src)
+        backup = target.with_suffix(target.suffix + f".bak-{time.strftime('%Y%m%d-%H%M%S')}-poll-liveness-writer")
+        shutil.copy2(target, backup)
+        target.write_text(src, encoding="utf-8")
+        return True
     if LOOP_DEF_ANCHOR not in src:
         raise RuntimeError(
             "[telegram_poll_liveness_writer] native heartbeat loop missing; "

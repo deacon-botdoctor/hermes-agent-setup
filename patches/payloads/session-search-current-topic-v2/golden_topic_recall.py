@@ -171,7 +171,7 @@ def _empty(mode: str, query: str, topic=None):
     return json.dumps(response, ensure_ascii=False)
 
 
-def _search(topic, query: str, limit: int, min_timestamp):
+def _search(topic, query: str, limit: int, min_timestamp, roles, sort):
     home = Path(os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
     db_path = home / "data" / "telegram-transcript.db"
     if not db_path.exists():
@@ -182,8 +182,8 @@ def _search(topic, query: str, limit: int, min_timestamp):
         )
 
     limit = max(1, min(int(limit or 8), 20))
-    filters = ["chat_id = ?"]
-    params: list[Any] = [topic[0]]
+    filters = ["chat_id = ?", "role IN (" + ",".join("?" for _ in roles) + ")"]
+    params: list[Any] = [topic[0], *roles]
     if min_timestamp:
         filters.append("timestamp >= ?")
         params.append(min_timestamp)
@@ -192,9 +192,10 @@ def _search(topic, query: str, limit: int, min_timestamp):
         filters.extend("LOWER(text) LIKE ?" for _ in terms)
         params.extend(f"%{term}%" for term in terms)
     params.append(max(limit * (3 if terms else 2), limit))
+    direction = "ASC" if sort == "oldest" else "DESC"
     sql = (
         "SELECT timestamp, sender_name, role, text FROM telegram_messages "
-        f"WHERE {' AND '.join(filters)} ORDER BY timestamp DESC LIMIT ?"
+        f"WHERE {' AND '.join(filters)} ORDER BY timestamp {direction} LIMIT ?"
     )
     try:
         with sqlite3.connect(str(db_path)) as connection:
@@ -242,7 +243,7 @@ def _search(topic, query: str, limit: int, min_timestamp):
     )
 
 
-def scoped_telegram_recall(*, query, limit, db, current_session_id):
+def scoped_telegram_recall(*, query, limit, db, current_session_id, role_filter=None, sort=None, detail="adaptive"):
     """Return ``(response, query)``; response is None for native/global paths."""
     broad, query = _split_query(query)
     if broad:
@@ -256,4 +257,20 @@ def scoped_telegram_recall(*, query, limit, db, current_session_id):
         if is_telegram:
             return _empty("current_topic_unavailable", query), query
         return None, query
-    return _search(topic, query, limit, _started_at(db, session_id, row)), query
+    if isinstance(detail, str) and detail.strip().lower() == "full":
+        return json.dumps({
+            "success": False,
+            "mode": "current_topic_unsupported_detail",
+            "query": query,
+            "topic_key": topic[0], "chat_id": topic[1], "thread_id": topic[2],
+            "results": [], "count": 0,
+            "message": (
+                "Full session hydration is unavailable for current-topic transcript recall. "
+                "Use detail='adaptive' for scoped snippets, or explicitly prefix the query "
+                "with 'global:' for native session hydration across topics."
+            ),
+        }, ensure_ascii=False), query
+    roles = ([role.strip() for role in role_filter.split(",") if role.strip()]
+             if isinstance(role_filter, str) else []) or ["user", "assistant"]
+    sort_norm = sort.strip().lower() if isinstance(sort, str) else None
+    return _search(topic, query, limit, _started_at(db, session_id, row), roles, sort_norm), query

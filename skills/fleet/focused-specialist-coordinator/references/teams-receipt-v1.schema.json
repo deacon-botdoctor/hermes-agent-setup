@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "teams.receipt/v1",
+  "title": "Client Teams Worker Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema", "receipt_id", "packet_id", "tenant_id", "decision_id",
+    "decision_version", "decision_fingerprint", "lane", "worker_role",
+    "execution_kind", "outcome", "actions", "artifacts", "checks", "side_effects",
+    "rollback", "observed_state_fingerprint", "manager_gate_receipt_sha256",
+    "started_at", "completed_at"
+  ],
+  "properties": {
+    "schema": {"const": "teams.receipt/v1"},
+    "receipt_id": {"type": "string", "minLength": 1},
+    "packet_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "decision_id": {"type": "string", "minLength": 1},
+    "decision_version": {"type": "integer", "minimum": 1},
+    "decision_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lane": {"type": "string", "minLength": 1},
+    "worker_role": {"type": "string", "minLength": 1},
+    "execution_kind": {"enum": ["worker", "deterministic"]},
+    "outcome": {"enum": ["accepted_candidate", "rework", "needs_human", "failed_safe", "superseded"]},
+    "actions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "artifacts": {"type": "array", "items": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "uniqueItems": true},
+    "checks": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+    "side_effects": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "rollback": {"type": ["string", "null"]},
+    "observed_state_fingerprint": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "manager_gate_receipt_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": "string", "format": "date-time"}
+  }
+}

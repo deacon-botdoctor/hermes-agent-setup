@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Any, Optional
 
@@ -25,6 +26,37 @@ DB_PATH = HERMES_HOME / "data" / "telegram-transcript.db"
 AGENT_NAME = os.environ.get("HERMES_AGENT_NAME") or os.environ.get("AGENT_NAME") or "Assistant"
 
 _db_conn: Optional[sqlite3.Connection] = None
+
+
+def wal_reset_bug_fixed(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> bool:
+    current = tuple((list(version) + [0, 0, 0])[:3])
+    return (
+        current >= (3, 51, 3)
+        or (3, 50, 7) <= current < (3, 51, 0)
+        or (3, 44, 6) <= current < (3, 45, 0)
+    )
+
+
+def safe_journal_mode(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> str:
+    if _is_linux_platform():
+        return "DELETE"
+    return "WAL" if wal_reset_bug_fixed(version) else "DELETE"
+
+
+def _is_linux_platform() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def require_safe_journal_mode(connection: sqlite3.Connection, *, allow_initialize: bool = False) -> None:
+    effective = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+    expected = safe_journal_mode()
+    if not allow_initialize and (effective == "DELETE" or effective == expected):
+        return
+    if effective != expected and allow_initialize:
+        effective = str(connection.execute(f"PRAGMA journal_mode={expected}").fetchone()[0]).upper()
+    if effective != expected:
+        connection.close()
+        raise sqlite3.DatabaseError(f"unsafe journal mode: expected {expected}, found {effective}")
 
 
 _INTERNAL_HISTORY_PREFIXES = (
@@ -66,10 +98,15 @@ def get_db() -> sqlite3.Connection:
     if _db_conn is not None:
         return _db_conn
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    allow_initialize = not DB_PATH.exists() or DB_PATH.stat().st_size == 0
     conn = sqlite3.connect(str(DB_PATH), timeout=5.0, check_same_thread=False)
     conn.execute("PRAGMA busy_timeout = 5000")
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    require_safe_journal_mode(conn, allow_initialize=allow_initialize)
+    conn.execute(
+        "PRAGMA synchronous=FULL"
+        if _is_linux_platform()
+        else "PRAGMA synchronous=NORMAL"
+    )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS telegram_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

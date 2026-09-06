@@ -182,6 +182,8 @@ def transcript_summary(home: Path) -> dict:
     info = {
         "exists": db_path.exists(),
         "path": str(db_path),
+        "freshness": "checkpointed",
+        "live_freshness": False,
         "rows": 0,
         "latest_timestamp": None,
         "recent_24h_rows": 0,
@@ -192,7 +194,14 @@ def transcript_summary(home: Path) -> dict:
         info.update(session_meta)
         return info
     try:
-        conn = sqlite3.connect(str(db_path))
+        before = db_path.stat()
+        # This report intentionally reads checkpointed historical data only;
+        # it must not join or alter a live gateway WAL or claim live freshness.
+        conn = sqlite3.connect(
+            db_path.resolve().as_uri() + "?mode=ro&immutable=1",
+            uri=True,
+            timeout=3,
+        )
         info["rows"] = int(conn.execute("select count(*) from telegram_messages").fetchone()[0])
         latest = conn.execute("select max(timestamp) from telegram_messages").fetchone()[0]
         info["latest_timestamp"] = latest
@@ -206,6 +215,12 @@ def transcript_summary(home: Path) -> dict:
         )
         info.update(transcript_friction_summary(conn, home))
         conn.close()
+        after = db_path.stat()
+        if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            info = {"exists": True, "path": str(db_path), "freshness": "unavailable",
+                    "live_freshness": False, "error": "checkpoint changed during read"}
     except Exception as exc:
         info["error"] = str(exc)
     transcript_hits = info.get("continuity_meta_reply_hits", []) or []
@@ -1133,7 +1148,9 @@ def _has_dream_job(home: Path) -> tuple[bool | None, str | None]:
         if enabled:
             return True, job_id
         fallback_job_id = fallback_job_id or job_id
-    return None, fallback_job_id
+    if fallback_job_id is not None:
+        return False, fallback_job_id
+    return None, None
 
 
 def _has_launchd_dream_job(home: Path) -> tuple[bool, str | None]:
@@ -1187,6 +1204,7 @@ def dream_agent_summary(home: Path) -> dict:
         "log_zero_streak": 0,
         "broken": False,
         "reasons": [],
+        "policy": "required",
     }
 
     cron_enabled, dream_job_id = _has_dream_job(home)
@@ -1194,6 +1212,9 @@ def dream_agent_summary(home: Path) -> dict:
         info["scheduled"] = cron_enabled
         info["scheduler_source"] = "hermes_cron"
         info["dream_job_id"] = dream_job_id
+        if cron_enabled is False and dream_job_id is not None:
+            info["policy"] = "intentionally_disabled"
+            return info
     else:
         system = platform.system().lower()
         try:

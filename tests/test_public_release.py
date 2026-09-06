@@ -62,18 +62,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 742
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 33
+    assert manifest["components"]["runtime_payload"]["file_count"] == 820
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 34
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "512235b711ee013f11a65558f0bbbf2ae62fcb1eabb8c770098099bc4ee08e3b",
-        "file_count": 93,
+        "digest": "0cafea15a04a3ce2ca369046155c9d74d3e1b6cce269cacae55a9e5241ca3c74",
+        "file_count": 125,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 93
+    assert manifest["runtime_fingerprint"]["file_count"] == 125
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -83,7 +83,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 93
+    assert len(manifest["runtime_fingerprint"]["files"]) == 125
     assert set(release) == {
         "schema_version",
         "release",
@@ -191,8 +191,8 @@ def test_release_pins_the_golden_cua_driver_contract():
     contract_path = ROOT / driver["contract"]["path"]
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
 
-    assert driver["version"] == "0.14.2"
-    assert driver["tag"] == "cua-driver-rs-v0.14.2"
+    assert driver["version"] == "0.22.0"
+    assert driver["tag"] == "cua-driver-rs-v0.22.0"
     assert driver["baseline_acceptance"] == "exact_version_present"
     assert driver["gui_acceptance"] == "doctor_ready_and_list_windows"
     assert hashlib.sha256(helper.read_bytes()).hexdigest() == driver["helper"]["sha256"]
@@ -393,6 +393,54 @@ def test_stable_coherence_scheduler_reports_removed_candidate(tmp_path: Path):
     assert json.loads(receipt.read_text(encoding="utf-8"))["kind"] == "binding_missing"
 
 
+@pytest.mark.parametrize("outcome", ["success", "import_failure", "timeout", "spawn_failure"])
+def test_runtime_coherence_import_probe_isolated_and_cleaned(tmp_path, monkeypatch, outcome):
+    checker = load_path("public_coherence_isolation", ROOT / "checks/agent-runtime-coherence.py")
+    home = tmp_path / "live"
+    home.mkdir()
+    protected = [home / name for name in ("state.db", "state.db-wal", "state.db-shm")]
+    for path in protected:
+        path.write_bytes(("original-" + path.name).encode())
+    before = [(p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.read_bytes()) for p in protected]
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    python = runtime / "python"
+    python.write_text("fixture")
+    monkeypatch.setattr(checker, "validate_runtime_binding", lambda **kwargs: {"ok": True})
+    probe_homes = []
+
+    def spawn(command, **kwargs):
+        env = kwargs["env"]
+        probe = Path(env["HERMES_HOME"])
+        probe_homes.append(probe)
+        assert probe.is_dir() and probe != home
+        assert Path(env["HOME"]) != tmp_path / "operator"
+        assert Path(env["USERPROFILE"]) == Path(env["HOME"])
+        assert list(probe.iterdir()) == []
+        assert command[0] == str(python) and kwargs["cwd"] == runtime
+        for name in ("state.db", "state.db-wal", "state.db-shm"):
+            (probe / name).write_text("disposable probe state")
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(command, 45)
+        if outcome == "spawn_failure":
+            raise OSError("fixture spawn failure")
+        return SimpleNamespace(returncode=0 if outcome == "success" else 1,
+            stdout='HERMES_RUNTIME_COHERENCE={"origins":{}}\n', stderr="")
+
+    monkeypatch.setenv("HOME", str(tmp_path / "operator"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "operator"))
+    monkeypatch.setenv("HERMES_HOME", str(home))
+    monkeypatch.setattr(checker.subprocess, "run", spawn)
+    result = checker.run_probe(runtime_root=runtime, runtime_python=python, hermes_home=home, agent_id="fixture")
+    assert result["kind"] == {"success": "coherent"}.get(outcome, outcome)
+    assert result["hermes_home"] == str(home)
+    assert len(probe_homes) == 1 and not probe_homes[0].parent.exists()
+    assert before == [(p.stat().st_ino, p.stat().st_size, p.stat().st_mtime_ns, p.read_bytes()) for p in protected]
+    receipt = home / "state/health/runtime-coherence.json"
+    checker.atomic_write(receipt, result)
+    assert json.loads(receipt.read_text())["hermes_home"] == str(home)
+
+
 def test_runtime_coherence_fails_closed_on_service_definition_drift(tmp_path: Path):
     check = load_path(
         "public_runtime_coherence",
@@ -462,11 +510,11 @@ def test_release_payload_keeps_critical_blobs():
     }
     assert (
         blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
-        == "2f402487325e4cc05e95b4e3af391334dd16477c"
+        == "e5cbbcef89aa9635971d77ba9977535cd23aabc6"
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "ba7fde1f94ae40f3ed3eb219826f369b5c646279"
+        == "e91c52c8bb8525dbba25d932d51bcca422ad3147"
     )
 
 
@@ -475,7 +523,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 33
+    assert len(patches) == 49
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -670,7 +718,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
                 {
                     "ok": True,
                     "status": "installed",
-                    "after": {"installed": True, "version": "0.14.2"},
+                    "after": {"installed": True, "version": "0.22.0"},
                     "doctor_ready": False,
                 }
             ),
@@ -680,7 +728,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
     monkeypatch.setattr(installer.subprocess, "run", fake_run)
     receipt = installer.ensure_cua_driver(runtime_python, home)
 
-    assert receipt["after"]["version"] == "0.14.2"
+    assert receipt["after"]["version"] == "0.22.0"
     assert calls[0][0] == sys.executable
     assert calls[0][1] == str(ROOT / "bin" / "ensure-cua-driver.py")
     assert calls[0][calls[0].index("--hermes-python") + 1] == str(runtime_python)
@@ -699,7 +747,7 @@ def test_profile_installer_can_require_gui_driver_readiness(tmp_path, monkeypatc
                 {
                     "ok": False,
                     "status": "blocked_not_ready",
-                    "after": {"installed": True, "version": "0.14.2"},
+                    "after": {"installed": True, "version": "0.22.0"},
                     "doctor_ready": False,
                 }
             ),
@@ -1766,6 +1814,27 @@ def test_windows_runtime_identity_accepts_only_declared_crlf(tmp_path):
     assert "content hash" in reason
 
 
+def test_runtime_manifest_cli_uses_declared_public_files(tmp_path, monkeypatch, capsys):
+    module = load_script("public_manifest_declared", "runtime-payload-manifest.py")
+    manifest = json.loads((ROOT / "runtime-payload-source-manifest.json").read_text())
+    declared = manifest["runtime_fingerprint"]["files"]
+    def fingerprint(runtime, upstream, golden, expected_files):
+        assert runtime == tmp_path.resolve()
+        assert expected_files == declared
+        return {"verified": True}
+    monkeypatch.setattr(module, "runtime_fingerprint", fingerprint)
+    assert module.main(["--source-manifest", str(ROOT / "runtime-payload-source-manifest.json"),
+                        "--runtime-dir", str(tmp_path), "--compact"]) == 0
+    assert json.loads(capsys.readouterr().out)["runtime_fingerprint"]["verified"]
+
+
+def test_runtime_manifest_excludes_only_candidate_private_python_store():
+    module = load_script("public_manifest_managed_python", "runtime-payload-manifest.py")
+    assert module.is_runtime_state_or_artifact(".hermes-runtime/python/cpython/lib/libpython.dylib")
+    assert not module.is_runtime_state_or_artifact(".hermes-runtime/injected.py")
+    assert not module.is_runtime_state_or_artifact("gateway/.hermes-runtime/python/injected.py")
+
+
 def test_profile_install_interrupt_restores_from_pending_receipt(
     tmp_path, monkeypatch
 ):
@@ -1796,7 +1865,7 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
         "ensure_cua_driver",
         lambda *_args, **_kwargs: {
             "ok": True,
-            "after": {"version": "0.14.2"},
+            "after": {"version": "0.22.0"},
             "doctor_ready": False,
         },
     )

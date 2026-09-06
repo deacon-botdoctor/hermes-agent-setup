@@ -1,0 +1,7 @@
+id: telegram-email-card-qa
+name: telegram-email-card-qa
+version: 1.0.0
+description: Fail-closed Gmail send/draft lint; repair assembled email cards.
+provides_hooks:
+  - transform_llm_output
+  - pre_tool_call

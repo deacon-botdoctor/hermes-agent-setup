@@ -610,6 +610,102 @@ def atomic_json(path: Path, payload: object) -> None:
     os.replace(temporary, path)
 
 
+def fileprovider_relief_config(path: Path, home: Path, hermes_home: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    payload, _ = read_json(path, "File Provider disk-relief config")
+    if not isinstance(payload, dict):
+        raise ValueError("File Provider disk-relief config must be an object")
+    if payload.get("schema_version") != 1:
+        raise ValueError("File Provider disk-relief config schema_version must be 1")
+    if payload.get("enabled") is not True:
+        return None
+    target_free = payload.get("target_free_bytes")
+    targets = payload.get("targets")
+    if not isinstance(target_free, int) or target_free <= 0:
+        raise ValueError("File Provider target_free_bytes must be a positive integer")
+    if not isinstance(targets, list) or not targets:
+        raise ValueError("File Provider targets must be a non-empty list")
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(targets):
+        if not isinstance(item, dict):
+            raise ValueError(f"File Provider target {index} must be an object")
+        raw_path = item.get("path")
+        raw_root = item.get("allowed_root")
+        if not isinstance(raw_path, str) or not isinstance(raw_root, str):
+            raise ValueError(f"File Provider target {index} requires path and allowed_root")
+        target = Path(raw_path).expanduser().resolve()
+        allowed_root = Path(raw_root).expanduser().resolve()
+        if not target.is_absolute() or not allowed_root.is_absolute():
+            raise ValueError(f"File Provider target {index} must use absolute paths")
+        if not is_relative_to(target, home) or is_relative_to(target, hermes_home):
+            raise ValueError(f"File Provider target {index} is outside the safe host scope")
+        if target == allowed_root or not is_relative_to(target, allowed_root):
+            raise ValueError(f"File Provider target {index} must be a child of allowed_root")
+        normalized.append({"path": str(target), "allowed_root": str(allowed_root)})
+    return {
+        "schema_version": 1,
+        "target_free_bytes": target_free,
+        "targets": normalized,
+    }
+
+
+def parse_json_result(result: subprocess.CompletedProcess[str], label: str) -> dict[str, object]:
+    lines = [line for line in (result.stdout or "").splitlines() if line.strip()]
+    if not lines:
+        raise RuntimeError(f"{label} produced no JSON result: {(result.stderr or '')[:300]}")
+    try:
+        payload = json.loads(lines[-1])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{label} produced invalid JSON") from exc
+    if result.returncode != 0 or not isinstance(payload, dict) or payload.get("ok") is not True:
+        detail = payload.get("error") if isinstance(payload, dict) else None
+        raise RuntimeError(f"{label} failed: {detail or (result.stderr or '')[:300]}")
+    return payload
+
+
+def run_fileprovider_relief(
+    config: dict[str, object], home: Path, script: Path
+) -> tuple[list[dict[str, object]], list[dict[str, str]]]:
+    if sys.platform != "darwin":
+        return [], [{"path": str(script), "error": "File Provider relief requires macOS"}]
+    swift = shutil.which("swift")
+    if swift is None or not script.is_file():
+        return [], [{"path": str(script), "error": "Swift runtime or relief tool missing"}]
+    results: list[dict[str, object]] = []
+    errors: list[dict[str, str]] = []
+    target_free = int(config["target_free_bytes"])
+    for item in config["targets"]:
+        if shutil.disk_usage(home).free >= target_free:
+            break
+        assert isinstance(item, dict)
+        target = str(item["path"])
+        allowed_root = str(item["allowed_root"])
+        base = [swift, str(script), "--path", target, "--allowed-root", allowed_root]
+        try:
+            dry = parse_json_result(
+                subprocess.run(base, capture_output=True, text=True, timeout=120, check=False),
+                "File Provider dry-run",
+            )
+            confirmation = dry.get("confirmation_token")
+            if not isinstance(confirmation, str) or not confirmation:
+                raise RuntimeError("File Provider dry-run omitted confirmation token")
+            applied = parse_json_result(
+                subprocess.run(
+                    [*base, "--apply", "--confirmation-token", confirmation],
+                    capture_output=True,
+                    text=True,
+                    timeout=1800,
+                    check=False,
+                ),
+                "File Provider apply",
+            )
+            results.append(applied)
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"path": target, "error": f"{type(exc).__name__}: {exc}"})
+    return results, errors
+
+
 def clear_platform_flags(path: Path) -> None:
     if os.name == "nt":
         return
@@ -718,6 +814,17 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
                 deleted.append(record(candidate, "deleted"))
             except Exception as exc:  # noqa: BLE001
                 errors.append({"path": str(candidate.path), "error": f"{type(exc).__name__}: {exc}"})
+    after_runtime_retention = shutil.disk_usage(home).free
+    relief_results: list[dict[str, object]] = []
+    relief_errors: list[dict[str, str]] = []
+    relief_config = fileprovider_relief_config(args.fileprovider_config, home, hermes_home)
+    if args.apply and relief_config is not None and after_runtime_retention < int(relief_config["target_free_bytes"]):
+        relief_results, relief_errors = run_fileprovider_relief(
+            relief_config,
+            home,
+            Path(__file__).with_name("hermes-fileprovider-online-only.swift"),
+        )
+        errors.extend(relief_errors)
     after = shutil.disk_usage(home).free
     status = "error" if errors else "pass"
     if status == "pass" and after < args.block_free_bytes:
@@ -739,6 +846,8 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
             "runtime_candidate_policy": "active_plus_one_rollback_plus_referenced_dependencies",
             "memory_policy": "never_eligible",
             "clear_flags": args.clear_flags,
+            "fileprovider_relief_config": str(args.fileprovider_config),
+            "fileprovider_relief_enabled": relief_config is not None,
         },
         "free_before_bytes": before,
         "free_after_bytes": after,
@@ -748,6 +857,7 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
         "inventory": inventory,
         "planned": [record(item, "delete" if args.apply else "would_delete") for item in candidates],
         "deleted": deleted,
+        "fileprovider_relief": relief_results,
         "errors": errors,
     }
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -772,13 +882,40 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--home", default=str(Path.home()))
     parser.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
-    parser.add_argument("--keep-backups", type=int, default=int(os.environ.get("HERMES_DISK_RETENTION_KEEP_BACKUPS", "1")))
-    parser.add_argument("--keep-snapshots", type=int, default=int(os.environ.get("HERMES_DISK_RETENTION_KEEP_SNAPSHOTS", "1")))
-    parser.add_argument("--min-cache-bytes", type=parse_size, default=parse_size(os.environ.get("HERMES_DISK_RETENTION_MIN_CACHE", "256M")))
-    parser.add_argument("--warn-free-bytes", type=parse_size, default=parse_size(os.environ.get("HERMES_DISK_RETENTION_WARN_FREE", "30G")))
-    parser.add_argument("--block-free-bytes", type=parse_size, default=parse_size(os.environ.get("HERMES_DISK_RETENTION_BLOCK_FREE", "15G")))
+    parser.add_argument(
+        "--keep-backups",
+        type=int,
+        default=int(os.environ.get("HERMES_DISK_RETENTION_KEEP_BACKUPS", "1")),
+    )
+    parser.add_argument(
+        "--keep-snapshots",
+        type=int,
+        default=int(os.environ.get("HERMES_DISK_RETENTION_KEEP_SNAPSHOTS", "1")),
+    )
+    parser.add_argument(
+        "--min-cache-bytes",
+        type=parse_size,
+        default=parse_size(os.environ.get("HERMES_DISK_RETENTION_MIN_CACHE", "256M")),
+    )
+    parser.add_argument(
+        "--warn-free-bytes",
+        type=parse_size,
+        default=parse_size(os.environ.get("HERMES_DISK_RETENTION_WARN_FREE", "30G")),
+    )
+    parser.add_argument(
+        "--block-free-bytes",
+        type=parse_size,
+        default=parse_size(os.environ.get("HERMES_DISK_RETENTION_BLOCK_FREE", "15G")),
+    )
     parser.add_argument("--prune-caches", dest="prune_caches", action="store_true")
     parser.add_argument("--no-prune-caches", dest="prune_caches", action="store_false")
+    parser.add_argument(
+        "--fileprovider-config",
+        default=os.environ.get(
+            "HERMES_DISK_RELIEF_CONFIG",
+            str(Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))) / "config/disk-relief.json"),
+        ),
+    )
     parser.add_argument("--clear-flags", dest="clear_flags", action="store_true")
     parser.add_argument("--no-clear-flags", dest="clear_flags", action="store_false")
     parser.set_defaults(
@@ -790,6 +927,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         raise SystemExit("fleet policy requires exactly one rollback backup and one snapshot")
     home = Path(args.home).expanduser().resolve()
     hermes_home = Path(args.hermes_home).expanduser().resolve()
+    args.fileprovider_config = Path(args.fileprovider_config).expanduser().resolve()
     if not home.is_dir() or not hermes_home.is_dir():
         raise SystemExit("home or Hermes home not found")
     state = hermes_home / "state/promotion/executor"

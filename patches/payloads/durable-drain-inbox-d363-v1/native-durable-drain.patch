@@ -1,0 +1,4684 @@
+diff --git a/gateway/drain_inbox.py b/gateway/drain_inbox.py
+new file mode 100644
+index 00000000..923fe92e
+--- /dev/null
++++ b/gateway/drain_inbox.py
+@@ -0,0 +1,1346 @@
++"""Durable inbound mailbox for messages accepted during gateway drain."""
++
++from __future__ import annotations
++
++import hashlib
++import json
++import logging
++import os
++import stat
++import tempfile
++import threading
++import time
++from contextlib import contextmanager
++from dataclasses import dataclass
++from datetime import datetime
++from pathlib import Path
++from typing import Any, IO, Iterator
++
++from gateway.platforms.base import MessageEvent, MessageType
++from gateway.session import SessionSource
++from gateway.status import _release_file_lock, _try_acquire_file_lock
++from hermes_constants import get_hermes_home
++
++logger = logging.getLogger(__name__)
++
++_SCHEMA_VERSION = 1
++_FILE_NAME = "drain-queued-messages.jsonl"
++_LOCK_FILE_NAME = ".drain-queued-messages.lock"
++_REPLAY_LOCK_FILE_NAME = ".drain-queued-messages.replay.lock"
++_LOCK_TIMEOUT_SECONDS = 10.0
++_QUEUED = "queued"
++_CLAIMED = "claimed"
++_AMBIGUOUS = "ambiguous"
++_COMPLETED = "completed"
++_HANDLED = "handled"
++_FAILED = "failed"
++_MAX_METADATA_BYTES = 64 * 1024
++_MAX_RAW_MESSAGE_BYTES = 1024 * 1024
++_MAX_PENDING_RECORDS = 64
++_MAX_QUARANTINED_RECORDS = 64
++_PRODUCER_ROLLBACK_MAX_ATTEMPTS = 20
++_lock = threading.Lock()
++_replay_lock = threading.Lock()
++_replay_lock_pid = os.getpid()
++
++
++class _PostReplaceError(OSError):
++    pass
++
++
++def _capacity_record_count(
++    rows: list[tuple[str, dict[str, Any] | None]],
++) -> int:
++    return sum(
++        1
++        for _, parsed in rows
++        if parsed is None
++        or str(parsed.get("state") or _QUEUED) != _AMBIGUOUS
++    )
++
++
++def _has_record_capacity(
++    rows: list[tuple[str, dict[str, Any] | None]],
++) -> bool:
++    return (
++        _capacity_record_count(rows) < _MAX_PENDING_RECORDS
++        and len(rows)
++        < _MAX_PENDING_RECORDS + _MAX_QUARANTINED_RECORDS
++    )
++
++
++def _replace_with_ambiguous(
++    path: Path,
++    rows: list[tuple[str, dict[str, Any] | None]],
++    index: int,
++    record: dict[str, Any],
++) -> None:
++    ambiguous = dict(record)
++    ambiguous["state"] = _AMBIGUOUS
++    ambiguous["recovery_disposition"] = _AMBIGUOUS
++    replacements = [
++        (
++            json.dumps(ambiguous, ensure_ascii=False, default=str)
++            if row_index == index
++            else raw
++        )
++        for row_index, (raw, _) in enumerate(rows)
++    ]
++    for attempt in range(2):
++        try:
++            _replace_rows(path, replacements)
++            return
++        except _PostReplaceError:
++            try:
++                visible = _read_rows(path)
++            except Exception:
++                if attempt:
++                    raise
++                continue
++            if any(
++                parsed is not None
++                and parsed.get("queue_id") == ambiguous["queue_id"]
++                and parsed.get("state") == _AMBIGUOUS
++                and parsed.get("recovery_disposition") == _AMBIGUOUS
++                for _, parsed in visible
++            ):
++                return
++            if attempt:
++                raise
++        except Exception:
++            if attempt:
++                raise
++
++
++@dataclass(frozen=True)
++class ProducerReplayLease:
++    handle: IO[str]
++    path: Path
++    producer_token: str
++    previous_token: str
++
++
++def inbox_path(hermes_home: Path | None = None) -> Path:
++    """Return the profile-scoped durable drain inbox path."""
++    return (hermes_home or get_hermes_home()) / "state" / _FILE_NAME
++
++
++def _event_identity(event: MessageEvent, session_key: str) -> str:
++    message_id = (
++        "" if event.message_id is None else str(event.message_id).strip()
++    )
++    platform_update_id = (
++        ""
++        if event.platform_update_id is None
++        else str(event.platform_update_id).strip()
++    )
++    if message_id:
++        payload = {
++            "session_key": session_key,
++            "message_id": message_id,
++        }
++    elif platform_update_id:
++        payload = {
++            "session_key": session_key,
++            "platform_update_id": platform_update_id,
++        }
++    else:
++        raise ValueError("stable platform message identity is required")
++    encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
++    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
++
++
++def event_queue_id(event: MessageEvent, session_key: str) -> str:
++    """Return the stable durable-inbox identity for an event."""
++    return _event_identity(event, session_key)
++
++
++def _normalize_metadata(value: Any) -> dict[str, Any]:
++    if value is None:
++        return {}
++    if not isinstance(value, dict):
++        raise ValueError("event metadata must be an object")
++    try:
++        encoded = json.dumps(
++            value,
++            ensure_ascii=False,
++            allow_nan=False,
++            separators=(",", ":"),
++        )
++    except (TypeError, ValueError) as exc:
++        raise ValueError("event metadata must be JSON-serializable") from exc
++    if len(encoded.encode("utf-8")) > _MAX_METADATA_BYTES:
++        raise ValueError("event metadata is too large")
++    normalized = json.loads(encoded)
++    if not isinstance(normalized, dict):
++        raise ValueError("event metadata must be an object")
++    return normalized
++
++
++def _sdk_message_snapshot(value: Any) -> Any:
++    """Snapshot supported native SDK envelopes; hooks still receive the live original.
++
++    SDK clients/connections/callable methods are never serialized. These records
++    replay only after the live pre-dispatch hook receipt is durable; a crash
++    before that receipt is ambiguous and never re-invokes the hook.
++    """
++    module = type(value).__module__
++    if module.startswith("telegram.") and callable(getattr(value, "to_json", None)):
++        # PTB's public JSON codec includes nested entities and wire timestamps.
++        return json.loads(value.to_json())
++    if module == "discord.message" and type(value).__name__ == "Message":
++        author = getattr(value, "author", None)
++        def user_data(user):
++            if user is None:
++                return None
++            return {"id": str(user.id), "name": getattr(user, "name", None),
++                    "display_name": getattr(user, "display_name", None),
++                    "bot": getattr(user, "bot", False),
++                    "roles": [str(role.id) for role in getattr(user, "roles", [])]}
++        def wire_items(name):
++            return [item.to_dict() for item in getattr(value, name, [])]
++        reference = getattr(value, "reference", None)
++        return {
++            "id": str(value.id), "content": value.content,
++            "channel_id": str(value.channel.id),
++            "guild_id": str(value.guild.id) if getattr(value, "guild", None) else None,
++            "author": user_data(author),
++            "mentions": [user_data(user) for user in getattr(value, "mentions", [])],
++            "role_mentions": [str(role.id) for role in getattr(value, "role_mentions", [])],
++            "mention_everyone": getattr(value, "mention_everyone", False),
++            "attachments": wire_items("attachments"), "embeds": wire_items("embeds"),
++            "reference": reference.to_dict() if reference is not None else None,
++            "tts": getattr(value, "tts", False), "pinned": getattr(value, "pinned", False),
++            "webhook_id": getattr(value, "webhook_id", None),
++            "type": getattr(getattr(value, "type", None), "value", None),
++            "flags": getattr(getattr(value, "flags", None), "value", None),
++        }
++    return value
++
++
++def _normalize_raw_message(value: Any) -> Any:
++    """Return the JSON-safe platform payload exposed to ingress hooks."""
++    if value is None:
++        return None
++    value = _sdk_message_snapshot(value)
++    try:
++        encoded = json.dumps(
++            value,
++            ensure_ascii=False,
++            allow_nan=False,
++            separators=(",", ":"),
++        )
++    except (TypeError, ValueError) as exc:
++        raise ValueError("raw platform payload must be JSON-serializable") from exc
++    if len(encoded.encode("utf-8")) > _MAX_RAW_MESSAGE_BYTES:
++        raise ValueError("raw platform payload is too large")
++    return json.loads(encoded)
++
++
++def _record_for_event(
++    event: MessageEvent,
++    session_key: str,
++    reason: str,
++) -> dict[str, Any]:
++    pre_dispatch_attempted = event.pre_dispatch_attempted
++    if not isinstance(pre_dispatch_attempted, bool):
++        raise ValueError("pre-dispatch receipt must be a boolean")
++    if not isinstance(event.internal, bool):
++        raise ValueError("internal receipt must be a boolean")
++    if not isinstance(event.durable_ingress, bool):
++        raise ValueError("durable-ingress receipt must be a boolean")
++    if not isinstance(event.allow_gateway_control, bool):
++        raise ValueError("gateway-control receipt must be a boolean")
++    media_text_inlined = list(event.media_text_inlined or [])
++    if any(value is not None and not isinstance(value, bool) for value in media_text_inlined):
++        raise ValueError("media text-inlined receipts must be booleans or null")
++    authorization_via_gateway_home = bool(
++        getattr(event.source, "_authorization_profile_home", None) is not None
++        or getattr(event.source, "_authorization_via_gateway_home", False)
++    )
++    role_authorized = bool(getattr(event.source, "role_authorized", False))
++    delivered_via_upstream_relay = bool(
++        getattr(event.source, "delivered_via_upstream_relay", False)
++    )
++    return {
++        "schema": _SCHEMA_VERSION,
++        "queue_id": _event_identity(event, session_key),
++        "state": _QUEUED,
++        "pre_dispatch_attempted": pre_dispatch_attempted,
++        "queued_at": datetime.now().astimezone().isoformat(),
++        "reason": reason,
++        "session_key": session_key,
++        "source": event.source.to_dict(),
++        "authorization_via_gateway_home": authorization_via_gateway_home,
++        # These are gateway-local admission receipts, not wire fields.  The
++        # inbox is private and integrity-checked before replay, so retaining
++        # them here preserves authorization already granted by the live
++        # adapter without making either bit peer-forgeable.
++        "role_authorized": role_authorized,
++        "delivered_via_upstream_relay": delivered_via_upstream_relay,
++        "user_id": event.user_id,
++        "user_name": event.user_name,
++        "prompt_response": _normalize_metadata(event.prompt_response),
++        "text": event.text,
++        "raw_message": _normalize_raw_message(event.raw_message),
++        "message_type": event.message_type.value,
++        "message_id": event.message_id,
++        "platform_update_id": event.platform_update_id,
++        "media_urls": list(event.media_urls or []),
++        "media_types": list(event.media_types or []),
++        "media_text_inlined": media_text_inlined,
++        "reply_to_message_id": event.reply_to_message_id,
++        "reply_to_text": event.reply_to_text,
++        "reply_to_author_id": event.reply_to_author_id,
++        "reply_to_author_name": event.reply_to_author_name,
++        "reply_to_is_own_message": event.reply_to_is_own_message,
++        "auto_skill": event.auto_skill,
++        "channel_prompt": event.channel_prompt,
++        "channel_context": event.channel_context,
++        "internal": event.internal and event.durable_ingress,
++        "allow_gateway_control": event.allow_gateway_control,
++        "metadata": _normalize_metadata(event.metadata),
++        "timestamp": event.timestamp.isoformat(),
++    }
++
++
++def _validate_private_file(
++    path: Path,
++    file_stat: os.stat_result,
++) -> None:
++    if not stat.S_ISREG(file_stat.st_mode):
++        raise PermissionError(f"Durable inbox state is not a regular file: {path}")
++    if hasattr(os, "getuid") and file_stat.st_uid != os.getuid():
++        raise PermissionError(f"Durable inbox state has the wrong owner: {path}")
++    if os.name != "nt" and stat.S_IMODE(file_stat.st_mode) != 0o600:
++        raise PermissionError(f"Durable inbox state is not private: {path}")
++
++
++def _open_trusted_directory(path: Path) -> os.stat_result:
++    if os.name == "nt":  # HERMES_DURABLE_DRAIN_COMPATIBILITY_v1
++        path_stat = path.lstat()
++        if stat.S_ISLNK(path_stat.st_mode):
++            raise PermissionError(f"Durable inbox directory is a symlink: {path}")
++        reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
++        if reparse_flag and (
++            getattr(path_stat, "st_file_attributes", 0) & reparse_flag
++        ):
++            raise PermissionError(
++                f"Durable inbox directory is a reparse point: {path}"
++            )
++        if not stat.S_ISDIR(path_stat.st_mode):
++            raise PermissionError(
++                f"Durable inbox directory is not a directory: {path}"
++            )
++        return path_stat
++
++    # Linux PrivateTmp mount namespaces can deny a read-open of their synthetic
++    # root even though metadata traversal is allowed. O_PATH is sufficient for
++    # fstat-based trust validation and avoids requiring directory read access.
++    flags = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
++    flags |= getattr(os, "O_NOFOLLOW", 0)
++    fd = os.open(path, flags)
++    try:
++        directory_stat = os.fstat(fd)
++        path_stat = path.lstat()
++        if stat.S_ISLNK(path_stat.st_mode):
++            raise PermissionError(f"Durable inbox directory is a symlink: {path}")
++        if not stat.S_ISDIR(directory_stat.st_mode):
++            raise PermissionError(
++                f"Durable inbox directory is not a directory: {path}"
++            )
++        if (
++            directory_stat.st_dev,
++            directory_stat.st_ino,
++        ) != (
++            path_stat.st_dev,
++            path_stat.st_ino,
++        ):
++            raise PermissionError(
++                f"Durable inbox directory changed while opening: {path}"
++            )
++        return directory_stat
++    finally:
++        os.close(fd)
++
++
++def _ensure_trusted_directory(path: Path) -> None:
++    absolute = Path(os.path.abspath(path))
++    chain = list(reversed((absolute, *absolute.parents)))
++    parent_stat: os.stat_result | None = None
++    target_stat: os.stat_result | None = None
++
++    for component in chain:
++        try:
++            component_stat = _open_trusted_directory(component)
++        except FileNotFoundError:
++            if (
++                parent_stat is not None
++                and os.name != "nt"
++                and stat.S_IMODE(parent_stat.st_mode) & 0o022
++                and not parent_stat.st_mode & stat.S_ISVTX
++            ):
++                raise PermissionError(
++                    "Durable inbox directory trust chain is writable by other users: "
++                    f"{component.parent}"
++                )
++            try:
++                os.mkdir(component, mode=0o700)
++            except FileExistsError:
++                pass
++            component_stat = _open_trusted_directory(component)
++
++        if parent_stat is not None and os.name != "nt":
++            parent_mode = stat.S_IMODE(parent_stat.st_mode)
++            if parent_mode & 0o022:
++                if (
++                    not parent_stat.st_mode & stat.S_ISVTX
++                    or not hasattr(os, "getuid")
++                    or component_stat.st_uid != os.getuid()  # windows-footgun: ok — guarded above
++                ):
++                    raise PermissionError(
++                        "Durable inbox directory trust chain is writable by "
++                        f"other users: {component.parent}"
++                    )
++        # systemd PrivateTmp presents its protected namespace prefix (commonly
++        # / and /home) as uid 65534. It is safe to traverse while it is not
++        # group/other-writable; the actual Hermes state directory must still be
++        # owned by the gateway user below.
++        synthetic_namespace_ancestor = (
++            os.name != "nt"
++            and component_stat.st_uid == 65534
++            and not stat.S_IMODE(component_stat.st_mode) & 0o022
++        )
++        if (
++            os.name != "nt"
++            and hasattr(os, "getuid")
++            and component_stat.st_uid not in {0, os.getuid()}  # windows-footgun: ok — guarded above
++            and not synthetic_namespace_ancestor
++        ):
++            raise PermissionError(
++                f"Durable inbox directory trust chain has an untrusted owner: {component}"
++            )
++        parent_stat = component_stat
++        target_stat = component_stat
++
++    if target_stat is None:
++        raise PermissionError(f"Durable inbox directory is unavailable: {path}")
++    if hasattr(os, "getuid") and target_stat.st_uid != os.getuid():
++        raise PermissionError(f"Durable inbox directory has the wrong owner: {path}")
++    if os.name != "nt" and stat.S_IMODE(target_stat.st_mode) & 0o022:
++        raise PermissionError(
++            f"Durable inbox directory is writable by other users: {path}"
++        )
++
++
++def _open_private_file(
++    path: Path,
++    flags: int,
++    *,
++    create: bool,
++) -> tuple[int, bool]:
++    no_follow = getattr(os, "O_NOFOLLOW", 0)
++    created = False
++    if create:
++        try:
++            fd = os.open(
++                path,
++                flags | os.O_CREAT | os.O_EXCL | no_follow,
++                0o600,
++            )
++            created = True
++        except FileExistsError:
++            fd = os.open(path, flags | no_follow)
++    else:
++        fd = os.open(path, flags | no_follow)
++
++    try:
++        if created and os.name != "nt":
++            os.fchmod(fd, 0o600)
++        file_stat = os.fstat(fd)
++        path_stat = path.lstat()
++        if stat.S_ISLNK(path_stat.st_mode):
++            raise PermissionError(f"Durable inbox state is a symlink: {path}")
++        if (
++            file_stat.st_dev,
++            file_stat.st_ino,
++        ) != (
++            path_stat.st_dev,
++            path_stat.st_ino,
++        ):
++            raise PermissionError(f"Durable inbox state changed while opening: {path}")
++        _validate_private_file(path, file_stat)
++    except BaseException:
++        os.close(fd)
++        raise
++    return fd, created
++
++
++def _read_rows(path: Path) -> list[tuple[str, dict[str, Any] | None]]:
++    try:
++        fd, _ = _open_private_file(path, os.O_RDONLY, create=False)
++    except FileNotFoundError:
++        return []
++    rows: list[tuple[str, dict[str, Any] | None]] = []
++    with os.fdopen(
++        fd,
++        "r",
++        encoding="utf-8",
++        errors="surrogateescape",
++    ) as handle:
++        contents = handle.read()
++    raw_lines = contents.splitlines()
++    trailing_fragment = bool(contents) and not contents.endswith("\n")
++    for index, raw in enumerate(raw_lines):
++        if trailing_fragment and index == len(raw_lines) - 1:
++            logger.warning(
++                "Incomplete durable drain-inbox tail isolated from recovery"
++            )
++            continue
++        if not raw.strip():
++            continue
++        try:
++            value = json.loads(raw)
++        except (TypeError, ValueError):
++            logger.warning("Malformed durable drain-inbox row retained for recovery")
++            value = None
++        rows.append((raw, value if isinstance(value, dict) else None))
++    return rows
++
++
++@contextmanager
++def _locked_inbox(path: Path) -> Iterator[IO[str]]:
++    """Serialize inbox read-modify-write cycles across threads and processes."""
++    _ensure_trusted_directory(path.parent)
++    lock_path = path.parent / _LOCK_FILE_NAME
++    with _lock:
++        fd, _ = _open_private_file(lock_path, os.O_RDWR, create=True)
++        handle = os.fdopen(fd, "a+", encoding="utf-8")
++        acquired = False
++        try:
++            deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
++            while not _try_acquire_file_lock(handle):
++                if time.monotonic() >= deadline:
++                    raise TimeoutError(f"Timed out waiting for durable inbox lock: {lock_path}")
++                time.sleep(0.01)
++            acquired = True
++            yield handle
++        finally:
++            if acquired:
++                _release_file_lock(handle)
++            handle.close()
++
++
++def acquire_replay_lease(
++    path: Path | None = None,
++    *,
++    cancellation_event: threading.Event | None = None,
++) -> IO[str]:
++    global _replay_lock, _replay_lock_pid
++    current_pid = os.getpid()
++    if _replay_lock_pid != current_pid:
++        _replay_lock = threading.Lock()
++        _replay_lock_pid = current_pid
++    path = path or inbox_path()
++    _ensure_trusted_directory(path.parent)
++    lock_path = path.parent / _REPLAY_LOCK_FILE_NAME
++    while not _replay_lock.acquire(timeout=0.01):
++        if cancellation_event is not None and cancellation_event.is_set():
++            raise InterruptedError("durable replay lease acquisition cancelled")
++    handle: IO[str] | None = None
++    try:
++        if cancellation_event is not None and cancellation_event.is_set():
++            raise InterruptedError("durable replay lease acquisition cancelled")
++        fd, _ = _open_private_file(lock_path, os.O_RDWR, create=True)
++        handle = os.fdopen(fd, "a+", encoding="utf-8")
++        while not _try_acquire_file_lock(handle):
++            if cancellation_event is not None and cancellation_event.is_set():
++                raise InterruptedError("durable replay lease acquisition cancelled")
++            time.sleep(0.01)
++        if cancellation_event is not None and cancellation_event.is_set():
++            raise InterruptedError("durable replay lease acquisition cancelled")
++        return handle
++    except BaseException:
++        if handle is not None:
++            handle.close()
++        _replay_lock.release()
++        raise
++
++
++def release_replay_lease(
++    lease: IO[str] | ProducerReplayLease,
++) -> None:
++    handle = lease.handle if isinstance(lease, ProducerReplayLease) else lease
++    try:
++        _release_file_lock(handle)
++    finally:
++        handle.close()
++        _replay_lock.release()
++
++
++def acquire_producer_replay_lease(
++    producer_token: str,
++    path: Path | None = None,
++    *,
++    cancellation_event: threading.Event | None = None,
++) -> ProducerReplayLease:
++    if not producer_token:
++        raise ValueError("producer token is required")
++    path = path or inbox_path()
++    replay_lease = acquire_replay_lease(
++        path,
++        cancellation_event=cancellation_event,
++    )
++    try:
++        with _locked_inbox(path) as handle:
++            handle.seek(0)
++            previous_token = handle.read().strip()
++            if cancellation_event is not None and cancellation_event.is_set():
++                raise InterruptedError("durable producer handoff cancelled")
++            handle.seek(0)
++            handle.truncate()
++            handle.write(producer_token)
++            handle.flush()
++            os.fsync(handle.fileno())
++    except BaseException:
++        release_replay_lease(replay_lease)
++        raise
++    lease = ProducerReplayLease(
++        handle=replay_lease,
++        path=path,
++        producer_token=producer_token,
++        previous_token=previous_token,
++    )
++    if cancellation_event is not None and cancellation_event.is_set():
++        cancel_producer_replay_lease(lease)
++        raise InterruptedError("durable producer handoff cancelled")
++    return lease
++
++
++def cancel_producer_replay_lease(lease: ProducerReplayLease) -> None:
++    restored = False
++    try:
++        for attempt in range(_PRODUCER_ROLLBACK_MAX_ATTEMPTS):
++            try:
++                with _locked_inbox(lease.path) as handle:
++                    handle.seek(0)
++                    current_token = handle.read().strip()
++                    if current_token not in {
++                        lease.producer_token,
++                        lease.previous_token,
++                    }:
++                        logger.error(
++                            "Refusing durable producer rollback because ownership "
++                            "changed unexpectedly"
++                        )
++                        break
++                    handle.seek(0)
++                    handle.truncate()
++                    handle.write(lease.previous_token)
++                    handle.flush()
++                    os.fsync(handle.fileno())
++                    restored = True
++                    break
++            except Exception:
++                logger.exception(
++                    "Failed to restore durable inbox producer ownership "
++                    "(attempt %d/%d)",
++                    attempt + 1,
++                    _PRODUCER_ROLLBACK_MAX_ATTEMPTS,
++                )
++                if attempt + 1 < _PRODUCER_ROLLBACK_MAX_ATTEMPTS:
++                    time.sleep(0.05)
++        if not restored:
++            logger.critical(
++                "Durable inbox producer ownership could not be restored; "
++                "releasing the replay lease to preserve gateway availability"
++            )
++    finally:
++        release_replay_lease(lease)
++
++
++def claim_producer(producer_token: str, path: Path | None = None) -> None:
++    """Make one gateway process the only accepted inbox producer."""
++    replay_lease = acquire_producer_replay_lease(producer_token, path)
++    release_replay_lease(replay_lease)
++
++
++def _fsync_directory(path: Path) -> None:
++    """Persist directory-entry changes where the platform supports it."""
++    if os.name == "nt":
++        return
++    directory_fd = os.open(path, os.O_RDONLY)
++    try:
++        os.fsync(directory_fd)
++    finally:
++        os.close(directory_fd)
++
++
++def persist_event_result(
++    event: MessageEvent,
++    session_key: str,
++    *,
++    reason: str,
++    path: Path | None = None,
++    producer_token: str | None = None,
++) -> tuple[str | None, str]:
++    """Write *event* durably before the gateway acknowledges acceptance."""
++    if event.source is None:
++        return None, _FAILED
++    if event.is_command():
++        return None, _FAILED
++    if not str(event.text or "").strip() and not event.media_urls:
++        return None, _FAILED
++
++    try:
++        record = _record_for_event(event, session_key, reason)
++        queue_id = str(record["queue_id"])
++        path = path or inbox_path()
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            for index, (_, parsed) in enumerate(rows):
++                if parsed is None or parsed.get("queue_id") != queue_id:
++                    continue
++                state = str(parsed.get("state") or _QUEUED)
++                if state != _QUEUED:
++                    if state in {
++                        _CLAIMED,
++                        _AMBIGUOUS,
++                        _COMPLETED,
++                        _HANDLED,
++                    }:
++                        return queue_id, state
++                    raise RuntimeError(f"invalid duplicate drain-inbox state: {state}")
++                existing_receipt = parsed.get("pre_dispatch_attempted", False)
++                if not isinstance(existing_receipt, bool):
++                    raise ValueError("pre-dispatch receipt must be a boolean")
++                if existing_receipt or not record["pre_dispatch_attempted"]:
++                    return queue_id, _QUEUED
++                updated = dict(parsed)
++                updated.update(record)
++                updated["queued_at"] = parsed.get(
++                    "queued_at",
++                    record["queued_at"],
++                )
++                updated["reason"] = parsed.get("reason", record["reason"])
++                replacement = json.dumps(
++                    updated,
++                    ensure_ascii=False,
++                    default=str,
++                )
++                replacements = [
++                    replacement if row_index == index else raw
++                    for row_index, (raw, _) in enumerate(rows)
++                ]
++                try:
++                    _replace_rows(path, replacements)
++                except _PostReplaceError:
++                    raise
++                return queue_id, _QUEUED
++            if not _has_record_capacity(rows):
++                raise OverflowError("durable drain inbox is at capacity")
++            prior_rows = [raw for raw, _ in rows]
++            try:
++                _replace_rows(
++                    path,
++                    [
++                        *prior_rows,
++                        json.dumps(
++                            record,
++                            ensure_ascii=False,
++                            default=str,
++                        ),
++                    ],
++                )
++            except _PostReplaceError:
++                raise
++    except Exception as exc:
++        logger.warning(
++            "Failed to persist drain-time message for %s: %s",
++            session_key or "?",
++            exc,
++        )
++        return None, _FAILED
++    logger.info(
++        "Persisted drain-time message %s for %s (%s)",
++        queue_id,
++        session_key or "?",
++        reason,
++    )
++    return queue_id, _QUEUED
++def claim_pre_dispatch_event_result(
++    event: MessageEvent,
++    session_key: str,
++    *,
++    reason: str,
++    path: Path | None = None,
++    producer_token: str | None = None,
++) -> tuple[str | None, str, bool]:
++    try:
++        record = _record_for_event(event, session_key, reason)
++        queue_id = str(record["queue_id"])
++        path = path or inbox_path()
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            for index, (_, parsed) in enumerate(rows):
++                if parsed is None or parsed.get("queue_id") != queue_id:
++                    continue
++                state = str(parsed.get("state") or _QUEUED)
++                attempted = parsed.get("pre_dispatch_attempted", False)
++                if not isinstance(attempted, bool):
++                    raise ValueError("pre-dispatch receipt must be a boolean")
++                if state != _QUEUED or attempted:
++                    return queue_id, state, False
++                claimed = dict(parsed)
++                claimed["state"] = _CLAIMED
++                claimed["state_changed_at"] = (
++                    datetime.now().astimezone().isoformat()
++                )
++                replacements = [
++                    (
++                        json.dumps(claimed, ensure_ascii=False, default=str)
++                        if row_index == index
++                        else raw
++                    )
++                    for row_index, (raw, _) in enumerate(rows)
++                ]
++                _replace_rows(path, replacements)
++                return queue_id, _CLAIMED, True
++            if not _has_record_capacity(rows):
++                raise OverflowError("durable drain inbox is at capacity")
++            record["state"] = _CLAIMED
++            record["state_changed_at"] = datetime.now().astimezone().isoformat()
++            _replace_rows(
++                path,
++                [
++                    *(raw for raw, _ in rows),
++                    json.dumps(record, ensure_ascii=False, default=str),
++                ],
++            )
++            return queue_id, _CLAIMED, True
++    except Exception as exc:
++        logger.warning(
++            "Failed to claim pre-dispatch message for %s: %s",
++            session_key or "?",
++            exc,
++        )
++        return None, _FAILED, False
++
++
++def record_pre_dispatch_attempt_result(
++    event: MessageEvent,
++    session_key: str,
++    *,
++    path: Path | None = None,
++    producer_token: str | None = None,
++) -> tuple[str | None, str]:
++    try:
++        record = _record_for_event(
++            event,
++            session_key,
++            "startup-restore-pre-dispatch",
++        )
++        if record["pre_dispatch_attempted"] is not True:
++            raise ValueError("pre-dispatch attempt is not complete")
++        queue_id = str(record["queue_id"])
++        path = path or inbox_path()
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            for index, (_, parsed) in enumerate(rows):
++                if parsed is None or parsed.get("queue_id") != queue_id:
++                    continue
++                state = str(parsed.get("state") or _QUEUED)
++                attempted = parsed.get("pre_dispatch_attempted", False)
++                if not isinstance(attempted, bool):
++                    raise ValueError("pre-dispatch receipt must be a boolean")
++                if state != _CLAIMED or attempted:
++                    return queue_id, state
++                updated = dict(parsed)
++                updated.update(record)
++                updated["state"] = _CLAIMED
++                updated["queued_at"] = parsed.get(
++                    "queued_at",
++                    record["queued_at"],
++                )
++                updated["reason"] = parsed.get("reason", record["reason"])
++                updated["state_changed_at"] = (
++                    datetime.now().astimezone().isoformat()
++                )
++                replacements = [
++                    (
++                        json.dumps(updated, ensure_ascii=False, default=str)
++                        if row_index == index
++                        else raw
++                    )
++                    for row_index, (raw, _) in enumerate(rows)
++                ]
++                try:
++                    _replace_rows(path, replacements)
++                except Exception:
++                    try:
++                        _replace_rows(path, replacements)
++                    except Exception:
++                        _replace_with_ambiguous(
++                            path,
++                            rows,
++                            index,
++                            updated,
++                        )
++                        return queue_id, _AMBIGUOUS
++                return queue_id, _CLAIMED
++            raise RuntimeError("pre-dispatch claim is missing")
++    except Exception as exc:
++        logger.warning(
++            "Failed to record pre-dispatch attempt for %s: %s",
++            session_key or "?",
++            exc,
++        )
++        return None, _FAILED
++
++
++def finalize_pre_dispatch_event_result(
++    event: MessageEvent,
++    session_key: str,
++    *,
++    handled: bool,
++    reason: str,
++    path: Path | None = None,
++    producer_token: str | None = None,
++) -> tuple[str | None, str]:
++    final_state = _HANDLED if handled else _QUEUED
++    control_command = event.is_command()
++    try:
++        record = _record_for_event(event, session_key, reason)
++        record["state"] = final_state
++        queue_id = str(record["queue_id"])
++        path = path or inbox_path()
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            for index, (_, parsed) in enumerate(rows):
++                if parsed is None or parsed.get("queue_id") != queue_id:
++                    continue
++                state = str(parsed.get("state") or _QUEUED)
++                if state == final_state:
++                    return queue_id, state
++                if state != _CLAIMED:
++                    return queue_id, state
++                if control_command and not handled:
++                    return queue_id, _CLAIMED
++                updated = dict(parsed)
++                updated.update(record)
++                updated["queued_at"] = parsed.get(
++                    "queued_at",
++                    record["queued_at"],
++                )
++                updated["reason"] = parsed.get("reason", record["reason"])
++                rejection_disposition = (
++                    handled
++                    and reason == "startup-restore-unauthorized-rejected"
++                )
++                if rejection_disposition:
++                    updated["recovery_disposition"] = "unauthorized-rejected"
++                claimed = dict(updated)
++                claimed["state"] = _CLAIMED
++                claimed["state_changed_at"] = (
++                    datetime.now().astimezone().isoformat()
++                )
++                replacements = [
++                    (
++                        json.dumps(updated, ensure_ascii=False, default=str)
++                        if row_index == index
++                        else raw
++                    )
++                    for row_index, (raw, _) in enumerate(rows)
++                ]
++                claimed_rows = [
++                    (
++                        json.dumps(claimed, ensure_ascii=False, default=str)
++                        if row_index == index
++                        else raw
++                    )
++                    for row_index, (raw, _) in enumerate(rows)
++                ]
++                if (
++                    rejection_disposition
++                    and parsed.get("recovery_disposition")
++                    != "unauthorized-rejected"
++                ):
++                    try:
++                        _replace_rows(path, claimed_rows)
++                    except Exception:
++                        try:
++                            _replace_rows(path, claimed_rows)
++                        except Exception:
++                            _replace_with_ambiguous(
++                                path,
++                                rows,
++                                index,
++                                claimed,
++                            )
++                            return queue_id, _AMBIGUOUS
++                try:
++                    _replace_rows(path, replacements)
++                except _PostReplaceError:
++                    try:
++                        _replace_rows(path, claimed_rows)
++                    except Exception:
++                        return queue_id, _CLAIMED
++                    return queue_id, _CLAIMED
++                except Exception:
++                    return queue_id, _CLAIMED
++                return queue_id, final_state
++            raise RuntimeError("pre-dispatch claim is missing")
++    except Exception as exc:
++        logger.warning(
++            "Failed to finalize pre-dispatch message for %s: %s",
++            session_key or "?",
++            exc,
++        )
++        return None, _FAILED
++
++
++def persist_event(
++    event: MessageEvent,
++    session_key: str,
++    *,
++    reason: str,
++    path: Path | None = None,
++    producer_token: str | None = None,
++) -> str | None:
++    queue_id, state = persist_event_result(
++        event,
++        session_key,
++        reason=reason,
++        path=path,
++        producer_token=producer_token,
++    )
++    return queue_id if state == _QUEUED else None
++
++
++def event_state(
++    event: MessageEvent,
++    session_key: str,
++    path: Path | None = None,
++) -> str | None:
++    receipt = event_receipt(event, session_key, path)
++    if receipt is None:
++        return None
++    return str(receipt.get("state") or _QUEUED)
++
++
++def event_receipt(
++    event: MessageEvent,
++    session_key: str,
++    path: Path | None = None,
++) -> dict[str, Any] | None:
++    queue_id = _event_identity(event, session_key)
++    path = path or inbox_path()
++    with _locked_inbox(path):
++        for _, parsed in _read_rows(path):
++            if parsed is not None and parsed.get("queue_id") == queue_id:
++                return dict(parsed)
++    return None
++
++
++def pending_records(path: Path | None = None) -> list[dict[str, Any]]:
++    """Return parseable pending records in arrival order."""
++    path = path or inbox_path()
++    with _locked_inbox(path):
++        rows = _read_rows(path)
++        return [
++            parsed
++            for _, parsed in rows
++            if parsed is not None and parsed.get("queue_id")
++        ]
++
++
++def _replace_rows(path: Path, rows: list[str]) -> None:
++    _ensure_trusted_directory(path.parent)
++    fd, tmp_name = tempfile.mkstemp(
++        dir=str(path.parent),
++        prefix=f".{_FILE_NAME}.",
++        suffix=".tmp",
++    )
++    installed = False
++    try:
++        with os.fdopen(
++            fd,
++            "w",
++            encoding="utf-8",
++            errors="surrogateescape",
++        ) as handle:
++            if os.name != "nt":
++                os.fchmod(handle.fileno(), 0o600)
++                if stat.S_IMODE(os.fstat(handle.fileno()).st_mode) != 0o600:
++                    raise PermissionError(f"Durable inbox is not private: {path}")
++            if rows:
++                handle.write("\n".join(rows) + "\n")
++            handle.flush()
++            os.fsync(handle.fileno())
++        os.replace(tmp_name, path)
++        installed = True
++        try:
++            _fsync_directory(path.parent)
++        except OSError:
++            _fsync_directory(path.parent)
++    except BaseException as exc:
++        try:
++            os.unlink(tmp_name)
++        except OSError:
++            pass
++        if installed and isinstance(exc, Exception):
++            raise _PostReplaceError(str(exc)) from exc
++        raise
++
++
++def _transition_event(
++    queue_id: str,
++    expected_state: str,
++    new_state: str,
++    path: Path | None = None,
++    *,
++    producer_token: str | None = None,
++) -> bool:
++    if not queue_id:
++        return False
++    path = path or inbox_path()
++    try:
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            replaced: list[str] = []
++            transitioned = False
++            for raw, parsed in rows:
++                if (
++                    not transitioned
++                    and parsed is not None
++                    and parsed.get("queue_id") == queue_id
++                ):
++                    current_state = str(parsed.get("state") or _QUEUED)
++                    if current_state != expected_state:
++                        return False
++                    updated = dict(parsed)
++                    updated["state"] = new_state
++                    updated["state_changed_at"] = (
++                        datetime.now().astimezone().isoformat()
++                    )
++                    raw = json.dumps(updated, ensure_ascii=False, default=str)
++                    transitioned = True
++                replaced.append(raw)
++            if not transitioned:
++                return False
++            _replace_rows(path, replaced)
++    except Exception as exc:
++        logger.warning(
++            "Failed to transition drain-inbox row %s from %s to %s: %s",
++            queue_id,
++            expected_state,
++            new_state,
++            exc,
++        )
++        return False
++    return True
++
++
++def claim_event(
++    queue_id: str,
++    path: Path | None = None,
++    *,
++    producer_token: str | None = None,
++) -> bool:
++    return _transition_event(
++        queue_id,
++        _QUEUED,
++        _CLAIMED,
++        path,
++        producer_token=producer_token,
++    )
++
++
++def complete_event(
++    queue_id: str,
++    path: Path | None = None,
++    *,
++    producer_token: str | None = None,
++) -> bool:
++    return _transition_event(
++        queue_id,
++        _CLAIMED,
++        _COMPLETED,
++        path,
++        producer_token=producer_token,
++    )
++
++
++def event_from_record(record: dict[str, Any]) -> MessageEvent:
++    """Rebuild an event, including policy inputs, from the validated private inbox."""
++    if record.get("schema") != _SCHEMA_VERSION:
++        raise ValueError(f"Unsupported drain-inbox schema: {record.get('schema')!r}")
++    pre_dispatch_attempted = record.get("pre_dispatch_attempted", False)
++    if not isinstance(pre_dispatch_attempted, bool):
++        raise ValueError("pre-dispatch receipt must be a boolean")
++    internal = record.get("internal", False)
++    if not isinstance(internal, bool):
++        raise ValueError("internal receipt must be a boolean")
++    allow_gateway_control = record.get("allow_gateway_control", False)
++    if not isinstance(allow_gateway_control, bool):
++        raise ValueError("gateway-control receipt must be a boolean")
++    media_text_inlined = record.get("media_text_inlined", [])
++    if not isinstance(media_text_inlined, list) or any(
++        value is not None and not isinstance(value, bool)
++        for value in media_text_inlined
++    ):
++        raise ValueError("media text-inlined receipts must be a list of booleans or null")
++    metadata = _normalize_metadata(record.get("metadata", {}))
++    raw_type = str(record.get("message_type") or MessageType.TEXT.value)
++    try:
++        message_type = MessageType(raw_type)
++    except ValueError:
++        message_type = MessageType.TEXT
++    raw_timestamp = record.get("timestamp")
++    try:
++        timestamp = datetime.fromisoformat(str(raw_timestamp))
++    except (TypeError, ValueError):
++        timestamp = datetime.now()
++    queue_id = str(record.get("queue_id") or "")
++    message_id = str(record.get("message_id") or "").strip()
++    if not message_id and queue_id:
++        message_id = f"drain:{queue_id}"
++    event = MessageEvent(
++        text=str(record.get("text") or ""),
++        user_id=record.get("user_id"),
++        user_name=record.get("user_name"),
++        prompt_response=_normalize_metadata(record.get("prompt_response")) or None,
++        message_type=message_type,
++        source=SessionSource.from_dict(record["source"]),
++        raw_message=_normalize_raw_message(record.get("raw_message")),
++        message_id=message_id,
++        platform_update_id=record.get("platform_update_id"),
++        media_urls=list(record.get("media_urls") or []),
++        media_types=list(record.get("media_types") or []),
++        media_text_inlined=list(media_text_inlined),
++        reply_to_message_id=record.get("reply_to_message_id"),
++        reply_to_text=record.get("reply_to_text"),
++        reply_to_author_id=record.get("reply_to_author_id"),
++        reply_to_author_name=record.get("reply_to_author_name"),
++        reply_to_is_own_message=bool(record.get("reply_to_is_own_message", False)),
++        auto_skill=record.get("auto_skill"),
++        channel_prompt=record.get("channel_prompt"),
++        channel_context=record.get("channel_context"),
++        internal=internal,
++        allow_gateway_control=allow_gateway_control,
++        metadata=metadata,
++        timestamp=timestamp,
++    )
++    authorization_via_gateway_home = record.get(
++        "authorization_via_gateway_home",
++        False,
++    )
++    if not isinstance(authorization_via_gateway_home, bool):
++        raise ValueError("gateway authorization scope must be a boolean")
++    if authorization_via_gateway_home:
++        event.source._authorization_via_gateway_home = True
++    role_authorized = record.get("role_authorized", False)
++    delivered_via_upstream_relay = record.get(
++        "delivered_via_upstream_relay",
++        False,
++    )
++    if not isinstance(role_authorized, bool):
++        raise ValueError("role authorization receipt must be a boolean")
++    if not isinstance(delivered_via_upstream_relay, bool):
++        raise ValueError("upstream relay admission receipt must be a boolean")
++    event.source.role_authorized = role_authorized
++    event.source.delivered_via_upstream_relay = delivered_via_upstream_relay
++    event.pre_dispatch_attempted = pre_dispatch_attempted
++    event.durable_ingress = internal
++    return event
++
++
++def acknowledge(
++    queue_id: str,
++    path: Path | None = None,
++    *,
++    expected_state: str | None = None,
++    producer_token: str | None = None,
++) -> bool:
++    """Atomically remove one matching record while retaining malformed rows."""
++    if not queue_id:
++        return False
++    path = path or inbox_path()
++    try:
++        with _locked_inbox(path) as handle:
++            if producer_token is not None:
++                handle.seek(0)
++                if handle.read().strip() != producer_token:
++                    raise RuntimeError("durable inbox producer ownership changed")
++            rows = _read_rows(path)
++            kept: list[str] = []
++            removed = False
++            for raw, parsed in rows:
++                if (
++                    not removed
++                    and parsed is not None
++                    and parsed.get("queue_id") == queue_id
++                ):
++                    current_state = str(parsed.get("state") or _QUEUED)
++                    if (
++                        expected_state is not None
++                        and current_state != expected_state
++                    ):
++                        return False
++                    removed = True
++                    continue
++                kept.append(raw)
++            if not removed:
++                return False
++
++            _replace_rows(path, kept)
++    except Exception as exc:
++        logger.warning("Failed to acknowledge drain-inbox row %s: %s", queue_id, exc)
++        return False
++    return True
++
++
++def defer_event(queue_id, path=None, *, producer_token=None):
++    """Release a replay claim only after the native owner proves no work started."""
++    return _transition_event(queue_id, _CLAIMED, _QUEUED, path, producer_token=producer_token)
++
++
++def record_ambiguity_notice(queue_id, path=None, *, producer_token=None):
++    """Record accepted recovery guidance without ever making the event executable."""
++    path = path or inbox_path()
++    with _locked_inbox(path) as handle:
++        if producer_token is not None:
++            handle.seek(0)
++            if handle.read().strip() != producer_token:
++                raise RuntimeError("durable inbox producer ownership changed")
++        rows = _read_rows(path)
++        for index, (_, record) in enumerate(rows):
++            if record is None or record.get("queue_id") != queue_id:
++                continue
++            if record.get("state") not in {_CLAIMED, _AMBIGUOUS}:
++                return False
++            updated = dict(record, state=_AMBIGUOUS, ambiguity_notice_sent=True)
++            _replace_rows(path, [json.dumps(updated, ensure_ascii=False) if i == index else raw
++                                 for i, (raw, _) in enumerate(rows)])
++            return True
++    return False
+diff --git a/gateway/platforms/base.py b/gateway/platforms/base.py
+index 6e40a97a..9fb1ef76 100644
+--- a/gateway/platforms/base.py
++++ b/gateway/platforms/base.py
+@@ -1487,6 +1487,13 @@ class ProcessingOutcome(Enum):
+     CANCELLED = "cancelled"
+ 
+ 
++@dataclass
++class MessageProcessingReceipt:
++    """Local processing outcome shared by native dataclasses.replace rewrites."""
++    deferred: bool = False
++    succeeded: bool = False
++
++
+ @dataclass
+ class MessageEvent:
+     """Incoming message from a platform — the normalized shape all adapters produce."""
+@@ -1529,6 +1536,27 @@ class MessageEvent:
+     # May this event resolve gateway commands / control prompts? Proactive plugin events set False
+     # so untrusted payload text stays conversational. Kept last for positional compat.
+     allow_gateway_control: bool = True
++    durable_ingress: bool = False
++    admission_checked: bool = False
++    pre_dispatch_attempted: bool = False
++    durable_replay: bool = False
++    processing_receipt: MessageProcessingReceipt = field(default_factory=MessageProcessingReceipt)
++
++    @property
++    def durable_deferred(self) -> bool:
++        return self.processing_receipt.deferred
++
++    @durable_deferred.setter
++    def durable_deferred(self, value: bool) -> None:
++        self.processing_receipt.deferred = value
++
++    @property
++    def handler_succeeded(self) -> bool:
++        return self.processing_receipt.succeeded
++
++    @handler_succeeded.setter
++    def handler_succeeded(self, value: bool) -> None:
++        self.processing_receipt.succeeded = value
+ 
+     def is_command(self) -> bool:
+         """Check if this is a command message (e.g., /new, /reset)."""
+@@ -3459,6 +3487,23 @@ class BasePlatformAdapter(ABC):
+             raise
+         await self._drain_pending_after_session_command(session_key, command_guard)
+ 
++    def set_startup_gate_handler(self, handler) -> None:
++        self._startup_gate_handler = handler
++
++    async def _preflight_startup_gate(self, event: MessageEvent) -> bool:
++        if event.admission_checked or event.durable_replay:
++            return False
++        if event.allow_gateway_control:
++            coerce_plaintext_gateway_command(event)
++        owner = self._session_key_profile(event.source)
++        if owner and not event.source.profile:
++            event.source.profile = owner
++        handler = getattr(self, "_startup_gate_handler", None)
++        if handler is not None and await handler(event, self._event_session_key(event)):
++            return True
++        event.admission_checked = True
++        return False
++
+     async def handle_message(self, event: MessageEvent) -> None:
+         """Process an incoming message; returns quickly by spawning a background
+         task so new messages (and interrupts) can arrive while an agent runs."""
+@@ -3470,6 +3515,8 @@ class BasePlatformAdapter(ABC):
+         if (getattr(self, "_topic_recovery_fn", None) is not None
+                 and event.source.platform == Platform.TELEGRAM and event.source.chat_type == "dm"):
+             await asyncio.to_thread(self._apply_topic_recovery, event)
++        if await self._preflight_startup_gate(event):
++            return
+         session_key = self._event_session_key(event)
+         expected_session_key = str((event.metadata or {}).get("gateway_session_key") or "").strip()
+         if expected_session_key and session_key != expected_session_key:
+@@ -3480,6 +3527,9 @@ class BasePlatformAdapter(ABC):
+         if session_key in self._active_sessions:
+             self._heal_stale_session_lock(session_key)
+         if session_key in self._active_sessions:
++            if event.durable_replay:
++                event.durable_deferred = True
++                return
+             await self._handle_message_while_active(event, session_key)
+             return
+         # Guard installed synchronously BEFORE the task spawns so a second message can't race in.
+@@ -3889,6 +3939,7 @@ class BasePlatformAdapter(ABC):
+         try:
+             await self._run_processing_hook("on_processing_start", event)
+             response = await self._message_handler(event)
++            event.handler_succeeded = True
+             is_ephemeral_response = isinstance(response, EphemeralReply)
+             # Unwrap EphemeralReply for downstream text processing; TTL applies after send.
+             response, _ephemeral_ttl = self._unwrap_ephemeral(response)
+diff --git a/gateway/platforms/bluebubbles.py b/gateway/platforms/bluebubbles.py
+index 8c0eb278..aa422457 100644
+--- a/gateway/platforms/bluebubbles.py
++++ b/gateway/platforms/bluebubbles.py
+@@ -596,9 +596,15 @@ class BlueBubblesAdapter(BasePlatformAdapter):
+             message_id=self._value(record.get("guid"), record.get("messageGuid"), record.get("id")),
+             reply_to_message_id=self._value(record.get("threadOriginatorGuid"), record.get("associatedMessageGuid")),
+             media_urls=media_urls, media_types=media_types)
+-        task = asyncio.create_task(self.handle_message(event))
+-        self._background_tasks.add(task)
+-        task.add_done_callback(self._background_tasks.discard)
++        try:
++            accepted = await self._preflight_startup_gate(event)
++        except Exception:
++            logger.exception("[bluebubbles] durable admission failed")
++            return web.Response(text="retry", status=503)
++        if not accepted:
++            task = asyncio.create_task(self.handle_message(event))
++            self._background_tasks.add(task)
++            task.add_done_callback(self._background_tasks.discard)
+         if self.send_read_receipts and session_chat_id:  # fire-and-forget read receipt
+             asyncio.create_task(self.mark_read(session_chat_id))
+         return _ok()
+diff --git a/gateway/platforms/msgraph_webhook.py b/gateway/platforms/msgraph_webhook.py
+index 3e59f767..5835e88e 100644
+--- a/gateway/platforms/msgraph_webhook.py
++++ b/gateway/platforms/msgraph_webhook.py
+@@ -179,7 +179,7 @@ class MSGraphWebhookAdapter(BasePlatformAdapter):
+             return web.Response(status=400)
+         return web.Response(text=validation_token, content_type="text/plain")
+ 
+-    def _ingest_notification(self, raw_notification: Any) -> str:
++    async def _ingest_notification(self, raw_notification: Any) -> str:
+         """Classify + schedule one notification: 'accepted' | 'duplicate' | 'auth' | 'other'."""
+         if not isinstance(raw_notification, dict):
+             return "other"
+@@ -194,9 +194,17 @@ class MSGraphWebhookAdapter(BasePlatformAdapter):
+         if receipt_key is not None:
+             if receipt_key in self._seen_receipts:
+                 return "duplicate"
++        event = self._build_message_event(notification, receipt_key)
++        try:
++            accepted = await self._preflight_startup_gate(event)
++        except Exception:
++            logger.exception("[msgraph_webhook] durable admission failed")
++            return "retry"
++        if receipt_key is not None:
+             self._remember_receipt(receipt_key)
+         self._accepted_count += 1
+-        self._schedule_notification(notification, self._build_message_event(notification, receipt_key))
++        if not accepted:
++            self._schedule_notification(notification, event)
+         return "accepted"
+ 
+     async def _handle_notification(self, request: "web.Request") -> "web.Response":
+@@ -210,7 +218,10 @@ class MSGraphWebhookAdapter(BasePlatformAdapter):
+             return web.Response(status=status)
+         counts = {"accepted": 0, "duplicate": 0, "auth": 0, "other": 0}
+         for raw_notification in notifications:
+-            counts[self._ingest_notification(raw_notification)] += 1
++            result = await self._ingest_notification(raw_notification)
++            if result == "retry":
++                return web.Response(status=503)
++            counts[result] += 1
+         self._duplicate_count += counts["duplicate"]
+         # Anything ingested OR deduped → 202 with empty body (Graph acks; no counter leak). Every item
+         # failed auth → 403 so forged POSTs get a clear reject. Otherwise (malformed / not accepted) → 400.
+@@ -288,7 +299,18 @@ class MSGraphWebhookAdapter(BasePlatformAdapter):
+             chat_type="webhook", user_id="msgraph", user_name="Microsoft Graph")
+         return MessageEvent(
+             text=self._render_prompt(notification), message_type=MessageType.TEXT, source=source,
+-            raw_message=notification, message_id=message_id, internal=True)
++            raw_message=notification, message_id=message_id, internal=True, durable_ingress=True)
++
++    async def replay_durable_event(self, event: MessageEvent) -> None:
++        if self._notification_scheduler is None:
++            await self.handle_message(event)
++            return
++        if not isinstance(event.raw_message, dict):
++            raise ValueError("Durable Graph notification payload is missing")
++        result = self._notification_scheduler(dict(event.raw_message), event)
++        if asyncio.iscoroutine(result):
++            await result
++        event.handler_succeeded = True
+ 
+     def _render_prompt(self, notification: Dict[str, Any]) -> str:
+         template = self.config.extra.get("prompt", "")
+diff --git a/gateway/platforms/signal.py b/gateway/platforms/signal.py
+index f73c3904..794c8628 100644
+--- a/gateway/platforms/signal.py
++++ b/gateway/platforms/signal.py
+@@ -486,6 +486,7 @@ class SignalAdapter(BasePlatformAdapter):
+         event = MessageEvent(
+             source=source, text=text or "", message_type=msg_type, media_urls=media_urls,
+             media_types=media_types, timestamp=timestamp,
++            message_id=f"signal:{sender}:{ts_ms}" if ts_ms else None,
+             raw_message={"sender": sender, "timestamp_ms": ts_ms, "quote": quote_data if quote_data else None},
+             reply_to_message_id=reply_to_id, reply_to_text=quote_data.get("text"),
+             reply_to_author_id=reply_to_author,
+diff --git a/gateway/platforms/webhook.py b/gateway/platforms/webhook.py
+index 9c928a4..637592c 100644
+--- a/gateway/platforms/webhook.py
++++ b/gateway/platforms/webhook.py
+@@ -17,6 +17,7 @@ import re
+ import subprocess
+ import sys
+ import time
++import uuid
+ from collections import deque
+ from contextlib import nullcontext, suppress
+ from typing import Any, Deque, Dict, List, Optional
+@@ -174,6 +175,7 @@ class WebhookAdapter(BasePlatformAdapter):
+         self.gateway_runner = None  # set externally; needed for cross-platform delivery
+         # Idempotency: TTL cache of recently processed delivery IDs.
+         self._seen_deliveries: Dict[str, float] = {}
++        self._pending_admissions: set[str] = set()
+         self._idempotency_ttl: int = 3600  # 1 hour
+         self._seen_deliveries_next_prune_at: float = 0.0
+         self._rate_counts: Dict[str, Deque[float]] = {}  # per-route hit timestamps in a fixed window
+@@ -548,18 +550,30 @@ class WebhookAdapter(BasePlatformAdapter):
+             prompt = self._render_prompt(route_config.get("prompt", ""), payload, event_type, route_name)
+             if skills := route_config.get("skills", []):
+                 prompt = self._apply_skills(prompt, skills)
+-        delivery_id = headers.get("X-GitHub-Delivery", headers.get(
+-            "svix-id", headers.get("X-Request-ID", str(int(time.time() * 1000)))))
++        delivery_id = next((str(headers.get(k) or "").strip()
++                            for k in ("X-GitHub-Delivery", "svix-id", "X-Request-ID")
++                            if str(headers.get(k) or "").strip()), f"local:{uuid.uuid4().hex}")
+         now = time.time()  # idempotency: skip duplicate deliveries (webhook retries)
++        if delivery_id in self._pending_admissions:
++            return web.json_response({"status": "error", "error": "Admission pending"}, status=503)
+         if not self._record_delivery_id(delivery_id, now):
+             logger.info("[webhook] Skipping duplicate delivery %s", delivery_id)
+             return web.json_response({"status": "duplicate", "delivery_id": delivery_id}, status=200)
+         if route_config.get("deliver_only"):
+             return await self._handle_deliver_only(prompt, payload, route_config, route_name, event_type, delivery_id)
+-        return self._dispatch_agent_run(request, route_config, route_name, profile, payload, prompt, event_type,
+-                                        delivery_id, now)
+-
+-    def _dispatch_agent_run(self, request, route_config: dict, route_name: str, profile, payload: Any, prompt: str,
++        self._pending_admissions.add(delivery_id)
++        try:
++            return await self._dispatch_agent_run(request, route_config, route_name, profile, payload, prompt, event_type,
++                                            delivery_id, now)
++        except BaseException:
++            # Cancellation or setup failure must not leave a false accepted receipt.
++            if self._seen_deliveries.get(delivery_id) == now:
++                self._seen_deliveries.pop(delivery_id, None)
++            raise
++        finally:
++            self._pending_admissions.discard(delivery_id)
++
++    async def _dispatch_agent_run(self, request, route_config: dict, route_name: str, profile, payload: Any, prompt: str,
+                             event_type: str, delivery_id: str, now: float) -> "web.Response":
+         """Record delivery info, spawn the agent run, and return 202 immediately."""
+         # delivery_id in the session key → concurrent webhooks on one route get independent runs.
+@@ -575,17 +589,41 @@ class WebhookAdapter(BasePlatformAdapter):
+         if profile and isinstance(profile, str):
+             source.profile = profile
+         event = MessageEvent(text=prompt, message_type=MessageType.TEXT, source=source, raw_message=payload,
+-                             message_id=delivery_id)
++                             message_id=delivery_id,
++                             metadata={"webhook_delivery": self._delivery_info[session_chat_id]})
+         logger.info("[webhook] %s event=%s route=%s prompt_len=%d delivery=%s", request.method, event_type, route_name,
+                     len(prompt), delivery_id)
+         # The per-delivery session is closed by ``on_processing_complete`` once the run finishes
+         # (``handle_message`` is fire-and-forget, so nothing can be closed here).
+-        task = asyncio.create_task(self.handle_message(event))
+-        self._background_tasks.add(task)
+-        task.add_done_callback(self._background_tasks.discard)
++        try:
++            accepted = await self._preflight_startup_gate(event)
++        except Exception:
++            self._delivery_info.pop(session_chat_id, None)
++            self._delivery_info_created.pop(session_chat_id, None)
++            if self._seen_deliveries.get(delivery_id) == now:
++                self._seen_deliveries.pop(delivery_id, None)
++            logger.exception("[webhook] durable admission failed")
++            return web.json_response({"status": "error", "error": "Admission failed"}, status=503)
++        if not accepted:
++            task = asyncio.create_task(self.handle_message(event))
++            self._background_tasks.add(task)
++            task.add_done_callback(self._background_tasks.discard)
+         return web.json_response({"status": "accepted", "route": route_name, "event": event_type,
+                                   "delivery_id": delivery_id}, status=202)
+ 
++    async def handle_message(self, event: MessageEvent) -> None:
++        delivery = event.metadata.get("webhook_delivery")
++        if delivery is not None:
++            if not isinstance(delivery, dict) or not isinstance(delivery.get("deliver"), str) or not isinstance(delivery.get("deliver_extra"), dict):
++                raise ValueError("Invalid durable webhook delivery metadata")
++            chat_id = event.source.chat_id
++            if chat_id not in self._delivery_info:
++                now = time.time()
++                self._delivery_info[chat_id] = delivery
++                self._delivery_info_created[chat_id] = now
++                self._delivery_info_order.append((now, chat_id))
++        await super().handle_message(event)
++
+     async def on_processing_complete(self, event: "MessageEvent", outcome: Any) -> None:
+         """Close the one-shot per-delivery session: ``prune_sessions`` only reaps rows with ``ended_at`` set, so
+         unclosed webhook sessions leak unbounded. Fires at the true end of the run; ``end_session()`` is
+diff --git a/gateway/platforms/whatsapp_cloud.py b/gateway/platforms/whatsapp_cloud.py
+--- a/gateway/platforms/whatsapp_cloud.py
++++ b/gateway/platforms/whatsapp_cloud.py
+@@ -725,7 +725,8 @@
+             payload = None
+         if not isinstance(payload, dict):
+             return web.Response(status=400)
+-        await self._dispatch_payload(payload)
++        if await self._dispatch_payload(payload) is False:
++            return web.Response(status=503)
+         return web.Response(status=200)
+ 
+     def _verify_signature(self, raw_body: bytes, header: str) -> bool:
+@@ -746,12 +747,12 @@
+             self._bounded_put(self._seen_wamids, wamid, True, cap=WAMID_DEDUP_CACHE_SIZE)
+         return True
+ 
+-    async def _dispatch_payload(self, payload: Dict[str, Any]) -> None:
++    async def _dispatch_payload(self, payload: Dict[str, Any]) -> bool:
+         """Walk ``entry[].changes[].value.{messages, contacts, statuses}`` and dispatch each message.
+         ``statuses`` (sent/delivered/read/failed) are only logged — the agent doesn't consume receipts."""
+         if payload.get("object") != "whatsapp_business_account":
+             logger.debug("[whatsapp_cloud] ignoring non-WABA payload (object=%r)", payload.get("object"))
+-            return
++            return True
+         for entry in payload.get("entry") or []:
+             for change in (entry.get("changes") or []) if isinstance(entry, dict) else []:
+                 if not isinstance(change, dict) or change.get("field") != "messages":
+@@ -764,31 +765,53 @@
+                 }
+                 for raw_message in value.get("messages") or []:
+                     if isinstance(raw_message, dict):
+-                        await self._ingest_message(raw_message, contacts_by_waid, value.get("metadata") or {})
++                        if await self._ingest_message(raw_message, contacts_by_waid, value.get("metadata") or {}) is False:
++                            return False
+                 for status in value.get("statuses") or []:
+                     if isinstance(status, dict):
+                         logger.debug("[whatsapp_cloud] status %s for %s", status.get("status"), status.get("id"))
+ 
+-    async def _ingest_message(self, raw_message: Dict[str, Any], contacts_by_waid: Dict[str, str], metadata: Dict[str, Any]) -> None:
+-        """Dedup → build event → handle_message. Neither build nor dispatch errors may
+-        bubble out: the wamid is already dedup-marked, so a 500 would make Meta retry
+-        the batch and every message in it would then be dropped as a duplicate."""
++        return True
++
++    async def _ingest_message(self, raw_message: Dict[str, Any], contacts_by_waid: Dict[str, str], metadata: Dict[str, Any]) -> bool:
++        """Build and admit before remembering the WAMID; failed admission requests retry."""
+         wamid = str(raw_message.get("id") or "").strip()
+-        if not self._dedup_wamid(wamid):
++        if wamid and wamid in self._seen_wamids:
++            self._duplicate_count += 1
+             logger.debug("[whatsapp_cloud] duplicate wamid %s, skipping", wamid)
+-            return
+-        try:
+-            event = await self._build_message_event_from_cloud(raw_message, contacts_by_waid, metadata)
+-        except Exception:
+-            logger.exception("[whatsapp_cloud] failed to build event for wamid %s", wamid)
+-            return
+-        if event is None:
+-            return
+-        self._accepted_count += 1
+-        try:
+-            await self.handle_message(event)
+-        except Exception:
+-            logger.exception("[whatsapp_cloud] handle_message raised for wamid %s", wamid)
++            return True
++        inflight = getattr(self, "_inflight_wamids", None)
++        if inflight is None:
++            inflight = self._inflight_wamids = set()
++        if wamid and wamid in inflight:
++            return False  # Retry: the first delivery has not finished admission.
++        if wamid:
++            inflight.add(wamid)
++        try:
++            try:
++                event = await self._build_message_event_from_cloud(raw_message, contacts_by_waid, metadata)
++            except Exception:
++                logger.exception("[whatsapp_cloud] failed to build event for wamid %s", wamid)
++                return True
++            if event is None:
++                return True
++            try:
++                accepted = await self._preflight_startup_gate(event)
++            except Exception:
++                logger.exception("[whatsapp_cloud] durable admission failed for wamid %s", wamid)
++                return False
++            if wamid:
++                self._bounded_put(self._seen_wamids, wamid, True, cap=WAMID_DEDUP_CACHE_SIZE)
++            self._accepted_count += 1
++            if accepted:
++                return True
++            try:
++                await self.handle_message(event)
++            except Exception:
++                logger.exception("[whatsapp_cloud] handle_message raised for wamid %s", wamid)
++            return True
++        finally:
++            inflight.discard(wamid)
+ 
+     async def _dispatch_interactive_reply(self, raw_message: Dict[str, Any], contacts_by_waid: Dict[str, str]) -> bool:
+         """Route an inbound button tap to its resolver (see ``_INTERACTIVE_HANDLERS``). True = claimed.
+diff --git a/gateway/run.py b/gateway/run.py
+index f59ae79a..360200f5 100644
+--- a/gateway/run.py
++++ b/gateway/run.py
+@@ -2030,6 +2030,7 @@ from gateway.run_shutdown import GatewayShutdownMixin
+ from gateway.run_busy import GatewayBusySessionMixin
+ from gateway.run_config_loaders import GatewayConfigLoadersMixin
+ from gateway.run_startup import GatewayStartupMixin
++from gateway.run_durable_drain import GatewayDurableDrainMixin
+ from gateway.run_watchers import GatewaySessionWatchersMixin
+ from gateway.run_notifications import GatewayNotificationsMixin
+ from gateway.run_inbound import GatewayInboundMixin
+@@ -3229,7 +3230,7 @@ class GatewayRunner(
+     GatewayVoiceMixin, GatewayAdapterLifecycleMixin, GatewayTopicThreadsMixin, GatewayTurnMixin,
+     GatewayShutdownMixin, GatewayBusySessionMixin, GatewayConfigLoadersMixin, GatewayStartupMixin,
+     GatewaySessionWatchersMixin, GatewayNotificationsMixin, GatewayInboundMixin, GatewayGoalsMixin,
+-    GatewayAgentCacheMixin):
++    GatewayAgentCacheMixin, GatewayDurableDrainMixin):
+     """Main gateway controller: manages adapter lifecycles, routes messages to/from the agent."""
+ 
+     # Class-level defaults so partial construction in tests doesn't blow up on attribute access.
+@@ -3443,7 +3444,7 @@ class GatewayRunner(
+         # Startup restore gate: while restart-interrupted sessions auto-resume, real inbound messages
+         # queue instead of competing with the synthetic resume turns; drained after all resume tasks end.
+         self._startup_restore_in_progress = False
+-        self._startup_restore_queue: List[MessageEvent] = []
++        self._init_durable_drain()
+         self._startup_restore_tasks: List[asyncio.Task] = []
+         # Set by start_gateway() only for an explicit ``--replace`` launch; scoped to each adapter's
+         # cold-start connect and removed before any reconnect can run.
+diff --git a/gateway/run_adapters.py b/gateway/run_adapters.py
+index 3ea22ad6..e1db1bc0 100644
+--- a/gateway/run_adapters.py
++++ b/gateway/run_adapters.py
+@@ -1039,6 +1039,7 @@ class GatewayAdapterLifecycleMixin:
+         adapter.set_message_handler(message_handler or self._primary_message_handler())
+         adapter.set_fatal_error_handler(fatal_error_handler or self._handle_adapter_fatal_error)
+         adapter.set_session_store(self.session_store)
++        adapter.set_startup_gate_handler(self._make_durable_admission_handler(adapter))
+         adapter.set_busy_session_handler(busy_session_handler or self._handle_active_session_busy_message)
+         _set_reaction = getattr(adapter, "set_reaction_handler", None)
+         if callable(_set_reaction):
+diff --git a/gateway/run_busy.py b/gateway/run_busy.py
+index 3fcf447e..fc9d65ab 100644
+--- a/gateway/run_busy.py
++++ b/gateway/run_busy.py
+@@ -360,7 +360,7 @@ class GatewayBusySessionMixin:
+         if not adapter:
+             return
+         if self._queue_during_drain_enabled(effective_mode):
+-            self._queue_or_replace_pending_event(session_key, event)
++            await self._persist_pending_followup_for_drain(event, session_key)
+             message = f"⏳ Gateway {self._status_action_gerund()} — queued for the next turn after it comes back."
+         else:
+             message = f"⏳ Gateway is {self._status_action_gerund()} and is not accepting another turn right now."
+@@ -614,11 +614,11 @@ class GatewayBusySessionMixin:
+             return True  # handled (silently dropped); do not fall through
+ 
+         effective_mode = self._effective_busy_input_mode(event.source)
+-        if self._draining:  # gateway restarting/stopping
+-            await self._send_busy_drain_notice(event, session_key, effective_mode)
+-            return True
+         if await self._route_plaintext_approval_while_busy(event, session_key):
+             return True
++        if self._draining and not self._durable_control_event(event, session_key):
++            await self._persist_pending_followup_for_drain(event, session_key)
++            return True
+         adapter = self._adapter_for_source(event.source)
+         if not adapter:
+             return False  # let default path handle it
+diff --git a/gateway/run_durable_drain.py b/gateway/run_durable_drain.py
+new file mode 100644
+index 0000000..d515ab70f45eb8a8178f398b97985042cd13027e
+--- /dev/null
++++ b/gateway/run_durable_drain.py
+@@ -0,0 +1,289 @@
++"""Durable admission and replay around the native gateway lifecycle phases.
++
++Only a claimed event may enter a potentially side-effecting hook or agent. A
++crash while claimed is ambiguous and requires resend; it is never re-executed.
++"""
++from __future__ import annotations
++
++import asyncio
++import dataclasses
++import logging
++import threading
++import uuid
++import functools
++from pathlib import Path
++
++from gateway import drain_inbox as inbox
++
++logger = logging.getLogger(__name__)
++
++
++class DurableAdmissionError(RuntimeError):
++    """The transport must retry: durable acceptance could not be confirmed."""
++
++
++class GatewayDurableDrainMixin:
++    def _init_durable_drain(self):
++        self._durable_producer_token = uuid.uuid4().hex
++        self._durable_inbox_path = inbox.inbox_path()
++        self._durable_admission_lock = asyncio.Lock()
++        self._durable_replay_task = None
++        self._durable_replay_pending = False
++        self._durable_retry_handle = None
++        self._durable_retry_needed = False
++
++    def _durable_setup(self):
++        # Native unit fixtures construct runners without __init__.
++        if not isinstance(getattr(self, "_durable_producer_token", None), str):
++            self._init_durable_drain()
++
++    async def _claim_durable_producer(self):
++        self._durable_setup()
++        cancelled = threading.Event()
++        task = asyncio.get_running_loop().run_in_executor(None, functools.partial(
++            inbox.acquire_producer_replay_lease, self._durable_producer_token,
++            cancellation_event=cancelled, path=self._durable_inbox_path,
++        ))
++        try:
++            lease = await asyncio.shield(task)
++        except asyncio.CancelledError:
++            cancelled.set()
++            try:
++                lease = await task
++            except InterruptedError:
++                pass
++            else:
++                await asyncio.to_thread(inbox.cancel_producer_replay_lease, lease)
++            raise
++        await asyncio.to_thread(inbox.release_replay_lease, lease)
++
++    def _durable_control_event(self, event, session_key):
++        if event.internal and not event.durable_ingress:
++            return True
++        if not event.allow_gateway_control:
++            return False
++        if event.prompt_response:
++            return True
++        if event.get_command():
++            from hermes_cli.commands import resolve_command
++            if resolve_command(event.get_command()) is not None:
++                return True
++        from tools.approval import has_blocking_approval
++        from tools import clarify_gateway, slash_confirm
++        approval_pending = has_blocking_approval(session_key)
++        reply = (event.text or "").strip().lower()
++        if approval_pending and reply in self._PLAINTEXT_APPROVAL_WORDS:
++            return True
++        # Match inbound slash-confirm resolution, including tool-approval precedence.
++        if not approval_pending and slash_confirm.get_pending(session_key):
++            if (self._SLASH_CONFIRM_CMD_CHOICES.get(event.get_command())
++                    or self._SLASH_CONFIRM_TEXT_CHOICES.get(reply.lstrip("!/"))):
++                return True
++        return bool(clarify_gateway.get_pending_for_session(session_key, include_choice_prompts=True))
++
++    def _durable_gate_active(self):
++        return bool(
++            getattr(self, "_startup_restore_in_progress", False)
++            or getattr(self, "_draining", False)
++            or getattr(self, "_external_drain_active", False)
++            or getattr(self, "_durable_replay_pending", False)
++        )
++
++    def _make_durable_admission_handler(self, adapter):
++        from gateway.run import _async_profile_runtime_scope
++        from hermes_constants import get_hermes_home
++        default_home = Path(get_hermes_home())
++        async def admission(event, session_key):
++            if event.durable_replay or self._durable_control_event(event, session_key):
++                return False
++            if not self._durable_gate_active():
++                return False
++            self._durable_setup()
++            async with self._durable_admission_lock:
++                if not self._durable_gate_active():
++                    return False
++                # Match the native message-handler profile scope before hooks/auth.
++                owner = getattr(adapter, "_owner_profile", None)
++                profile_home = None
++                if isinstance(owner, str) and owner:
++                    profile_home = self._profile_home_or_none(owner)
++                elif getattr(self.config, "multiplex_profiles", False):
++                    event.source._authorization_profile_home = default_home
++                    if not event.source.profile:
++                        self._stamp_routed_profile(event.source)
++                    profile_home = self._resolve_profile_home_for_source(event.source)
++                async with self._scope_or_null(_async_profile_runtime_scope, profile_home):
++                    await self._hm_admit_event(event, durable_admission=True)
++            return True
++        return admission
++
++    async def _durable_admit_event(self, event):
++        key = self._session_key_for_source(event.source)
++        identity = inbox.event_queue_id(event, key)
++        if await asyncio.to_thread(self.session_store.replay_marker_status_for_session_key, key, f"drain:{identity}"):
++            return None
++        queue_id, state, claimed = await asyncio.to_thread(
++            inbox.claim_pre_dispatch_event_result, event, key,
++            reason="startup-or-drain", path=self._durable_inbox_path, producer_token=self._durable_producer_token,
++        )
++        if not queue_id:
++            raise DurableAdmissionError("Durable inbox admission failed")
++        if not claimed:
++            # A retry of claimed/completed/handled ingress must never repeat hooks.
++            return None
++        original = event
++        event = self._hm_pre_gateway_dispatch_hook(event, event.source) if not event.internal else event
++        plugin_handled = event is None
++        handled = plugin_handled
++        event = dataclasses.replace(event or original, pre_dispatch_attempted=True)
++        # Persist rewrite + hook receipt BEFORE auth/pairing can have side effects.
++        receipt, state = await asyncio.to_thread(
++            inbox.record_pre_dispatch_attempt_result, event, key,
++            path=self._durable_inbox_path, producer_token=self._durable_producer_token,
++        )
++        if not receipt or state != "claimed":
++            raise DurableAdmissionError("Durable hook receipt failed")
++        admitted = None if handled else await self._hm_admit_event(event, durable_finalize=True)
++        handled = handled or admitted is None
++        receipt, state = await asyncio.to_thread(
++            inbox.finalize_pre_dispatch_event_result, event, key, handled=handled,
++            reason=("startup-restore-plugin-handled" if plugin_handled else
++                    "startup-restore-unauthorized-rejected" if handled else "startup-or-drain"),
++            path=self._durable_inbox_path, producer_token=self._durable_producer_token,
++        )
++        if not receipt or state not in {"queued", "handled"}:
++            raise DurableAdmissionError("Durable admission finalization failed")
++        return None
++
++    async def _persist_pending_followup_for_drain(self, event, session_key):
++        self._durable_setup()
++        async with self._durable_admission_lock:
++            await self._hm_admit_event(event, durable_admission=True)
++
++    def _schedule_durable_replay(self):
++        self._durable_setup()
++        if not getattr(self, "_running", False) or self._draining or self._external_drain_active:
++            return
++        if self._durable_retry_handle is not None:
++            self._durable_retry_handle.cancel()
++            self._durable_retry_handle = None
++        task = self._durable_replay_task
++        if task is not None and not task.done():
++            return
++        self._durable_replay_pending = True
++        self._durable_retry_needed = False
++        self._durable_replay_task = asyncio.create_task(self._drain_durable_inbox())
++        self._durable_replay_task.add_done_callback(self._durable_replay_finished)
++
++    def _durable_replay_finished(self, task):
++        if task.cancelled():
++            return
++        if task.exception():
++            logger.error("Durable inbox replay retained pending work: %s", task.exception())
++            self._durable_retry_needed = True
++        if self._durable_retry_needed and getattr(self, "_running", False):
++            self._durable_retry_handle = asyncio.get_running_loop().call_later(5, self._schedule_durable_replay)
++
++    async def _drain_durable_inbox(self):
++        cancelled = threading.Event()
++        acquire = asyncio.get_running_loop().run_in_executor(None, functools.partial(
++            inbox.acquire_replay_lease, cancellation_event=cancelled, path=self._durable_inbox_path,
++        ))
++        try:
++            lease = await asyncio.shield(acquire)
++        except asyncio.CancelledError:
++            cancelled.set()
++            try:
++                lease = await acquire
++            except InterruptedError:
++                pass
++            else:
++                await asyncio.to_thread(inbox.release_replay_lease, lease)
++            raise
++        seen = set()
++        try:
++            while not (getattr(self, "_draining", False) or getattr(self, "_external_drain_active", False)):
++                async with self._durable_admission_lock:
++                    records = await asyncio.to_thread(inbox.pending_records, self._durable_inbox_path)
++                    remaining = [r for r in records if r["queue_id"] not in seen]
++                    if not remaining:
++                        self._durable_retry_needed = any(
++                            r.get("state") in {"queued", "completed", "handled"}
++                            or (r.get("state") in {"claimed", "ambiguous"} and r.get("ambiguity_notice_sent") is not True)
++                            for r in records
++                        )
++                        self._durable_replay_pending = False
++                        return
++                for record in remaining:
++                    if getattr(self, "_draining", False) or getattr(self, "_external_drain_active", False):
++                        return
++                    seen.add(record["queue_id"])
++                    try:
++                        await self._replay_durable_record(record)
++                    except Exception:
++                        logger.exception("Durable inbox retained record %s", record["queue_id"])
++        finally:
++            self._durable_replay_pending = False
++            await asyncio.to_thread(inbox.release_replay_lease, lease)
++
++    async def _replay_durable_record(self, record):
++        queue_id, state = record["queue_id"], record.get("state", "queued")
++        key = record["session_key"]
++        marker = f"drain:{queue_id}"
++        token = self._durable_producer_token
++        if state == "handled" and record.get("recovery_disposition") == "unauthorized-rejected":
++            await asyncio.to_thread(inbox.acknowledge, queue_id, expected_state=state, path=self._durable_inbox_path, producer_token=token)
++            return
++        event = inbox.event_from_record(record)
++        adapter = self._adapter_for_source(event.source)
++        if adapter is None:
++            return  # Offline profile/platform: retain, never drop accepted work.
++        # Strict canonical DB lookup must succeed before any replay side effect.
++        marked = await asyncio.to_thread(self.session_store.replay_marker_status_for_session_key, key, marker)
++        if marked:
++            await asyncio.to_thread(inbox.acknowledge, queue_id, expected_state=state, path=self._durable_inbox_path, producer_token=token)
++            return
++        if state in {"claimed", "ambiguous"}:
++            if record.get("ambiguity_notice_sent") is not True:
++                result = await adapter.send(
++                    chat_id=event.source.chat_id,
++                    content="A message was interrupted during restart and may have partially run. Please resend it if you still need it.",
++                )
++                if result and result.success:
++                    await asyncio.to_thread(inbox.record_ambiguity_notice, queue_id, path=self._durable_inbox_path, producer_token=token)
++            return
++        if state in {"completed", "handled"}:
++            await self._complete_durable_marker(event, key, queue_id, marker, expected_state=state)
++            return
++        if state != "queued":
++            return
++        # Resume owns the native adapter task and runner slot before startup releases.
++        task = getattr(adapter, "_session_tasks", {}).get(key)
++        if task is not None:
++            await asyncio.shield(task)
++        if key in getattr(adapter, "_active_sessions", {}) or self._is_session_running(key):
++            return
++        if not await asyncio.to_thread(inbox.claim_event, queue_id, path=self._durable_inbox_path, producer_token=token):
++            return
++        event = dataclasses.replace(event, durable_replay=True, admission_checked=True)
++        replay = getattr(adapter, "replay_durable_event", None)
++        await (replay(event) if replay is not None else adapter.handle_message(event))
++        task = getattr(adapter, "_session_tasks", {}).get(key)
++        if task is not None:
++            await asyncio.shield(task)
++        if event.durable_deferred:
++            await asyncio.to_thread(inbox.defer_event, queue_id, path=self._durable_inbox_path, producer_token=token)
++            return
++        if not event.handler_succeeded:
++            return  # Adapter errors are caught by native processing; claim stays ambiguous.
++        if not await asyncio.to_thread(inbox.complete_event, queue_id, path=self._durable_inbox_path, producer_token=token):
++            return
++        await self._complete_durable_marker(event, key, queue_id, marker)
++
++    async def _complete_durable_marker(self, event, key, queue_id, marker, *, expected_state="completed"):
++        session = await asyncio.to_thread(self.session_store.get_or_create_session, event.source, touch_activity=False)
++        if session.session_key != key:
++            raise RuntimeError("Durable replay session scope changed")
++        if not await asyncio.to_thread(self.session_store.persist_replay_marker, session.session_id, marker):
++            raise RuntimeError("Durable replay completion marker failed")
++        await asyncio.to_thread(inbox.acknowledge, queue_id, expected_state=expected_state, path=self._durable_inbox_path, producer_token=self._durable_producer_token)
+diff --git a/gateway/run_inbound.py b/gateway/run_inbound.py
+index 989ccf79..32873a03 100644
+--- a/gateway/run_inbound.py
++++ b/gateway/run_inbound.py
+@@ -109,7 +109,7 @@ class GatewayInboundMixin:
+             pairing_store._record_rate_limit(platform_name, source.user_id)
+ 
+     async def _hm_admit_event(
+-        self, event: "MessageEvent"
++        self, event: "MessageEvent", *, durable_admission: bool = False, durable_finalize: bool = False
+     ) -> Optional[Tuple["MessageEvent", SessionSource, bool]]:
+         """Ingress gates for ``_handle_message``; None when dropped, else ``(event, source, is_internal)``
+         (the ``pre_gateway_dispatch`` hook may have rewritten ``event``)."""
+@@ -163,13 +163,20 @@ class GatewayInboundMixin:
+             logger.info("Dropping Slack message from configured ignored channel %s", _chat_id)
+             return None
+ 
+-        if (
+-            getattr(self, "_startup_restore_in_progress", False)
+-            and not is_internal
+-            and not getattr(event, "_hermes_startup_restore_replay", False)
++        if event.durable_replay and (
++            self._draining or self._external_drain_active
++            or getattr(self, "_startup_restore_in_progress", False)
+         ):
+-            self._queue_startup_restore_event(event)
++            event.durable_deferred = True
+             return None
++        if durable_admission:
++            return await self._durable_admit_event(event)
++        if (not durable_finalize and not event.durable_replay
++                and self._durable_gate_active()
++                and not self._durable_control_event(event, self._session_key_for_source(source))):
++            self._durable_setup()
++            async with self._durable_admission_lock:
++                return await self._durable_admit_event(event)
+ 
+         if is_internal:
+             return event, source, True
+@@ -177,7 +184,8 @@ class GatewayInboundMixin:
+         # scale-to-zero: only real user-originated inbound stamps the last-inbound clock;
+         # counting internal/system events would keep a genuinely idle gateway awake.
+         self._scale_to_zero_note_real_inbound()
+-        event = self._hm_pre_gateway_dispatch_hook(event, source)
++        if not event.pre_dispatch_attempted:
++            event = self._hm_pre_gateway_dispatch_hook(event, source)
+         if event is None:
+             return None
+         source = event.source
+@@ -604,6 +612,9 @@ class GatewayInboundMixin:
+         if _handled:
+             return _result
+ 
++        if event.durable_replay:
++            event.durable_deferred = True
++            return None
+         effective_busy_input_mode = self._effective_busy_input_mode(source)
+         if self._hm_busy_telegram_grace_queue(event, source, _quick_key, effective_busy_input_mode):
+             return None
+@@ -948,6 +959,9 @@ class GatewayInboundMixin:
+         """Drain gate, user-defined quick commands (exec/alias) and plugin slash commands →
+         ``(handled, result, command)``; an alias quick command rewrites ``command``."""
+         if self._draining:
++            if event.durable_replay:
++                event.durable_deferred = True
++                return True, None, command
+             return True, f"⏳ Gateway is {self._status_action_gerund()} and is not accepting new work right now.", command
+ 
+         # User-defined quick commands (bypass agent loop, no LLM call)
+@@ -1214,6 +1228,9 @@ class GatewayInboundMixin:
+             # seen by _drain_control_watcher), refuse to START new turns so the in-flight set can
+             # only fall to zero. Reversible.
+             if self._external_drain_active:
++                if event.durable_replay:
++                    event.durable_deferred = True
++                    return None
+                 logger.info("Refusing new turn for session %s — external drain active.", _quick_key)
+                 return (
+                     "⏳ This agent is draining for a maintenance action and isn't "
+diff --git a/gateway/run_shutdown.py b/gateway/run_shutdown.py
+index 6a16d467..41afb2b5 100644
+--- a/gateway/run_shutdown.py
++++ b/gateway/run_shutdown.py
+@@ -501,6 +501,7 @@ class GatewayShutdownMixin:
+             "re-accepting new turns; gateway_state -> running."
+         )
+         self._update_runtime_status("running")
++        self._schedule_durable_replay()
+ 
+     async def _drain_control_watcher(self, interval: float = 1.0) -> None:
+         """Poll ``.drain_request.json`` at 1s: present -> enter drain, absent -> exit; a stale epoch = absent."""
+diff --git a/gateway/run_startup.py b/gateway/run_startup.py
+index b20d49e6..4437716f 100644
+--- a/gateway/run_startup.py
++++ b/gateway/run_startup.py
+@@ -55,40 +55,6 @@ class GatewayStartupMixin:
+             if (_pre_state.turn.agent if _pre_state else None) is _AGENT_PENDING_SENTINEL:
+                 self._release_running_agent_state(session_key)
+ 
+-    def _queue_startup_restore_event(self, event: MessageEvent) -> None:
+-        queue = getattr(self, "_startup_restore_queue", None)
+-        if queue is None:
+-            queue = self._startup_restore_queue = []
+-        queue.append(event)
+-        with suppress(Exception):
+-            source = event.source
+-            logger.info(
+-                "Queued inbound message during gateway startup restore: platform=%s chat=%s",
+-                source.platform.value if source and source.platform else "unknown",
+-                source.chat_id if source else "unknown",
+-            )
+-
+-    async def _drain_startup_restore_queue(self) -> int:
+-        """Replay inbound messages queued while startup auto-resume ran."""
+-        drained = 0
+-        queue = getattr(self, "_startup_restore_queue", None) or []
+-        while queue:
+-            event = queue.pop(0)
+-            source = getattr(event, "source", None)
+-            adapter = self._adapter_for_source(source)
+-            if adapter is None:
+-                logger.debug(
+-                    "Dropping startup-restore queued message: adapter unavailable for %s",
+-                    getattr(getattr(source, "platform", None), "value", None),
+-                )
+-                continue
+-            # Mark the replay so _handle_message does not re-queue it while the restore gate is closed.
+-            with suppress(Exception):
+-                setattr(event, "_hermes_startup_restore_replay", True)
+-            await adapter.handle_message(event)
+-            drained += 1
+-        return drained
+-
+     def _start_startup_warmup(self) -> None:
+         """Kick off the boot turn-machinery warm-up so it overlaps the network-bound platform
+         connects; ``_finish_startup_restore`` awaits it (bounded)."""
+@@ -175,10 +141,8 @@ class GatewayStartupMixin:
+         self._startup_restore_tasks = []
+         # Warm the turn machinery BEFORE the queue drains: inbound turns must not build skeleton prompts.
+         await self._await_startup_warmup()
+-        drained = await self._drain_startup_restore_queue()
+         self._startup_restore_in_progress = False
+-        if drained:
+-            logger.info("Drained %d inbound message(s) queued during startup restore", drained)
++        self._schedule_durable_replay()
+ 
+     @staticmethod
+     def _late_failure_callback(message: str, *, level: int = logging.WARNING):
+@@ -1248,7 +1212,7 @@ class GatewayStartupMixin:
+         # Serialize startup restore against inbound: adapters receive as soon as they connect, so inbound
+         # queues until every synthetic resume turn has finished.
+         self._startup_restore_in_progress = True
+-        self._startup_restore_queue = []
++        await self._claim_durable_producer()
+         self._startup_restore_tasks = []
+         # Fresh boot: the gate opens while the turn machinery is still cold (skeleton prompts). Warm NOW
+         # to overlap the connects; _finish_startup_restore awaits it (bounded).
+diff --git a/gateway/session_transcript.py b/gateway/session_transcript.py
+index ff9e795d..6fa6e087 100644
+--- a/gateway/session_transcript.py
++++ b/gateway/session_transcript.py
+@@ -419,6 +419,56 @@ class SessionTranscriptMixin:
+             logger.debug("has_platform_message_id lookup failed", exc_info=True)
+             return False
+ 
++    def replay_marker_status(
++        self, session_id: str, platform_message_id: str
++    ) -> bool:
++        db = self._db_for_session_id(session_id)
++        if not db:
++            raise RuntimeError("canonical session database is unavailable")
++        if not platform_message_id:
++            raise ValueError("platform message id is required")
++        return db.has_platform_message_id(session_id, platform_message_id)
++
++    def replay_marker_status_for_session_key(
++        self,
++        session_key: str,
++        platform_message_id: str,
++    ) -> bool:
++        db = self._db_for_key(session_key)
++        if not db:
++            raise RuntimeError("canonical session database is unavailable")
++        if not session_key:
++            raise ValueError("session key is required")
++        if not platform_message_id:
++            raise ValueError("platform message id is required")
++        return db.has_platform_message_id_for_session_key(
++            session_key,
++            platform_message_id,
++        )
++
++    def persist_replay_marker(
++        self,
++        session_id: str,
++        platform_message_id: str,
++        *,
++        timestamp: Optional[float] = None,
++    ) -> bool:
++        db = self._db_for_session_id(session_id)
++        if not db:
++            raise RuntimeError("canonical session database is unavailable")
++        if not platform_message_id:
++            raise ValueError("platform message id is required")
++        if db.has_platform_message_id(session_id, platform_message_id):
++            return True
++        db.append_message(
++            session_id=session_id,
++            role="session_meta",
++            content=None,
++            platform_message_id=platform_message_id,
++            timestamp=timestamp,
++        )
++        return db.has_platform_message_id(session_id, platform_message_id)
++
+     def rewrite_transcript(
+         self, session_id: str, messages: List[Dict[str, Any]], active_only: bool = False,
+         reject_active_turn_lease: bool = False) -> bool:
+diff --git a/hermes_state_messages.py b/hermes_state_messages.py
+index 9f09886b..8804833f 100644
+--- a/hermes_state_messages.py
++++ b/hermes_state_messages.py
+@@ -1044,6 +1044,17 @@ class SessionMessagesMixin:
+         sql = "SELECT COUNT(*) FROM messages" + (" WHERE session_id = ?" if session_id else "")
+         return self._read_one(sql, (session_id,) if session_id else ())[0]
+ 
++    def has_platform_message_id_for_session_key(
++        self,
++        session_key: str,
++        platform_message_id: str,
++    ) -> bool:
++        return self._read_one(
++            "SELECT 1 FROM sessions s JOIN messages m ON m.session_id = s.id "
++            "WHERE s.session_key = ? AND m.platform_message_id = ? LIMIT 1",
++            (session_key, platform_message_id),
++        ) is not None
++
+     def has_platform_message_id(self, session_id: str, platform_message_id: str) -> bool:
+         """True when *platform_message_id* exists (partial-index probe; the gateway's transient-failure dedupe).
+ 
+diff --git a/plugins/platforms/raft/adapter.py b/plugins/platforms/raft/adapter.py
+index 9f38281e..3db72cfc 100644
+--- a/plugins/platforms/raft/adapter.py
++++ b/plugins/platforms/raft/adapter.py
+@@ -23,6 +23,7 @@ import sys
+ import threading
+ import time
+ import uuid
++import uuid
+ import weakref
+ from pathlib import Path as _Path
+ from typing import Any, Deque, Dict, List, Optional
+@@ -452,11 +453,11 @@ class RaftAdapter(BasePlatformAdapter):
+             return web.json_response(not_ready, status=503)
+         delivery_id = str(
+             next((payload.get(k) for k in _WAKE_ID_KEYS if payload.get(k)), None)
+-            or f"raft-wake-{int(time.time() * 1000)}")
++            or f"raft-wake-{uuid.uuid4().hex}")
+         source = self.build_source(chat_id=self._runtime_session, chat_name="Raft channel", chat_type="dm",
+                                    user_id="raft-bridge", user_name="Raft Bridge")
+         event = MessageEvent(text=_WAKE_PROMPT, message_type=MessageType.TEXT, source=source,
+-                             raw_message=payload, message_id=delivery_id, internal=True)
++                             raw_message=payload, message_id=delivery_id, internal=True, durable_ingress=True)
+         try:
+             await self.handle_message(event)
+         except Exception:
+@@ -486,6 +487,8 @@ class RaftAdapter(BasePlatformAdapter):
+         """Accept Raft wake hints without interrupting an active Hermes turn."""
+         if not self._message_handler:
+             return
++        if await self._preflight_startup_gate(event):
++            return
+         session_key = build_session_key(
+             event.source, group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
+             thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
+diff --git a/tests/gateway/test_drain_inbox.py b/tests/gateway/test_drain_inbox.py
+new file mode 100644
+index 00000000..3ae0da60
+--- /dev/null
++++ b/tests/gateway/test_drain_inbox.py
+@@ -0,0 +1,1600 @@
++import asyncio
++import errno
++import json
++import multiprocessing
++import os
++import stat
++import threading
++from datetime import timedelta
++from pathlib import Path
++from types import SimpleNamespace
++from unittest.mock import AsyncMock, MagicMock
++
++import pytest
++
++import gateway.drain_inbox as drain_inbox
++import gateway.run as gateway_run
++from gateway.drain_inbox import (
++    acquire_producer_replay_lease,
++    acquire_replay_lease,
++    acknowledge,
++    cancel_producer_replay_lease,
++    claim_pre_dispatch_event_result,
++    claim_event,
++    claim_producer,
++    complete_event,
++    event_queue_id,
++    event_from_record,
++    event_state,
++    finalize_pre_dispatch_event_result,
++    inbox_path,
++    pending_records,
++    persist_event,
++    persist_event_result,
++    record_pre_dispatch_attempt_result,
++    release_replay_lease,
++)
++from gateway.config import Platform
++from gateway.platforms.base import MessageEvent, MessageType, SendResult
++from gateway.platforms.signal import SignalAdapter
++from gateway.session import build_session_key
++from tests.gateway.restart_test_helpers import make_restart_runner, make_restart_source
++
++
++def _acknowledge_after_pause(
++    path: str,
++    queue_id: str,
++    ready,
++    proceed,
++) -> None:
++    """Pause an acknowledge at its final replace for a process-overlap test."""
++    real_replace = drain_inbox.os.replace
++
++    def paused_replace(source, destination):
++        ready.set()
++        if not proceed.wait(timeout=10):
++            raise TimeoutError("test did not release acknowledge")
++        return real_replace(source, destination)
++
++    drain_inbox.os.replace = paused_replace  # ty:ignore[invalid-assignment]
++    if not acknowledge(queue_id, Path(path)):
++        raise RuntimeError("acknowledge failed")
++
++
++def _claim_producer_in_process(path: str, producer_token: str, done) -> None:
++    claim_producer(producer_token, Path(path))
++    done.set()
++
++
++def _persist_in_process(path: str, done) -> None:
++    event = MessageEvent(
++        text="third instruction",
++        message_type=MessageType.TEXT,
++        source=make_restart_source(),
++        message_id="message-44",
++        platform_update_id=101,
++    )
++    queue_id = persist_event(
++        event,
++        build_session_key(event.source),
++        reason="overlapping-new-process",
++        path=Path(path),
++    )
++    if not queue_id:
++        raise RuntimeError("persist failed")
++    done.set()
++
++
++def _event(text: str = "finish the long instruction") -> MessageEvent:
++    return MessageEvent(
++        text=text,
++        message_type=MessageType.TEXT,
++        source=make_restart_source(),
++        message_id="message-42",
++        platform_update_id=99,
++    )
++
++
++def test_persisted_event_round_trips_exact_user_instruction(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("A long instruction with unicode: résumé → done")
++    session_key = build_session_key(event.source)
++
++    queue_id = persist_event(event, session_key, reason="test-drain")
++
++    assert queue_id
++    records = pending_records()
++    assert len(records) == 1
++    assert records[0]["state"] == "queued"
++    assert records[0]["pre_dispatch_attempted"] is False
++    replay = event_from_record(records[0])
++    assert replay.text == event.text
++    assert replay.message_id == event.message_id
++    assert replay.platform_update_id == event.platform_update_id
++    assert replay.source.to_dict() == event.source.to_dict()
++    if os.name != "nt":
++        assert inbox_path().stat().st_mode & 0o777 == 0o600
++
++
++def test_persisted_event_preserves_control_and_media_inline_receipts(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("restart gateway")
++    event.allow_gateway_control = False
++    event.media_urls = ["/tmp/cached-note.txt", "/tmp/photo.png"]
++    event.media_types = ["text/plain", "image/png"]
++    event.media_text_inlined = [False, None]
++    event.raw_message = {
++        "authenticated": True,
++        "items": [{"kind": "text", "value": "original payload"}],
++    }
++
++    assert persist_event(event, build_session_key(event.source), reason="test")
++
++    replay = event_from_record(pending_records()[0])
++    assert replay.allow_gateway_control is False
++    assert replay.media_text_inlined == [False, None]
++    assert replay.raw_message == event.raw_message
++
++
++def test_legacy_record_defaults_gateway_control_to_false():
++    event = _event("restart gateway")
++    record = drain_inbox._record_for_event(
++        event,
++        build_session_key(event.source),
++        "test",
++    )
++    record.pop("allow_gateway_control")
++
++    assert event_from_record(record).allow_gateway_control is False
++
++
++@pytest.mark.parametrize(
++    ("field", "value", "match"),
++    [
++        ("allow_gateway_control", "yes", "gateway-control receipt"),
++        ("media_text_inlined", [False, "no"], "media text-inlined receipts"),
++    ],
++)
++def test_persisted_event_rejects_malformed_delivery_receipts(field, value, match):
++    event = _event()
++    record = drain_inbox._record_for_event(
++        event,
++        build_session_key(event.source),
++        "test",
++    )
++    record[field] = value
++
++    with pytest.raises(ValueError, match=match):
++        event_from_record(record)
++
++
++def test_persisted_event_rejects_non_json_raw_policy_input():
++    event = _event()
++    event.raw_message = object()
++
++    with pytest.raises(ValueError, match="raw platform payload"):
++        drain_inbox._record_for_event(
++            event,
++            build_session_key(event.source),
++            "test",
++        )
++
++
++def test_untrusted_slash_payload_remains_persistable_conversation(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("/customer/payload")
++    event.allow_gateway_control = False
++
++    assert persist_event(event, build_session_key(event.source), reason="test")
++    assert event_from_record(pending_records()[0]).text == "/customer/payload"
++
++
++@pytest.mark.parametrize(
++    ("field", "value"),
++    [
++        ("role_authorized", True),
++        ("delivered_via_upstream_relay", True),
++    ],
++)
++def test_persisted_event_preserves_gateway_admission_receipt(
++    tmp_path,
++    monkeypatch,
++    field,
++    value,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    setattr(event.source, field, value)
++
++    assert persist_event(event, build_session_key(event.source), reason="test")
++
++    replay = event_from_record(pending_records()[0])
++    assert getattr(replay.source, field) is value
++
++
++@pytest.mark.parametrize(
++    "field",
++    ["role_authorized", "delivered_via_upstream_relay"],
++)
++def test_persisted_event_rejects_malformed_admission_receipt(field):
++    event = _event()
++    record = drain_inbox._record_for_event(
++        event,
++        build_session_key(event.source),
++        "test",
++    )
++    record[field] = "yes"
++
++    with pytest.raises(ValueError, match="receipt must be a boolean"):
++        event_from_record(record)
++
++
++def test_pre_dispatch_receipt_round_trips_and_rejects_non_boolean(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    setattr(event, "pre_dispatch_attempted", True)
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++    record = pending_records()[0]
++    assert record["pre_dispatch_attempted"] is True
++    replay = event_from_record(record)
++    assert getattr(replay, "pre_dispatch_attempted") is True
++
++    invalid = dict(record)
++    invalid["pre_dispatch_attempted"] = "true"
++    with pytest.raises(ValueError, match="must be a boolean"):
++        event_from_record(invalid)
++
++
++def test_internal_event_metadata_round_trips(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    event.internal = True
++    event.durable_ingress = True
++    event.metadata = {
++        "webhook_delivery": {
++            "deliver": "telegram",
++            "deliver_extra": {"chat_id": "12345"},
++        }
++    }
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++
++    replay = event_from_record(pending_records()[0])
++    assert replay.internal is True
++    assert replay.metadata == event.metadata
++
++
++def test_transport_authorization_scope_round_trips(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    transport_home = tmp_path / "transport-profile"
++    event = _event()
++    event.source._authorization_profile_home = transport_home
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="multiplex-transport-scope",
++    )
++
++    record = pending_records()[0]
++    assert record["authorization_via_gateway_home"] is True
++    replay = event_from_record(record)
++    assert replay.source._authorization_via_gateway_home is True
++
++
++def test_transport_authorization_scope_rejects_non_boolean(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="multiplex-transport-scope",
++    )
++    record = pending_records()[0]
++    record["authorization_via_gateway_home"] = "true"
++
++    with pytest.raises(ValueError, match="must be a boolean"):
++        event_from_record(record)
++
++
++def test_claim_and_complete_transitions_are_durable(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    queue_id = persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++
++    assert claim_event(queue_id)  # ty:ignore[invalid-argument-type]
++    assert pending_records()[0]["state"] == "claimed"
++    assert complete_event(queue_id)  # ty:ignore[invalid-argument-type]
++    assert pending_records()[0]["state"] == "completed"
++
++
++def test_lifecycle_transitions_require_current_producer(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    claim_producer("current-process", path)
++    event = _event()
++    queue_id = persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++        path=path,
++        producer_token="current-process",
++    )
++
++    assert not claim_event(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="stale-process",
++    )
++    assert claim_event(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="current-process",
++    )
++    assert not complete_event(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="stale-process",
++    )
++    assert complete_event(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="current-process",
++    )
++    assert not acknowledge(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="stale-process",
++    )
++    assert acknowledge(
++        queue_id,  # ty:ignore[invalid-argument-type]
++        path,
++        producer_token="current-process",
++    )
++
++
++def test_duplicate_platform_event_is_written_once(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    session_key = build_session_key(event.source)
++
++    first = persist_event(event, session_key, reason="first")
++    second = persist_event(event, session_key, reason="duplicate-delivery")
++
++    assert first == second
++    assert len(pending_records()) == 1
++
++
++def test_pre_dispatch_claim_has_one_owner_and_finalizes_handled(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("plugin candidate")
++    session_key = build_session_key(event.source)
++    barrier = threading.Barrier(3)
++    results: list[tuple[str | None, str, bool]] = []
++
++    def claim() -> None:
++        barrier.wait()
++        results.append(
++            claim_pre_dispatch_event_result(
++                event,
++                session_key,
++                reason="pre-dispatch",
++            )
++        )
++
++    threads = [threading.Thread(target=claim) for _ in range(2)]
++    for thread in threads:
++        thread.start()
++    barrier.wait()
++    for thread in threads:
++        thread.join()
++
++    assert sum(acquired for _, _, acquired in results) == 1
++    assert {state for _, state, _ in results} == {"claimed"}
++    setattr(event, "pre_dispatch_attempted", True)
++    queue_id, state = finalize_pre_dispatch_event_result(
++        event,
++        session_key,
++        handled=True,
++        reason="plugin-handled",
++    )
++    assert queue_id
++    assert state == "handled"
++    assert event_state(event, session_key) == "handled"
++
++
++def test_pre_dispatch_promotion_failure_restores_claimed_state(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("plugin candidate")
++    session_key = build_session_key(event.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        event,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(event, "pre_dispatch_attempted", True)
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def fail_after_promotion(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        real_replace_rows(path, rows)
++        if replace_calls == 1:
++            raise drain_inbox._PostReplaceError(
++                "simulated promotion directory fsync failure"
++            )
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", fail_after_promotion)
++
++    result_queue_id, result_state = finalize_pre_dispatch_event_result(
++        event,
++        session_key,
++        handled=False,
++        reason="startup-gate",
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == "claimed"
++    assert pending_records()[0]["state"] == "claimed"
++
++
++def test_pre_dispatch_attempt_phase_remains_claimed(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("plugin candidate")
++    session_key = build_session_key(event.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        event,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(event, "pre_dispatch_attempted", True)
++
++    result_queue_id, result_state = record_pre_dispatch_attempt_result(
++        event,
++        session_key,
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == "claimed"
++    record = pending_records()[0]
++    assert record["state"] == "claimed"
++    assert record["pre_dispatch_attempted"] is True
++
++
++def test_pre_dispatch_attempt_phase_retries_transient_write_failure(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("plugin candidate")
++    session_key = build_session_key(event.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        event,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(event, "pre_dispatch_attempted", True)
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def fail_once(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        if replace_calls == 1:
++            raise OSError("simulated phase write failure")
++        return real_replace_rows(path, rows)
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", fail_once)
++
++    result_queue_id, result_state = record_pre_dispatch_attempt_result(
++        event,
++        session_key,
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == "claimed"
++    assert replace_calls == 2
++    assert pending_records()[0]["pre_dispatch_attempted"] is True
++
++
++def test_pre_dispatch_attempt_phase_quarantines_exhausted_writes(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("plugin candidate")
++    session_key = build_session_key(event.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        event,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(event, "pre_dispatch_attempted", True)
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def fail_until_quarantine_retry(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        if replace_calls <= 3:
++            raise OSError("simulated phase write failure")
++        real_replace_rows(path, rows)
++        raise drain_inbox._PostReplaceError(
++            "simulated quarantine directory fsync failure"
++        )
++
++    monkeypatch.setattr(
++        drain_inbox,
++        "_replace_rows",
++        fail_until_quarantine_retry,
++    )
++
++    result_queue_id, result_state = record_pre_dispatch_attempt_result(
++        event,
++        session_key,
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == "ambiguous"
++    assert replace_calls == 4
++    record = pending_records()[0]
++    assert record["state"] == "ambiguous"
++    assert record["recovery_disposition"] == "ambiguous"
++    assert record["pre_dispatch_attempted"] is True
++
++
++def test_pre_dispatch_control_command_cannot_promote_to_queued(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("/restart")
++    session_key = build_session_key(event.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        event,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(event, "pre_dispatch_attempted", True)
++
++    result_queue_id, result_state = finalize_pre_dispatch_event_result(
++        event,
++        session_key,
++        handled=False,
++        reason="startup-gate",
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == "claimed"
++    assert pending_records()[0]["state"] == "claimed"
++
++
++def test_queued_duplicate_reconciles_normalized_pre_dispatch_receipt(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    original = _event("original")
++    session_key = build_session_key(original.source)
++    queue_id = persist_event(original, session_key, reason="busy-path")
++    queued_at = pending_records()[0]["queued_at"]
++    redelivery = _event("rewritten")
++    setattr(redelivery, "pre_dispatch_attempted", True)
++
++    assert persist_event(
++        redelivery,
++        session_key,
++        reason="cold-redelivery",
++    ) == queue_id
++
++    record = pending_records()[0]
++    assert record["state"] == "queued"
++    assert record["text"] == "rewritten"
++    assert record["pre_dispatch_attempted"] is True
++    assert record["queued_at"] == queued_at
++    assert record["reason"] == "busy-path"
++
++
++@pytest.mark.parametrize("state", ["claimed", "completed"])
++def test_nonqueued_duplicate_reports_existing_state(
++    tmp_path,
++    monkeypatch,
++    state,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    original = _event("original")
++    session_key = build_session_key(original.source)
++    queue_id = persist_event(original, session_key, reason="busy-path")
++    assert claim_event(queue_id)  # ty:ignore[invalid-argument-type]
++    if state == "completed":
++        assert complete_event(queue_id)  # ty:ignore[invalid-argument-type]
++    redelivery = _event("rewritten")
++    setattr(redelivery, "pre_dispatch_attempted", True)
++
++    result_queue_id, result_state = persist_event_result(
++        redelivery,
++        session_key,
++        reason="cold-redelivery",
++    )
++
++    assert result_queue_id == queue_id
++    assert result_state == state
++
++    record = pending_records()[0]
++    assert record["state"] == state
++    assert record["text"] == "original"
++    assert record["pre_dispatch_attempted"] is False
++
++
++def test_reconciliation_post_replace_failure_is_not_acknowledged(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    original = _event("original")
++    session_key = build_session_key(original.source)
++    queue_id = persist_event(original, session_key, reason="busy-path")
++    redelivery = _event("rewritten")
++    setattr(redelivery, "pre_dispatch_attempted", True)
++
++    fsync_calls = 0
++
++    def fail_first_replacement_fsync(_path):
++        nonlocal fsync_calls
++        fsync_calls += 1
++        if fsync_calls <= 2:
++            raise OSError("simulated directory fsync failure")
++
++    monkeypatch.setattr(
++        drain_inbox,
++        "_fsync_directory",
++        fail_first_replacement_fsync,
++    )
++
++    result_queue_id, result_state = persist_event_result(
++        redelivery,
++        session_key,
++        reason="cold-redelivery",
++    )
++
++    assert result_queue_id is None
++    assert result_state == "failed"
++    record = pending_records()[0]
++    assert record["state"] == "queued"
++    assert record["text"] == "rewritten"
++    assert record["pre_dispatch_attempted"] is True
++
++
++def test_reconciliation_queued_promotion_post_replace_failure_is_not_accepted(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    original = _event("original")
++    session_key = build_session_key(original.source)
++    queue_id = persist_event(original, session_key, reason="busy-path")
++    redelivery = _event("rewritten")
++    setattr(redelivery, "pre_dispatch_attempted", True)
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def staged_replace_failure(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        row = json.loads(rows[0])
++        assert replace_calls == 1
++        assert row["state"] == "queued"
++        assert row["pre_dispatch_attempted"] is True
++        real_replace_rows(path, rows)
++        raise drain_inbox._PostReplaceError(
++            "simulated queued promotion fsync failure"
++        )
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", staged_replace_failure)
++
++    result_queue_id, result_state = persist_event_result(
++        redelivery,
++        session_key,
++        reason="cold-redelivery",
++    )
++
++    assert result_queue_id is None
++    assert result_state == "failed"
++    record = pending_records()[0]
++    assert record["state"] == "queued"
++    assert record["text"] == "rewritten"
++    assert record["pre_dispatch_attempted"] is True
++
++
++def test_reconciliation_pre_replace_failure_retains_original_queued_receipt(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    original = _event("original")
++    session_key = build_session_key(original.source)
++    queue_id = persist_event(original, session_key, reason="busy-path")
++    redelivery = _event("rewritten")
++    setattr(redelivery, "pre_dispatch_attempted", True)
++    def staged_replace_failure(_path, _rows):
++        raise OSError("simulated queued promotion failure")
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", staged_replace_failure)
++
++    result_queue_id, result_state = persist_event_result(
++        redelivery,
++        session_key,
++        reason="cold-redelivery",
++    )
++
++    assert result_queue_id is None
++    assert result_state == "failed"
++    record = pending_records()[0]
++    assert record["state"] == "queued"
++    assert record["text"] == "original"
++    assert record["pre_dispatch_attempted"] is False
++
++
++def test_duplicate_platform_event_ignores_delivery_timestamp(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    first_event = _event()
++    redelivery = _event()
++    redelivery.timestamp = first_event.timestamp + timedelta(seconds=30)
++    session_key = build_session_key(first_event.source)
++
++    first = persist_event(first_event, session_key, reason="first")
++    second = persist_event(redelivery, session_key, reason="redelivery")
++
++    assert first == second
++    assert len(pending_records()) == 1
++
++
++def test_acknowledge_retains_malformed_rows_for_recovery(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    queue_id = persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++    with inbox_path().open("a", encoding="utf-8") as handle:
++        handle.write("{not-json\n")
++
++    assert acknowledge(queue_id)  # ty:ignore[invalid-argument-type]
++    assert pending_records() == []  # HERMES_DURABLE_DRAIN_COMPATIBILITY_TEST_v1
++    assert inbox_path().read_text(encoding="utf-8") == "{not-json\n"
++
++
++def test_control_command_is_not_replayed_after_restart(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("/restart")
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    ) is None
++    assert not inbox_path().exists()
++
++
++def test_whitespace_prefixed_control_command_is_not_replayed(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("  /restart")
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    ) is None
++    assert not inbox_path().exists()
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes required")
++def test_new_inbox_is_private_even_when_process_umask_is_permissive(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(os, "chmod", lambda *_args, **_kwargs: None)
++    previous_umask = os.umask(0)
++    try:
++        queue_id = persist_event(
++            _event(),
++            build_session_key(_event().source),
++            reason="test-drain",
++        )
++    finally:
++        os.umask(previous_umask)
++
++    assert queue_id
++    assert inbox_path().stat().st_mode & 0o777 == 0o600
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes required")
++def test_existing_nonprivate_inbox_is_rejected(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    path.parent.mkdir(parents=True)
++    path.write_text("", encoding="utf-8")
++    path.chmod(0o666)
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    ) is None
++    with pytest.raises(PermissionError, match="not private"):
++        pending_records()
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX symlink semantics required")
++def test_existing_symlink_inbox_is_rejected(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    path.parent.mkdir(parents=True)
++    target = path.parent / "target.jsonl"
++    target.write_text("unchanged\n", encoding="utf-8")
++    target.chmod(0o600)
++    path.symlink_to(target)
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    ) is None
++    with pytest.raises(OSError):
++        pending_records()
++    assert target.read_text(encoding="utf-8") == "unchanged\n"
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes required")
++def test_other_writable_state_directory_is_rejected(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    path.parent.mkdir(parents=True, mode=0o777)
++    path.parent.chmod(0o777)
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    ) is None
++    with pytest.raises(PermissionError, match="writable by other users"):
++        pending_records()
++    assert not path.exists()
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes required")
++def test_other_writable_home_parent_is_rejected(tmp_path, monkeypatch):
++    unsafe_parent = tmp_path / "unsafe-parent"
++    unsafe_parent.mkdir(mode=0o777)
++    unsafe_parent.chmod(0o777)
++    hermes_home = unsafe_parent / "hermes-home"
++    hermes_home.mkdir(mode=0o700)
++    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    ) is None
++    with pytest.raises(PermissionError, match="trust chain"):
++        pending_records()
++    assert not inbox_path().exists()
++
++
++@pytest.mark.skipif(
++    os.name == "nt" or not hasattr(os, "getuid"),
++    reason="POSIX ownership required",
++)
++def test_owner_writable_untrusted_ancestor_is_rejected(tmp_path, monkeypatch):
++    hermes_home = tmp_path / "hermes-home"
++    hermes_home.mkdir(mode=0o700)
++    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
++    real_open_trusted_directory = drain_inbox._open_trusted_directory
++
++    def foreign_owner(component):
++        component_stat = real_open_trusted_directory(component)
++        if component == tmp_path:
++            return SimpleNamespace(
++                st_mode=component_stat.st_mode | stat.S_IWUSR,
++                st_uid=os.getuid() + 1,  # windows-footgun: ok — POSIX-only test
++            )
++        return component_stat
++
++    monkeypatch.setattr(
++        drain_inbox,
++        "_open_trusted_directory",
++        foreign_owner,
++    )
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    ) is None
++    with pytest.raises(PermissionError, match="untrusted owner"):
++        pending_records()
++    assert not inbox_path().exists()
++
++
++@pytest.mark.skipif(
++    os.name == "nt" or not hasattr(os, "getuid"),
++    reason="POSIX ownership required",
++)
++def test_readonly_synthetic_namespace_ancestors_are_trusted(tmp_path, monkeypatch):
++    hermes_home = tmp_path / "hermes-home"
++    hermes_home.mkdir(mode=0o700)
++    monkeypatch.setenv("HERMES_HOME", str(hermes_home))
++    real_open_trusted_directory = drain_inbox._open_trusted_directory
++
++    namespace_prefix = {
++        Path(tmp_path.anchor),
++        Path(tmp_path.anchor) / tmp_path.parts[1],
++    }
++
++    def synthetic_namespace_owner(component):
++        component_stat = real_open_trusted_directory(component)
++        if component in namespace_prefix:
++            return SimpleNamespace(
++                st_mode=(component_stat.st_mode & ~0o022) | stat.S_IWUSR,
++                st_uid=65534,
++            )
++        return component_stat
++
++    monkeypatch.setattr(
++        drain_inbox,
++        "_open_trusted_directory",
++        synthetic_namespace_owner,
++    )
++
++    assert persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++
++@pytest.mark.skipif(os.name == "nt", reason="POSIX directory descriptors required")
++def test_trusted_directory_prefers_metadata_only_open(tmp_path, monkeypatch):
++    fake_o_path = 1 << 29
++    real_open = os.open
++    observed_flags = []
++
++    monkeypatch.setattr(drain_inbox.os, "O_PATH", fake_o_path, raising=False)
++
++    def open_without_fake_flag(path, flags):
++        observed_flags.append(flags)
++        return real_open(path, flags & ~fake_o_path)
++
++    monkeypatch.setattr(drain_inbox.os, "open", open_without_fake_flag)
++
++    directory_stat = drain_inbox._open_trusted_directory(tmp_path)
++
++    assert stat.S_ISDIR(directory_stat.st_mode)
++    assert observed_flags[0] & fake_o_path
++
++
++def test_failed_fsync_does_not_leave_a_replayable_row(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++
++    def fail_fsync(_fd):
++        raise OSError("simulated storage failure")
++
++    monkeypatch.setattr(os, "fsync", fail_fsync)
++    queue_id = persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++    assert queue_id is None
++    assert pending_records() == []
++
++
++def test_new_row_post_replace_failure_is_not_acknowledged(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    fsync_calls = 0
++
++    def fail_first_replacement_fsync(_path):
++        nonlocal fsync_calls
++        fsync_calls += 1
++        if fsync_calls <= 2:
++            raise OSError("simulated directory fsync failure")
++
++    monkeypatch.setattr(
++        drain_inbox,
++        "_fsync_directory",
++        fail_first_replacement_fsync,
++    )
++
++    queue_id, state = persist_event_result(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++    assert queue_id is None
++    assert state == "failed"
++    record = pending_records()[0]
++    assert record["state"] == "queued"
++
++
++def test_new_row_pre_replace_failure_reports_failure_without_receipt(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    def staged_replace_failure(_path, _rows):
++        raise OSError("simulated queued promotion failure")
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", staged_replace_failure)
++
++    queue_id, state = persist_event_result(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++    assert queue_id is None
++    assert state == "failed"
++    assert pending_records() == []
++
++
++def test_queued_promotion_post_replace_failure_is_not_accepted(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def staged_replace_failure(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        real_replace_rows(path, rows)
++        if replace_calls == 1:
++            raise drain_inbox._PostReplaceError(
++                "simulated queued promotion fsync failure"
++            )
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", staged_replace_failure)
++
++    queue_id, state = persist_event_result(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++    assert queue_id is None
++    assert state == "failed"
++    assert pending_records()[0]["state"] == "queued"
++
++
++def test_failed_directory_fsync_is_not_acknowledged(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    real_fsync = os.fsync
++    calls = 0
++
++    def fail_second_fsync(fd):
++        nonlocal calls
++        calls += 1
++        if calls in {2, 3}:
++            raise OSError("simulated directory storage failure")
++        return real_fsync(fd)
++
++    monkeypatch.setattr(os, "fsync", fail_second_fsync)
++    queue_id = persist_event(
++        _event(),
++        build_session_key(_event().source),
++        reason="test-drain",
++    )
++
++    assert queue_id is None
++    assert pending_records()[0]["state"] == "queued"
++
++
++def test_durable_inbox_capacity_rejects_new_unique_rows(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(drain_inbox, "_MAX_PENDING_RECORDS", 2)
++    first = _event("first")
++    second = _event("second")
++    second.message_id = "message-43"
++    third = _event("third")
++    third.message_id = "message-44"
++    session_key = build_session_key(first.source)
++
++    first_id = persist_event(first, session_key, reason="test-drain")
++    assert first_id
++    assert persist_event(second, session_key, reason="test-drain")
++    assert persist_event(first, session_key, reason="redelivery") == first_id
++    assert persist_event(third, session_key, reason="test-drain") is None
++    assert len(pending_records()) == 2
++
++
++def test_ambiguous_receipts_use_bounded_reserved_capacity(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(drain_inbox, "_MAX_PENDING_RECORDS", 1)
++    monkeypatch.setattr(drain_inbox, "_MAX_QUARANTINED_RECORDS", 1)
++    ambiguous = _event("ambiguous")
++    session_key = build_session_key(ambiguous.source)
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        ambiguous,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(ambiguous, "pre_dispatch_attempted", True)
++    real_replace_rows = drain_inbox._replace_rows
++    replace_calls = 0
++
++    def fail_twice(path, rows):
++        nonlocal replace_calls
++        replace_calls += 1
++        if replace_calls <= 2:
++            raise OSError("simulated phase write failure")
++        return real_replace_rows(path, rows)
++
++    monkeypatch.setattr(drain_inbox, "_replace_rows", fail_twice)
++    assert record_pre_dispatch_attempt_result(
++        ambiguous,
++        session_key,
++    ) == (queue_id, "ambiguous")
++    monkeypatch.setattr(drain_inbox, "_replace_rows", real_replace_rows)
++
++    queued = _event("queued")
++    queued.message_id = "message-after-ambiguous"
++    assert persist_event(queued, session_key, reason="test-drain")
++    assert [record["state"] for record in pending_records()] == [
++        "ambiguous",
++        "queued",
++    ]
++
++    queue_id, state, acquired = claim_pre_dispatch_event_result(
++        queued,
++        session_key,
++        reason="pre-dispatch",
++    )
++    assert queue_id
++    assert state == "claimed"
++    assert acquired is True
++    setattr(queued, "pre_dispatch_attempted", True)
++    replace_calls = 0
++    monkeypatch.setattr(drain_inbox, "_replace_rows", fail_twice)
++    assert record_pre_dispatch_attempt_result(
++        queued,
++        session_key,
++    ) == (queue_id, "ambiguous")
++    monkeypatch.setattr(drain_inbox, "_replace_rows", real_replace_rows)
++
++    rejected = _event("rejected")
++    rejected.message_id = "message-after-full-quarantine"
++    assert persist_event(rejected, session_key, reason="test-drain") is None
++    assert [record["state"] for record in pending_records()] == [
++        "ambiguous",
++        "ambiguous",
++    ]
++
++
++def test_failed_copy_on_write_preserves_earlier_rows(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    first = _event("first")
++    session_key = build_session_key(first.source)
++    first_queue_id = persist_event(first, session_key, reason="test-drain")
++    second = _event("second")
++    second.message_id = "message-43"
++
++    def fail_fsync(_fd):
++        raise OSError("simulated storage failure")
++
++    monkeypatch.setattr(os, "fsync", fail_fsync)
++    assert persist_event(
++        second,
++        session_key,
++        reason="test-drain",
++    ) is None
++    assert [record["queue_id"] for record in pending_records()] == [
++        first_queue_id
++    ]
++
++
++def test_cross_device_replace_failure_never_truncates_live_inbox(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    first = _event("first")
++    session_key = build_session_key(first.source)
++    first_queue_id = persist_event(first, session_key, reason="test-drain")
++    original_contents = inbox_path().read_bytes()
++    second = _event("second")
++    second.message_id = "message-43"
++
++    def fail_replace(_source, _destination):
++        raise OSError(errno.EXDEV, "simulated cross-device replace")
++
++    monkeypatch.setattr(os, "replace", fail_replace)
++
++    assert persist_event(
++        second,
++        session_key,
++        reason="test-drain",
++    ) is None
++    assert inbox_path().read_bytes() == original_contents
++    assert [record["queue_id"] for record in pending_records()] == [
++        first_queue_id
++    ]
++
++
++def test_incomplete_trailing_append_does_not_block_earlier_recovery(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event("first")
++    session_key = build_session_key(event.source)
++    queue_id = persist_event(event, session_key, reason="test-drain")
++    with inbox_path().open("ab") as handle:
++        handle.write(b'\n{"schema":1,"queue_id":"partial')
++
++    assert [record["queue_id"] for record in pending_records()] == [queue_id]
++    assert claim_event(queue_id)  # ty:ignore[invalid-argument-type]
++    assert b'"queue_id":"partial' not in inbox_path().read_bytes()
++
++
++def test_blank_message_id_uses_platform_update_id_for_identity(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    first = _event("first")
++    first.message_id = ""
++    second = _event("second")
++    second.message_id = ""
++    second.platform_update_id = 100
++    session_key = build_session_key(first.source)
++
++    first_queue_id = persist_event(first, session_key, reason="test-drain")
++    second_queue_id = persist_event(second, session_key, reason="test-drain")
++
++    assert first_queue_id != second_queue_id
++    assert len(pending_records()) == 2
++
++
++def test_zero_platform_update_id_is_stable_identity(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    event.message_id = None
++    event.platform_update_id = 0
++
++    assert persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++    assert len(pending_records()) == 1
++
++
++def test_event_without_stable_platform_identity_is_rejected(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    first = _event()
++    first.message_id = None
++    first.platform_update_id = None
++    second = _event()
++    second.message_id = None
++    second.platform_update_id = None
++    second.timestamp = first.timestamp + timedelta(seconds=30)
++    session_key = build_session_key(first.source)
++
++    assert persist_event(first, session_key, reason="first") is None
++    assert persist_event(second, session_key, reason="redelivery") is None
++    assert pending_records() == []
++
++
++@pytest.mark.skipif(os.name == "nt", reason="fork-based process overlap test")
++def test_old_process_ack_cannot_erase_new_process_append(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    first = _event("first instruction")
++    second = MessageEvent(
++        text="second instruction",
++        message_type=MessageType.TEXT,
++        source=make_restart_source(),
++        message_id="message-43",
++        platform_update_id=100,
++    )
++    first_queue_id = persist_event(
++        first,
++        build_session_key(first.source),
++        reason="old-process",
++    )
++    assert first_queue_id
++    assert persist_event(
++        second,
++        build_session_key(second.source),
++        reason="old-process",
++    )
++
++    context = multiprocessing.get_context("fork")
++    acknowledge_ready = context.Event()
++    allow_acknowledge = context.Event()
++    append_done = context.Event()
++    acknowledge_process = context.Process(
++        target=_acknowledge_after_pause,
++        args=(
++            str(path),
++            first_queue_id,
++            acknowledge_ready,
++            allow_acknowledge,
++        ),
++    )
++    append_process = context.Process(
++        target=_persist_in_process,
++        args=(str(path), append_done),
++    )
++
++    acknowledge_process.start()
++    assert acknowledge_ready.wait(timeout=10)
++    append_process.start()
++    append_done.wait(timeout=1)
++    allow_acknowledge.set()
++    acknowledge_process.join(timeout=10)
++    append_process.join(timeout=10)
++
++    assert acknowledge_process.exitcode == 0
++    assert append_process.exitcode == 0
++    assert [record["text"] for record in pending_records()] == [
++        "second instruction",
++        "third instruction",
++    ]
++
++
++def test_new_producer_claim_rejects_old_process_append(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    session_key = build_session_key(_event().source)
++    claim_producer("old-process", path)
++    assert persist_event(
++        _event("accepted before handoff"),
++        session_key,
++        reason="old-process",
++        path=path,
++        producer_token="old-process",
++    )
++
++    claim_producer("new-process", path)
++    late = _event("late old-process message")
++    late.message_id = "message-late"
++    current = _event("new-process message")
++    current.message_id = "message-current"
++
++    assert persist_event(
++        late,
++        session_key,
++        reason="old-process",
++        path=path,
++        producer_token="old-process",
++    ) is None
++    assert persist_event(
++        current,
++        session_key,
++        reason="new-process",
++        path=path,
++        producer_token="new-process",
++    )
++    assert [record["text"] for record in pending_records(path)] == [
++        "accepted before handoff",
++        "new-process message",
++    ]
++
++
++def test_pending_record_read_failure_is_not_reported_as_empty(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++
++    def fail_read(_path):
++        raise OSError("simulated read failure")
++
++    monkeypatch.setattr(drain_inbox, "_read_rows", fail_read)
++
++    with pytest.raises(OSError, match="simulated read failure"):
++        pending_records()
++
++
++
++
++def test_cancelled_producer_rollback_holds_lease_until_fsync_succeeds(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    path = inbox_path()
++    claim_producer("old-process", path)
++    lease = acquire_producer_replay_lease("cancelled-process", path)
++    real_fsync = drain_inbox.os.fsync
++    failed_once = threading.Event()
++    allow_retry = threading.Event()
++    rollback_done = threading.Event()
++    append_done = threading.Event()
++    append_result = {}
++    fsync_calls = 0
++
++    def flaky_fsync(fd):
++        nonlocal fsync_calls
++        fsync_calls += 1
++        if fsync_calls == 1:
++            failed_once.set()
++            raise OSError("simulated rollback fsync failure")
++        if not allow_retry.wait(timeout=10):
++            raise TimeoutError("rollback retry was not released")
++        return real_fsync(fd)
++
++    monkeypatch.setattr(drain_inbox.os, "fsync", flaky_fsync)
++
++    def rollback():
++        cancel_producer_replay_lease(lease)
++        rollback_done.set()
++
++    event = _event("old producer append")
++    event.message_id = "old-producer-append"
++    session_key = build_session_key(event.source)
++
++    def append():
++        append_result["queue_id"] = persist_event(
++            event,
++            session_key,
++            reason="old-process",
++            path=path,
++            producer_token="old-process",
++        )
++        append_done.set()
++
++    rollback_thread = threading.Thread(target=rollback)
++    append_thread = threading.Thread(target=append)
++    rollback_thread.start()
++    try:
++        assert failed_once.wait(timeout=10)
++        append_thread.start()
++        assert not append_done.wait(timeout=0.1)
++    finally:
++        allow_retry.set()
++        rollback_thread.join(timeout=10)
++        if append_thread.ident is not None:
++            append_thread.join(timeout=10)
++
++    assert rollback_done.is_set()
++    assert append_done.is_set()
++    assert append_result["queue_id"]
++
++def test_cancelled_producer_rollback_releases_lease_after_bounded_failure(
++    tmp_path,
++    monkeypatch,
++):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    monkeypatch.setattr(drain_inbox, "_PRODUCER_ROLLBACK_MAX_ATTEMPTS", 2)
++    path = inbox_path()
++    claim_producer("old-process", path)
++    lease = acquire_producer_replay_lease("cancelled-process", path)
++    monkeypatch.setattr(
++        drain_inbox.os,
++        "fsync",
++        MagicMock(side_effect=OSError("permanent fsync failure")),
++    )
++
++    cancel_producer_replay_lease(lease)
++
++    replay_lease = acquire_replay_lease(path)
++    release_replay_lease(replay_lease)
++
++def test_queue_file_is_jsonl_for_operator_inspection(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    persist_event(
++        event,
++        build_session_key(event.source),
++        reason="test-drain",
++    )
++
++    row = json.loads(inbox_path().read_text(encoding="utf-8"))
++    assert row["text"] == event.text
++    assert row["queue_id"]
++
++
++def test_telegram_sdk_json_codec_is_durably_serializable(tmp_path, monkeypatch):
++    # Gateway conftest intentionally mocks optional SDK imports. Match the public
++    # PTB to_json contract here; real installed SDK proof runs separately.
++    Message = type("Message", (), {"__module__": "telegram._message", "to_json": lambda self:
++        json.dumps({"message_id": 42, "text": "original wire input", "from": {"id": 55}})})
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    event = _event()
++    raw = Message()
++    event.raw_message = raw
++    assert persist_event(event, build_session_key(event.source), reason="sdk")
++    assert event.raw_message is raw
++    restored = event_from_record(pending_records()[0])
++    assert restored.raw_message["text"] == "original wire input"
++    assert restored.raw_message["from"]["id"] == 55
++
++
++def test_discord_sdk_envelope_snapshot_preserves_policy_content(tmp_path, monkeypatch):
++    Message = type("Message", (SimpleNamespace,), {"__module__": "discord.message"})
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    raw = Message()
++    raw.id = 42
++    raw.content = "original Discord input"
++    raw.channel = SimpleNamespace(id=123, guild=None)
++    raw.author = SimpleNamespace(id=55, name="sender", display_name="Sender", bot=False, roles=[SimpleNamespace(id=7)])
++    raw.mentions = []
++    raw.role_mentions = []
++    raw.attachments = [SimpleNamespace(to_dict=lambda: {"id": "media", "url": "https://example.test/file"})]
++    raw.embeds = []
++    event = _event()
++    event.raw_message = raw
++    assert persist_event(event, build_session_key(event.source), reason="sdk")
++    assert event.raw_message is raw
++    restored = event_from_record(pending_records()[0])
++    assert restored.raw_message["author"]["roles"] == ["7"]
++    assert restored.raw_message["attachments"][0]["id"] == "media"
+diff --git a/tests/gateway/test_durable_drain_native.py b/tests/gateway/test_durable_drain_native.py
+new file mode 100644
+index 0000000..b2b9e3d
+--- /dev/null
++++ b/tests/gateway/test_durable_drain_native.py
+@@ -0,0 +1,417 @@
++"""Durable ingress against native phase owners and adapter task contracts."""
++import asyncio
++import dataclasses
++from types import SimpleNamespace
++from unittest.mock import MagicMock
++import pytest
++import pytest_asyncio
++from gateway import drain_inbox as inbox
++from gateway.platforms.base import MessageEvent
++from gateway.run_durable_drain import DurableAdmissionError
++from tests.gateway.restart_test_helpers import make_restart_runner, make_restart_source
++
++@pytest_asyncio.fixture
++async def durable(tmp_path, monkeypatch):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    runner, adapter = make_restart_runner()
++    runner._init_durable_drain()
++    await runner._claim_durable_producer()
++    runner._startup_restore_in_progress = True
++    runner._scale_to_zero_note_real_inbound = lambda: None
++    runner._is_user_authorized_for_source = lambda source: True
++    runner._hm_pre_gateway_dispatch_hook = MagicMock(side_effect=lambda event, source: event)
++    runner._is_session_running = lambda key: False
++    runner._adapter_for_source = lambda source: adapter
++    runner._session_key_for_source = lambda source: adapter._event_session_key(MessageEvent(text="", source=source))
++    runner._get_unauthorized_dm_behavior = lambda *args, **kwargs: "ignore"
++    runner.session_store.replay_marker_status_for_session_key.return_value = False
++    runner.session_store.persist_replay_marker.return_value = True
++    runner.session_store.get_or_create_session.side_effect = lambda source, **kwargs: SimpleNamespace(
++        session_id="sid", session_key=runner._session_key_for_source(source))
++    adapter.set_startup_gate_handler(runner._make_durable_admission_handler(adapter))
++    yield runner, adapter
++    for task in list(adapter._background_tasks):
++        await task
++
++def event(text="do the work", identity="incoming-1"):
++    return MessageEvent(text=text, message_id=identity, source=make_restart_source())
++
++@pytest.mark.asyncio
++async def test_claim_before_hook_persist_rewrite_and_dedupe(durable):
++    runner, adapter = durable
++    def hook(incoming, source):
++        assert inbox.pending_records()[0]["state"] == "claimed"
++        return dataclasses.replace(incoming, text="rewritten")
++    runner._hm_pre_gateway_dispatch_hook.side_effect = hook
++    assert await adapter._preflight_startup_gate(event()) is True
++    row, = inbox.pending_records()
++    assert (row["state"], row["pre_dispatch_attempted"], row["text"]) == ("queued", True, "rewritten")
++    assert not adapter._session_tasks
++    await adapter._preflight_startup_gate(event())
++    runner._hm_pre_gateway_dispatch_hook.assert_called_once()
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("disposition", ["unauthorized", "plugin-handled"])
++async def test_rejected_never_replay(durable, disposition):
++    runner, adapter = durable
++    if disposition == "unauthorized":
++        runner._is_user_authorized_for_source = lambda source: False
++    else:
++        runner._hm_pre_gateway_dispatch_hook.side_effect = lambda incoming, source: None
++    await adapter._preflight_startup_gate(event())
++    assert inbox.pending_records()[0]["state"] == "handled"
++    runner._startup_restore_in_progress = False
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records() == []
++    adapter._message_handler.assert_not_called()
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("control", ["command", "approval", "clarify", "clarify-with-approval", "clarify-with-confirm", "prompt", "internal"])
++async def test_control_bypasses_drain(durable, monkeypatch, control):
++    from tools import approval, clarify_gateway, slash_confirm
++    runner, adapter = durable
++    runner._draining = True
++    incoming = event()
++    if control == "command": incoming.text = "/status"
++    if control == "approval":
++        incoming.text = "yes"
++        monkeypatch.setattr(approval, "has_blocking_approval", lambda key: True)
++    if control.startswith("clarify"): monkeypatch.setattr(clarify_gateway, "get_pending_for_session", lambda *a, **kw: object())
++    if control == "clarify-with-approval": monkeypatch.setattr(approval, "has_blocking_approval", lambda key: True)
++    if control == "clarify-with-confirm": monkeypatch.setattr(slash_confirm, "get_pending", lambda key: {"confirm_id": "pending"})
++    if control == "prompt": incoming.prompt_response = {"prompt_id": "waiting"}
++    if control == "internal": incoming.internal = True
++    assert await adapter._preflight_startup_gate(incoming) is False
++    assert inbox.pending_records() == []
++
++@pytest.mark.asyncio
++async def test_failed_admission_requests_retry(durable, monkeypatch):
++    runner, adapter = durable
++    monkeypatch.setattr(inbox, "claim_pre_dispatch_event_result", lambda *a, **kw: (None, "failed", False))
++    with pytest.raises(DurableAdmissionError):
++        await adapter._preflight_startup_gate(event())
++    assert not adapter._session_tasks
++
++@pytest.mark.asyncio
++async def test_replay_awaits_native_task_before_marker(durable):
++    runner, adapter = durable
++    incoming = event()
++    await adapter._preflight_startup_gate(incoming)
++    key = adapter._event_session_key(incoming)
++    runner.session_store.get_or_create_session.return_value = SimpleNamespace(session_id="sid", session_key=key)
++    release, entered = asyncio.Event(), asyncio.Event()
++    async def handler(incoming):
++        assert inbox.pending_records()[0]["state"] == "claimed"
++        entered.set()
++        await release.wait()
++    adapter.set_message_handler(handler)
++    runner._startup_restore_in_progress = False
++    replay = asyncio.create_task(runner._drain_durable_inbox())
++    await asyncio.wait_for(entered.wait(), 5)
++    assert not runner.session_store.persist_replay_marker.called
++    release.set()
++    await replay
++    assert inbox.pending_records() == []
++    runner.session_store.persist_replay_marker.assert_called_once_with("sid", "drain:" + inbox.event_queue_id(incoming, key))
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("state", ["claimed", "completed"])
++async def test_ambiguous_completed_never_rerun(durable, state):
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    row, = inbox.pending_records()
++    assert inbox.claim_event(row["queue_id"])
++    if state == "completed": assert inbox.complete_event(row["queue_id"])
++    runner.session_store.persist_replay_marker.side_effect = RuntimeError("db unavailable")
++    runner.session_store.get_or_create_session.return_value = SimpleNamespace(session_id="sid", session_key=row["session_key"])
++    runner._startup_restore_in_progress = False
++    await runner._drain_durable_inbox()
++    await runner._drain_durable_inbox()
++    adapter._message_handler.assert_not_called()
++    assert inbox.pending_records()[0]["state"] == ("ambiguous" if state == "claimed" else "completed")
++    assert len(adapter.sent) == (1 if state == "claimed" else 0)
++
++@pytest.mark.asyncio
++async def test_offline_retained(durable):
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    runner._adapter_for_source = lambda source: None
++    runner._startup_restore_in_progress = False
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records()[0]["state"] == "queued"
++
++@pytest.mark.asyncio
++async def test_resume_barrier_then_rescan_arrivals(durable):
++    runner, adapter = durable
++    first = event()
++    await adapter._preflight_startup_gate(first)
++    key = adapter._event_session_key(first)
++    runner.session_store.get_or_create_session.return_value = SimpleNamespace(session_id="sid", session_key=key)
++    resume_release = asyncio.Event()
++    resume = asyncio.create_task(resume_release.wait())
++    adapter._session_tasks[key] = resume
++    seen = []
++    async def handler(incoming): seen.append(incoming.message_id)
++    adapter.set_message_handler(handler)
++    runner._startup_restore_in_progress = False
++    runner._schedule_durable_replay()
++    await asyncio.sleep(0.03)
++    assert seen == []
++    await adapter._preflight_startup_gate(event(identity="incoming-2"))
++    adapter._session_tasks.pop(key)
++    resume_release.set()
++    await runner._durable_replay_task
++    assert seen == ["incoming-1", "incoming-2"]
++    assert inbox.pending_records() == []
++
++@pytest.mark.asyncio
++async def test_profile_context_keeps_process_inbox(durable, tmp_path, monkeypatch):
++    runner, adapter = durable
++    expected = runner._durable_inbox_path
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "profile"))
++    await adapter._preflight_startup_gate(event())
++    assert inbox.pending_records(expected)[0]["state"] == "queued"
++    assert not inbox.inbox_path().exists()
++
++@pytest.mark.asyncio
++async def test_busy_drain_no_duplicate_pending_or_flush(durable):
++    runner, adapter = durable
++    runner._draining = True
++    incoming = event()
++    await runner._handle_active_session_busy_message(incoming, adapter._event_session_key(incoming))
++    assert len(inbox.pending_records()) == 1
++    assert not adapter._pending_messages
++    assert not runner._pending_messages
++
++@pytest.mark.asyncio
++async def test_bluebubbles_failure_is_503_before_read_receipt(monkeypatch):
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_bluebubbles import _make_adapter, _FakeBlueBubblesRequest
++    adapter = _make_adapter(monkeypatch)
++    adapter._preflight_startup_gate = AsyncMock(side_effect=OSError("disk full"))
++    adapter.mark_read = AsyncMock()
++    adapter.handle_message = AsyncMock()
++    response = await adapter._handle_webhook(_FakeBlueBubblesRequest({
++        "type": "new-message", "data": {"guid": "retry-1", "text": "persist me",
++        "handle": {"address": "+15555550100"}, "isFromMe": False,
++        "chats": [{"guid": "iMessage;-;+15555550100"}]}}))
++    assert response.status == 503
++    adapter.mark_read.assert_not_called()
++    adapter.handle_message.assert_not_called()
++
++@pytest.mark.asyncio
++async def test_graph_failure_does_not_dedupe_or_ack():
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_msgraph_webhook import _make_adapter, _FakeRequest
++    adapter = _make_adapter()
++    adapter._preflight_startup_gate = AsyncMock(side_effect=OSError("disk full"))
++    request = _FakeRequest(json_payload={"value": [{"id": "retry-1", "clientState": "expected-client-state",
++        "resource": "communications/onlineMeetings/1", "subscriptionId": "sub"}]})
++    assert (await adapter._handle_notification(request)).status == 503
++    assert adapter._seen_receipts == set()
++    adapter._preflight_startup_gate = AsyncMock(return_value=True)
++    assert (await adapter._handle_notification(request)).status == 202
++    assert adapter._seen_receipts == {"id:retry-1"}
++
++@pytest.mark.asyncio
++async def test_webhook_failure_releases_identity_and_delivery_destination():
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_webhook_adapter import _make_adapter, _mock_request, _INSECURE_NO_AUTH
++    adapter = _make_adapter(routes={"test": {"secret": _INSECURE_NO_AUTH, "prompt": "work"}})
++    adapter._preflight_startup_gate = AsyncMock(side_effect=OSError("disk full"))
++    request = _mock_request(headers={"X-Request-ID": "retry-1"}, body=b"{}", match_info={"route_name": "test"})
++    assert (await adapter._handle_webhook(request)).status == 503
++    assert "retry-1" not in adapter._seen_deliveries
++    assert adapter._delivery_info == {}
++    adapter._preflight_startup_gate = AsyncMock(return_value=True)
++    assert (await adapter._handle_webhook(request)).status == 202
++    captured = adapter._preflight_startup_gate.call_args.args[0]
++    assert captured.metadata["webhook_delivery"]["deliver"] == "log"
++
++@pytest.mark.asyncio
++async def test_whatsapp_failure_leaves_wamid_retryable():
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_whatsapp_cloud import _make_adapter
++    adapter = _make_adapter()
++    adapter._build_message_event_from_cloud = AsyncMock(return_value=event())
++    adapter._preflight_startup_gate = AsyncMock(side_effect=OSError("disk full"))
++    assert await adapter._ingest_message({"id": "wamid-1"}, {}, {}) is False
++    assert "wamid-1" not in adapter._seen_wamids
++    adapter._preflight_startup_gate = AsyncMock(return_value=True)
++    assert await adapter._ingest_message({"id": "wamid-1"}, {}, {}) is True
++    assert "wamid-1" in adapter._seen_wamids
++
++@pytest.mark.asyncio
++async def test_raft_busy_override_cannot_bypass_admission():
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_raft_adapter import _make_adapter
++    adapter = _make_adapter()
++    adapter.set_message_handler(AsyncMock())
++    incoming = event()
++    adapter._active_sessions[adapter._event_session_key(incoming)] = asyncio.Event()
++    adapter._preflight_startup_gate = AsyncMock(side_effect=DurableAdmissionError("disk full"))
++    with pytest.raises(DurableAdmissionError):
++        await adapter.handle_message(incoming)
++    assert not adapter._pending_messages
++
++@pytest.mark.asyncio
++async def test_marker_lookup_failure_retains_without_execution(durable):
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    runner.session_store.replay_marker_status_for_session_key.side_effect = OSError("db unavailable")
++    runner._startup_restore_in_progress = False
++    await runner._drain_durable_inbox()
++    adapter._message_handler.assert_not_called()
++    assert inbox.pending_records()[0]["state"] == "queued"
++
++
++
++@pytest.mark.asyncio
++async def test_drain_starting_after_replay_claim_returns_row_to_queue(durable):
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    runner._startup_restore_in_progress = False
++    async def handler(incoming):
++        runner._draining = True
++        assert await runner._hm_admit_event(incoming) is None
++        assert incoming.durable_deferred is True
++    adapter.set_message_handler(handler)
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records()[0]["state"] == "queued"
++    runner.session_store.persist_replay_marker.assert_not_called()
++
++
++@pytest.mark.asyncio
++async def test_completed_retry_does_not_repeat_ingress_hook(durable):
++    runner, adapter = durable
++    runner.session_store.replay_marker_status_for_session_key.return_value = True
++    assert await adapter._preflight_startup_gate(event()) is True
++    runner._hm_pre_gateway_dispatch_hook.assert_not_called()
++    assert inbox.pending_records() == []
++
++
++@pytest.mark.asyncio
++async def test_ambiguous_notice_failure_retries_guidance_without_rerunning(durable):
++    from unittest.mock import AsyncMock
++    from gateway.platforms.base import SendResult
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    row, = inbox.pending_records()
++    assert inbox.claim_event(row["queue_id"])
++    adapter.send = AsyncMock(side_effect=[SendResult(success=False), SendResult(success=True)])
++    runner._startup_restore_in_progress = False
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records()[0]["state"] == "claimed"
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records()[0]["ambiguity_notice_sent"] is True
++    await runner._drain_durable_inbox()
++    assert adapter.send.await_count == 2
++    adapter._message_handler.assert_not_called()
++
++
++@pytest.mark.asyncio
++async def test_native_rewrite_preserves_clean_replay_deferral(durable):
++    runner, adapter = durable
++    await adapter._preflight_startup_gate(event())
++    runner._startup_restore_in_progress = False
++    async def handler(incoming):
++        rewritten = dataclasses.replace(incoming, text="rewritten by native hook")
++        rewritten.durable_deferred = True
++    adapter.set_message_handler(handler)
++    await runner._drain_durable_inbox()
++    assert inbox.pending_records()[0]["state"] == "queued"
++    runner.session_store.persist_replay_marker.assert_not_called()
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("approval_pending,confirm_pending,text,bypass", [
++    (True, False, "also summarize tomorrow", False),
++    (False, True, "also summarize tomorrow", False),
++    (True, True, "also summarize tomorrow", False),
++    (True, False, " YES ", True),
++    (True, False, "approve session", True),
++    (False, True, "once", True),
++    (False, True, "!always", True),
++    (False, True, "/yes", True),
++    (True, True, "yes", True),
++    (True, True, "once", False),
++    (False, False, "yes", False),
++])
++async def test_pending_controls_only_bypass_recognized_replies(durable, monkeypatch, approval_pending, confirm_pending, text, bypass):
++    from tools import approval, slash_confirm
++    runner, adapter = durable
++    runner._draining = True
++    monkeypatch.setattr(approval, "has_blocking_approval", lambda key: approval_pending)
++    monkeypatch.setattr(slash_confirm, "get_pending", lambda key: {"confirm_id": "pending"} if confirm_pending else None)
++    incoming = event(text)
++    assert await adapter._preflight_startup_gate(incoming) is (not bypass)
++    rows = inbox.pending_records()
++    if bypass:
++        assert rows == []
++    else:
++        assert len(rows) == 1 and rows[0]["state"] == "queued" and rows[0]["text"] == text
++
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("pending", ["approval", "confirm"])
++async def test_busy_unrelated_pending_control_text_is_durable(durable, monkeypatch, pending):
++    from tools import approval, slash_confirm
++    runner, adapter = durable
++    runner._draining = True
++    runner._is_user_authorized = lambda source: True
++    runner._effective_busy_input_mode = lambda source: "queue"
++    runner._effective_busy_text_mode = lambda source: "queue"
++    monkeypatch.setattr(approval, "has_blocking_approval", lambda key: pending == "approval")
++    monkeypatch.setattr(slash_confirm, "get_pending", lambda key: {"confirm_id": "pending"} if pending == "confirm" else None)
++    incoming = event("also summarize tomorrow")
++    key = runner._session_key_for_source(incoming.source)
++    assert await runner._handle_active_session_busy_message(incoming, key) is True
++    row, = inbox.pending_records()
++    assert row["state"] == "queued" and row["text"] == incoming.text
++    assert runner._pending_messages == {}
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize("outcome", ["accepted", "failed", "cancelled"])
++async def test_webhook_concurrent_retry_waits_for_durable_admission(outcome):
++    from unittest.mock import AsyncMock
++    from tests.gateway.test_webhook_adapter import _make_adapter, _mock_request, _INSECURE_NO_AUTH
++    adapter = _make_adapter(routes={"test": {"secret": _INSECURE_NO_AUTH, "prompt": "work"}})
++    entered, release = asyncio.Event(), asyncio.Event()
++
++    async def admit(event):
++        entered.set()
++        await release.wait()
++        if outcome == "failed":
++            raise OSError("disk full")
++        return True
++
++    adapter._preflight_startup_gate = AsyncMock(side_effect=admit)
++    request = _mock_request(headers={"X-Request-ID": "concurrent-1"}, body=b"{}", match_info={"route_name": "test"})
++    first = asyncio.create_task(adapter._handle_webhook(request))
++    await asyncio.wait_for(entered.wait(), timeout=1)
++    try:
++        retry = await adapter._handle_webhook(request)
++        assert retry.status == 503
++        assert adapter._preflight_startup_gate.await_count == 1
++    finally:
++        if outcome == "cancelled":
++            first.cancel()
++        release.set()
++        if outcome == "cancelled":
++            with pytest.raises(asyncio.CancelledError):
++                await first
++        else:
++            response = await first
++    assert adapter._pending_admissions == set()
++    if outcome == "accepted":
++        assert response.status == 202
++        assert (await adapter._handle_webhook(request)).status == 200
++        assert adapter._preflight_startup_gate.await_count == 1
++    else:
++        if outcome == "failed":
++            assert response.status == 503
++        assert "concurrent-1" not in adapter._seen_deliveries
++        adapter._preflight_startup_gate = AsyncMock(return_value=True)
++        assert (await adapter._handle_webhook(request)).status == 202
++        assert (await adapter._handle_webhook(request)).status == 200
++        assert adapter._preflight_startup_gate.await_count == 1
+diff --git a/tests/gateway/test_multiplex_adapter_registry.py b/tests/gateway/test_multiplex_adapter_registry.py
+index 972701dd..aca3b9c8 100644
+--- a/tests/gateway/test_multiplex_adapter_registry.py
++++ b/tests/gateway/test_multiplex_adapter_registry.py
+@@ -198,6 +198,9 @@ class _SecondaryRecoveryAdapter:
+     def set_session_store(self, store):
+         self.session_store = store
+ 
++    def set_startup_gate_handler(self, handler):
++        self.startup_gate_handler = handler
++
+     def set_busy_session_handler(self, handler):
+         self.busy_session_handler = handler
+ 
+diff --git a/tests/gateway/test_multiplex_session_db_profile_scope.py b/tests/gateway/test_multiplex_session_db_profile_scope.py
+index 10833311..79571db7 100644
+--- a/tests/gateway/test_multiplex_session_db_profile_scope.py
++++ b/tests/gateway/test_multiplex_session_db_profile_scope.py
+@@ -779,3 +779,39 @@ def test_crash_marker_from_a_secondary_profile_survives_restart(multiplex_homes)
+     assert recovered.resume_pending is True
+     assert recovered.resume_reason == "restart_interrupted"
+     assert recovered.active_turn_token is None
++
++
++def test_durable_replay_marker_is_strict_and_scoped(multiplex_homes):
++    root, profile = multiplex_homes
++    store = _multiplex_store(root)
++    entry = store.get_or_create_session(_profile_source())
++    marker = "drain:profile-specific-completion"
++    assert store.replay_marker_status_for_session_key(entry.session_key, marker) is False
++    assert store.persist_replay_marker(entry.session_id, marker) is True
++    assert store.replay_marker_status_for_session_key(entry.session_key, marker) is True
++    assert store.replay_marker_status_for_session_key("agent:main:telegram:dm:555", marker) is False
++    with patch.object(store, "_db_for_key", return_value=None):
++        with pytest.raises(RuntimeError, match="unavailable"):
++            store.replay_marker_status_for_session_key(entry.session_key, marker)
++
++
++def test_durable_admission_uses_secondary_profile_scope(multiplex_homes):
++    from gateway.run import GatewayRunner
++    from tests.gateway.restart_test_helpers import RestartTestAdapter
++    root, profile = multiplex_homes
++    runner = object.__new__(GatewayRunner)
++    runner.config = GatewayConfig()
++    runner._init_durable_drain()
++    runner._startup_restore_in_progress = True
++    observed = []
++    async def admit(event, **kwargs):
++        observed.append(Path(get_hermes_home()))
++    runner._hm_admit_event = admit
++    adapter = RestartTestAdapter()
++    adapter.set_owner_profile("fitness")
++    adapter.set_startup_gate_handler(runner._make_durable_admission_handler(adapter))
++    event = MessageEvent(text="work", source=_profile_source(), message_id="profile-message")
++    assert asyncio.run(adapter._preflight_startup_gate(event)) is True
++    assert observed == [profile]
++    assert runner._durable_inbox_path.parent.parent == root
++    assert Path(get_hermes_home()) == root
+diff --git a/tests/gateway/test_restart_resume_pending.py b/tests/gateway/test_restart_resume_pending.py
+index fe147ae5..4ca90d19 100644
+--- a/tests/gateway/test_restart_resume_pending.py
++++ b/tests/gateway/test_restart_resume_pending.py
+@@ -1,3 +1,4 @@
++from gateway import drain_inbox
+ """Tests for the resume_pending session continuity path.
+ 
+ Covers the behaviour introduced to fix the ``Gateway shutting down ...
+@@ -704,12 +705,26 @@ async def test_reconnect_reschedule_is_platform_scoped():
+     assert event.source == tg_source
+ 
+ 
++async def _prepare_durable_startup(runner):
++    from types import SimpleNamespace
++    runner._init_durable_drain()
++    await runner._claim_durable_producer()
++    runner._scale_to_zero_note_real_inbound = lambda: None
++    runner._hm_pre_gateway_dispatch_hook = lambda event, source: event
++    runner._is_user_authorized_for_source = lambda source: True
++    runner._is_session_running = lambda key: False
++    runner.session_store.replay_marker_status_for_session_key.return_value = False
++    runner.session_store.persist_replay_marker.return_value = True
++    runner.session_store.get_or_create_session.side_effect = lambda source, **kw: SimpleNamespace(
++        session_id="sid", session_key=runner._session_key_for_source(source))
++
++
+ @pytest.mark.asyncio
+ async def test_startup_restore_waits_for_resume_before_draining_inbound():
+     """Queued inbound turns replay only after startup resume tasks finish."""
+     runner, adapter = make_restart_runner()
+     runner._startup_restore_in_progress = True
+-    runner._startup_restore_queue = []
++    await _prepare_durable_startup(runner)
+     runner._startup_restore_tasks = []
+ 
+     source = make_restart_source(chat_id="restore-chat")
+@@ -737,6 +752,7 @@ async def test_startup_restore_waits_for_resume_before_draining_inbound():
+             adapter._session_tasks[pending_entry.session_key] = task
+             return
+         seen.append(f"inbound:{event.text}")
++        event.handler_succeeded = True
+ 
+     adapter.handle_message = fake_handle_message
+ 
+@@ -744,14 +760,14 @@ async def test_startup_restore_waits_for_resume_before_draining_inbound():
+     await asyncio.sleep(0)
+ 
+     inbound = MessageEvent(
+-        text="hello",
++        text="hello", message_id="native-startup-hello",
+         message_type=MessageType.TEXT,
+         source=source,
+     )
+     assert await runner._handle_message(inbound) is None
+     assert scheduled == 1
+     assert seen == ["resume-start"]
+-    assert runner._startup_restore_queue == [inbound]
++    assert drain_inbox.pending_records()[0]["text"] == inbound.text
+ 
+     finish_task = asyncio.create_task(runner._finish_startup_restore())
+     await asyncio.sleep(0)
+@@ -759,9 +775,10 @@ async def test_startup_restore_waits_for_resume_before_draining_inbound():
+ 
+     resume_done.set()
+     await finish_task
++    await runner._durable_replay_task
+ 
+     assert seen == ["resume-start", "inbound:hello"]
+-    assert runner._startup_restore_queue == []
++    assert drain_inbox.pending_records() == []
+     assert runner._startup_restore_in_progress is False
+ 
+ 
+@@ -778,7 +795,7 @@ async def test_fresh_boot_gate_stays_closed_until_warmup_completes(monkeypatch):
+     system prompt (no context tier, no tool schemas)."""
+     runner, adapter = make_restart_runner()
+     runner._startup_restore_in_progress = True
+-    runner._startup_restore_queue = []
++    await _prepare_durable_startup(runner)
+     runner._startup_restore_tasks = []  # fresh boot: nothing to resume
+ 
+     monkeypatch.setenv("HERMES_STARTUP_WARMUP_TIMEOUT", "5")
+@@ -790,16 +807,17 @@ async def test_fresh_boot_gate_stays_closed_until_warmup_completes(monkeypatch):
+ 
+     async def fake_handle_message(event: MessageEvent) -> None:
+         handled.append(event.text)
++        event.handler_succeeded = True
+ 
+     adapter.handle_message = fake_handle_message
+ 
+     source = make_restart_source(chat_id="fresh-boot-chat")
+     inbound = MessageEvent(
+-        text="early-bird", message_type=MessageType.TEXT, source=source
++        text="early-bird", message_id="native-startup-early", message_type=MessageType.TEXT, source=source
+     )
+     # Inbound during the warm-up window queues instead of dispatching.
+     assert await runner._handle_message(inbound) is None
+-    assert runner._startup_restore_queue == [inbound]
++    assert drain_inbox.pending_records()[0]["text"] == inbound.text
+ 
+     finish_task = asyncio.create_task(runner._finish_startup_restore())
+     for _ in range(5):
+@@ -811,11 +829,12 @@ async def test_fresh_boot_gate_stays_closed_until_warmup_completes(monkeypatch):
+ 
+     warmup_done.set()
+     await asyncio.wait_for(finish_task, timeout=5)
++    await runner._durable_replay_task
+ 
+     # Gate opened only after warm-up; the queued message replayed.
+     assert runner._startup_restore_in_progress is False
+     assert handled == ["early-bird"]
+-    assert runner._startup_restore_queue == []
++    assert drain_inbox.pending_records() == []
+ 
+ 
+ @pytest.mark.asyncio
+@@ -1127,7 +1146,7 @@ async def test_startup_restore_gate_releases_when_resume_turn_outlives_timeout(
+ 
+     runner, adapter = make_restart_runner()
+     runner._startup_restore_in_progress = True
+-    runner._startup_restore_queue = []
++    await _prepare_durable_startup(runner)
+     runner._background_tasks = set()
+ 
+     seen: list[str] = []
+@@ -1138,6 +1157,7 @@ async def test_startup_restore_gate_releases_when_resume_turn_outlives_timeout(
+ 
+     async def fake_handle_message(event: MessageEvent) -> None:
+         seen.append(f"inbound:{event.text}")
++        event.handler_succeeded = True
+ 
+     adapter.handle_message = fake_handle_message
+ 
+@@ -1145,22 +1165,23 @@ async def test_startup_restore_gate_releases_when_resume_turn_outlives_timeout(
+     runner._startup_restore_tasks = [slow_task]
+ 
+     inbound = MessageEvent(
+-        text="hello",
++        text="hello", message_id="native-startup-hello",
+         message_type=MessageType.TEXT,
+         source=make_restart_source(chat_id="restore-chat"),
+     )
+     assert await runner._handle_message(inbound) is None
+-    assert runner._startup_restore_queue == [inbound]
++    assert drain_inbox.pending_records()[0]["text"] == inbound.text
+ 
+     # The gate must release on the bound even though the resume turn is
+     # still running.
+     await asyncio.wait_for(runner._finish_startup_restore(), timeout=5)
++    await runner._durable_replay_task
+ 
+     assert seen == ["inbound:hello"], (
+         "startup-restore gate never released: queued inbound was not drained "
+         "while a slow boot-resume turn was still running"
+     )
+-    assert runner._startup_restore_queue == []
++    assert drain_inbox.pending_records() == []
+     assert runner._startup_restore_in_progress is False
+     # The slow turn is NOT cancelled — it finishes in the background.
+     assert not slow_task.done()
+@@ -1183,7 +1204,7 @@ async def test_startup_restore_gate_releases_when_boot_path_send_hangs(
+ 
+     runner, adapter = make_restart_runner()
+     runner._startup_restore_in_progress = True
+-    runner._startup_restore_queue = []
++    await _prepare_durable_startup(runner)
+     runner._startup_restore_tasks = []
+     runner._background_tasks = set()
+ 
+@@ -1201,16 +1222,17 @@ async def test_startup_restore_gate_releases_when_boot_path_send_hangs(
+ 
+     async def fake_handle_message(event: MessageEvent) -> None:
+         seen.append(f"inbound:{event.text}")
++        event.handler_succeeded = True
+ 
+     adapter.handle_message = fake_handle_message
+ 
+     inbound = MessageEvent(
+-        text="hello",
++        text="hello", message_id="native-startup-hello",
+         message_type=MessageType.TEXT,
+         source=make_restart_source(chat_id="restore-chat"),
+     )
+     assert await runner._handle_message(inbound) is None
+-    assert runner._startup_restore_queue == [inbound]
++    assert drain_inbox.pending_records()[0]["text"] == inbound.text
+ 
+     await asyncio.wait_for(
+         runner._await_startup_boot_sends(
+@@ -1219,12 +1241,13 @@ async def test_startup_restore_gate_releases_when_boot_path_send_hangs(
+         timeout=5,
+     )
+     await asyncio.wait_for(runner._finish_startup_restore(), timeout=5)
++    await runner._durable_replay_task
+ 
+     assert seen == ["inbound:hello"], (
+         "startup-restore gate never released: queued inbound was not drained "
+         "while a boot-path send was still sleeping"
+     )
+-    assert runner._startup_restore_queue == []
++    assert drain_inbox.pending_records() == []
+     assert runner._startup_restore_in_progress is False
+     # The DB half (claim + resume clear) runs inline BEFORE the abandonable
+     # send task, so it must have completed even though the boot send hung;

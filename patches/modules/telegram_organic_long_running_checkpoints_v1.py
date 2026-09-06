@@ -43,6 +43,14 @@ PROGRESS_CALLBACK_REPLACEMENT = """        ctx = self._ctx
             )
         # Live status line (Slack's assistant status): stash the current
 """
+PROGRESS_CALLBACK_021_ANCHOR = """        ctx = self._ctx
+        # Failed subagent → one clean user-facing notice. Handled FIRST,
+"""
+PROGRESS_CALLBACK_021_REPLACEMENT = (
+    PROGRESS_CALLBACK_REPLACEMENT
+    + """        # Failed subagent → one clean user-facing notice. Handled FIRST,
+"""
+)
 INTERIM_ANCHOR = """        def _interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
             if not ctx._run_still_current():
                 return
@@ -419,8 +427,8 @@ def _format_telegram_model_checkpoint(
 '''
 
 
-def patch_telegram_organic_long_running_checkpoints_v1(hermes_dir: Path) -> bool:
-    """Patch only the Telegram periodic-notification seam."""
+def _patch_legacy_telegram_organic_long_running_checkpoints_v1(hermes_dir: Path) -> bool:
+    """Patch the pre-d363 monolithic gateway/run.py seam."""
     run_py = Path(hermes_dir) / "gateway/run.py"
     original = run_py.read_text(encoding="utf-8")
     if MARKER in original:
@@ -449,6 +457,17 @@ def patch_telegram_organic_long_running_checkpoints_v1(hermes_dir: Path) -> bool
     )
     patched = original
     for anchor, replacement, label in replacements:
+        if label == "tool checkpoint capture" and patched.count(anchor) == 0:
+            anchor = PROGRESS_CALLBACK_021_ANCHOR
+            replacement = PROGRESS_CALLBACK_021_REPLACEMENT
+        if (
+            label == "tool progress callback assignment"
+            and patched.count(anchor) == 0
+            and "agent.tool_progress_callback = ctx.progress_callback" in patched
+        ):
+            # Hermes 0.21 made this callback unconditional, which is stronger
+            # than the old opt-in predicate and already covers Telegram.
+            continue
         if patched.count(anchor) != 1:
             raise RuntimeError(f"telegram model checkpoint {label} anchor drift")
         patched = patched.replace(anchor, replacement, 1)
@@ -462,3 +481,151 @@ def patch_telegram_organic_long_running_checkpoints_v1(hermes_dir: Path) -> bool
         backup.unlink(missing_ok=True)
         raise
     return True
+
+
+# d363 split-gateway dispatch. The legacy implementation above remains available unchanged.
+_D363_NOTIFIER = r'''    async def _run_agent_notify_long_running(
+        self, disp: "GatewayRunner._RunAgentDisplay", turn_ctx: TurnContext, _executor_task_holder: list,
+    ) -> None:
+        if turn_ctx.source.platform != Platform.TELEGRAM:
+            return await self._run_agent_native_notify_long_running(disp, turn_ctx, _executor_task_holder)
+        # Factual Telegram checkpoints share the native notifier's ownership/cancellation lane.
+        from gateway.run import _float_env, _interim_metadata, _non_conversational_metadata
+        _notify_start = time.monotonic()
+        _notify_interval = _float_env("HERMES_AGENT_NOTIFY_INTERVAL", 180)
+        _long_running_mode = disp._display_surface_mode("long_running_notifications", default=True, allow_generic=True)
+        if _notify_interval <= 0 or _long_running_mode == "off":
+            return
+        source, session_key, agent_holder = turn_ctx.source, turn_ctx.session_key, turn_ctx.agent_holder
+        _status_thread_metadata = turn_ctx._status_thread_metadata
+        _notify_adapter = self._adapter_for_source(source)
+        if not _notify_adapter:
+            return
+        _heartbeat_msg_id = None
+        while True:
+            await asyncio.sleep(_notify_interval)
+            if not self._should_emit_long_running_notification(session_key, agent_holder[0], _executor_task_holder[0]):
+                break
+            _elapsed_mins = int((time.monotonic() - _notify_start) // 60)
+            if source.platform == Platform.TELEGRAM:
+                with turn_ctx.model_checkpoint_lock:
+                    _stop = len(turn_ctx.model_checkpoint_updates)
+                    _pending = list(turn_ctx.model_checkpoint_updates[turn_ctx.model_checkpoint_cursor[0]:_stop])
+                    _tool_stop = len(turn_ctx.model_checkpoint_tool_completed)
+                    _tool_pending = list(turn_ctx.model_checkpoint_tool_completed[turn_ctx.model_checkpoint_tool_cursor[0]:_tool_stop])
+                    _current = list(turn_ctx.model_checkpoint_tool_current)
+                _heartbeat_text = _format_telegram_model_checkpoint(_elapsed_mins, _pending, task=turn_ctx.model_checkpoint_task, completed=_tool_pending, current=_current)
+                if not _heartbeat_text:
+                    with turn_ctx.model_checkpoint_lock:
+                        turn_ctx.model_checkpoint_cursor[0] = _stop
+                        turn_ctx.model_checkpoint_tool_cursor[0] = _tool_stop
+                    continue
+            else:
+                _heartbeat_text = disp._generic_status_phrase("status") if _long_running_mode == "generic" else f"⏳ Working — {_elapsed_mins} min"
+            try:
+                _notify_res = None
+                if _heartbeat_msg_id:
+                    with suppress(Exception):
+                        _notify_res = await _notify_adapter.edit_message(source.chat_id, _heartbeat_msg_id, _heartbeat_text)
+                if not (_notify_res and getattr(_notify_res, "success", False)):
+                    _notify_res = await _notify_adapter.send(source.chat_id, _heartbeat_text, metadata=_interim_metadata(_non_conversational_metadata(_status_thread_metadata, platform=source.platform)))
+                    if getattr(_notify_res, "success", False) and getattr(_notify_res, "message_id", None):
+                        _heartbeat_msg_id = str(_notify_res.message_id)
+                        if turn_ctx._cleanup_progress:
+                            turn_ctx._cleanup_msg_ids.append(_heartbeat_msg_id)
+                if source.platform == Platform.TELEGRAM and getattr(_notify_res, "success", False):
+                    with turn_ctx.model_checkpoint_lock:
+                        turn_ctx.model_checkpoint_cursor[0] = max(turn_ctx.model_checkpoint_cursor[0], _stop)
+                        turn_ctx.model_checkpoint_tool_cursor[0] = max(turn_ctx.model_checkpoint_tool_cursor[0], _tool_stop)
+            except Exception as _ne:
+                logger.debug("Long-running notification error: %s", _ne)
+
+'''
+
+def _patch_split_d363(root: Path) -> bool:
+    run_py, runner_py = root / 'gateway/run_turn.py', root / 'gateway/run_turn_runner.py'
+    run, runner = run_py.read_text(encoding='utf-8'), runner_py.read_text(encoding='utf-8')
+    if MARKER in run:
+        return False
+    import_anchor = 'logger = logging.getLogger("gateway.run")\n'
+    if run.count(import_anchor) != 1:
+        raise RuntimeError('Telegram checkpoint v1 d363 import anchor drift')
+    bridge = '''def _redact_gateway_user_facing_secrets(value):
+    from gateway.run import _redact_gateway_user_facing_secrets as _redact
+    return _redact(value)
+'''
+    run = run.replace(import_anchor, import_anchor + '\n' + bridge + HELPERS + '\n', 1)
+    context_anchor = '        turn_runner = TurnRunner(self, turn_ctx)\n'
+    context_replacement = '''        # HERMES_TELEGRAM_MODEL_COMMENTARY_CHECKPOINTS_v1
+        if source.platform == Platform.TELEGRAM:
+            turn_ctx.model_checkpoint_lock = threading.Lock()
+            turn_ctx.model_checkpoint_updates = []
+            turn_ctx.model_checkpoint_cursor = [0]
+            turn_ctx.model_checkpoint_task = _telegram_checkpoint_task_label(message)
+            turn_ctx.model_checkpoint_tool_active = {}
+            turn_ctx.model_checkpoint_tool_current = []
+            turn_ctx.model_checkpoint_tool_completed = []
+            turn_ctx.model_checkpoint_tool_cursor = [0]
+        turn_runner = TurnRunner(self, turn_ctx)
+'''
+    if run.count(context_anchor) != 1:
+        raise RuntimeError('Telegram checkpoint v1 d363 context anchor drift')
+    run = run.replace(context_anchor, context_replacement, 1)
+    start = run.index('    async def _run_agent_notify_long_running(')
+    end = run.index('    async def _run_agent_inner(', start)
+    native_notifier = run[start:end].replace("def _run_agent_notify_long_running(", "def _run_agent_native_notify_long_running(", 1)
+    run = run[:start] + native_notifier + _D363_NOTIFIER + run[end:]
+    interim_anchor = '''        def interim_assistant_cb(text: str, *, already_streamed: bool = False) -> None:
+            if not ctx._run_still_current():
+                return
+'''
+    interim_replacement = interim_anchor + '''            from gateway.run_turn import _redact_gateway_user_facing_secrets
+            if ctx.source.platform == Platform.TELEGRAM and str(text or '').strip():
+                checkpoint_text = _redact_gateway_user_facing_secrets(str(text)).strip()[:1200]
+                with ctx.model_checkpoint_lock:
+                    if not ctx.model_checkpoint_updates or ctx.model_checkpoint_updates[-1] != checkpoint_text:
+                        ctx.model_checkpoint_updates.append(checkpoint_text)
+            # Capture remains private when immediate commentary display is off.
+            if not want_interim_messages:
+                return
+'''
+    if runner.count(interim_anchor) != 1:
+        raise RuntimeError('Telegram checkpoint v1 d363 interim callback anchor drift')
+    runner = runner.replace(interim_anchor, interim_replacement, 1)
+    callback_anchor = '        agent.interim_assistant_callback = interim_assistant_cb if want_interim_messages else None\n'
+    callback_replacement = '''        agent.interim_assistant_callback = (
+            interim_assistant_cb
+            if (want_interim_messages or ctx.source.platform == Platform.TELEGRAM)
+            else None
+        )
+'''
+    if runner.count(callback_anchor) != 1:
+        raise RuntimeError('Telegram checkpoint v1 d363 callback assignment anchor drift')
+    runner = runner.replace(callback_anchor, callback_replacement, 1)
+    progress_anchor = '        ctx = self._ctx\n        # Failed subagent'
+    progress_replacement = '''        ctx = self._ctx
+        if ctx.source.platform == Platform.TELEGRAM:
+            from gateway.run_turn import _capture_telegram_tool_checkpoint
+            _capture_telegram_tool_checkpoint(ctx, event_type, tool_name, preview, kwargs)
+        # Failed subagent'''
+    if runner.count(progress_anchor) != 1:
+        raise RuntimeError('Telegram checkpoint v1 d363 progress callback anchor drift')
+    runner = runner.replace(progress_anchor, progress_replacement, 1)
+    # Upstream always attaches progress_callback; its body owns display gates.
+    _write_split({run_py: run, runner_py: runner}, '.bak-pre-telegram-model-checkpoints-v1')
+    return True
+
+def _write_split(patched, suffix):
+    backups = {p: Path(str(p) + suffix) for p in patched}
+    for p,b in backups.items(): shutil.copy2(p,b)
+    try:
+        for p,text in patched.items(): p.write_text(text, encoding='utf-8')
+    except Exception:
+        for p,b in backups.items(): shutil.copy2(b,p); b.unlink(missing_ok=True)
+        raise
+
+def patch_telegram_organic_long_running_checkpoints_v1(hermes_dir: Path) -> bool:
+    root = Path(hermes_dir)
+    if (root / 'gateway/run_turn.py').exists():
+        return _patch_split_d363(root)
+    return _patch_legacy_telegram_organic_long_running_checkpoints_v1(root)

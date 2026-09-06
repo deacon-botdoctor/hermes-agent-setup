@@ -1,0 +1,962 @@
+diff --git a/agent/anthropic_adapter.py b/agent/anthropic_adapter.py
+index 7815b1f..816f103 100644
+--- a/agent/anthropic_adapter.py
++++ b/agent/anthropic_adapter.py
+@@ -11,7 +11,7 @@ import subprocess
+ from contextlib import suppress
+ from typing import Any, Dict, List, Optional
+ 
+-from utils import normalize_proxy_env_vars
++from utils import base_url_hostname, normalize_proxy_env_vars
+ 
+ from agent.anthropic_credentials import _is_oauth_token
+ from agent.anthropic_endpoints import (
+@@ -549,7 +549,12 @@ def build_anthropic_kwargs(
+     if anthropic_tools:
+         kwargs["tools"] = anthropic_tools
+         if tool_choice == "none":
+-            kwargs.pop("tools", None)  # no Anthropic "none" — omit tools to prevent use
++            # Native Messages accepts an explicit answer-only choice only when the schema
++            # remains present.  Compatible endpoints retain omission because many reject it.
++            if base_url_hostname(base_url or "https://api.anthropic.com") == "api.anthropic.com":
++                kwargs["tool_choice"] = {"type": "none"}
++            else:
++                kwargs.pop("tools", None)
+         elif tool_choice is None or isinstance(tool_choice, str):
+             # A forced tool name goes through the OAuth normalizer too: every tools[] entry is
+             # mcp__-prefixed/aliased there, so the literal would leak and name a nonexistent tool.
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index 5bd41cc..fef70a5 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -1296,6 +1296,10 @@ class _LoopState:
+     # is set ONLY if it becomes the final response (#65919).
+     _pending_verification_response: Any = None
+     _pending_verification_response_previewed: bool = False
++    # HERMES_D363_TOOL_GUARDRAIL_ANSWER_v1: one post-halt answer attempt.
++    _guardrail_recovery_pending: bool = False
++    _guardrail_recovery_sent: bool = False
++    _guardrail_recovery_terminal: bool = False
+     # MoA guidance retained across a pre-API compression, rebased next iteration (no second fan-out).
+     pending_moa_prepared_request: Any = None
+     # Per-iteration slots.
+@@ -1476,7 +1480,7 @@ def run_conversation(
+             should_review_memory=s._should_review_memory,
+         )
+ 
+-    while (s.api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call:
++    while ((s.api_call_count < agent.max_iterations and agent.iteration_budget.remaining > 0) or agent._budget_grace_call or (s._guardrail_recovery_pending and not s._guardrail_recovery_sent)):
+         if _run_phase(begin_iteration, agent, s).action == "break":
+             break
+         _run_phase(prepare_iteration, agent, s)
+@@ -1490,7 +1494,7 @@ def run_conversation(
+             continue
+         _run_phase(announce_api_call, agent, s)
+ 
+-        s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, agent._api_max_retries
++        s.api_start_time, s.retry_count, s.max_retries = time.time(), 0, (1 if s._guardrail_recovery_pending else agent._api_max_retries)
+         s._retry, s.finish_reason, s.response, s.api_kwargs = TurnRetryState(), "stop", None, None
+         s.api_request_id = agent._current_api_request_id = f"{s.turn_id}:api:{s.api_call_count}"
+ 
+diff --git a/agent/tool_dispatch_helpers.py b/agent/tool_dispatch_helpers.py
+index f994ecf..b666eff 100644
+--- a/agent/tool_dispatch_helpers.py
++++ b/agent/tool_dispatch_helpers.py
+@@ -40,7 +40,6 @@ _PARALLEL_SAFE_TOOLS = frozenset({
+     "skills_list",
+     "vision_analyze",
+     "web_extract",
+-    "web_search",
+ })
+ 
+ # Filesystem tools admitted by path overlap: readers may share a subtree, a writer conflicts
+diff --git a/agent/tool_guardrails.py b/agent/tool_guardrails.py
+index 7a01869..37738f5 100644
+--- a/agent/tool_guardrails.py
++++ b/agent/tool_guardrails.py
+@@ -9,6 +9,7 @@ from __future__ import annotations
+ 
+ import hashlib
+ import json
++import re
+ from dataclasses import asdict, dataclass, field, fields
+ from typing import Any, Mapping
+ 
+@@ -70,6 +71,9 @@ _THRESHOLD_SOURCES: dict[str, tuple[str, str]] = {
+ _DEFAULT_MAX_WEB_SEARCHES_PER_TURN = 50
+ _DEFAULT_MAX_SUBAGENTS_PER_TURN = 50
+ 
++# HERMES_D363_TOOL_GUARDRAIL_ANSWER_v1: structural empty result limit.
++EMPTY_WEB_SEARCH_HALT_AFTER = 8
++
+ # Interactive surfaces plus bounded supervised task loops (subagent stopped by its parent;
+ # api_server has a live client) doing real edit -> re-run work keep the warn-only default.
+ _ATTENDED_PLATFORMS = frozenset({"cli", "tui", "desktop", "acp", "subagent", "api_server"})
+@@ -283,6 +287,7 @@ class ToolCallGuardrailController:
+     def reset_for_turn(self) -> None:
+         self._exact_failure_counts: dict[ToolCallSignature, int] = {}
+         self._same_tool_failure_counts: dict[str, int] = {}
++        self._empty_web_search_streak = 0
+         # signature -> a mutating call succeeded since its last failure
+         self._progress_since_failure: dict[ToolCallSignature, bool] = {}
+         self._no_progress: dict[ToolCallSignature, tuple[str, int]] = {}
+@@ -320,6 +325,8 @@ class ToolCallGuardrailController:
+         return decision
+ 
+     def before_call(self, tool_name: str, args: Mapping[str, Any] | None) -> ToolGuardrailDecision:
++        if self._halt_decision is not None and self._halt_decision.action == "halt":
++            return self._halt_decision
+         args = _coerce_args(args)
+         signature = ToolCallSignature.from_call(tool_name, args)
+         allow = ToolGuardrailDecision(tool_name=tool_name, signature=signature)
+@@ -347,6 +354,34 @@ class ToolCallGuardrailController:
+             failed, _ = classify_tool_failure(tool_name, result)
+         warnings = self.config.warnings_enabled
+ 
++        if tool_name == "web_search":
++            if not failed and _web_search_result_is_empty(result):
++                self._empty_web_search_streak += 1
++                empty_count = self._empty_web_search_streak
++                if empty_count >= EMPTY_WEB_SEARCH_HALT_AFTER:
++                    decision = ToolGuardrailDecision(
++                        action="halt", code="repeated_empty_web_search_halt",
++                        message=(
++                            f"web_search returned no results {empty_count} times in a row. "
++                            "Stop changing the query. Answer from evidence already collected, "
++                            "or name the missing fact if the evidence is insufficient."
++                        ),
++                        tool_name=tool_name, count=empty_count, signature=signature,
++                    )
++                    self._halt_decision = decision
++                    return decision
++                if warnings and empty_count >= self.config.same_tool_failure_warn_after:
++                    return ToolGuardrailDecision(
++                        action="warn", code="repeated_empty_web_search_warning",
++                        message=(
++                            f"web_search returned no results {empty_count} times in a row. "
++                            "Use evidence already collected or change to a non-search source."
++                        ),
++                        tool_name=tool_name, count=empty_count, signature=signature,
++                    )
++            else:
++                self._empty_web_search_streak = 0
++
+         if failed:
+             # An identical failing call is only a REPLAY if nothing landed in between;
+             # a mutation since the last identical failure restarts the exact-args streak.
+@@ -519,6 +554,24 @@ def _coerce_args(args: Mapping[str, Any] | None) -> Mapping[str, Any]:
+     return args if isinstance(args, Mapping) else {}
+ 
+ 
++def _web_search_result_is_empty(result: str | None) -> bool:
++    """True only for a structural, successful ``data.web: []`` result."""
++    if not result:
++        return False
++    payload = result.strip()
++    wrapped = re.fullmatch(
++        r'<untrusted_tool_result(?:\s+[^>]*)?>\s*(.*?)\s*</untrusted_tool_result>',
++        payload, flags=re.DOTALL,
++    )
++    if wrapped:
++        payload = wrapped.group(1)
++    parsed = safe_json_loads(payload)
++    if not isinstance(parsed, Mapping):
++        return False
++    data = parsed.get("data")
++    return isinstance(data, Mapping) and isinstance(data.get("web"), list) and not data["web"]
++
++
+ def _result_hash(result: str | None) -> str:
+     parsed = safe_json_loads(result or "")
+     return _sha256(_canonical_json(parsed) if parsed is not None else (result or ""))
+diff --git a/agent/turn_api_call.py b/agent/turn_api_call.py
+index 0aa3519..75b25b9 100644
+--- a/agent/turn_api_call.py
++++ b/agent/turn_api_call.py
+@@ -38,6 +38,7 @@ class ApiCallVerdict:
+     response: Any
+     thinking_spinner: Any
+     interrupted: Any
++    _guardrail_recovery_sent: Any
+ 
+ 
+ def _should_stream(agent: Any) -> bool:
+@@ -62,7 +63,7 @@ def perform_api_call(
+     agent: Any, *, api_kwargs: Any, _original_api_kwargs: Any, _llm_middleware_trace: Any,
+     _moa_prepared_request: Any, _retry: Any, thinking_spinner: Any, retry_count: Any,
+     api_call_count: Any, api_request_id: Any, effective_task_id: Any, turn_id: Any,
+-    interrupted: Any,
++    interrupted: Any, _guardrail_recovery_pending: Any, _guardrail_recovery_sent: Any,
+ ) -> ApiCallVerdict:
+     """Issue the request (see ``_should_stream`` for the streaming decision)."""
+     response = None
+@@ -70,16 +71,25 @@ def perform_api_call(
+     def _verdict(action: str) -> ApiCallVerdict:
+         return ApiCallVerdict(
+             action=action, response=response, thinking_spinner=thinking_spinner,
+-            interrupted=interrupted,
++            interrupted=interrupted, _guardrail_recovery_sent=_guardrail_recovery_sent,
+         )
+ 
+     def _stop_spinner():
+         nonlocal thinking_spinner
+         thinking_spinner = stop_thinking_spinner(agent, thinking_spinner)
+ 
+-    _use_streaming = _should_stream(agent)
++    _use_streaming = _should_stream(agent) and not _guardrail_recovery_pending
+ 
+     def _perform_api_call(next_api_kwargs):
++        nonlocal _guardrail_recovery_sent
++        if _guardrail_recovery_pending:
++            if _guardrail_recovery_sent:
++                raise RuntimeError("guardrail recovery attempted more than once")
++            # Execution middleware receives the regular schema for observability, but cannot
++            # restore an auto tool choice or stream this one final answer request.
++            from agent.turn_guardrail_recovery import shape_answer_only_request
++            next_api_kwargs = shape_answer_only_request(agent, next_api_kwargs)
++            _guardrail_recovery_sent = True
+         if agent.api_mode == "codex_responses":
+             next_api_kwargs = agent._get_transport().preflight_kwargs(
+                 next_api_kwargs, allow_stream=False, is_github_responses=agent._is_copilot_url(),
+diff --git a/agent/turn_api_error.py b/agent/turn_api_error.py
+index 13cd554..73dd2c8 100644
+--- a/agent/turn_api_error.py
++++ b/agent/turn_api_error.py
+@@ -45,6 +45,10 @@ class ApiErrorVerdict:
+     max_retries: Any
+     compression_attempts: Any
+     _provider_overflow_recovery_pending: Any
++    final_response: Any
++    _turn_exit_reason: Any
++    _guardrail_recovery_pending: Any
++    _guardrail_recovery_terminal: Any
+     result: Optional[Dict[str, Any]] = None
+ 
+ 
+@@ -54,6 +58,8 @@ def handle_api_error(
+     conversation_history: Any, approx_tokens: Any, retry_count: Any, max_retries: Any,
+     compression_attempts: Any, max_compression_attempts: Any, api_call_count: Any,
+     api_request_id: Any, api_start_time: Any, effective_task_id: Any, turn_id: Any,
++    final_response: Any, _turn_exit_reason: Any, _guardrail_recovery_pending: Any,
++    _guardrail_recovery_terminal: Any,
+ ) -> ApiErrorVerdict:
+     """Recover from ``api_error`` in the original order. Every fallback activation must leave
+     the retry loop with ``restart_with_rebuilt_messages`` armed (``"break"``) so the pre-API
+@@ -66,9 +72,22 @@ def handle_api_error(
+             active_system_prompt=active_system_prompt, conversation_history=conversation_history,
+             approx_tokens=approx_tokens, retry_count=retry_count, max_retries=max_retries,
+             compression_attempts=compression_attempts,
+-            _provider_overflow_recovery_pending=_provider_overflow_recovery_pending, result=result,
++            _provider_overflow_recovery_pending=_provider_overflow_recovery_pending,
++            final_response=final_response, _turn_exit_reason=_turn_exit_reason,
++            _guardrail_recovery_pending=_guardrail_recovery_pending,
++            _guardrail_recovery_terminal=_guardrail_recovery_terminal, result=result,
+         )
+ 
++    if _guardrail_recovery_pending:
++        # The final answer attempt is deliberately single-shot: a provider error must not
++        # enter credential rotation, retry, or fallback and thereby make another model call.
++        from agent.turn_guardrail_recovery import controlled_halt_text
++        final_response = controlled_halt_text(agent)
++        _turn_exit_reason = "guardrail_recovery_error"
++        _guardrail_recovery_pending = False
++        _guardrail_recovery_terminal = True
++        return _verdict("break")
++
+     # Stop spinner silently — retry status is buffered and only flushed when every
+     # retry+fallback is exhausted.
+     if thinking_spinner:
+diff --git a/agent/turn_api_request.py b/agent/turn_api_request.py
+index a77aa6c..ef0b416 100644
+--- a/agent/turn_api_request.py
++++ b/agent/turn_api_request.py
+@@ -96,6 +96,7 @@ def build_api_request(
+     system_message: Any, messages: Any, original_user_message: Any, approx_tokens: Any,
+     total_chars: Any, retry_count: Any, api_call_count: Any, api_request_id: Any,
+     api_start_time: Any, effective_task_id: Any, turn_id: Any,
++    _guardrail_recovery_pending: Any,
+ ) -> ApiRequestBuild:
+     """Assemble the attempt's request in the original order (every mutation happens BEFORE
+     middleware/hooks/debug dumps observe the payload)."""
+@@ -120,6 +121,9 @@ def build_api_request(
+         api_kwargs = agent._build_api_kwargs(api_messages)
+     else:
+         api_kwargs = agent._build_api_kwargs(api_messages, tools_for_api=tools_for_api)
++    if _guardrail_recovery_pending:
++        from agent.turn_guardrail_recovery import shape_answer_only_request
++        api_kwargs = shape_answer_only_request(agent, api_kwargs)
+     # Surrogate chokepoint: tool descriptions, extra_body and kwargs strings can carry
+     # invalid code points (HTTP 400). One walk makes the payload json.dumps()-safe.
+     # Outbound-request surrogate chokepoint (#50959): the messages were scrubbed above, but the rest of the
+@@ -155,6 +159,9 @@ def build_api_request(
+             api_call_count=api_call_count,
+         )
+         api_kwargs = _llm_request_mw.payload
++        if _guardrail_recovery_pending:
++            from agent.turn_guardrail_recovery import shape_answer_only_request
++            api_kwargs = shape_answer_only_request(agent, api_kwargs)
+         _original_api_kwargs = _llm_request_mw.original_payload
+         _llm_middleware_trace = _llm_request_mw.trace
+     except Exception:
+diff --git a/agent/turn_final_response.py b/agent/turn_final_response.py
+index 4907d6b09b..1096d8b0fd 100644
+--- a/agent/turn_final_response.py
++++ b/agent/turn_final_response.py
+@@ -40,6 +40,8 @@ class FinalResponseVerdict:
+     length_continue_retries: Any
+     _pending_verification_response: Any
+     _pending_verification_response_previewed: Any
++    _guardrail_recovery_pending: Any
++    _guardrail_recovery_terminal: Any
+     result: Optional[Dict[str, Any]] = None
+ 
+ 
+@@ -50,6 +52,7 @@ def finish_text_response(
+     _preflight_compression_blocked: Any, codex_ack_continuations: Any,
+     truncated_response_parts: Any, length_continue_retries: Any,
+     _pending_verification_response: Any, _pending_verification_response_previewed: Any,
++    _guardrail_recovery_pending: Any, _guardrail_recovery_terminal: Any,
+ ) -> FinalResponseVerdict:
+     """Finish (or defer) a text-only assistant response in the original guard order. Every
+     continuation path sets ``final_response = None`` so an acknowledgment never suppresses
+@@ -69,10 +72,39 @@ def finish_text_response(
+             length_continue_retries=length_continue_retries,
+             _pending_verification_response=_pending_verification_response,
+             _pending_verification_response_previewed=_pending_verification_response_previewed,
+-            result=result,
++            _guardrail_recovery_pending=_guardrail_recovery_pending,
++            _guardrail_recovery_terminal=_guardrail_recovery_terminal, result=result,
+         )
+ 
+     final_response = assistant_message.content or ""
++    if _guardrail_recovery_pending:
++        # This terminal answer cannot start another tool round, continuation, or stop-gate retry.
++        decision = agent._tool_guardrail_halt_decision
++        visible = agent._strip_think_blocks(final_response).strip()
++        if getattr(assistant_message, "tool_calls", None) or not visible:
++            final_response = agent._toolguard_controlled_halt_response(decision)
++            _turn_exit_reason = "guardrail_recovery_refused"
++        else:
++            final_msg = agent._build_assistant_message(assistant_message, finish_reason)
++            append_message(messages, final_msg)
++            agent._session_messages = messages
++            try:
++                agent._flush_messages_to_session_db(messages, conversation_history)
++            except Exception:
++                logger.warning("guardrail recovery final flush failed", exc_info=True)
++            final_response = visible
++            _turn_exit_reason = "guardrail_recovery_answer"
++            if finish_reason in {"length", "incomplete"}:
++                _turn_exit_reason = "guardrail_recovery_incomplete"
++            if agent.stream_delta_callback:
++                try:
++                    agent.stream_delta_callback(visible)
++                    agent.stream_delta_callback(None)
++                except Exception:
++                    pass
++        _guardrail_recovery_pending = False
++        _guardrail_recovery_terminal = True
++        return _verdict("break")
+     # Unmute: _mute_post_response from a housekeeping tool turn must not silence
+     # empty-response warnings on the final response path.
+     agent._mute_post_response = False
+diff --git a/agent/turn_finalizer.py b/agent/turn_finalizer.py
+index 85074870f5..db3fe980a2 100644
+--- a/agent/turn_finalizer.py
++++ b/agent/turn_finalizer.py
+@@ -448,10 +448,14 @@ def finalize_turn(
+         logger=logger,
+     )
+ 
++    successful_guardrail_recovery = (
++        str(_turn_exit_reason) == "guardrail_recovery_answer" and final_response is not None and not failed
++    )
+     completed = (
+         final_response is not None
+         and not failed
+-        and (api_call_count < agent.max_iterations or str(_turn_exit_reason).startswith("text_response("))
++        and str(_turn_exit_reason) not in {"guardrail_recovery_incomplete", "guardrail_recovery_error", "guardrail_recovery_refused", "guardrail_halt"}
++        and (api_call_count < agent.max_iterations or str(_turn_exit_reason).startswith("text_response(") or successful_guardrail_recovery)
+     )
+ 
+     _rollback_interrupted_preflight_display(agent, interrupted)
+@@ -541,7 +545,7 @@ def finalize_turn(
+         "completed": completed,
+         "turn_exit_reason": _turn_exit_reason,
+         "failed": failed,
+-        "partial": False,  # True only when stopped due to invalid tool calls
++        "partial": str(_turn_exit_reason) == "guardrail_recovery_incomplete",
+         "interrupted": interrupted,
+         "response_transformed": _response_transformed,
+         "pre_transform_response": _pre_transform_response,
+diff --git a/agent/turn_guardrail_recovery.py b/agent/turn_guardrail_recovery.py
+new file mode 100644
+index 0000000..b1da024
+--- /dev/null
++++ b/agent/turn_guardrail_recovery.py
+@@ -0,0 +1,35 @@
++"""One-shot answer-only recovery helpers for a latched tool guardrail halt."""
++from __future__ import annotations
++from typing import Any
++
++def shape_answer_only_request(agent: Any, api_kwargs: Any) -> dict:
++    """Return a request that keeps provider-required tool schemas but cannot authorize a call.
++
++    Call before observability hooks and again inside the execution-middleware callback: plugins
++    may observe the normal schema, but cannot restore auto tool selection or streaming.
++    """
++    payload = dict(api_kwargs)
++    if agent.api_mode == "bedrock_converse":
++        # Converse has no no-tool choice. Preserve history-required toolConfig;
++        # the existing recovery latch refuses any returned call before dispatch.
++        # Nonstreaming is selected by perform_api_call, not a Converse wire key.
++        for key in ("tool_choice", "parallel_tool_calls", "stream", "functions", "function_call"):
++            payload.pop(key, None)
++        return payload
++    if agent.api_mode == "anthropic_messages":
++        # Native Anthropic requires the schema to accompany ``tool_choice: none``. Compatible
++        # Messages endpoints retain their established omission behavior because many reject it.
++        from utils import base_url_hostname
++        if base_url_hostname(getattr(agent, "base_url", "") or "https://api.anthropic.com") == "api.anthropic.com":
++            payload["tool_choice"] = {"type": "none"}
++        else:
++            payload.pop("tools", None)
++            payload.pop("tool_choice", None)
++    else:
++        payload["tool_choice"] = "none"
++    payload["parallel_tool_calls"] = False
++    payload["stream"] = False
++    return payload
++
++def controlled_halt_text(agent: Any) -> str:
++    return agent._toolguard_controlled_halt_response(agent._tool_guardrail_halt_decision)
+diff --git a/agent/turn_iteration_prep.py b/agent/turn_iteration_prep.py
+index 1b49177..a26439a 100644
+--- a/agent/turn_iteration_prep.py
++++ b/agent/turn_iteration_prep.py
+@@ -301,13 +301,14 @@ class RetryRestartVerdict:
+     api_call_count: Any
+     _preflight_compression_blocked: Any
+     _turn_exit_reason: Any
++    _guardrail_recovery_terminal: Any
+ 
+ 
+ def apply_retry_restarts(
+     agent: Any, *, _retry: Any, response: Any, interrupted: Any, messages: Any,
+     conversation_history: Any, user_message: Any, api_kwargs: Any, current_turn_user_idx: Any,
+     final_response: Any, retry_count: Any, api_call_count: Any, length_continue_retries: Any,
+-    _preflight_compression_blocked: Any, _turn_exit_reason: Any,
++    _preflight_compression_blocked: Any, _turn_exit_reason: Any, _guardrail_recovery_terminal: Any,
+ ) -> RetryRestartVerdict:
+     """Consume the ``TurnRetryState`` restart flags after the retry loop, in the original
+     priority order. Refunds the iteration budget/count for restarts that produced no valid
+@@ -323,8 +324,12 @@ def apply_retry_restarts(
+             final_response=final_response, retry_count=retry_count, api_call_count=api_call_count,
+             _preflight_compression_blocked=_preflight_compression_blocked,
+             _turn_exit_reason=_turn_exit_reason,
++            _guardrail_recovery_terminal=_guardrail_recovery_terminal,
+         )
+ 
++    if _guardrail_recovery_terminal:
++        return _verdict("break")
++
+     if _retry.restart_with_redirected_messages:
+         # Cancelled request produced no valid assistant item: reuse the same logical
+         # iteration after the outer loop appends partial context + correction.
+diff --git a/agent/turn_response_check.py b/agent/turn_response_check.py
+index 07dab60..0a3acfa 100644
+--- a/agent/turn_response_check.py
++++ b/agent/turn_response_check.py
+@@ -39,6 +39,10 @@ class ResponseCheckVerdict:
+     _preflight_compression_blocked: Any
+     _last_preflight_pressure: Any
+     api_duration: Any
++    final_response: Any
++    _turn_exit_reason: Any
++    _guardrail_recovery_pending: Any
++    _guardrail_recovery_terminal: Any
+     result: Optional[Dict[str, Any]] = None
+ 
+ 
+@@ -88,7 +92,8 @@ def check_api_response(
+     max_compression_attempts: Any, length_continue_retries: Any, truncated_response_parts: Any,
+     truncated_tool_call_retries: Any, current_turn_user_idx: Any, api_call_count: Any,
+     api_request_id: Any, api_start_time: Any, effective_task_id: Any, turn_id: Any,
+-    _preflight_compression_blocked: Any, _last_preflight_pressure: Any,
++    _preflight_compression_blocked: Any, _last_preflight_pressure: Any, _guardrail_recovery_pending: Any,
++    final_response: Any, _turn_exit_reason: Any, _guardrail_recovery_terminal: Any,
+ ) -> ResponseCheckVerdict:
+     """Verify ``response`` in the original order. The retry buffer is NOT cleared on success
+     (bytes back != usable content); ``_preflight_compression_blocked``/``_last_preflight_pressure``
+@@ -105,7 +110,9 @@ def check_api_response(
+             truncated_tool_call_retries=truncated_tool_call_retries,
+             _preflight_compression_blocked=_preflight_compression_blocked,
+             _last_preflight_pressure=_last_preflight_pressure, api_duration=api_duration,
+-            result=result,
++            final_response=final_response, _turn_exit_reason=_turn_exit_reason,
++            _guardrail_recovery_pending=_guardrail_recovery_pending,
++            _guardrail_recovery_terminal=_guardrail_recovery_terminal, result=result,
+         )
+ 
+     api_duration = time.time() - api_start_time
+@@ -121,6 +128,13 @@ def check_api_response(
+         logging.debug(f"API Response received - Model: {resp_model}, Usage: {response.usage if hasattr(response, 'usage') else 'N/A'}")
+ 
+     response_invalid, error_details = validate_response_shape(agent, response)
++    if response_invalid and _guardrail_recovery_pending:
++        from agent.turn_guardrail_recovery import controlled_halt_text
++        final_response = controlled_halt_text(agent)
++        _turn_exit_reason = "guardrail_recovery_refused"
++        _guardrail_recovery_pending = False
++        _guardrail_recovery_terminal = True
++        return _verdict("break")
+     if response_invalid:
+         _iv = retry_invalid_response(
+             agent, response=response, error_details=error_details, _retry=_retry,
+@@ -143,6 +157,14 @@ def check_api_response(
+     finish_reason = _derive_finish_reason(agent, response, messages)
+ 
+     # HTTP-200 refusals are deterministic: one fallback try, else return the refusal.
++    if finish_reason == "content_filter" and _guardrail_recovery_pending:
++        from agent.turn_guardrail_recovery import controlled_halt_text
++        final_response = controlled_halt_text(agent)
++        _turn_exit_reason = "guardrail_recovery_refused"
++        _guardrail_recovery_pending = False
++        _guardrail_recovery_terminal = True
++        return _verdict("break")
++
+     if finish_reason == "content_filter":
+         _rv = handle_content_policy_refusal(
+             agent, response, _retry, thinking_spinner=thinking_spinner, messages=messages,
+@@ -160,7 +182,7 @@ def check_api_response(
+         compression_attempts = 0
+         return _verdict("break")
+ 
+-    if finish_reason == "length":
++    if finish_reason == "length" and not _guardrail_recovery_pending:
+         _tv = recover_from_truncation(
+             agent, response, finish_reason, _retry, messages=messages,
+             conversation_history=conversation_history, api_kwargs=api_kwargs,
+diff --git a/agent/turn_response_intake.py b/agent/turn_response_intake.py
+index 8c4b594..3940a5f 100644
+--- a/agent/turn_response_intake.py
++++ b/agent/turn_response_intake.py
+@@ -115,7 +115,7 @@ def _relay_thinking(agent: Any, content: str) -> None:
+ def normalize_model_response(
+     agent: Any, *, response: Any, messages: Any, api_messages: Any, conversation_history: Any,
+     api_call_count: Any, api_duration: Any, api_start_time: Any, api_request_id: Any,
+-    effective_task_id: Any, turn_id: Any,
++    effective_task_id: Any, turn_id: Any, _guardrail_recovery_pending: Any,
+ ) -> ResponseIntakeVerdict:
+     """Normalize ``response`` into ``assistant_message`` (str content, never dict/list) and run
+     the post-response hooks and continuation guards, in the original order."""
+@@ -150,6 +150,9 @@ def normalize_model_response(
+     if content and agent.tool_progress_callback:
+         _relay_thinking(agent, content)
+ 
++    if _guardrail_recovery_pending:
++        return _verdict("fallthrough")
++
+     # Incomplete <REASONING_SCRATCHPAD> (opened, never closed): the model ran out of
+     # output tokens mid-reasoning — retry up to 2 times, then save as partial.
+     if has_incomplete_scratchpad(content or ""):
+diff --git a/agent/turn_tool_round.py b/agent/turn_tool_round.py
+index daa009a..9a2758a 100644
+--- a/agent/turn_tool_round.py
++++ b/agent/turn_tool_round.py
+@@ -39,6 +39,7 @@ class ToolRoundVerdict:
+     failed: Any
+     _turn_exit_reason: Any
+     truncated_tool_call_retries: Any
++    _guardrail_recovery_pending: Any
+     result: Optional[Dict[str, Any]] = None
+ 
+ 
+@@ -47,7 +48,7 @@ def run_tool_round(
+     conversation_history: Any, api_call_count: Any, effective_task_id: Any, user_message: Any,
+     system_message: Any, active_system_prompt: Any, compression_attempts: Any,
+     max_compression_attempts: Any, final_response: Any, failed: Any, _turn_exit_reason: Any,
+-    truncated_tool_call_retries: Any,
++    truncated_tool_call_retries: Any, _guardrail_recovery_pending: Any,
+ ) -> ToolRoundVerdict:
+     """Execute one tool round in the exact original order. Persist-before-execute is a
+     durability invariant: resume must see the executed block if a destructive tool restarts
+@@ -60,9 +61,23 @@ def run_tool_round(
+             action=action, messages=messages, conversation_history=conversation_history,
+             active_system_prompt=active_system_prompt, compression_attempts=compression_attempts,
+             final_response=final_response, failed=failed, _turn_exit_reason=_turn_exit_reason,
+-            truncated_tool_call_retries=truncated_tool_call_retries, result=result,
++            truncated_tool_call_retries=truncated_tool_call_retries,
++            _guardrail_recovery_pending=_guardrail_recovery_pending, result=result,
+         )
+ 
++    if _guardrail_recovery_pending:
++        # The sole recovery request may return text, never a fresh side effect. Reject before
++        # persistence and dispatch so no call can leak past the guardrail latch.
++        decision = agent._tool_guardrail_halt_decision
++        final_response = agent._toolguard_controlled_halt_response(decision)
++        _turn_exit_reason = "guardrail_recovery_refused"
++        _guardrail_recovery_pending = False
++        if agent.stream_delta_callback:
++            with suppress(Exception):
++                agent.stream_delta_callback(final_response)
++                agent.stream_delta_callback(None)
++        return _verdict("break")
++
+     if not agent.quiet_mode:
+         agent._vprint(f"{agent.log_prefix}🔧 Processing {len(assistant_message.tool_calls)} tool call(s)...")
+ 
+@@ -161,19 +176,14 @@ def run_tool_round(
+ 
+     if agent._tool_guardrail_halt_decision is not None:
+         decision = agent._tool_guardrail_halt_decision
+-        _turn_exit_reason = "guardrail_halt"
+-        final_response = agent._toolguard_controlled_halt_response(decision)
+-        agent._emit_status(f"⚠️ Tool guardrail halted {decision.tool_name}: {decision.code}")
+-        append_message(messages, {"role": "assistant", "content": final_response})
+-        # Emit the halt so it isn't mistaken for a crash; the stream callback is still
+-        # alive, so SSE/TUI clients see the explanation.
+-        if final_response:
+-            agent._safe_print(f"\n{final_response}\n")
+-            if agent.stream_delta_callback:
+-                with suppress(Exception):
+-                    agent.stream_delta_callback(final_response)
+-                    agent.stream_delta_callback(None)
+-        return _verdict("break")
++        # The already-persisted tool rows are the only evidence available to the one
++        # answer-only recovery request.  Do not emit the template or dispatch another tool.
++        _guardrail_recovery_pending = True
++        # The existing grace mechanism admits exactly one request even when the normal budget is spent.
++        agent._budget_grace_call = True
++        _turn_exit_reason = "guardrail_recovery_pending"
++        agent._emit_status(f"⚠️ Tool guardrail halted {decision.tool_name}: {decision.code}; finishing from collected results")
++        return _verdict("continue")
+ 
+     # Reset per-turn retry counters so one truncation can't poison the turn.
+     truncated_tool_call_retries = 0
+diff --git a/tests/agent/test_anthropic_adapter.py b/tests/agent/test_anthropic_adapter.py
+index 3ded294..79428e1 100644
+--- a/tests/agent/test_anthropic_adapter.py
++++ b/tests/agent/test_anthropic_adapter.py
+@@ -1892,3 +1892,22 @@ class TestFinalPayloadHasNoBlankTextBlocks:
+         )
+         image_blocks = [b for b in tool_result_block["content"] if b.get("type") == "image"]
+         assert len(image_blocks) == 1
++
++class TestAnswerOnlyToolChoice:
++    def test_native_anthropic_keeps_schema_for_answer_only_choice(self):
++        kwargs = build_anthropic_kwargs(
++            "claude-sonnet-4-6", [{"role": "user", "content": "answer"}],
++            [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
++            256, None, tool_choice="none", base_url="https://api.anthropic.com/v1",
++        )
++        assert kwargs["tool_choice"] == {"type": "none"}
++        assert kwargs["tools"]
++
++    def test_compatible_anthropic_omits_tools_for_answer_only_choice(self):
++        kwargs = build_anthropic_kwargs(
++            "claude-sonnet-4-6", [{"role": "user", "content": "answer"}],
++            [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object"}}}],
++            256, None, tool_choice="none", base_url="https://compat.example/v1",
++        )
++        assert "tools" not in kwargs
++        assert "tool_choice" not in kwargs
+diff --git a/tests/agent/test_tool_dispatch_helpers.py b/tests/agent/test_tool_dispatch_helpers.py
+index 223730d..edee15f 100644
+--- a/tests/agent/test_tool_dispatch_helpers.py
++++ b/tests/agent/test_tool_dispatch_helpers.py
+@@ -310,3 +310,12 @@ class TestElisionNoticeWiring:
+         assert content.index("hermes note") < content.index("</untrusted_tool_result>")
+         # Exactly one notice.
+         assert content.count("hermes note") == 1
++
++
++def test_web_search_is_sequential_while_unrelated_safe_reads_stay_parallel():
++    from types import SimpleNamespace
++    from agent.tool_dispatch_helpers import _plan_tool_batch_segments
++    def call(name):
++        return SimpleNamespace(function=SimpleNamespace(name=name, arguments="{}"))
++    assert _plan_tool_batch_segments([call("web_search")])[0][0] == "sequential"
++    assert _plan_tool_batch_segments([call("skill_view"), call("vision_analyze")])[0][0] == "parallel"
+diff --git a/tests/agent/test_tool_guardrails.py b/tests/agent/test_tool_guardrails.py
+index 63ae5debd3..b0924d0bcb 100644
+--- a/tests/agent/test_tool_guardrails.py
++++ b/tests/agent/test_tool_guardrails.py
+@@ -3,6 +3,7 @@
+ import json
+ 
+ from agent.tool_guardrails import (
++    EMPTY_WEB_SEARCH_HALT_AFTER,
+     ToolCallGuardrailConfig,
+     ToolCallGuardrailController,
+     ToolCallSignature,
+@@ -376,3 +377,57 @@ def test_supervised_task_platforms_keep_warning_only_default():
+     for platform in ("telegram", "discord", "cron", "kanban"):
+         cfg = ToolCallGuardrailConfig.from_mapping({}, platform=platform)
+         assert cfg.hard_stop_enabled is True, platform
++
++
++def test_varied_structural_empty_web_searches_latch_and_stop_later_calls():
++    controller = ToolCallGuardrailController()
++    empty = json.dumps({"success": True, "data": {"web": []}})
++    for index in range(EMPTY_WEB_SEARCH_HALT_AFTER):
++        assert controller.before_call("web_search", {"query": f"different-{index}"}).action == "allow"
++        decision = controller.after_call("web_search", {"query": f"different-{index}"}, empty, failed=False)
++    assert decision.code == "repeated_empty_web_search_halt"
++    assert controller.before_call("terminal", {"command": "echo must-not-run"}) is decision
++
++
++def test_wrapped_empty_web_search_is_structural_and_nonempty_resets_streak():
++    controller = ToolCallGuardrailController()
++    wrapped = '<untrusted_tool_result source="web_search">{"data":{"web":[]}}</untrusted_tool_result>'
++    for index in range(3):
++        controller.after_call("web_search", {"query": str(index)}, wrapped, failed=False)
++    controller.after_call("web_search", {"query": "success"}, json.dumps({"data": {"web": [{"url": "https://example.invalid"}]}}), failed=False)
++    for index in range(EMPTY_WEB_SEARCH_HALT_AFTER - 1):
++        decision = controller.after_call("web_search", {"query": f"after-{index}"}, wrapped, failed=False)
++    assert decision.action != "halt"
++
++
++def test_answer_only_shaping_preserves_bedrock_history_and_omits_foreign_controls():
++    from agent.turn_guardrail_recovery import shape_answer_only_request
++
++    from types import SimpleNamespace
++    agent = SimpleNamespace(api_mode="bedrock_converse")
++    tool_config = {"tools": [{"toolSpec": {"name": "web_search"}}]}
++    messages = [
++        {"role": "assistant", "content": [{"toolUse": {"toolUseId": "call1", "name": "web_search", "input": {}}}]},
++        {"role": "user", "content": [{"toolResult": {"toolUseId": "call1", "content": [{"text": "No results"}]}}]},
++    ]
++    request = {
++        "toolConfig": tool_config, "messages": messages,
++        "tool_choice": "auto", "parallel_tool_calls": True, "stream": True,
++        "functions": [], "function_call": "auto",
++    }
++    payload = shape_answer_only_request(agent, request)
++    assert payload == {"toolConfig": tool_config, "messages": messages}
++    assert request["tool_choice"] == "auto" and request["stream"] is True
++
++
++def test_answer_only_shaping_keeps_compat_anthropic_tool_omission():
++    from types import SimpleNamespace
++    from agent.turn_guardrail_recovery import shape_answer_only_request
++
++    payload = shape_answer_only_request(
++        SimpleNamespace(api_mode="anthropic_messages", base_url="https://compat.example/v1"),
++        {"tools": [{"name": "lookup"}], "tool_choice": "auto", "stream": True},
++    )
++    assert "tools" not in payload
++    assert "tool_choice" not in payload
++    assert payload["stream"] is False
+diff --git a/tests/run_agent/test_tool_call_guardrail_runtime.py b/tests/run_agent/test_tool_call_guardrail_runtime.py
+index a88cfcdf4b..4c96755b84 100644
+--- a/tests/run_agent/test_tool_call_guardrail_runtime.py
++++ b/tests/run_agent/test_tool_call_guardrail_runtime.py
+@@ -443,7 +443,7 @@ def test_guardrail_halt_emits_final_response_through_stream_delta_callback():
+     ):
+         result = agent.run_conversation("search repeatedly")
+ 
+-    assert result["turn_exit_reason"] == "guardrail_halt"
++    assert result["turn_exit_reason"] == "guardrail_recovery_refused"
+     halt_text = result["final_response"]
+     assert "stopped retrying" in halt_text
+ 
+@@ -454,3 +454,198 @@ def test_guardrail_halt_emits_final_response_through_stream_delta_callback():
+     assert halt_text in text_deltas, (
+         f"halt message was never streamed; callback only saw {deltas!r}"
+     )
++
++
++@pytest.mark.parametrize("finish_reason", ["stop", "length", "incomplete"])
++def test_empty_search_halt_gets_exactly_one_answer_only_grace_call(finish_reason):
++    agent = _make_agent("web_search", max_iterations=8)
++    tool_rounds = [
++        _mock_response(
++            content="", finish_reason="tool_calls",
++            tool_calls=[_mock_tool_call("web_search", json.dumps({"query": f"varied-{i}"}), f"c{i}")],
++        )
++        for i in range(8)
++    ]
++    agent.client.chat.completions.create.side_effect = [*tool_rounds, _mock_response("Collected evidence is insufficient.", finish_reason=finish_reason)]
++    agent._disable_streaming = True
++    dispatched = []
++
++    def empty_search(name, args, task_id, **kwargs):
++        dispatched.append((name, args["query"]))
++        return json.dumps({"success": True, "data": {"web": []}})
++
++    with (
++        patch("model_tools.handle_function_call", side_effect=empty_search),
++        patch.object(agent, "_persist_session"),
++        patch.object(agent, "_save_trajectory"),
++        patch.object(agent, "_cleanup_task_resources"),
++    ):
++        result = agent.run_conversation("find evidence")
++
++    assert len(dispatched) == 8
++    assert result["final_response"] == "Collected evidence is insufficient."
++    truncated = finish_reason in {"length", "incomplete"}
++    assert result["turn_exit_reason"] == ("guardrail_recovery_incomplete" if truncated else "guardrail_recovery_answer")
++    assert result["completed"] is not truncated
++    assert result["partial"] is truncated
++    assert agent.client.chat.completions.create.call_count == 9
++    last_kwargs = agent.client.chat.completions.create.call_args.kwargs
++    assert last_kwargs["tool_choice"] == "none"
++    assert last_kwargs["parallel_tool_calls"] is False
++    assert last_kwargs["stream"] is False
++
++
++def _eight_empty_search_rounds():
++    return [
++        _mock_response(
++            content="", finish_reason="tool_calls",
++            tool_calls=[_mock_tool_call("web_search", json.dumps({"query": f"varied-{i}"}), f"c{i}")],
++        )
++        for i in range(8)
++    ]
++
++
++def _empty_web_result(name, args, task_id, **kwargs):
++    return json.dumps({"success": True, "data": {"web": []}})
++
++
++def test_guardrail_recovery_provider_error_never_retries_or_falls_back():
++    agent = _make_agent("web_search", max_iterations=20)
++    agent._disable_streaming = True
++    agent._fallback_chain = [("fallback", "fallback-key", "https://fallback.invalid")]
++    agent.client.chat.completions.create.side_effect = [*_eight_empty_search_rounds(), RuntimeError("provider unavailable")]
++
++    with (
++        patch("model_tools.handle_function_call", side_effect=_empty_web_result) as dispatch,
++        patch.object(agent, "_persist_session"),
++        patch.object(agent, "_save_trajectory"),
++        patch.object(agent, "_cleanup_task_resources"),
++    ):
++        result = agent.run_conversation("find evidence")
++
++    assert dispatch.call_count == 8
++    assert agent.client.chat.completions.create.call_count == 9
++    assert agent._fallback_index == 0
++    assert result["turn_exit_reason"] == "guardrail_recovery_error"
++    assert "stopped retrying" in result["final_response"]
++    assert result["completed"] is False
++
++
++def test_guardrail_recovery_request_and_execution_middleware_cannot_restore_tools():
++    agent = _make_agent("web_search", max_iterations=8)
++    agent._disable_streaming = True
++    agent.client.chat.completions.create.side_effect = [
++        *_eight_empty_search_rounds(), _mock_response("Evidence is incomplete."),
++    ]
++    observed = []
++
++    def malicious_request(payload, **_kwargs):
++        changed = dict(payload)
++        changed.update(tool_choice="auto", parallel_tool_calls=True, stream=True)
++        return SimpleNamespace(payload=changed, original_payload=dict(payload), trace=[])
++
++    def malicious_execution(payload, callback, **_kwargs):
++        changed = dict(payload)
++        changed.update(tool_choice="required", parallel_tool_calls=True, stream=True)
++        observed.append(changed)
++        return callback(changed)
++
++    with (
++        patch("model_tools.handle_function_call", side_effect=_empty_web_result),
++        patch("hermes_cli.middleware.apply_llm_request_middleware", side_effect=malicious_request),
++        patch("hermes_cli.middleware.run_llm_execution_middleware", side_effect=malicious_execution),
++        patch.object(agent, "_persist_session"),
++        patch.object(agent, "_save_trajectory"),
++        patch.object(agent, "_cleanup_task_resources"),
++    ):
++        result = agent.run_conversation("find evidence")
++
++    assert result["turn_exit_reason"] == "guardrail_recovery_answer"
++    # The execution middleware did attempt to reopen the request; the callback fence
++    # below is the authoritative payload that reaches the provider.
++    assert observed[-1]["tool_choice"] == "required"
++    assert observed[-1]["parallel_tool_calls"] is True
++    assert observed[-1]["stream"] is True
++    last_kwargs = agent.client.chat.completions.create.call_args.kwargs
++    assert last_kwargs["tool_choice"] == "none"
++    assert last_kwargs["parallel_tool_calls"] is False
++    assert last_kwargs["stream"] is False
++
++
++@pytest.mark.parametrize("recovery_response", [
++    _mock_response("", finish_reason="content_filter"),
++    _mock_response("", finish_reason="tool_calls", tool_calls=[_mock_tool_call("web_search", '{"query":"forbidden"}', "after-halt")]),
++])
++def test_guardrail_recovery_rejects_refusal_or_tool_response_without_fallback_or_dispatch(recovery_response):
++    agent = _make_agent("web_search", max_iterations=20)
++    agent._disable_streaming = True
++    agent._fallback_chain = [("fallback", "fallback-key", "https://fallback.invalid")]
++    agent.client.chat.completions.create.side_effect = [*_eight_empty_search_rounds(), recovery_response]
++
++    with (
++        patch("model_tools.handle_function_call", side_effect=_empty_web_result) as dispatch,
++        patch.object(agent, "_persist_session"),
++        patch.object(agent, "_save_trajectory"),
++        patch.object(agent, "_cleanup_task_resources"),
++    ):
++        result = agent.run_conversation("find evidence")
++
++    assert dispatch.call_count == 8
++    assert agent.client.chat.completions.create.call_count == 9
++    assert agent._fallback_index == 0
++    assert result["turn_exit_reason"] == "guardrail_recovery_refused"
++    assert "stopped retrying" in result["final_response"]
++    assert result["completed"] is False
++
++
++def test_guardrail_bedrock_recovery_reaches_valid_raw_converse(monkeypatch):
++    from agent.turn_guardrail_recovery import shape_answer_only_request
++    from agent import bedrock_adapter, chat_completion_helpers
++    from botocore.session import Session
++    from botocore.validate import validate_parameters
++    messages = [
++        {'role': 'user', 'content': 'Search then answer'},
++        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'call1', 'type': 'function', 'function': {'name': 'web_search', 'arguments': '{"query":"topic"}'}}]},
++        {'role': 'tool', 'tool_call_id': 'call1', 'content': 'No results'},
++        {'role': 'user', 'content': 'Answer from collected evidence; do not call tools'},
++    ]
++    request = bedrock_adapter.build_converse_kwargs('anthropic.claude-3-haiku-20240307-v1:0', messages, _make_tool_defs('web_search'))
++    original_config = request['toolConfig']
++    agent = SimpleNamespace(api_mode='bedrock_converse')
++    # Both observability and execution middleware can replace kwargs. The final
++    # shaping seam must remove their foreign fields before the actual SDK call.
++    request = shape_answer_only_request(agent, request)
++    request.update(tool_choice='auto', parallel_tool_calls=True, stream=True, functions=[], function_call='auto')
++    request = shape_answer_only_request(agent, request)
++    captured = []
++    class Client:
++        def converse(self, **kwargs):
++            validate_parameters(kwargs, Session().get_service_model('bedrock-runtime').operation_model('Converse').input_shape)
++            captured.append(kwargs)
++            return {'output': {'message': {'role': 'assistant', 'content': [{'text': 'No supported answer found.'}]}}, 'stopReason': 'end_turn', 'usage': {'inputTokens': 1, 'outputTokens': 1}}
++        def converse_stream(self, **kwargs):
++            pytest.fail('recovery must never stream')
++    monkeypatch.setattr(bedrock_adapter, '_get_bedrock_runtime_client', lambda region: Client())
++    response = chat_completion_helpers._dispatch_nonstreaming_api_request(agent, request, make_client=lambda *a, **k: pytest.fail('no OpenAI normalization/client'))
++    assert len(captured) == 1 and captured[0]['toolConfig'] == original_config
++    assert response.choices[0].message.content == 'No supported answer found.'
++
++
++def test_guardrail_bedrock_returned_tool_is_refused_before_dispatch():
++    import inspect
++    from agent.turn_tool_round import run_tool_round
++    agent = SimpleNamespace(
++        api_mode='bedrock_converse', _tool_guardrail_halt_decision=object(),
++        _toolguard_controlled_halt_response=lambda decision: 'Controlled halt',
++        stream_delta_callback=None,
++        _execute_tool_calls=lambda *a, **k: pytest.fail('recovery tool must not run'),
++        _persist_session=lambda *a, **k: pytest.fail('recovery tool must not persist'),
++    )
++    arguments = {key: None for key in inspect.signature(run_tool_round).parameters if key != 'agent'}
++    messages = []; history = []
++    arguments.update(_guardrail_recovery_pending=True, messages=messages, conversation_history=history,
++                     assistant_message=SimpleNamespace(tool_calls=[SimpleNamespace(function=SimpleNamespace(name='web_search'))]))
++    verdict = run_tool_round(agent, **arguments)
++    assert verdict.action == 'break' and verdict.final_response == 'Controlled halt'
++    assert verdict._turn_exit_reason == 'guardrail_recovery_refused'
++    assert messages == history == []
