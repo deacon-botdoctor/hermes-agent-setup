@@ -32,8 +32,76 @@ class PatchError(RuntimeError):
     pass
 
 
+# Upstream d3630f853239e8c41ce7201e09fbdf39bcbc5431, hermes_state_dbfile.py.
+# Retire this legacy backport when the baseline uses that native split owner.
+LEGACY_HEADER_PROBE = r'''_HEADER_PROBE_LOCK = threading.Lock()
+_HEADER_PROBE_FDS: "dict[str, tuple[int, int, int]]" = {}  # key -> (fd, dev, ino)
+_RETIRED_HEADER_PROBE_FDS: "list[int]" = []  # intentionally never closed
+
+
+def _pread_db_header(db_path: Path, length: int) -> "Optional[bytes]":
+    """Lock-safe raw header read of a possibly-live SQLite database: POSIX preads from a cached,
+    never-closed fd (rebound when the path names a new inode); Windows reads plainly, since
+    advisory-lock cancellation is a POSIX-only hazard."""
+    if _IS_WINDOWS:
+        with contextlib.suppress(OSError), db_path.open("rb") as handle:
+            return handle.read(length)
+        return None
+    key = str(db_path)
+    try:
+        st = os.stat(db_path)
+    except OSError:
+        return None
+    with _HEADER_PROBE_LOCK:
+        cached = _HEADER_PROBE_FDS.get(key)
+        if cached is not None and (cached[1], cached[2]) != (st.st_dev, st.st_ino):
+            # Path re-pointed at a new file. Retire (never close) the old fd.
+            _RETIRED_HEADER_PROBE_FDS.append(_HEADER_PROBE_FDS.pop(key)[0])
+            cached = None
+        if cached is None:
+            try:
+                fd = os.open(db_path, os.O_RDONLY)
+            except OSError:
+                return None
+            try:
+                fst = os.fstat(fd)
+            except OSError:
+                _RETIRED_HEADER_PROBE_FDS.append(fd)
+                return None
+            cached = _HEADER_PROBE_FDS[key] = (fd, fst.st_dev, fst.st_ino)
+        with contextlib.suppress(OSError):
+            return os.pread(cached[0], length, 0)
+    return None
+
+
+def _read_sqlite_application_id(db_path: Path) -> "Optional[int]":
+    """application_id from the SQLite header, via the lock-safe :func:`_pread_db_header`."""
+    end = _STATE_DB_APPLICATION_ID_OFFSET + 4
+    header = _pread_db_header(db_path, end)
+    if header is None or len(header) < end or header[:16] != b"SQLite format 3\x00":
+        return None
+    return int(struct.unpack(">I", header[_STATE_DB_APPLICATION_ID_OFFSET:end])[0])
+
+'''
+
+
+def patch_legacy_header_probe(source: str) -> str:
+    """Backport the native d3630f8 lock-safe header reader; native owns its copy."""
+    if "def _read_sqlite_application_id(" not in source or "def _pread_db_header(" in source:
+        return source
+    tree = ast.parse(source)
+    node = next(item for item in tree.body if isinstance(item, ast.FunctionDef)
+                and item.name == "_read_sqlite_application_id")
+    lines = source.splitlines(keepends=True)
+    original = "".join(lines[node.lineno - 1:node.end_lineno])
+    if original.count('with db_path.open("rb") as handle:') != 1:
+        raise PatchError("legacy SQLite header reader anchor drift")
+    replacement = LEGACY_HEADER_PROBE.rstrip() + "\n"
+    return "".join(lines[:node.lineno - 1]) + replacement + "".join(lines[node.end_lineno:])
+
 def patch_sqlite_writer_source(source: str) -> str:
     """Make literal WAL setters read-only on Linux and retain other platforms."""
+    source = patch_legacy_header_probe(source)
     if MARKER in source:
         if FORCED_WAL.search(source):
             raise PatchError("marked SQLite writer still contains a forced-WAL pragma")

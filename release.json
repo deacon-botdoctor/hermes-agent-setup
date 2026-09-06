@@ -1,6 +1,6 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "de963ad5538903552c1e91f8ad0617f960dd3b9eb04f58c7f4239b7d46e2cbac",
+    "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
     "file_count": 125
   },
   "baseline_wiring_digest": "15f008686aaf0d003c907e1fcba49d4f99c9fae577bc97a19ce62d58a3767abd",
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "ea9e888365a3cf46d2702107a5058382163455f3b69b3ddc2dea796313c39e66",
-  "golden_sha": "2de25a43f5ac2fec1f926347a01683fa816ab3d0",
+  "deployment_digest": "46ea524eb0a9a5ae87109508a0117c32f8594dce2dd015673c5a2b28211771e1",
+  "golden_sha": "011b7bb3e76290f9d20736f0089b9930ffff5335",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
   },
-  "release": "botdoctor-hermes-2026.09.06-golden-2de25a43",
+  "release": "botdoctor-hermes-2026.09.06-golden-011b7bb3",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "e5ebaf4cc99697d569044d2ecf0df24236b9656cf029abc69ea10b74841e3341",
+  "runtime_payload_digest": "268dfeab63be16372868c7b9b939ab0df36e2166e5c87ee5df9f1e18413f14c4",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Fresh current-release public assembly applied 49 patches, then repeated with 0 additional patches; private CPython 3.11.15 / SQLite 3.53.1 produced the 125-file fingerprint de963ad5538903552c1e91f8ad0617f960dd3b9eb04f58c7f4239b7d46e2cbac.",
-    "golden_suite": "Canonical Golden 2de25a43f5ac2fec1f926347a01683fa816ab3d0 includes the merged Host Audit source updates; the public capsule records the exact two deployable blob changes. No production activation claimed."
+    "clean_upstream_rehearsal": "Fresh isolated public assembly: 49 patches applied, repeat 0, 125-file fingerprint verified; candidate-private Python3.11.15 SQLite3.53.1.",
+    "golden_suite": "Reviewed Golden011b7bb3 upstream header-lock backport; 26 focused journal-policy and startup-chain checks passed."
   }
 }
