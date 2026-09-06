@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "46ea524eb0a9a5ae87109508a0117c32f8594dce2dd015673c5a2b28211771e1",
-  "golden_sha": "011b7bb3e76290f9d20736f0089b9930ffff5335",
+  "deployment_digest": "a555b6055a5c4c287dd2165263c21f1c1e7b4bbfd43a546069f6bea2e8b888b0",
+  "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
   },
-  "release": "botdoctor-hermes-2026.09.06-golden-011b7bb3",
+  "release": "botdoctor-hermes-2026.09.06-golden-e828031c",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "268dfeab63be16372868c7b9b939ab0df36e2166e5c87ee5df9f1e18413f14c4",
+  "runtime_payload_digest": "be8110339b7da8384590049b1c0fdee41566f418ba9ce61aaef719e679c333ac",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Fresh isolated public assembly: 49 patches applied, repeat 0, 125-file fingerprint verified; candidate-private Python3.11.15 SQLite3.53.1.",
-    "golden_suite": "Reviewed Golden011b7bb3 upstream header-lock backport; 26 focused journal-policy and startup-chain checks passed."
+    "clean_upstream_rehearsal": "Previously verified 49 fresh patches and 0 repeat changes; this release changes only the profile configuration merger. Current exact 125-file runtime verification passes with unchanged fingerprint cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f.",
+    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed."
   }
 }

@@ -274,7 +274,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "268dfeab63be16372868c7b9b939ab0df36e2166e5c87ee5df9f1e18413f14c4",
+      "digest": "be8110339b7da8384590049b1c0fdee41566f418ba9ce61aaef719e679c333ac",
       "excluded_paths": [
         "bin/doctrine-sync.py",
         "bin/telegram-send-artifact",
@@ -1229,7 +1229,7 @@
           "type": "blob"
         },
         {
-          "blob": "fa4804af1ea656bdbed20ad78464628b4f567ebd",
+          "blob": "ff6eb98dfae9addf224bf14d693b51b7b0dca55d",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
@@ -5397,8 +5397,8 @@
       ]
     }
   },
-  "deployment_digest": "46ea524eb0a9a5ae87109508a0117c32f8594dce2dd015673c5a2b28211771e1",
-  "golden_sha": "011b7bb3e76290f9d20736f0089b9930ffff5335",
+  "deployment_digest": "a555b6055a5c4c287dd2165263c21f1c1e7b4bbfd43a546069f6bea2e8b888b0",
+  "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
@@ -6100,7 +6100,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "011b7bb3e76290f9d20736f0089b9930ffff5335",
+    "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
     "upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
     "verified": true
   },
