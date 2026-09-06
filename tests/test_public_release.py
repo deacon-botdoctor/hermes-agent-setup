@@ -1627,8 +1627,17 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     monkeypatch.setattr(assembler, "run", fake_run)
+    monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 51, 3]})
+    monkeypatch.setenv("UV_PYTHON", "/unsafe/python")
+    monkeypatch.setenv("UV_PYTHON_PREFERENCE", "system")
+    monkeypatch.setenv("PYTHONPATH", "/unsafe/modules")
+    monkeypatch.setenv("VIRTUAL_ENV", "/unsafe/venv")
 
-    assembler.prepare_posix_dependencies(runtime, staging)
+    proof = assembler.prepare_posix_dependencies(runtime, staging)
+    assert proof["sqlite_version"] == [3, 51, 3]
+    if assembler.sys.platform == "darwin" and assembler.platform.machine() == "arm64":
+        assert proof["download_catalog"]["sha256"] == assembler.MACOS_PYTHON_CATALOG_SHA256
+        assert calls[0][1]["env"]["UV_PYTHON_DOWNLOADS_JSON_URL"] == (ROOT / assembler.MACOS_PYTHON_CATALOG).as_uri()
 
     command, kwargs = calls[0]
     assert command == [
@@ -1646,6 +1655,20 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
     ]
     assert kwargs["env"]["HOME"] == str(staging / ".installer-user")
     assert kwargs["env"]["HERMES_HOME"] == str(staging)
+    assert kwargs["env"]["UV_MANAGED_PYTHON"] == "1"
+    assert "UV_PYTHON_PREFERENCE" not in kwargs["env"]
+    assert kwargs["env"]["UV_PYTHON_INSTALL_DIR"] == str(runtime / ".hermes-runtime" / "python")
+    assert not {"UV_PYTHON", "PYTHONPATH", "VIRTUAL_ENV"} & kwargs["env"].keys()
+    # Exercise uv's real option parser and interpreter discovery without downloads.
+    uv = shutil.which("uv")
+    if uv:
+        discovery_env = dict(kwargs["env"], UV_PYTHON_DOWNLOADS="never", UV_NO_CONFIG="1")
+        discovered = subprocess.run([uv, "python", "find", "3.11"], env=discovery_env,
+                                    capture_output=True, text=True, check=False)
+        assert discovered.returncode != 0
+        assert not discovered.stdout.strip()
+        assert "No interpreter found" in discovered.stderr
+
     assert (
         runtime / ".hermes-bootstrap-complete"
     ).read_text(encoding="utf-8") == "installer-state\n"
@@ -2010,3 +2033,94 @@ def test_public_text_has_no_private_runtime_routes():
     ]["dirty_repo_rule"]
     assert "escalate_to_doc" in reflection
     assert "preserve approval gates" in reflection
+
+
+@pytest.mark.parametrize("version, accepted", [([3, 50, 4], False), ([3, 50, 7], False), ([3, 51, 3], True), ([3, 53, 1], True), ([3, "51", 3], False)])
+def test_candidate_python_sqlite_floor_and_isolation(tmp_path, monkeypatch, version, accepted):
+    assembler = load_script("public_python_floor", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    base = runtime / ".hermes-runtime" / "python" / "cpython"
+    base.mkdir(parents=True)
+    target = base / "python"
+    target.write_text("fixture interpreter")
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(target)
+    probe_homes = []
+
+    def fake_run(argv, **kwargs):
+        assert argv[:3] == [str(python), "-I", "-c"]
+        home = Path(kwargs["env"]["HERMES_HOME"])
+        assert home.is_dir() and home != tmp_path / "live"
+        assert not list(home.iterdir())
+        probe_homes.append(home)
+        return SimpleNamespace(stdout=json.dumps({"python": str(python), "prefix": str(runtime / "venv"), "base_prefix": str(base), "python_version": [3, 11, 15], "sqlite_version": version}))
+
+    monkeypatch.setattr(assembler, "run", fake_run)
+    if accepted:
+        assert assembler.candidate_python_proof(runtime, {"HERMES_HOME": str(tmp_path / "live")})["sqlite_version"] == version
+    else:
+        with pytest.raises(RuntimeError):
+            assembler.candidate_python_proof(runtime, {})
+    assert probe_homes and all(not path.exists() for path in probe_homes)
+
+
+def test_candidate_python_rejects_external_seed(tmp_path, monkeypatch):
+    assembler = load_script("public_python_external", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    monkeypatch.setattr(assembler, "run", lambda *args, **kwargs: pytest.fail("must reject before execution"))
+    with pytest.raises(RuntimeError, match="private managed store"):
+        assembler.candidate_python_proof(runtime, {})
+
+
+def test_candidate_python_cleans_probe_after_execution_failure(tmp_path, monkeypatch):
+    assembler = load_script("public_python_failure", "assemble-runtime.py")
+    runtime = tmp_path / "candidate"
+    python = runtime / "venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    target = runtime / ".hermes-runtime" / "python" / "python"
+    target.parent.mkdir(parents=True)
+    target.write_text("fixture")
+    python.symlink_to(target)
+    homes = []
+    def fail(argv, **kwargs):
+        homes.append(Path(kwargs["env"]["HERMES_HOME"]))
+        raise RuntimeError("failed interpreter")
+    monkeypatch.setattr(assembler, "run", fail)
+    with pytest.raises(RuntimeError, match="failed interpreter"):
+        assembler.candidate_python_proof(runtime, {})
+    assert homes and not homes[0].exists()
+
+
+@pytest.mark.parametrize("system,arch,expected", [("darwin", "arm64", True), ("darwin", "x86_64", False), ("linux", "aarch64", False)])
+def test_candidate_python_catalog_is_platform_scoped(tmp_path, monkeypatch, system, arch, expected):
+    assembler = load_script("public_python_catalog_scope", "assemble-runtime.py")
+    monkeypatch.setattr(assembler.sys, "platform", system)
+    monkeypatch.setattr(assembler.platform, "machine", lambda: arch)
+    monkeypatch.setenv("UV_PYTHON_DOWNLOADS_JSON_URL", "https://untrusted.invalid/catalog")
+    calls = []
+    monkeypatch.setattr(assembler, "run", lambda argv, **kw: calls.append(kw))
+    monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 53, 1]})
+    proof = assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
+    assert ("download_catalog" in proof) is expected
+    assert ("UV_PYTHON_DOWNLOADS_JSON_URL" in calls[0]["env"]) is expected
+    if expected:
+        catalog = ROOT / assembler.MACOS_PYTHON_CATALOG
+        assert hashlib.sha256(catalog.read_bytes()).hexdigest() == proof["download_catalog"]["sha256"]
+        assert calls[0]["env"]["UV_PYTHON_DOWNLOADS_JSON_URL"] == catalog.as_uri()
+
+
+def test_candidate_python_catalog_tamper_blocks_installer(tmp_path, monkeypatch):
+    assembler = load_script("public_python_catalog_tamper", "assemble-runtime.py")
+    monkeypatch.setattr(assembler.sys, "platform", "darwin")
+    monkeypatch.setattr(assembler.platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(assembler, "ROOT", tmp_path)
+    catalog = tmp_path / assembler.MACOS_PYTHON_CATALOG
+    catalog.parent.mkdir()
+    catalog.write_text("{}")
+    monkeypatch.setattr(assembler, "run", lambda *args, **kw: pytest.fail("must not install with changed catalog"))
+    with pytest.raises(RuntimeError, match="catalog digest mismatch"):
+        assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
