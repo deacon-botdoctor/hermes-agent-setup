@@ -676,6 +676,8 @@ def _refero_atomic_write(path: Path, payload: bytes, mode: int, uid=None, gid=No
 def _refero_validate_registry_root(home: Path, package: Path, registry: Path) -> None:
     if registry == package:
         return
+    if os.name != "nt" and home == package and home.parent == registry / "profiles":
+        return
     if home != package or home != registry.parent / "AppData/Local/hermes/spark-runtime" or registry.name != ".hermes":
         raise ValueError("Refero registry root is not the conventional same-user Windows layout")
 
@@ -1014,7 +1016,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile-root", type=Path, help="Client HERMES_HOME (contains config.yaml)")
     parser.add_argument("--package-root", type=Path, help="Refero package/registry root owning the named profile")
-    parser.add_argument("--registry-root", type=Path, help="Refero consumed registry root in the conventional Windows layout")
+    parser.add_argument("--registry-root", type=Path, help="Refero consumed registry root for a named POSIX profile or conventional Windows layout")
     parser.add_argument("--config-path", type=Path, help="Explicit path to client config.yaml")
     parser.add_argument("--manifest", type=Path, help="Path to manifest yaml (for overlay_config_exemptions)")
     parser.add_argument("--exemption", action="append", default=[], help="Extra dotted-path exemption; repeatable")
