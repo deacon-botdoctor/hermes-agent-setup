@@ -3,7 +3,7 @@
     "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
     "file_count": 125
   },
-  "baseline_wiring_digest": "369504752f7d48042cd1a088f19529f7bc08fb0d89462bea0c104ffc09d3abea",
+  "baseline_wiring_digest": "a2f37188ec66f3629fe9564475983213c53731e0d20cd98898e25dd331db9f95",
   "canonical_upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,7 +20,7 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "be2a4b439065b562eeeafe58741d31fa21b52072f254c490d560ac9c44de7af1",
+  "deployment_digest": "6c7f4ddc50e1b04a206a226897232d8f75dfb95bae84b4695554d0ff428d2327",
   "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
@@ -64,6 +64,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "Previously verified 49 fresh patches and 0 repeat changes; this release changes only the profile configuration merger. Current exact 125-file runtime verification passes with unchanged fingerprint cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f.",
-    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed. Bound macOS legacy launch and selfheal recovery delegate to the verified launchd service through hermes-safe-restart; unbound launcher behavior and runtime fingerprint are unchanged."
+    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed. Bound macOS legacy launch and selfheal recovery delegate to the verified launchd service through hermes-safe-restart; unbound launcher behavior and runtime fingerprint are unchanged. Published safe-restart helper matches Golden1054 (05a6f560), removing the live state.db quick_check during restart."
   }
 }
