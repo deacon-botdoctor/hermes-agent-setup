@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import hashlib
 import html
 import json
 import os
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -170,6 +172,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "mode": 0o600,
             }
         ]
+    # Keep the owning Linux timer cadence; only the service command changes.
+    if system == "linux":
+        timer = scheduler[1]["path"]
+        if timer.is_file() and not timer.is_symlink():
+            scheduler[1]["data"] = timer.read_bytes()
+            scheduler[1]["mode"] = timer.stat().st_mode & 0o777
     state_dir = (
         args.state_dir.expanduser().resolve()
         if args.state_dir
@@ -207,7 +215,8 @@ def command(plan: dict[str, Any], action: str) -> list[list[str]]:
     if system == "linux":
         timer = f"{unit}.timer"
         if action == "remove":
-            return [["systemctl", "--user", "disable", "--now", timer]]
+            return [["systemctl", "--user", "disable", "--now", timer],
+                    ["systemctl", "--user", "stop", f"{unit}.service"]]
         return [
             ["systemctl", "--user", "daemon-reload"],
             ["systemctl", "--user", "enable", "--now", timer],
@@ -237,9 +246,15 @@ def command(plan: dict[str, Any], action: str) -> list[list[str]]:
     ]
 
 
-def run_commands(commands: list[list[str]], *, ignore_first: bool = False) -> None:
+def run_commands(commands: list[list[str]], *, ignore_first: bool = False, ignore_absent: bool = False) -> None:
     for index, argv in enumerate(commands):
         proc = subprocess.run(argv, capture_output=True, text=True, timeout=45)
+        if proc.returncode and ignore_absent and argv[:2] == ["systemctl", "--user"]:
+            state = subprocess.run(["systemctl", "--user", "show", argv[-1],
+                                    "--property=LoadState", "--value"],
+                                   capture_output=True, text=True, timeout=30)
+            if state.returncode == 0 and state.stdout.strip() == "not-found":
+                continue
         if proc.returncode and not (ignore_first and index == 0):
             detail = (proc.stderr or proc.stdout or "")[-500:]
             raise RuntimeError(f"scheduler command failed: {argv[0]}: {detail}")
@@ -247,9 +262,29 @@ def run_commands(commands: list[list[str]], *, ignore_first: bool = False) -> No
 
 def snapshot(plan: dict[str, Any]) -> dict[str, Any]:
     state_dir = plan["state_dir"]
-    backup_dir = state_dir / "backup"
-    backup_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    backup_dir = Path(tempfile.mkdtemp(prefix="backup-", dir=state_dir))
+    if (state_dir / "rollback.json").is_file():
+        shutil.copy2(state_dir / "rollback.json", backup_dir / "prior-rollback.json")
     rows = []
+    scheduler_state = None
+    if plan["platform"] == "linux":
+        scheduler_state = {}
+        for action in ("is-enabled", "is-active"):
+            result = subprocess.run(["systemctl", "--user", action, plan["unit"] + ".timer"],
+                                    capture_output=True, text=True, timeout=30)
+            scheduler_state[action] = result.stdout.strip()
+        if not scheduler_state["is-enabled"]:
+            state = subprocess.run(["systemctl", "--user", "show", plan["unit"] + ".timer",
+                                    "--property=LoadState", "--value"],
+                                   capture_output=True, text=True, timeout=30)
+            if state.returncode == 0 and state.stdout.strip() == "not-found":
+                scheduler_state["is-enabled"] = "not-found"
+        if (scheduler_state["is-enabled"], scheduler_state["is-active"]) not in {
+            ("enabled", "active"), ("disabled", "inactive"), ("not-found", "inactive"),
+            ("enabled", "inactive"), ("disabled", "active"),
+        }:
+            raise RuntimeError(f"unsupported prior timer state: {scheduler_state}")
     paths = [(plan["check_path"], "check")] + [
         (row["path"], "scheduler") for row in plan["scheduler"]
     ] + [(plan["receipt"], "receipt")]
@@ -266,10 +301,12 @@ def snapshot(plan: dict[str, Any]) -> dict[str, Any]:
                 "kind": kind,
                 "existed": existed,
                 "backup": str(backup),
-                "mode": path.stat().st_mode & 0o777 if existed else None,
+                "mode": backup.stat().st_mode & 0o777 if existed else None,
+                "sha256": hashlib.sha256(backup.read_bytes()).hexdigest() if existed else None,
             }
         )
-    record = {"schema_version": 1, "generated_at": utc_now(), "files": rows}
+    record = {"schema_version": 1, "generated_at": utc_now(), "files": rows,
+              "scheduler_state": scheduler_state}
     atomic_write(state_dir / "rollback.json", (json.dumps(record, indent=2) + "\n").encode(), 0o600)
     return record
 
@@ -279,13 +316,39 @@ def restore(plan: dict[str, Any]) -> None:
     if not rollback.is_file():
         raise ValueError("rollback record is missing")
     record = json.loads(rollback.read_text(encoding="utf-8"))
-    run_commands(command(plan, "remove"), ignore_first=True)
+    def finish_rollback():
+        backup_dir = Path(record["files"][0]["backup"]).parent
+        atomic_write(backup_dir / "rolled-back.json", rollback.read_bytes(), 0o600)
+        prior = backup_dir / "prior-rollback.json"
+        if prior.is_file():
+            atomic_write(rollback, prior.read_bytes(), 0o600)
+        else:
+            rollback.unlink()
+    # Validate the whole backup before stopping jobs or restoring the first file.
+    for row in record["files"]:
+        if row["existed"]:
+            raw = Path(row["backup"]).read_bytes()
+            if row.get("sha256") and hashlib.sha256(raw).hexdigest() != row["sha256"]:
+                raise RuntimeError(f"rollback backup digest changed: {row['path']}")
+    run_commands(command(plan, "remove"), ignore_first=plan["platform"] != "linux", ignore_absent=True)
     for row in record["files"]:
         path = Path(row["path"])
         if row["existed"]:
-            atomic_write(path, Path(row["backup"]).read_bytes(), int(row["mode"]))
+            raw = Path(row["backup"]).read_bytes()
+            if row.get("sha256") and hashlib.sha256(raw).hexdigest() != row["sha256"]:
+                raise RuntimeError(f"rollback backup digest changed: {path}")
+            atomic_write(path, raw, int(row["mode"]))
         elif path.exists():
             path.unlink()
+    if plan["platform"] == "linux" and isinstance(record.get("scheduler_state"), dict):
+        run_commands([["systemctl", "--user", "daemon-reload"]])
+        before = record["scheduler_state"]
+        if before["is-enabled"] == "enabled":
+            run_commands([["systemctl", "--user", "enable", plan["unit"] + ".timer"]])
+        if before["is-active"] == "active":
+            run_commands([["systemctl", "--user", "start", plan["unit"] + ".timer"]])
+        finish_rollback()
+        return
     if any(
         row["kind"] == "scheduler" and row["existed"]
         for row in record["files"]
@@ -294,6 +357,7 @@ def restore(plan: dict[str, Any]) -> None:
             command(plan, "apply"),
             ignore_first=plan["platform"] == "macos",
         )
+    finish_rollback()
 
 
 def expected_files(plan: dict[str, Any]) -> list[tuple[Path, bytes, int]]:
@@ -305,7 +369,8 @@ def expected_files(plan: dict[str, Any]) -> list[tuple[Path, bytes, int]]:
 def files_current(plan: dict[str, Any]) -> bool:
     return all(
         path.is_file() and not path.is_symlink() and path.read_bytes() == data
-        for path, data, _ in expected_files(plan)
+        and (os.name == "nt" or path.stat().st_mode & 0o777 == mode)
+        for path, data, mode in expected_files(plan)
     )
 
 
@@ -317,10 +382,6 @@ def probe(plan: dict[str, Any]) -> None:
             str(plan["check_path"]),
             "--home",
             values["HERMES_HOME"],
-            "--runtime-root",
-            values["RUNTIME_ROOT"],
-            "--runtime-python",
-            values["RUNTIME_PYTHON"],
             "--agent-id",
             values["AGENT_ID"],
             "--receipt",
@@ -414,10 +475,27 @@ def main() -> int:
                 "unit": plan["unit"],
                 "files": [str(path) for path, _, _ in expected_files(plan)],
             }
+        elif args.action == "apply" and files_current(plan):
+            # Refresh health without replacing the last meaningful rollback.
+            # Already-current scheduler files are never rewritten on retry.
+            probe(plan)
+            run_commands(command(plan, "apply"), ignore_first=plan["platform"] == "macos")
+            result = verify(plan)
         elif args.action == "apply":
-            changed = not files_current(plan)
-            if changed:
-                snapshot(plan)
+            backup = snapshot(plan)
+            if plan["platform"] == "linux":
+                run_commands(command(plan, "remove"), ignore_absent=True)
+            # A failed CAS owns no file mutation: never restore over external
+            # edits. Keep this scheduler stopped and report the explicit hold.
+            for row in backup["files"]:
+                if row["kind"] == "receipt":
+                    continue
+                path = Path(row["path"])
+                actual = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+                if (path.is_symlink() or actual != row["sha256"]
+                        or (row["existed"] and os.name != "nt"
+                            and path.stat().st_mode & 0o777 != row["mode"])):
+                    raise RuntimeError(f"coherence preimage changed; scheduler held: {path}")
             try:
                 for path, data, mode in expected_files(plan):
                     atomic_write(path, data, mode)
@@ -430,8 +508,7 @@ def main() -> int:
                 if not result["ok"]:
                     raise RuntimeError(f"installed scheduler did not verify: {result['drift']}")
             except Exception:
-                if changed:
-                    restore(plan)
+                restore(plan)
                 raise
         elif args.action == "verify":
             result = verify(plan)

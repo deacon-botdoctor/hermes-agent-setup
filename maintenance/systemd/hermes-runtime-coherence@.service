@@ -4,6 +4,6 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart="__BASELINE_PYTHON__" "__CHECK_PATH__" --home "__HERMES_HOME__" --runtime-root "__RUNTIME_ROOT__" --runtime-python "__RUNTIME_PYTHON__" --agent-id "__AGENT_ID__" --receipt "__RECEIPT_PATH__" --json
+ExecStart="__BASELINE_PYTHON__" "__CHECK_PATH__" --home "__HERMES_HOME__" --agent-id "__AGENT_ID__" --receipt "__RECEIPT_PATH__" --json
 NoNewPrivileges=true
 PrivateTmp=true

@@ -5,8 +5,6 @@
   <key>ProgramArguments</key><array>
     <string>__BASELINE_PYTHON__</string><string>__CHECK_PATH__</string>
     <string>--home</string><string>__HERMES_HOME__</string>
-    <string>--runtime-root</string><string>__RUNTIME_ROOT__</string>
-    <string>--runtime-python</string><string>__RUNTIME_PYTHON__</string>
     <string>--agent-id</string><string>__AGENT_ID__</string>
     <string>--receipt</string><string>__RECEIPT_PATH__</string>
     <string>--json</string>
