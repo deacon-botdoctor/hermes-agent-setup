@@ -2219,6 +2219,32 @@ def test_coherence_cli_resolves_current_binding_each_invocation(tmp_path, monkey
     assert json.loads(receipt.read_text())["kind"] == "binding_invalid"
 
 
+def test_coherence_windows_scheduler_can_use_profile_binding(tmp_path):
+    installer = load_path("profile_binding_scheduler", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    home = tmp_path / "home/.hermes"
+    runtime = home / "profiles/posca/state/runtime-candidates/release"
+    runtime_python = runtime / "venv/Scripts/python.exe"
+    scheduler_python = tmp_path / "python.exe"
+    binding = home / "profiles/posca/state/runtime-binding.json"
+    runtime_python.parent.mkdir(parents=True)
+    runtime_python.write_bytes(b"python")
+    scheduler_python.write_bytes(b"python")
+    binding.parent.mkdir(parents=True, exist_ok=True)
+    binding.write_text("{}")
+    args = SimpleNamespace(
+        agent_id="posca", platform="windows", user_home=tmp_path / "home",
+        home=home, runtime_root=runtime, runtime_python=runtime_python,
+        scheduler_python=scheduler_python, runtime_user="Joshua", receipt=None,
+        binding_receipt=binding, state_dir=None,
+    )
+
+    plan = installer.build_plan(args)
+
+    scheduler = plan["scheduler"][0]["data"].decode()
+    assert plan["binding_receipt"] == binding.resolve()
+    assert f'--binding-receipt "{binding.resolve()}"' in scheduler
+
+
 @pytest.mark.parametrize("template", [
     "maintenance/systemd/hermes-runtime-coherence@.service",
     "maintenance/launchd/com.hermes.runtime-coherence.plist.template",

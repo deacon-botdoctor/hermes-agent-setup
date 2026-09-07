@@ -5,6 +5,9 @@ $Arguments = @(
   '--agent-id', '"__AGENT_ID__"',
   '--receipt', '"__RECEIPT_PATH__"', '--json'
 ) -join ' '
+if ('__BINDING_RECEIPT__') {
+  $Arguments += ' --binding-receipt "__BINDING_RECEIPT__"'
+}
 $Action = New-ScheduledTaskAction -Execute '__BASELINE_PYTHON__' -Argument $Arguments
 $Trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
   -RepetitionInterval (New-TimeSpan -Minutes 15)

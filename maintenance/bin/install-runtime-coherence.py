@@ -31,6 +31,7 @@ TEMPLATES = {
 TOKENS = (
     "AGENT_ID",
     "BASELINE_PYTHON",
+    "BINDING_RECEIPT",
     "CHECK_PATH",
     "HERMES_HOME",
     "RECEIPT_PATH",
@@ -125,11 +126,17 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         if args.receipt
         else hermes_home / "state/health/runtime-coherence.json"
     )
+    binding_receipt = (
+        args.binding_receipt.expanduser().resolve()
+        if args.binding_receipt
+        else None
+    )
     check_path = hermes_home / "bin/agent-runtime-coherence.py"
     runtime_user = args.runtime_user or getpass.getuser()
     values = {
         "AGENT_ID": agent_id,
         "BASELINE_PYTHON": str(scheduler_python),
+        "BINDING_RECEIPT": str(binding_receipt) if binding_receipt else "",
         "CHECK_PATH": str(check_path),
         "HERMES_HOME": str(hermes_home),
         "RECEIPT_PATH": str(receipt),
@@ -191,6 +198,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "unit": unit,
         "check_path": check_path,
         "receipt": receipt,
+        "binding_receipt": binding_receipt,
         "runtime_root": runtime_root,
         "runtime_python": runtime_python,
         "scheduler": scheduler,
@@ -475,6 +483,11 @@ def probe(plan: dict[str, Any]) -> None:
             values["AGENT_ID"],
             "--receipt",
             values["RECEIPT_PATH"],
+            *(
+                ["--binding-receipt", values["BINDING_RECEIPT"]]
+                if values["BINDING_RECEIPT"]
+                else []
+            ),
             "--json",
         ],
         capture_output=True,
@@ -551,6 +564,7 @@ def main() -> int:
     parser.add_argument("--runtime-user")
     parser.add_argument("--user-home", type=Path, default=Path.home())
     parser.add_argument("--receipt", type=Path)
+    parser.add_argument("--binding-receipt", type=Path)
     parser.add_argument("--state-dir", type=Path)
     parser.add_argument("--platform", choices=("macos", "linux", "windows"))
     parser.add_argument("--json", action="store_true")
