@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import json
@@ -2279,6 +2280,79 @@ def test_coherence_linux_stop_only_tolerates_confirmed_absence(monkeypatch, load
     else:
         with pytest.raises(RuntimeError, match="scheduler command failed"):
             installer.run_commands(commands, ignore_absent=True)
+
+
+def test_coherence_macos_rollback_restores_unloaded_plist_without_bootstrap(tmp_path, monkeypatch):
+    installer = load_path("coherence_macos_rollback", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    check = tmp_path / "probe.py"
+    receipt = tmp_path / "receipt.json"
+    plist = tmp_path / "agent.plist"
+    for path in (check, receipt, plist):
+        path.write_bytes(b"original")
+    plan = {"platform": "macos", "unit": "com.hermes.runtime-coherence.test",
+            "state_dir": tmp_path / "state", "check_path": check, "receipt": receipt,
+            "scheduler": [{"path": plist}]}
+    monkeypatch.setattr(installer.os, "getuid", lambda: 501)
+    monkeypatch.setattr(
+        installer.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv, 113, "", "Could not find service in domain for user: 501"
+        ),
+    )
+    backup = installer.snapshot(plan)
+    for path in (check, receipt, plist):
+        path.write_bytes(b"new")
+    commands = []
+    monkeypatch.setattr(installer, "run_commands", lambda rows, **kwargs: commands.extend(rows))
+    installer.restore(plan)
+    assert backup["scheduler_state"] == {"loaded": False}
+    assert plist.read_bytes() == b"original"
+    assert commands == [["launchctl", "bootout", "gui/501/com.hermes.runtime-coherence.test"]]
+
+
+def test_coherence_macos_snapshot_fails_closed_when_loaded_state_is_unknown(tmp_path, monkeypatch):
+    installer = load_path("coherence_macos_unknown", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    plan = {"platform": "macos", "unit": "com.hermes.runtime-coherence.test",
+            "state_dir": tmp_path / "state", "check_path": tmp_path / "probe.py",
+            "receipt": tmp_path / "receipt.json", "scheduler": [{"path": tmp_path / "agent.plist"}]}
+    monkeypatch.setattr(
+        installer.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 1, "", "Operation not permitted"),
+    )
+    with pytest.raises(RuntimeError, match="cannot determine prior launchd state"):
+        installer.snapshot(plan)
+    assert not plan["state_dir"].exists()
+
+
+def test_coherence_windows_rollback_restores_existing_task_definition(tmp_path, monkeypatch):
+    installer = load_path("coherence_windows_rollback", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    check = tmp_path / "probe.py"
+    receipt = tmp_path / "receipt.json"
+    task_script = tmp_path / "task.ps1"
+    for path in (check, receipt, task_script):
+        path.write_bytes(b"original")
+    task_xml = "<Task><Settings><Enabled>false</Enabled></Settings></Task>"
+    task_state = {"exists": True, "state": "Disabled",
+                  "xml": base64.b64encode(task_xml.encode()).decode()}
+    plan = {"platform": "windows", "unit": "Hermes Runtime Coherence - test",
+            "state_dir": tmp_path / "state", "check_path": check, "receipt": receipt,
+            "scheduler": [{"path": task_script}]}
+    monkeypatch.setattr(
+        installer.subprocess, "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, json.dumps(task_state), ""),
+    )
+    backup = installer.snapshot(plan)
+    for path in (check, receipt, task_script):
+        path.write_bytes(b"new")
+    commands = []
+    monkeypatch.setattr(installer, "run_commands", lambda rows, **kwargs: commands.extend(rows))
+    installer.restore(plan)
+    assert backup["scheduler_state"] == task_state
+    assert task_script.read_bytes() == b"original"
+    restore = [row for row in commands if "-EncodedCommand" in row][0]
+    script = base64.b64decode(restore[-1]).decode("utf-16le")
+    assert "Register-ScheduledTask" in script
+    assert task_state["xml"] in script
 
 
 def test_coherence_repeat_apply_keeps_original_rollback(tmp_path, monkeypatch):
