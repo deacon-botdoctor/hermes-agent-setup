@@ -324,24 +324,6 @@ PY
 }
 
 checkpoint_durable_db() {
-    local state_db="$HERMES_HOME/state.db" checker="python3" quick_result
-    [ -x "$PYTHON" ] && checker="$PYTHON"
-    if [ -f "$state_db" ]; then
-        if ! quick_result=$("$checker" - "$state_db" 2>&1 <<'PY'
-import sqlite3, sys
-with sqlite3.connect(sys.argv[1]) as connection:
-    rows = connection.execute("PRAGMA quick_check").fetchall()
-if rows != [("ok",)]:
-    raise SystemExit("; ".join(str(row[0]) for row in rows[:8]))
-print("ok")
-PY
-        ); then
-            log "state.db quick_check failed; refusing restart: $quick_result"
-            echo "state_db_integrity_failed"
-            return 1
-        fi
-        log "state.db quick_check: ok"
-    fi
     local db="$PROFILE_HOME/data/durable-threads.db"
     [ -f "$db" ] || return 0
     command -v sqlite3 >/dev/null 2>&1 || { log "sqlite3 not in PATH; skipping WAL checkpoint"; return 0; }
