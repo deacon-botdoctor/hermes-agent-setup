@@ -564,6 +564,9 @@ def check_immersion_quality():
     drift = []
     for key, expected in required_display.items():
         actual = _scalar_from_block(display, key)
+        # The native display resolver defaults this optional setting to False.
+        if key == "progress_on_typing" and actual is None:
+            actual = False
         if actual != expected:
             drift.append(f"display.{key}={actual!r}->{expected!r}")
     required_compression = {
@@ -655,13 +658,6 @@ def check_telegram_organic_checkpoints():
         failures.append(f"telegram={telegram_enabled!r} expected=True")
     if "display.platforms.telegram.cleanup_progress" not in exemptions and telegram_cleanup is not True:
         failures.append(f"cleanup={telegram_cleanup!r} expected=True")
-    if (
-        "display.platforms.telegram.progress_on_typing" not in exemptions
-        and telegram_typing_progress is not True
-    ):
-        failures.append(
-            f"progress_on_typing={telegram_typing_progress!r} expected=True"
-        )
 
     binding = load_json(binding_path, {})
     runtime_raw = str(binding.get("runtime_root") or "").strip()
@@ -689,6 +685,14 @@ def check_telegram_organic_checkpoints():
             failures.append("active runtime v3 commentary-capture marker missing")
         if b'"progress_on_typing"' not in sources[0]:
             failures.append("active runtime progress_on_typing implementation missing")
+        # Telegram checkpoints must wait for the interval regardless of the
+        # optional native typing-progress setting; it is not an enable switch.
+        delayed_guard = (
+            b"_is_immediate_heartbeat = _first_heartbeat and _progress_on_typing "
+            b"and source.platform != Platform.TELEGRAM"
+        )
+        if delayed_guard not in sources[0]:
+            failures.append("active runtime delayed Telegram checkpoint guard missing")
 
     live = gateway_runtime_binding()
     live_root = Path(str(live.get("runtime_root") or "")).expanduser()
