@@ -109,6 +109,64 @@ def test_release_identity_matches_source_manifest():
     }
 
 
+@pytest.mark.parametrize("typing_progress", [None, False, True])
+@pytest.mark.parametrize("failure", [None, "global_typing", "immediate_telegram", "marker", "binding", "live_root", "generation"])
+def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, typing_progress, failure):
+    module = load_script("automatic_checkpoint_contract", "hermes-local-selfcheck.py")
+    home = tmp_path / "profile"
+    runtime = home / "runtime-candidates/current"
+    (home / "state").mkdir(parents=True)
+    (runtime / "gateway").mkdir(parents=True)
+    (runtime / "agent").mkdir()
+    config = yaml.safe_load((ROOT / "shared-defaults/config-client-quiet-display.yaml").read_text())
+    checkpoint = yaml.safe_load((ROOT / "shared-defaults/config-telegram-organic-checkpoints.yaml").read_text())
+    config["agent"] = checkpoint["agent"]
+    config["display"]["platforms"]["telegram"].update(checkpoint["display"]["platforms"]["telegram"])
+    config["display"].pop("progress_on_typing")
+    telegram = config["display"]["platforms"]["telegram"]
+    if typing_progress is None:
+        telegram.pop("progress_on_typing")
+    else:
+        telegram["progress_on_typing"] = typing_progress
+    if failure == "global_typing": config["display"]["progress_on_typing"] = True
+    (home / "config.yaml").write_text(yaml.safe_dump(config))
+    marker = "# HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3\n"
+    guard = "_is_immediate_heartbeat = _first_heartbeat and _progress_on_typing and source.platform != Platform.TELEGRAM\n"
+    if failure == "immediate_telegram": guard = "_is_immediate_heartbeat = _first_heartbeat and _progress_on_typing\n"
+    (runtime / "gateway/run.py").write_text(marker + 'setting = "progress_on_typing"\n' + guard)
+    (runtime / "run_agent.py").write_text("missing" if failure == "marker" else marker)
+    (runtime / "agent/codex_runtime.py").write_text(marker)
+    binding = {"kind":"botdoctor_runtime_binding", "status":"held" if failure == "binding" else "active",
+               "runtime_root":str(runtime), "generated_at":"2026-09-07T17:38:34Z"}
+    (home / "state/runtime-binding.json").write_text(json.dumps(binding))
+    monkeypatch.setattr(module, "HERMES", home)
+    monkeypatch.setattr(module, "gateway_runtime_binding", lambda: {"pid":123,
+        "runtime_root":str(tmp_path / "other") if failure == "live_root" else str(runtime)})
+    monkeypatch.setattr(module, "_process_started_at", lambda pid: module.parse_dt(
+        "2026-09-07T17:38:33Z" if failure == "generation" else "2026-09-07T17:38:35Z"))
+    before = {p:p.read_bytes() for p in [home / "config.yaml", home / "state/runtime-binding.json"]}
+    immersion = module.check_immersion_quality()
+    checkpoints = module.check_telegram_organic_checkpoints()
+    assert immersion["status"] == ("fail" if failure == "global_typing" else "pass"), immersion
+    assert checkpoints["status"] == ("pass" if failure in {None, "global_typing"} else "fail"), checkpoints
+    assert {p:p.read_bytes() for p in before} == before
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_automatic_selfcheck_preserves_stale_canary_and_failed_action_guard(tmp_path, monkeypatch, failed):
+    module = load_script("automatic_canary_contract", "hermes-local-selfcheck.py")
+    (tmp_path / "state").mkdir()
+    path = tmp_path / "state/canary-reconciler-latest.json"
+    payload = {"checked_at":"2020-01-01T00:00:00Z", "ok":not failed,
+               "failed_actions":[{"canary":"disk_retention", "detail":"binding conflicts with newer receipt"}] if failed else []}
+    path.write_text(json.dumps(payload))
+    monkeypatch.setattr(module, "HERMES", tmp_path)
+    before = path.read_bytes()
+    result = module.check_canary_reconciler()
+    assert result["status"] == ("fail" if failed else "warn")
+    assert path.read_bytes() == before
+
+
 def test_host_health_and_cron_self_repair_are_release_owned():
     manifest = json.loads(
         (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
