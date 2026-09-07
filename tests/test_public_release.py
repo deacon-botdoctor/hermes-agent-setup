@@ -564,7 +564,7 @@ def test_native_agent_continuity_overlay_is_exact_and_manifest_driven():
     )
 
     assert contract["source_commit"] == (
-        "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
+        "6d3032a3b3e1c7895598cfb17b570376d4805415"
     )
     assert contract["activation"] == "manifest_driven_existing_selfheal"
     assert contract["platforms"] == ["linux", "macos", "windows"]
@@ -2415,3 +2415,73 @@ def test_coherence_preimage_drift_never_invokes_file_rollback(tmp_path, monkeypa
     monkeypatch.setattr(installer, "restore", lambda plan: pytest.fail("CAS failure overwrote external bytes"))
     assert installer.main() == 1
     assert target.read_bytes() == b"external edit"
+
+@pytest.mark.parametrize("kind,label", [("launchd-user", "ai.hermes.gateway"), ("launchd-daemon", "ai.hermes.gateway-feanor")])
+@pytest.mark.parametrize("failure", [None, "malformed_binding", "definition_drift", "missing_helper", "helper_failure", "unbound"])
+def test_macos_legacy_launcher_uses_bound_service(tmp_path, kind, label, failure):
+    import hashlib
+    import os
+    import plistlib
+
+    home = tmp_path / "home"
+    hermes = home / ".hermes"
+    (hermes / "state").mkdir(parents=True)
+    (hermes / "bin").mkdir()
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    (tools / "uname").write_text("#!/bin/sh\necho Darwin\n")
+    (tools / "uname").chmod(0o755)
+    definition = home / "gateway.plist"
+    raw = plistlib.dumps({"Label": label})
+    definition.write_bytes(raw)
+    binding = {"service": {"kind": kind, "definition_path": str(definition), "definition_sha256": hashlib.sha256(raw).hexdigest()}}
+    if failure != "unbound":
+        (hermes / "state/runtime-binding.json").write_text("{" if failure == "malformed_binding" else json.dumps(binding))
+    if failure == "definition_drift":
+        definition.write_bytes(plistlib.dumps({"Label": "wrong.gateway"}))
+    calls = tmp_path / "calls"
+    helper = hermes / "bin/hermes-safe-restart.sh"
+    if failure != "missing_helper":
+        helper.write_text('#!/bin/sh\nprintf "%s %s\\n" "$HERMES_GATEWAY_UNIT" "$1" > "$CALLS"\nexit '+('19' if failure == "helper_failure" else '0')+'\n')
+        helper.chmod(0o755)
+    nominal = hermes / "hermes-agent/venv/bin"
+    nominal.mkdir(parents=True)
+    for name in ["python3", "hermes"]:
+        p = nominal / name
+        p.write_text('#!/bin/sh\ntouch "$NOMINAL_MARKER"\nexit 88\n')
+        p.chmod(0o755)
+    env = dict(os.environ, HOME=str(home), PATH=str(tools)+os.pathsep+os.environ['PATH'], CALLS=str(calls), NOMINAL_MARKER=str(tmp_path/'nominal'))
+    result = subprocess.run(["bash", str(ROOT / "kit/bin/start-hermes.sh")], env=env, capture_output=True, text=True)
+    if failure == "unbound":
+        assert result.returncode == 88
+        assert (tmp_path / "nominal").exists()
+        assert not calls.exists()
+        return
+    assert (result.returncode == 0) == (failure is None), result.stderr
+    assert not (tmp_path / "nominal").exists()
+    if failure in (None, "helper_failure"):
+        assert calls.read_text().strip() == label + " gateway"
+    else:
+        assert not calls.exists()
+
+
+def test_macos_selfheal_failure_never_runs_nominal_fallback(tmp_path):
+    import os
+    source = (ROOT / 'native-continuity/bin/client-selfheal-heartbeat.sh').read_text()
+    body = source.split("remediate() {", 1)[1].split("\n}\n", 1)[0]
+    home = tmp_path / ".hermes"
+    (home / "bin").mkdir(parents=True)
+    (home / "state").mkdir()
+    (home / "state/runtime-binding.json").write_text("{}")
+    route = home / "bin/start-hermes.sh"
+    route.write_text('#!/bin/sh\nprintf called > "$ROUTE_MARKER"\nexit 23\n')
+    route.chmod(0o755)
+    fallback = home / "start-hermes.sh"
+    fallback.write_text('#!/bin/sh\ntouch "$FALLBACK_MARKER"\n')
+    fallback.chmod(0o755)
+    shell = 'uname() { echo Darwin; }; log() { :; }; launchctl() { touch "$FALLBACK_MARKER"; }; count_gateways() { echo 0; }; remediate() {' + body + '\n}; remediate test\n'
+    env = dict(os.environ, HERMES_HOME=str(home), ROUTE_MARKER=str(tmp_path/'called'), FALLBACK_MARKER=str(tmp_path/'fallback'))
+    result = subprocess.run(["sh", "-c", shell], env=env, capture_output=True, text=True)
+    assert result.returncode == 23
+    assert (tmp_path / "called").read_text() == 'called'
+    assert not (tmp_path / "fallback").exists()

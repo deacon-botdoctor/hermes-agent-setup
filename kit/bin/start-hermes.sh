@@ -4,6 +4,30 @@
 # and exports as ANTHROPIC_TOKEN before launching Hermes gateway.
 set -euo pipefail
 
+# [HERMES_BOUND_MAC_RESTART_v1]
+# Bound macOS gateways are owned by their verified launchd service. Legacy
+# watchdog callers must never resurrect the mutable nominal checkout.
+if [ "$(uname -s)" = Darwin ] && { [ -e "$HOME/.hermes/state/runtime-binding.json" ] || [ -L "$HOME/.hermes/state/runtime-binding.json" ]; }; then
+    UNIT=$(python3 - "$HOME/.hermes/state/runtime-binding.json" <<'PY_BOUND'
+import hashlib, json, pathlib, plistlib, re, sys
+binding = json.loads(pathlib.Path(sys.argv[1]).read_text())
+service = binding["service"]
+if service.get("kind") not in {"launchd-user", "launchd-daemon"}:
+    raise SystemExit("bound gateway is not a launchd service")
+path = pathlib.Path(service["definition_path"])
+raw = path.read_bytes()
+if hashlib.sha256(raw).hexdigest() != service["definition_sha256"]:
+    raise SystemExit("bound gateway service definition drifted")
+label = plistlib.loads(raw)["Label"]
+if not re.fullmatch(r"[A-Za-z0-9_.-]+", label):
+    raise SystemExit("invalid bound gateway label")
+print(label)
+PY_BOUND
+    ) || exit $?
+    export HERMES_GATEWAY_UNIT="$UNIT"
+    exec "$HOME/.hermes/bin/hermes-safe-restart.sh" gateway
+fi
+
 AUTH_PROFILES="$HOME/.hermes/auth-profiles.json"
 LOG="$HOME/.hermes/logs/start-hermes.log"
 mkdir -p "$(dirname "$LOG")"

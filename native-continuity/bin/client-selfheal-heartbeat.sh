@@ -90,6 +90,12 @@ PY2
 
 remediate() {
   log "remediation requested: $1"
+  if [ "$(uname -s)" = Darwin ] && { [ -e "$HERMES_HOME/state/runtime-binding.json" ] || [ -L "$HERMES_HOME/state/runtime-binding.json" ]; }; then
+    # The published launcher delegates bound gateways to the safe service
+    # restart route. Failure is terminal; never try the nominal checkout.
+    "$HERMES_HOME/bin/start-hermes.sh"
+    return $?
+  fi
   if command -v launchctl >/dev/null 2>&1; then
     if [ -f "$HOME/Library/LaunchAgents/$SERVICE_LABEL.plist" ]; then
       launchctl print "gui/$(id -u)/$SERVICE_LABEL" >/dev/null 2>&1 || launchctl bootstrap "gui/$(id -u)" "$HOME/Library/LaunchAgents/$SERVICE_LABEL.plist" >/dev/null 2>&1 || true
