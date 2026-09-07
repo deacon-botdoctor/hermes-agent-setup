@@ -41,9 +41,9 @@
     "file_count": 7,
     "installer": {
       "path": "maintenance/bin/install-runtime-coherence.py",
-      "sha256": "cbf6659060e8c93c23ec152bda8f38861621efdc0beaf7dfd74cd03c8d41c5b8"
+      "sha256": "207554ed3dfc5bc8ecca17cda7f2e7cbb5e787e192bb373627d91718b569c409"
     },
-    "package_digest": "58d2933407de796ad80d62932e7d1ee3de2e764ac4521909f2ed7956465cdb07",
+    "package_digest": "cc35f98898354edb85aa40a8d461c1cf8adcce07e261888c2cebdd5123b4bc95",
     "platforms": [
       "macos",
       "linux",

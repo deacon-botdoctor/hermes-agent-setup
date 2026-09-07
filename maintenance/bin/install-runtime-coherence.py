@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import getpass
 import hashlib
 import html
@@ -260,31 +261,107 @@ def run_commands(commands: list[list[str]], *, ignore_first: bool = False, ignor
             raise RuntimeError(f"scheduler command failed: {argv[0]}: {detail}")
 
 
+def scheduler_snapshot(plan: dict[str, Any]) -> dict[str, Any] | None:
+    """Capture enough native scheduler state to make rollback non-activating."""
+    if plan["platform"] == "linux":
+        state = {}
+        for action in ("is-enabled", "is-active"):
+            result = subprocess.run(["systemctl", "--user", action, plan["unit"] + ".timer"],
+                                    capture_output=True, text=True, timeout=30)
+            state[action] = result.stdout.strip()
+        if not state["is-enabled"]:
+            result = subprocess.run(["systemctl", "--user", "show", plan["unit"] + ".timer",
+                                     "--property=LoadState", "--value"],
+                                    capture_output=True, text=True, timeout=30)
+            if result.returncode == 0 and result.stdout.strip() == "not-found":
+                state["is-enabled"] = "not-found"
+        if (state["is-enabled"], state["is-active"]) not in {
+            ("enabled", "active"), ("disabled", "inactive"), ("not-found", "inactive"),
+            ("enabled", "inactive"), ("disabled", "active"),
+        }:
+            raise RuntimeError(f"unsupported prior timer state: {state}")
+        return state
+    if plan["platform"] == "macos":
+        target = f"gui/{os.getuid()}/{plan['unit']}"
+        result = subprocess.run(["launchctl", "print", target], capture_output=True,
+                                text=True, timeout=30)
+        if result.returncode == 0:
+            return {"loaded": True}
+        detail = (result.stderr or result.stdout or "").lower()
+        if "could not find service" in detail:
+            return {"loaded": False}
+        raise RuntimeError(
+            "cannot determine prior launchd state; refusing scheduler mutation: "
+            f"{detail[-500:]}"
+        )
+    task = plan["unit"]
+    script = (
+        "$task = Get-ScheduledTask -TaskName '" + task + "' -ErrorAction SilentlyContinue; "
+        "if ($null -eq $task) { @{ exists = $false } | ConvertTo-Json -Compress; exit 0 }; "
+        "$xml = Export-ScheduledTask -TaskName '" + task + "'; "
+        "@{ exists = $true; state = $task.State.ToString(); "
+        "xml = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($xml)) } | "
+        "ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError(f"cannot determine prior scheduled-task state: {(result.stderr or result.stdout)[-500:]}")
+    try:
+        state = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("cannot parse prior scheduled-task state") from exc
+    if state == {"exists": False}:
+        return state
+    if (
+        not isinstance(state, dict)
+        or state.get("exists") is not True
+        or state.get("state") not in {"Disabled", "Ready", "Running", "Queued"}
+        or not isinstance(state.get("xml"), str)
+    ):
+        raise RuntimeError(f"unsupported prior scheduled-task state: {state!r}")
+    try:
+        base64.b64decode(state["xml"], validate=True)
+    except ValueError as exc:
+        raise RuntimeError("prior scheduled-task definition is invalid") from exc
+    return state
+
+
+def restore_windows_task(plan: dict[str, Any], state: dict[str, Any]) -> None:
+    if state == {"exists": False}:
+        return
+    if (
+        state.get("exists") is not True
+        or state.get("state") not in {"Disabled", "Ready", "Running", "Queued"}
+        or not isinstance(state.get("xml"), str)
+    ):
+        raise RuntimeError("scheduled-task rollback state is missing or invalid")
+    try:
+        base64.b64decode(state["xml"], validate=True)
+    except ValueError as exc:
+        raise RuntimeError("scheduled-task rollback definition is invalid") from exc
+    script = (
+        "$xml = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('"
+        + state["xml"] + "')); Register-ScheduledTask -TaskName '" + plan["unit"]
+        + "' -Xml $xml -Force"
+    )
+    encoded = base64.b64encode(script.encode("utf-16le")).decode("ascii")
+    run_commands([[
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded,
+    ]])
+
+
 def snapshot(plan: dict[str, Any]) -> dict[str, Any]:
+    # Resolve state before touching rollback authority or any managed file.
+    scheduler_state = scheduler_snapshot(plan)
     state_dir = plan["state_dir"]
     state_dir.mkdir(parents=True, exist_ok=True)
     backup_dir = Path(tempfile.mkdtemp(prefix="backup-", dir=state_dir))
     if (state_dir / "rollback.json").is_file():
         shutil.copy2(state_dir / "rollback.json", backup_dir / "prior-rollback.json")
     rows = []
-    scheduler_state = None
-    if plan["platform"] == "linux":
-        scheduler_state = {}
-        for action in ("is-enabled", "is-active"):
-            result = subprocess.run(["systemctl", "--user", action, plan["unit"] + ".timer"],
-                                    capture_output=True, text=True, timeout=30)
-            scheduler_state[action] = result.stdout.strip()
-        if not scheduler_state["is-enabled"]:
-            state = subprocess.run(["systemctl", "--user", "show", plan["unit"] + ".timer",
-                                    "--property=LoadState", "--value"],
-                                   capture_output=True, text=True, timeout=30)
-            if state.returncode == 0 and state.stdout.strip() == "not-found":
-                scheduler_state["is-enabled"] = "not-found"
-        if (scheduler_state["is-enabled"], scheduler_state["is-active"]) not in {
-            ("enabled", "active"), ("disabled", "inactive"), ("not-found", "inactive"),
-            ("enabled", "inactive"), ("disabled", "active"),
-        }:
-            raise RuntimeError(f"unsupported prior timer state: {scheduler_state}")
     paths = [(plan["check_path"], "check")] + [
         (row["path"], "scheduler") for row in plan["scheduler"]
     ] + [(plan["receipt"], "receipt")]
@@ -330,6 +407,13 @@ def restore(plan: dict[str, Any]) -> None:
             raw = Path(row["backup"]).read_bytes()
             if row.get("sha256") and hashlib.sha256(raw).hexdigest() != row["sha256"]:
                 raise RuntimeError(f"rollback backup digest changed: {row['path']}")
+    before = record.get("scheduler_state")
+    if plan["platform"] == "macos" and (
+        not isinstance(before, dict) or not isinstance(before.get("loaded"), bool)
+    ):
+        raise RuntimeError("macOS rollback scheduler state is missing or unknown")
+    if plan["platform"] == "windows" and not isinstance(before, dict):
+        raise RuntimeError("Windows rollback scheduler state is missing or unknown")
     run_commands(command(plan, "remove"), ignore_first=plan["platform"] != "linux", ignore_absent=True)
     for row in record["files"]:
         path = Path(row["path"])
@@ -349,7 +433,12 @@ def restore(plan: dict[str, Any]) -> None:
             run_commands([["systemctl", "--user", "start", plan["unit"] + ".timer"]])
         finish_rollback()
         return
-    if any(
+    if plan["platform"] == "macos":
+        if before["loaded"]:
+            run_commands(command(plan, "apply"), ignore_first=True)
+    elif plan["platform"] == "windows":
+        restore_windows_task(plan, before)
+    elif any(
         row["kind"] == "scheduler" and row["existed"]
         for row in record["files"]
     ):
