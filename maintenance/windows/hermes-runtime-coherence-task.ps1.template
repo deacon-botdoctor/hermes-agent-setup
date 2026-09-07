@@ -2,8 +2,6 @@ $ErrorActionPreference = "Stop"
 $TaskName = 'Hermes Runtime Coherence - __AGENT_ID__'
 $Arguments = @(
   '"__CHECK_PATH__"', '--home', '"__HERMES_HOME__"',
-  '--runtime-root', '"__RUNTIME_ROOT__"',
-  '--runtime-python', '"__RUNTIME_PYTHON__"',
   '--agent-id', '"__AGENT_ID__"',
   '--receipt', '"__RECEIPT_PATH__"', '--json'
 ) -join ' '

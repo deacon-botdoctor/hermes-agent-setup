@@ -247,20 +247,33 @@ def atomic_write(path: Path, payload: dict[str, Any]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--home", required=True, type=Path)
-    parser.add_argument("--runtime-root", required=True, type=Path)
-    parser.add_argument("--runtime-python", required=True, type=Path)
+    parser.add_argument("--runtime-root", type=Path)
+    parser.add_argument("--runtime-python", type=Path)
     parser.add_argument("--agent-id", required=True)
     parser.add_argument("--receipt", required=True, type=Path)
     parser.add_argument("--binding-receipt", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = run_probe(
-        runtime_root=args.runtime_root.expanduser(),
-        runtime_python=args.runtime_python.expanduser(),
-        hermes_home=args.home.expanduser(),
-        agent_id=args.agent_id,
-        binding_path=args.binding_receipt.expanduser() if args.binding_receipt else None,
-    )
+    home = args.home.expanduser().resolve()
+    binding_path = args.binding_receipt.expanduser() if args.binding_receipt else home / "state/runtime-binding.json"
+    try:
+        if (args.runtime_root is None) != (args.runtime_python is None):
+            raise ValueError("runtime root and Python must be supplied together")
+        if args.runtime_root is None:
+            binding = json.loads(binding_path.read_text(encoding="utf-8"))
+            paths = [binding.get(key) for key in ("runtime_root", "runtime_python")]
+            if any(not isinstance(value, str) or not value or "\x00" in value or not Path(value).is_absolute() for value in paths):
+                raise ValueError("binding runtime paths are invalid")
+            args.runtime_root, args.runtime_python = map(Path, paths)
+        result = run_probe(
+            runtime_root=args.runtime_root.expanduser(),
+            runtime_python=args.runtime_python.expanduser(),
+            hermes_home=home, agent_id=args.agent_id, binding_path=binding_path,
+        )
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        result = {"schema_version": 1, "generated_at": utc_now(),
+                  "agent_id": args.agent_id, "hermes_home": str(home),
+                  "ok": False, "kind": "binding_invalid", "detail": type(exc).__name__}
     atomic_write(args.receipt.expanduser(), result)
     if args.json:
         print(json.dumps(result, sort_keys=True))

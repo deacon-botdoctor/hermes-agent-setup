@@ -2193,3 +2193,125 @@ def test_candidate_python_catalog_tamper_blocks_installer(tmp_path, monkeypatch)
     monkeypatch.setattr(assembler, "run", lambda *args, **kw: pytest.fail("must not install with changed catalog"))
     with pytest.raises(RuntimeError, match="catalog digest mismatch"):
         assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
+
+
+def test_coherence_cli_resolves_current_binding_each_invocation(tmp_path, monkeypatch):
+    checker = load_path("dynamic_coherence", ROOT / "checks/agent-runtime-coherence.py")
+    home = tmp_path / "home"
+    (home / "state").mkdir(parents=True)
+    binding = home / "state/runtime-binding.json"
+    receipt = tmp_path / "receipt.json"
+    monkeypatch.setattr(sys, "argv", ["probe", "--home", str(home), "--agent-id", "test", "--receipt", str(receipt)])
+    calls = []
+    def probe(**kwargs):
+        calls.append(kwargs)
+        return {"ok": True, "runtime_root": str(kwargs["runtime_root"])}
+    monkeypatch.setattr(checker, "run_probe", probe)
+    for name in ("first", "second"):
+        root = tmp_path / name
+        binding.write_text(json.dumps({"runtime_root": str(root), "runtime_python": str(root / "venv/bin/python")}))
+        assert checker.main() == 0
+        assert calls[-1]["runtime_root"] == root
+    binding.write_text('{}')
+    assert checker.main() == 1
+    assert len(calls) == 2
+    assert json.loads(receipt.read_text())["kind"] == "binding_invalid"
+
+
+@pytest.mark.parametrize("template", [
+    "maintenance/systemd/hermes-runtime-coherence@.service",
+    "maintenance/launchd/com.hermes.runtime-coherence.plist.template",
+    "maintenance/windows/hermes-runtime-coherence-task.ps1.template",
+])
+def test_coherence_schedulers_never_pin_runtime_candidates(template):
+    text = (ROOT / template).read_text()
+    assert "__RUNTIME_ROOT__" not in text
+    assert "__RUNTIME_PYTHON__" not in text
+    assert "__BASELINE_PYTHON__" in text and "__CHECK_PATH__" in text
+
+
+@pytest.mark.parametrize("enabled,active", [("enabled", "active"), ("disabled", "inactive"), ("not-found", "inactive")])
+def test_coherence_linux_rollback_preserves_timer_state_and_files(tmp_path, monkeypatch, enabled, active):
+    installer = load_path("coherence_rollback", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    check = tmp_path / "probe.py"
+    receipt = tmp_path / "receipt.json"
+    service = tmp_path / "probe.service"
+    timer = tmp_path / "probe.timer"
+    check.write_bytes(b"original probe")
+    receipt.write_bytes(b"original receipt")
+    if enabled != "not-found":
+        service.write_bytes(b"original service")
+        timer.write_bytes(b"original timer")
+    plan = {"platform": "linux", "unit": "probe", "state_dir": tmp_path / "state",
+            "check_path": check, "receipt": receipt,
+            "scheduler": [{"path": service}, {"path": timer}]}
+    def command(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, enabled if "is-enabled" in argv else active, "")
+    monkeypatch.setattr(installer.subprocess, "run", command)
+    plan["state_dir"].mkdir()
+    (plan["state_dir"] / "rollback.json").write_text("original rollback authority")
+    backup = installer.snapshot(plan)
+    for p in (check, receipt, service, timer):
+        p.write_bytes(b"new")
+    commands = []
+    monkeypatch.setattr(installer, "run_commands", lambda rows, **kwargs: commands.extend(rows))
+    installer.restore(plan)
+    assert check.read_bytes() == b"original probe"
+    assert receipt.read_bytes() == b"original receipt"
+    assert timer.exists() == (enabled != "not-found")
+    assert (["systemctl", "--user", "enable", "probe.timer"] in commands) == (enabled == "enabled")
+    assert (["systemctl", "--user", "start", "probe.timer"] in commands) == (active == "active")
+    assert backup["scheduler_state"] == {"is-enabled": enabled, "is-active": active}
+    assert (plan["state_dir"] / "rollback.json").read_text() == "original rollback authority"
+
+
+@pytest.mark.parametrize("load_state,passes", [("not-found", True), ("loaded", False)])
+def test_coherence_linux_stop_only_tolerates_confirmed_absence(monkeypatch, load_state, passes):
+    installer = load_path("coherence_absent", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    def run(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0 if "show" in argv else 5,
+                                           load_state if "show" in argv else "", "stop failed")
+    monkeypatch.setattr(installer.subprocess, "run", run)
+    commands = [["systemctl", "--user", "disable", "--now", "probe.timer"],
+                ["systemctl", "--user", "stop", "probe.service"]]
+    if passes:
+        installer.run_commands(commands, ignore_absent=True)
+    else:
+        with pytest.raises(RuntimeError, match="scheduler command failed"):
+            installer.run_commands(commands, ignore_absent=True)
+
+
+def test_coherence_repeat_apply_keeps_original_rollback(tmp_path, monkeypatch):
+    installer = load_path("coherence_repeat", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    rollback = tmp_path / "rollback.json"
+    rollback.write_text('original pre-upgrade receipt')
+    monkeypatch.setattr(sys, "argv", ["installer", "apply", "--agent-id", "test", "--home", str(tmp_path),
+                                     "--runtime-root", str(tmp_path), "--runtime-python", sys.executable])
+    monkeypatch.setattr(installer, "build_plan", lambda args: {"platform": "linux"})
+    monkeypatch.setattr(installer, "files_current", lambda plan: True)
+    monkeypatch.setattr(installer, "probe", lambda plan: None)
+    monkeypatch.setattr(installer, "verify", lambda plan: {"ok": True})
+    registrations = []
+    monkeypatch.setattr(installer, "command", lambda plan, action: [[action]])
+    monkeypatch.setattr(installer, "run_commands", lambda commands, **kwargs: registrations.extend(commands))
+    monkeypatch.setattr(installer, "snapshot", lambda plan: pytest.fail("repeat overwrote rollback"))
+    assert installer.main() == 0
+    assert rollback.read_text() == 'original pre-upgrade receipt'
+    assert registrations == [['apply']]
+
+
+def test_coherence_preimage_drift_never_invokes_file_rollback(tmp_path, monkeypatch):
+    installer = load_path("coherence_cas", ROOT / "maintenance/bin/install-runtime-coherence.py")
+    target = tmp_path / "probe.py"
+    target.write_bytes(b"external edit")
+    monkeypatch.setattr(sys, "argv", ["installer", "apply", "--agent-id", "test", "--home", str(tmp_path),
+                                     "--runtime-root", str(tmp_path), "--runtime-python", sys.executable])
+    monkeypatch.setattr(installer, "build_plan", lambda args: {"platform": "linux"})
+    monkeypatch.setattr(installer, "files_current", lambda plan: False)
+    monkeypatch.setattr(installer, "snapshot", lambda plan: {"files": [{"kind": "check", "path": str(target),
+                         "existed": True, "sha256": "different", "mode": 0o600}]})
+    monkeypatch.setattr(installer, "command", lambda plan, action: [])
+    monkeypatch.setattr(installer, "run_commands", lambda *a, **k: None)
+    monkeypatch.setattr(installer, "restore", lambda plan: pytest.fail("CAS failure overwrote external bytes"))
+    assert installer.main() == 1
+    assert target.read_bytes() == b"external edit"

@@ -41,9 +41,9 @@
     "file_count": 7,
     "installer": {
       "path": "maintenance/bin/install-runtime-coherence.py",
-      "sha256": "e66926be076e13e695d4da8ca391b6974ef8e7f56116ae486f2c93692503a537"
+      "sha256": "cbf6659060e8c93c23ec152bda8f38861621efdc0beaf7dfd74cd03c8d41c5b8"
     },
-    "package_digest": "83690e953219e1ba36585d25faed728780edb61a4ad97813af1d9639ac4677e4",
+    "package_digest": "58d2933407de796ad80d62932e7d1ee3de2e764ac4521909f2ed7956465cdb07",
     "platforms": [
       "macos",
       "linux",
@@ -51,7 +51,7 @@
     ],
     "probe": {
       "path": "checks/agent-runtime-coherence.py",
-      "sha256": "77616dd194156875fc6345f6fcf2d8b35bc581fd57f6cc3a697355aef902e9a9"
+      "sha256": "61245f7ac2c2d1933e502102f5d5e2640221f60b131e0a0116e8e317037094bb"
     },
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
