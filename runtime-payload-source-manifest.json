@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "15f008686aaf0d003c907e1fcba49d4f99c9fae577bc97a19ce62d58a3767abd",
+      "digest": "369504752f7d48042cd1a088f19529f7bc08fb0d89462bea0c104ffc09d3abea",
       "excluded_paths": [
         "kit/bin/client-selfheal-heartbeat.ps1",
         "kit/bin/client-selfheal-heartbeat.sh",
@@ -187,7 +187,7 @@
           "type": "blob"
         },
         {
-          "blob": "53f20a542c6aa2c3f57602d47f8d817ce89551fe",
+          "blob": "a53280f3ec47edd40fda9cf46c1aec361596f620",
           "mode": "100755",
           "path": "kit/bin/start-hermes.sh",
           "type": "blob"
@@ -5397,7 +5397,7 @@
       ]
     }
   },
-  "deployment_digest": "a555b6055a5c4c287dd2165263c21f1c1e7b4bbfd43a546069f6bea2e8b888b0",
+  "deployment_digest": "be2a4b439065b562eeeafe58741d31fa21b52072f254c490d560ac9c44de7af1",
   "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {

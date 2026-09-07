@@ -3,7 +3,7 @@
     "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
     "file_count": 125
   },
-  "baseline_wiring_digest": "15f008686aaf0d003c907e1fcba49d4f99c9fae577bc97a19ce62d58a3767abd",
+  "baseline_wiring_digest": "369504752f7d48042cd1a088f19529f7bc08fb0d89462bea0c104ffc09d3abea",
   "canonical_upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,21 +20,21 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "a555b6055a5c4c287dd2165263c21f1c1e7b4bbfd43a546069f6bea2e8b888b0",
+  "deployment_digest": "be2a4b439065b562eeeafe58741d31fa21b52072f254c490d560ac9c44de7af1",
   "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
       "path": "contracts/native-agent-continuity-release-v1.json",
-      "sha256": "119993e5c2aa9be08d90dc4a90672bef8244be74502cee5f1651f9447c83fe74"
+      "sha256": "0760c8c18f7a89a2b7a92561aa5d799bcf6f252326555288748c45050f180fd9"
     },
-    "package_digest": "c0c780d67ce24b8e3033a51e40387b139a44ce9b84e726f129ff67ec1298658e",
+    "package_digest": "5ebdedce01f2aa39d8e4762560dfc66331e98c27f98435a547eae8a3c22974fd",
     "platforms": [
       "linux",
       "macos",
       "windows"
     ],
-    "source_commit": "3408573b4ca02b1fd45bd969ff87fea15c0d065f"
+    "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
   "release": "botdoctor-hermes-2026.09.06-golden-e828031c",
   "runtime_coherence": {
@@ -64,6 +64,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "Previously verified 49 fresh patches and 0 repeat changes; this release changes only the profile configuration merger. Current exact 125-file runtime verification passes with unchanged fingerprint cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f.",
-    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed."
+    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed. Bound macOS legacy launch and selfheal recovery delegate to the verified launchd service through hermes-safe-restart; unbound launcher behavior and runtime fingerprint are unchanged."
   }
 }
