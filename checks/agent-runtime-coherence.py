@@ -58,8 +58,30 @@ constructors=[item for node in caller_tree.body if isinstance(node,ast.ClassDef)
               for item in node.body if isinstance(item,(ast.FunctionDef,ast.AsyncFunctionDef)) and item.name=='__init__']
 calls=[node for constructor in constructors for node in ast.walk(constructor)
        if isinstance(node,ast.Call) and isinstance(node.func,ast.Name) and node.func.id=='init_agent']
-dynamic=any(keyword.arg is None for call in calls for keyword in call.keywords)
 forwarded={{keyword.arg for call in calls for keyword in call.keywords if keyword.arg is not None}}
+dynamic_keywords=[keyword for call in calls for keyword in call.keywords if keyword.arg is None]
+dynamic=bool(dynamic_keywords)
+# Upstream's constructor forwards its named parameters through this exact
+# locals mapping. Resolve that bounded shape without executing a constructor;
+# unknown expansions and any other use of the mapping still fail closed.
+locals_forwarder=ast.parse('init_kwargs = {{k: v for k, v in locals().items() if k not in ("self", "tool_delay")}}').body[0]
+if len(constructors)==1 and len(calls)==1 and len(dynamic_keywords)==1:
+    constructor=constructors[0]
+    mapping_uses=[node for node in ast.walk(constructor)
+                  if isinstance(node,ast.Name) and node.id=='init_kwargs']
+    assignments=[node for node in constructor.body if ast.dump(node)==ast.dump(locals_forwarder)]
+    expansion=dynamic_keywords[0].value
+    prefix=constructor.body[:constructor.body.index(assignments[0])] if assignments else []
+    only_docstring=all(isinstance(node,ast.Expr) and isinstance(node.value,ast.Constant)
+                       and isinstance(node.value.value,str) for node in prefix)
+    if (len(assignments)==1 and len(mapping_uses)==2 and only_docstring
+            and len(calls[0].keywords)==1
+            and isinstance(expansion,ast.Name) and expansion.id=='init_kwargs'
+            and constructor.args.vararg is None and constructor.args.kwarg is None):
+        forwarded.update(arg.arg for arg in
+                         constructor.args.posonlyargs+constructor.args.args+constructor.args.kwonlyargs
+                         if arg.arg not in ('self','tool_delay'))
+        dynamic=False
 missing=(['dynamic argument expansion'] if dynamic else [])
 if not accepts_kwargs:
     missing.extend(sorted(forwarded-init_params))
