@@ -500,6 +500,47 @@ def test_runtime_coherence_import_probe_isolated_and_cleaned(tmp_path, monkeypat
     assert json.loads(receipt.read_text())["hermes_home"] == str(home)
 
 
+@pytest.mark.parametrize("case, expected", [
+    ("legacy", []),
+    ("locals", []),
+    ("missing_parameter", ["model"]),
+    ("mutated_mapping", ["dynamic argument expansion"]),
+    ("extra_local", ["dynamic argument expansion"]),
+    ("opaque", ["dynamic argument expansion"]),
+])
+def test_runtime_coherence_constructor_forwarding(tmp_path, case, expected):
+    checker = load_path("constructor_coherence", ROOT / "checks/agent-runtime-coherence.py")
+    runtime = tmp_path / "runtime"
+    for package in ("gateway", "agent"):
+        (runtime / package).mkdir(parents=True)
+        (runtime / package / "__init__.py").write_text("")
+    (runtime / "gateway/run.py").write_text("")
+    signature = "agent" if case == "missing_parameter" else "agent, model=None"
+    (runtime / "agent/agent_init.py").write_text(f"def init_agent({signature}): pass\n")
+    mapping = 'init_kwargs = {k: v for k, v in locals().items() if k not in ("self", "tool_delay")}'
+    body = [mapping, "from agent.agent_init import init_agent", "init_agent(self, **init_kwargs)"]
+    if case == "legacy":
+        body = ["from agent.agent_init import init_agent", "init_agent(self, model=model)"]
+    elif case == "mutated_mapping":
+        body.insert(1, "init_kwargs.update(extra=True)")
+    elif case == "extra_local":
+        body.insert(0, "extra = True")
+    elif case == "opaque":
+        body[0] = "init_kwargs = dict(model=model)"
+    (runtime / "run_agent.py").write_text(
+        "class AIAgent:\n    def __init__(self, model=None, tool_delay=None):\n"
+        + "".join("        " + line + "\n" for line in body)
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", checker.probe_program(runtime)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == (42 if expected else 0), result.stderr
+    payload = json.loads(result.stdout.split("HERMES_RUNTIME_COHERENCE=", 1)[1])
+    assert payload["missing_init_params"] == expected
+    assert payload["origin_mismatches"] == {}
+
+
 def test_runtime_coherence_fails_closed_on_service_definition_drift(tmp_path: Path):
     check = load_path(
         "public_runtime_coherence",
