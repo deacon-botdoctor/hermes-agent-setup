@@ -94,8 +94,8 @@ def test_loaded_launchd_schedule_replaces_owned_cron_without_touching_other_jobs
     installed: dict[str, str] = {}
 
     def fake_subprocess_run(command, **_kwargs):
-        assert command[0] == "crontab"
-        installed["crontab"] = Path(command[1]).read_text(encoding="utf-8")
+        assert command == ["crontab", "-"]
+        installed["crontab"] = _kwargs["input"]
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(reconciler.subprocess, "run", fake_subprocess_run)
@@ -214,8 +214,8 @@ def test_retired_codex_cron_is_removed_without_touching_unrelated_lines(
     installed: dict[str, str] = {}
 
     def fake_subprocess_run(command, **_kwargs):
-        assert command[0] == "crontab"
-        installed["crontab"] = Path(command[1]).read_text(encoding="utf-8")
+        assert command == ["crontab", "-"]
+        installed["crontab"] = _kwargs["input"]
         return subprocess.CompletedProcess(command, 0, "", "")
 
     monkeypatch.setattr(reconciler.subprocess, "run", fake_subprocess_run)
