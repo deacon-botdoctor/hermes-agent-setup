@@ -13,6 +13,7 @@ import pytest
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "bin" / "ensure-cua-driver.py"
 CONTRACT = REPO / "contracts" / "cua-driver-release-v1.json"
+CURRENT_VERSION = json.loads(CONTRACT.read_text(encoding="utf-8"))["release"]["version"]
 
 
 def load_helper():
@@ -33,9 +34,9 @@ def test_release_contract_is_exact_and_complete():
 
     assert contract["release"] == {
         "repository": "trycua/cua",
-        "source_commit": "ed9d5efcf5f261f4854bf2de0ba06a2b0b4419c4",
-        "tag": "cua-driver-rs-v0.14.2",
-        "version": "0.14.2",
+        "source_commit": "ac9b1643acb61e20d5af078215e7d1b8c414db89",
+        "tag": "cua-driver-rs-v0.22.0",
+        "version": "0.22.0",
     }
     assert set(contract["assets"]) == {
         "linux-arm64",
@@ -81,7 +82,7 @@ def test_child_environment_strips_credentials(monkeypatch, tmp_path):
     assert "OPENAI_API_KEY" not in env
     assert "GITHUB_TOKEN" not in env
     assert env["HERMES_HOME"] == str(tmp_path)
-    assert env["CUA_DRIVER_RS_VERSION"] == "0.14.2"
+    assert env["CUA_DRIVER_RS_VERSION"] == CURRENT_VERSION
     assert env["CUA_DRIVER_RS_TELEMETRY_ENABLED"] == "0"
 
 
@@ -93,7 +94,7 @@ def test_exact_driver_is_idempotent_and_doctor_green(monkeypatch, tmp_path):
         lambda *_args, **_kwargs: {
             "installed": True,
             "path": "/driver",
-            "version": "0.14.2",
+            "version": CURRENT_VERSION,
         },
     )
     commands = []
@@ -119,12 +120,19 @@ def test_exact_driver_is_idempotent_and_doctor_green(monkeypatch, tmp_path):
     assert commands[0][-2:] == ["doctor", "--json"]
 
 
-def test_missing_driver_installs_through_native_hermes(monkeypatch, tmp_path):
+def test_missing_driver_installs_pinned_version_and_copies_windows_package(monkeypatch, tmp_path):
     helper = load_helper()
+    login_home = tmp_path / "login"
+    monkeypatch.setattr(Path, "home", lambda: login_home)
+    package = login_home / ".cua-driver/packages/releases" / f"{CURRENT_VERSION}-x86_64-pc-windows-msvc"
+    package.mkdir(parents=True)
+    binaries = ("cua-driver.exe", "cua-driver-uia.exe", "cua-cursor-theme.exe")
+    for binary in binaries:
+        (package / binary).write_bytes(binary.encode())
     probes = iter(
         [
             {"installed": False, "path": None, "version": None},
-            {"installed": True, "path": "/driver", "version": "0.14.2"},
+            {"installed": True, "path": "/driver", "version": CURRENT_VERSION},
         ]
     )
     monkeypatch.setattr(helper, "probe_driver", lambda *_args, **_kwargs: next(probes))
@@ -132,6 +140,8 @@ def test_missing_driver_installs_through_native_hermes(monkeypatch, tmp_path):
 
     def fake_run(command, **_kwargs):
         commands.append(command)
+        if command[-1] == "--version":
+            return completed(command, 0, f"cua-driver {CURRENT_VERSION}")
         if command[-1] == "--json":
             return completed(command, 0, json.dumps({"ok": True, "overall": "ok"}))
         return completed(command, 0)
@@ -148,9 +158,11 @@ def test_missing_driver_installs_through_native_hermes(monkeypatch, tmp_path):
     assert code == 0
     assert receipt["status"] == "installed"
     assert receipt["install_attempted"] is True
-    assert "computer-use" in commands[0]
-    assert commands[0][-2:] == ["install", "--upgrade"]
+    assert commands[0][0] == sys.executable
+    assert commands[0][-1] == CURRENT_VERSION
     assert receipt["asset"]["key"] == "windows-x86_64"
+    for binary in binaries:
+        assert (tmp_path / "bin" / binary).read_bytes() == (package / binary).read_bytes()
 
 
 def test_version_mismatch_after_install_fails_closed(monkeypatch, tmp_path):
@@ -187,7 +199,7 @@ def test_degraded_doctor_is_recorded_but_only_blocks_gui_gate(monkeypatch, tmp_p
         lambda *_args, **_kwargs: {
             "installed": True,
             "path": "/driver",
-            "version": "0.14.2",
+            "version": CURRENT_VERSION,
         },
     )
     monkeypatch.setattr(
@@ -233,7 +245,7 @@ def test_doctor_payload_cannot_claim_ready_when_payload_is_degraded(
         lambda *_args, **_kwargs: {
             "installed": True,
             "path": "/driver",
-            "version": "0.14.2",
+            "version": CURRENT_VERSION,
         },
     )
     monkeypatch.setattr(
