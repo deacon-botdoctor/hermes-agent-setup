@@ -323,7 +323,7 @@ _D363_V2_NOTIFIER = r'''    async def _run_agent_notify_long_running(
         if _notify_interval <= 0 or _long_running_mode == "off":
             return
         source, session_key, agent_holder = turn_ctx.source, turn_ctx.session_key, turn_ctx.agent_holder
-        _notify_adapter = self._adapter_for_source(source)
+        _notify_adapter = self._delivery_adapter_for(source)
         if not _notify_adapter:
             return
         _heartbeat_msg_id = None

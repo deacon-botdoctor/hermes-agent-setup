@@ -32,6 +32,15 @@ HELPER_OLD = '''def _emit_compaction_done(agent: Any) -> None:
         logger.debug("status_callback error in compaction completion", exc_info=True)
 '''
 
+HELPER_CURRENT = '''def _emit_compaction_done(agent: Any) -> None:
+    """Emit the structured terminal edge for a started compaction."""
+    status_callback = getattr(agent, "status_callback", None)
+    if not status_callback:
+        return
+    with _swallow('status_callback error in compaction completion', exc_info=True):
+        status_callback("compacted", COMPACTION_DONE_STATUS)
+'''
+
 HELPER_NEW = '''def _emit_compaction_done(agent: Any) -> None:
     """Keep compaction completion internal; never create a transcript event."""
     # HERMES_SUPPRESS_COMPACTION_COMPLETION_STATUS_v1
@@ -96,6 +105,16 @@ RECOVERED_MARKER = (
 )
 """
 DELIVERY_MARKER_NEW = """# HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
+# Ambiguity remains recorded by ``needs_marker`` and the delivery receipt, but
+# control-plane recovery vocabulary never enters the client conversation.
+RECOVERED_MARKER = ""
+"""
+
+DELIVERY_MARKER_CURRENT = (
+    'RECOVERED_MARKER = "♻️ Recovered reply — the gateway restarted during delivery, '
+    'so this may be a duplicate:\\n\\n"\n'
+)
+DELIVERY_MARKER_CURRENT_NEW = """# HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
 # Ambiguity remains recorded by ``needs_marker`` and the delivery receipt, but
 # control-plane recovery vocabulary never enters the client conversation.
 RECOVERED_MARKER = ""
@@ -726,6 +745,66 @@ TELEGRAM_ALREADY_RESOLVED_NEW = """                if not session_key:
                     return
 """
 
+# Hermes 2026-09 moved callback-state claiming behind a shared helper.  Keep
+# this transform deliberately scoped to the exec-approval caller: the helper
+# also serves slash confirms and update prompts, whose visible stale-state UX
+# is outside this patch's ownership.
+TELEGRAM_CURRENT_CLAIM_OLD = '''        session_key = await self._claim_callback_state(
+            query, cb, self._approval_state, approval_id, _UNAUTHORIZED,
+            "This approval has already been resolved.")
+        if not session_key:
+            return
+'''
+TELEGRAM_CURRENT_CLAIM_NEW = '''        session_key = await self._claim_callback_state(
+            query, cb, self._approval_state, approval_id, _UNAUTHORIZED,
+            "")
+        if not session_key:
+            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — stale approval
+            # callbacks are acknowledged without creating transcript noise.
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return
+'''
+
+TELEGRAM_CURRENT_APPROVAL_OLD = '''        if count:
+            label_map = {
+                "once": "✅ Approved once", "session": "✅ Approved for session", "always": "✅ Approved permanently", "deny": "❌ Denied",
+            }
+            label = label_map.get(choice, "Resolved")
+            edit_text = f"{label} by {user_display}"
+        else:
+            label = "⌛ Approval expired"
+            edit_text = f"{label} — no command was waiting. It already timed out (and was denied) or was resolved elsewhere."
+        await query.answer(text=label)
+        await self._edit_md_quiet(query, edit_text)
+        # Typing was paused when the approval was sent; the text /approve and /deny paths resume it too.
+        if count and cb["chat_id"] is not None:
+            self.resume_typing_for_chat(str(cb["chat_id"]))
+'''
+TELEGRAM_CURRENT_APPROVAL_NEW = '''        if not count:
+            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — the command is
+            # already fail-closed. Remove stale controls without narrating
+            # the control-plane timeout to the client.
+            await query.answer()
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+            return
+        label_map = {
+            "once": "✅ Approved once", "session": "✅ Approved for session", "always": "✅ Approved permanently", "deny": "❌ Denied",
+        }
+        label = label_map.get(choice, "Resolved")
+        edit_text = f"{label} by {user_display}"
+        await query.answer(text=label)
+        await self._edit_md_quiet(query, edit_text)
+        # Typing was paused when the approval was sent; the text /approve and /deny paths resume it too.
+        if cb["chat_id"] is not None:
+            self.resume_typing_for_chat(str(cb["chat_id"]))
+'''
+
 TELEGRAM_CALLBACK_TEST_ANCHOR = """    @pytest.mark.asyncio
     async def test_approval_callback_escapes_dynamic_user_name(self):
 """
@@ -783,6 +862,9 @@ WHATSAPP_APPROVAL_NEW = """            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v
                     logger.exception("[whatsapp_cloud] approval confirm failed")
 """
 
+WHATSAPP_CURRENT_APPROVAL_OLD = '        # A tap after the wait timed out (count == 0) must not claim approval:\n        # the command was already denied fail-closed.\n        if count:\n            confirm_text = t("platform.whatsapp.approved" if choice == "approve" else "platform.whatsapp.denied")\n        else:\n            logger.info("[whatsapp_cloud] approval resolver reported no waiter (session_key=%s) — likely already resolved", session_key)\n            confirm_text = t("platform.whatsapp.approval_expired")\n        await self._reply_best_effort(to, confirm_text, "[whatsapp_cloud] approval confirm failed")\n'
+WHATSAPP_CURRENT_APPROVAL_NEW = '        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — the command has already\n        # failed closed. Do not add an expiry message to the conversation.\n        if count:\n            confirm_text = t("platform.whatsapp.approved" if choice == "approve" else "platform.whatsapp.denied")\n            await self._reply_best_effort(to, confirm_text, "[whatsapp_cloud] approval confirm failed")\n        else:\n            logger.info("[whatsapp_cloud] approval resolver reported no waiter (session_key=%s) — stale tap suppressed", session_key)\n'
+
 RELAY_APPROVAL_OLD = """                if not count:
                     label = "⌛ Approval expired — no command was waiting."
                 # Acknowledge in-channel (the connector's prompt message can't
@@ -827,6 +909,25 @@ RELAY_APPROVAL_LATEST_NEW = """                # HERMES_CLIENT_CONVERSATION_CONT
                     )
                     self.resume_typing_for_chat(chat_id)
 """
+
+RELAY_CURRENT_APPROVAL_OLD = '''        choice = option_id if option_id in _EXEC_APPROVAL_LABELS else "deny"
+        count = resolve_gateway_approval(str(state.get("session_key") or ""), choice)
+        label = _EXEC_APPROVAL_LABELS[choice] if count else "⌛ Approval expired — no command was waiting."
+        # In-channel ack preserves the audit trail the native edit gives (the
+        # connector's prompt message can't be edited cross-platform yet).
+        self._send_lifecycle_ack(chat_id, label, ack_meta)
+        if count:
+            self.resume_typing_for_chat(chat_id)
+'''
+RELAY_CURRENT_APPROVAL_NEW = '''        choice = option_id if option_id in _EXEC_APPROVAL_LABELS else "deny"
+        count = resolve_gateway_approval(str(state.get("session_key") or ""), choice)
+        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — stale approval taps have
+        # already failed closed. Keep the receipt state internal rather than
+        # sending a second, expiry-only chat message.
+        if count:
+            self._send_lifecycle_ack(chat_id, _EXEC_APPROVAL_LABELS[choice], ack_meta)
+            self.resume_typing_for_chat(chat_id)
+'''
 
 SLACK_EXPIRED_OLD = """        decision_text = label_map.get(choice, f"Resolved by {user_name}")
         if not count:
@@ -885,6 +986,9 @@ SLACK_BLOCKS_NEW = """        updated_blocks = [
                 blocks=sanitize_blocks(updated_blocks),
             )
 """
+
+SLACK_CURRENT_APPROVAL_OLD = '        decision_text = t(self._APPROVAL_DECISION_KEYS[choice], user=user_name)\n        if not count:\n            decision_text = t("platform.shared.approval_expired")\n        await self._finalize_interactive_message(\n            channel_id, msg_ts, self._section_text(message), decision_text,\n            "Command approval request", "approval", team_id or None)\n'
+SLACK_CURRENT_APPROVAL_NEW = '        if not count:\n            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — remove stale controls\n            # but retain the original request without an expiry transcript.\n            original_text = self._section_text(message)\n            updated_blocks = [{\n                "type": "section",\n                "text": {"type": "mrkdwn", "text": original_text or "Command approval request"},\n            }]\n            try:\n                await self._get_client(channel_id, team_id=team_id or None).chat_update(\n                    channel=channel_id,\n                    ts=msg_ts,\n                    text=original_text or "Command approval request",\n                    blocks=sanitize_blocks(updated_blocks),\n                )\n            except Exception as exc:\n                logger.warning("[Slack] Failed to silently retire stale approval: %s", exc)\n            return\n        decision_text = t(self._APPROVAL_DECISION_KEYS[choice], user=user_name)\n        await self._finalize_interactive_message(\n            channel_id, msg_ts, self._section_text(message), decision_text,\n            "Command approval request", "approval", team_id or None)\n'
 
 SLACK_CALLBACK_TEST_ANCHOR = """    @pytest.mark.asyncio
     async def test_global_allowlist_blocks_unauthorized_click(self, monkeypatch):
@@ -978,6 +1082,11 @@ DISCORD_APPROVAL_TIMEOUT_NEW = '''        async def on_timeout(self):
     class SlashConfirmView(discord.ui.View):
 '''
 
+DISCORD_CURRENT_APPROVAL_OLD = '            if not await self._gate(\n                interaction, resolved_msg=t("platform.discord.approval.already_resolved"),\n                unauth_msg=_unauthorized(),\n            ):\n                return\n            label = t(label_key)\n            self.resolved = True\n            # Unblock the waiting agent thread FIRST. A click after the approval\n            # wait timed out (count == 0) must not claim "Approved".\n            try:\n                from tools.approval import resolve_gateway_approval\n                count = resolve_gateway_approval(self.session_key, choice)\n                logger.info(\n                    "Discord button resolved %d approval(s) for session %s (choice=%s, user=%s)",\n                    count, self.session_key, choice, interaction.user.display_name,\n                )\n            except Exception as exc:\n                logger.error("Failed to resolve gateway approval from button: %s", exc)\n                count = 0\n            if not count:\n                color = discord.Color.dark_grey()\n                label = t("platform.discord.approval.expired")\n            await self._finalize_embed(\n                interaction, color,\n                t("platform.discord.approval.by_user", label=label, user=interaction.user.display_name) if count else label)\n'
+DISCORD_CURRENT_APPROVAL_NEW = '            if self.resolved:\n                # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — acknowledge a\n                # repeat tap without an ephemeral expiry transcript.\n                await interaction.response.defer()\n                return\n            if not self._check_auth(interaction):\n                await interaction.response.send_message(\n                    _unauthorized(), ephemeral=True\n                )\n                return\n            label = t(label_key)\n            self.resolved = True\n            try:\n                from tools.approval import resolve_gateway_approval\n                count = resolve_gateway_approval(self.session_key, choice)\n                logger.info(\n                    "Discord button resolved %d approval(s) for session %s (choice=%s, user=%s)",\n                    count, self.session_key, choice, interaction.user.display_name,\n                )\n            except Exception as exc:\n                logger.error("Failed to resolve gateway approval from button: %s", exc)\n                count = None\n            if count is None:\n                await self._finalize_embed(\n                    interaction,\n                    discord.Color.dark_grey(),\n                    "Approval could not be confirmed. Check the command status before retrying.",\n                )\n                return\n            if not count:\n                # The approval is already fail-closed. Disable controls while\n                # leaving the original prompt free of lifecycle wording.\n                embed = self._first_embed(interaction.message)\n                if embed:\n                    embed.remove_footer()\n                self._disable_all()\n                await interaction.response.edit_message(embed=embed, view=self)\n                return\n            await self._finalize_embed(\n                interaction, color, t("platform.discord.approval.by_user", label=label, user=interaction.user.display_name))\n'
+DISCORD_CURRENT_TIMEOUT_OLD = '        async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):\n            await self._resolve(interaction, "deny", discord.Color.red(), "platform.discord.approval.resolved_deny")\n\n    class SlashConfirmView(_HermesView):\n'
+DISCORD_CURRENT_TIMEOUT_NEW = '        async def deny(self, interaction: discord.Interaction, button: discord.ui.Button):\n            await self._resolve(interaction, "deny", discord.Color.red(), "platform.discord.approval.resolved_deny")\n\n        async def on_timeout(self):\n            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1\n            self.resolved = True\n            self._disable_all()\n            msg = self._message\n            if msg:\n                try:\n                    embed = self._first_embed(msg)\n                    if embed:\n                        embed.remove_footer()\n                    await msg.edit(embed=embed, view=self)\n                except Exception:\n                    pass\n\n    class SlashConfirmView(_HermesView):\n'
+
 SLASH_APPROVAL_OLD = """            if session_key in self._pending_approvals:
                 self._pending_approvals.pop(session_key)
                 return t("gateway.approval_expired")
@@ -987,6 +1096,23 @@ SLASH_APPROVAL_NEW = """            if session_key in self._pending_approvals:
                 # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
                 return None
 """
+
+SLASH_CURRENT_STALE_OLD = '''        if session_key in self._pending_approvals:
+            self._pending_approvals.pop(session_key)
+            return session_key, t(stale_key)
+'''
+SLASH_CURRENT_STALE_NEW = '''        if session_key in self._pending_approvals:
+            self._pending_approvals.pop(session_key)
+            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — a stale approval
+            # already failed closed; do not narrate the race to chat.
+            return session_key, ""
+'''
+SLASH_CURRENT_STALE_GUARD_OLD = '''        if stale:
+            return stale
+'''
+SLASH_CURRENT_STALE_GUARD_NEW = '''        if stale is not None:
+            return stale
+'''
 
 FEISHU_EXPIRED_OLD = """            if not count and choice != "deny":
                 # The card was already updated synchronously to "Approved" by
@@ -1012,6 +1138,13 @@ FEISHU_EXPIRED_NEW = """            if not count:
                 )
 """
 
+FEISHU_CURRENT_EXPIRED_OLD = '            if not count and choice != "deny":\n                # The card already reads "Approved" (synchronous callback), but nothing was\n                # waiting — the wait timed out (fail-closed deny) or was resolved via /approve.\n                # Correct the record so the user doesn\'t believe the command ran.\n                _chat = str(state.get("chat_id", "") or chat_id or "")\n                if _chat:\n                    try:\n                        await self.send(\n                            _chat,\n                            t("platform.shared.approval_expired"),\n                        )\n                    except Exception:\n                        logger.debug("[Feishu] expired-approval notice failed", exc_info=True)\n'
+FEISHU_CURRENT_EXPIRED_NEW = '''            if not count:
+                # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — the callback
+                # was stale and fail-closed; preserve audit logging only.
+                logger.info("Feishu approval callback was stale; client notice suppressed")
+'''
+
 MATRIX_EXPIRED_OLD = """        await self._send_invalid_reaction_feedback(
             room_id,
             target_event_id,
@@ -1021,6 +1154,12 @@ MATRIX_EXPIRED_OLD = """        await self._send_invalid_reaction_feedback(
 MATRIX_EXPIRED_NEW = """        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1
         logger.info("Matrix approval prompt expired; client notice suppressed")
 """
+
+MATRIX_CURRENT_EXPIRED_OLD = '        await self._send_invalid_reaction_feedback(\n            room_id, target_event_id,\n            t("platform.matrix.approval.expired"))\n'
+MATRIX_CURRENT_EXPIRED_NEW = '''        # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1 — remove stale controls and
+        # retain the expiry in logs/receipt state only.
+        logger.info("Matrix approval prompt expired; client notice suppressed")
+'''
 
 TEAMS_EXPIRED_OLD = """        if not has_blocking_approval(session_key):
             return InvokeResponse(
@@ -1041,6 +1180,14 @@ TEAMS_EXPIRED_NEW = """        if not has_blocking_approval(session_key):
             )
 """
 
+TEAMS_CURRENT_EXPIRED_OLD = '        if not has_blocking_approval(session_key):\n            return self._invoke_card([TextBlock(text=t("platform.shared.approval_expired"), wrap=True)])\n'
+TEAMS_CURRENT_EXPIRED_NEW = '''        if not has_blocking_approval(session_key):
+            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1: the invoke protocol
+            # still receives a successful acknowledgement, but no expiry card
+            # replaces the client-visible approval prompt.
+            return self._invoke_message("")
+'''
+
 
 def _target(hermes_dir: Path, *parts: str) -> Path:
     direct = hermes_dir.joinpath(*parts)
@@ -1055,24 +1202,32 @@ def _target(hermes_dir: Path, *parts: str) -> Path:
 def patch_completion_text(source: str) -> str:
     if COMPLETION_MARKER in source:
         return source
-    if source.count(HELPER_OLD) != 1:
+    anchors = [anchor for anchor in (HELPER_OLD, HELPER_CURRENT) if source.count(anchor) == 1]
+    if len(anchors) != 1:
         raise RuntimeError("compaction completion helper anchor missing or ambiguous")
-    patched = source.replace(HELPER_OLD, HELPER_NEW, 1)
+    patched = source.replace(anchors[0], HELPER_NEW, 1)
     if 'status_callback("compacted", COMPACTION_DONE_STATUS)' in patched:
         raise RuntimeError("compaction completion status remained after patch")
     return patched
 
 
 def patch_gateway_text(source: str) -> str:
-    if CHAT_MARKER in source:
-        return source
-    if source.count(GATEWAY_NOISY_ANCHOR) != 1:
-        raise RuntimeError("gateway context-lifecycle noise anchor missing or ambiguous")
-    return source.replace(
-        GATEWAY_NOISY_ANCHOR,
-        GATEWAY_NOISY_REPLACEMENT,
-        1,
-    )
+    if CHAT_MARKER not in source:
+        if source.count(GATEWAY_NOISY_ANCHOR) != 1:
+            raise RuntimeError("gateway context-lifecycle noise anchor missing or ambiguous")
+        source = source.replace(GATEWAY_NOISY_ANCHOR, GATEWAY_NOISY_REPLACEMENT, 1)
+    marker = "HERMES_SILENT_COMPACTION_GROWTH_REFUSAL_v1"
+    if marker not in source:
+        if source.count(GATEWAY_NOISY_ANCHOR) != 1:
+            raise RuntimeError("gateway compression-refusal noise anchor missing or ambiguous")
+        source = source.replace(
+            GATEWAY_NOISY_ANCHOR,
+            GATEWAY_NOISY_ANCHOR
+            + "    # " + marker + " — preserve logs and explicit /compress feedback.\n"
+            + '    r"|compression\\s+refused:\\s+the\\s+generated\\s+summary\\s+would\\s+have\\s+grown"\n',
+            1,
+        )
+    return source
 
 
 def patch_gateway_test_text(source: str) -> str:
@@ -1107,6 +1262,8 @@ def _replace_exact(
 def patch_delivery_ledger_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if source.count(DELIVERY_MARKER_CURRENT) == 1:
+        return source.replace(DELIVERY_MARKER_CURRENT, DELIVERY_MARKER_CURRENT_NEW, 1)
     return _replace_exact(
         source,
         DELIVERY_MARKER_OLD,
@@ -1128,6 +1285,11 @@ def patch_delivery_ledger_test_text(source: str) -> str:
 
 def patch_continuity_gateway_text(source: str) -> str:
     patched = source
+    drain_notice_count = sum(patched.count(old) for old in DRAIN_NOTICE_REPLACEMENTS)
+    if drain_notice_count == 0:
+        # Hermes retired the drain-inbox implementation. Its remaining startup
+        # recovery path has no client-facing drain notices to silence.
+        return patched
     if CONTINUITY_MARKER not in patched:
         for old, new in DRAIN_NOTICE_REPLACEMENTS.items():
             found = patched.count(old)
@@ -1344,6 +1506,38 @@ def patch_slash_sender_test_text(source: str) -> str:
 def patch_telegram_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    localized_claim = ('            query, cb, self._approval_state, approval_id, _unauthorized(),\n'
+                       '            _toast("platform.telegram.approval.toast_already_resolved"))')
+    if localized_claim in source:
+        source = source.replace(localized_claim, localized_claim.replace(
+            '_toast("platform.telegram.approval.toast_already_resolved")', '""'), 1)
+        old = '        if not session_key:\n            return\n        user_display = '
+        new = ('        if not session_key:\n'
+               '            # HERMES_CLIENT_CONVERSATION_CONTINUITY_v1: remove stale controls quietly.\n'
+               '            try:\n                await query.edit_message_reply_markup(reply_markup=None)\n'
+               '            except Exception:\n                pass\n            return\n        user_display = ')
+        prefix = localized_claim.replace('_toast("platform.telegram.approval.toast_already_resolved")', '""') + "\n"
+        source = _replace_exact(source, prefix + old, prefix + new, label="localized stale approval")
+        old = '        if count:\n            label_key = '
+        new = ('        if not count:\n'
+               '            await query.answer()\n'
+               '            try:\n                await query.edit_message_reply_markup(reply_markup=None)\n'
+               '            except Exception:\n                pass\n            return\n'
+               '        if count:\n            label_key = ')
+        return _replace_exact(source, old, new, label="localized expired approval")
+    if TELEGRAM_CURRENT_CLAIM_OLD in source:
+        patched = _replace_exact(
+            source,
+            TELEGRAM_CURRENT_CLAIM_OLD,
+            TELEGRAM_CURRENT_CLAIM_NEW,
+            label="current Telegram resolved approval",
+        )
+        return _replace_exact(
+            patched,
+            TELEGRAM_CURRENT_APPROVAL_OLD,
+            TELEGRAM_CURRENT_APPROVAL_NEW,
+            label="current Telegram expired approval",
+        )
     patched = _replace_exact(
         source,
         TELEGRAM_ALREADY_RESOLVED_OLD,
@@ -1374,6 +1568,13 @@ def patch_telegram_approval_test_text(source: str) -> str:
 def patch_whatsapp_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if WHATSAPP_CURRENT_APPROVAL_OLD in source:
+        return _replace_exact(
+            source,
+            WHATSAPP_CURRENT_APPROVAL_OLD,
+            WHATSAPP_CURRENT_APPROVAL_NEW,
+            label="current WhatsApp expired approval",
+        )
     return _replace_exact(
         source,
         WHATSAPP_APPROVAL_OLD,
@@ -1385,6 +1586,13 @@ def patch_whatsapp_approval_text(source: str) -> str:
 def patch_relay_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if RELAY_CURRENT_APPROVAL_OLD in source:
+        return _replace_exact(
+            source,
+            RELAY_CURRENT_APPROVAL_OLD,
+            RELAY_CURRENT_APPROVAL_NEW,
+            label="current relay expired approval",
+        )
     candidates = (
         (RELAY_APPROVAL_OLD, RELAY_APPROVAL_NEW),
         (RELAY_APPROVAL_LATEST_OLD, RELAY_APPROVAL_LATEST_NEW),
@@ -1408,8 +1616,17 @@ def _approval_uncertainty(source: str, platform: str) -> str:
 
 
 def patch_slack_approval_text(source: str) -> str:
+    if SLACK_CURRENT_APPROVAL_NEW in source:
+        return source
     if CONTINUITY_MARKER in source:
         return _approval_uncertainty(source, 'slack')
+    if SLACK_CURRENT_APPROVAL_OLD in source:
+        return _replace_exact(
+            source,
+            SLACK_CURRENT_APPROVAL_OLD,
+            SLACK_CURRENT_APPROVAL_NEW,
+            label="current Slack expired approval",
+        )
     patched = _replace_exact(
         source,
         SLACK_EXPIRED_OLD,
@@ -1439,8 +1656,23 @@ def patch_slack_approval_test_text(source: str) -> str:
 
 
 def patch_discord_approval_text(source: str) -> str:
+    if DISCORD_CURRENT_APPROVAL_NEW in source and DISCORD_CURRENT_TIMEOUT_NEW in source:
+        return source
     if CONTINUITY_MARKER in source:
         return _approval_uncertainty(source, 'discord')
+    if DISCORD_CURRENT_APPROVAL_OLD in source:
+        patched = _replace_exact(
+            source,
+            DISCORD_CURRENT_APPROVAL_OLD,
+            DISCORD_CURRENT_APPROVAL_NEW,
+            label="current Discord expired approval",
+        )
+        return _replace_exact(
+            patched,
+            DISCORD_CURRENT_TIMEOUT_OLD,
+            DISCORD_CURRENT_TIMEOUT_NEW,
+            label="current Discord approval timeout",
+        )
     patched = _replace_exact(
         source,
         DISCORD_ALREADY_RESOLVED_OLD,
@@ -1465,6 +1697,22 @@ def patch_discord_approval_text(source: str) -> str:
 def patch_slash_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if SLASH_CURRENT_STALE_OLD in source:
+        patched = _replace_exact(
+            source,
+            SLASH_CURRENT_STALE_OLD,
+            SLASH_CURRENT_STALE_NEW,
+            label="current slash stale approval",
+        )
+        found = patched.count(SLASH_CURRENT_STALE_GUARD_OLD)
+        if found != 2:
+            raise RuntimeError(
+                f"current slash stale approval guards missing or ambiguous: expected 2, found {found}"
+            )
+        return patched.replace(
+            SLASH_CURRENT_STALE_GUARD_OLD,
+            SLASH_CURRENT_STALE_GUARD_NEW,
+        )
     return _replace_exact(
         source,
         SLASH_APPROVAL_OLD,
@@ -1476,6 +1724,13 @@ def patch_slash_approval_text(source: str) -> str:
 def patch_feishu_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if FEISHU_CURRENT_EXPIRED_OLD in source:
+        return _replace_exact(
+            source,
+            FEISHU_CURRENT_EXPIRED_OLD,
+            FEISHU_CURRENT_EXPIRED_NEW,
+            label="current Feishu expired approval",
+        )
     return _replace_exact(
         source,
         FEISHU_EXPIRED_OLD,
@@ -1487,6 +1742,13 @@ def patch_feishu_approval_text(source: str) -> str:
 def patch_matrix_approval_text(source: str) -> str:
     if CONTINUITY_MARKER in source:
         return source
+    if MATRIX_CURRENT_EXPIRED_OLD in source:
+        return _replace_exact(
+            source,
+            MATRIX_CURRENT_EXPIRED_OLD,
+            MATRIX_CURRENT_EXPIRED_NEW,
+            label="current Matrix expired approval",
+        )
     return _replace_exact(
         source,
         MATRIX_EXPIRED_OLD,
@@ -1496,6 +1758,8 @@ def patch_matrix_approval_text(source: str) -> str:
 
 
 def patch_teams_approval_text(source: str) -> str:
+    if TEAMS_CURRENT_EXPIRED_NEW in source:
+        return source
     if CONTINUITY_MARKER in source:
         previous = TEAMS_EXPIRED_NEW.replace('value=""', 'value=None', 1)
         if source.count(TEAMS_EXPIRED_NEW) == 1:
@@ -1503,6 +1767,13 @@ def patch_teams_approval_text(source: str) -> str:
         if source.count(previous) != 1:
             raise RuntimeError("Teams installed stale response drift")
         return source.replace(previous, TEAMS_EXPIRED_NEW, 1)
+    if TEAMS_CURRENT_EXPIRED_OLD in source:
+        return _replace_exact(
+            source,
+            TEAMS_CURRENT_EXPIRED_OLD,
+            TEAMS_CURRENT_EXPIRED_NEW,
+            label="current Teams expired approval",
+        )
     return _replace_exact(
         source,
         TEAMS_EXPIRED_OLD,
@@ -1646,18 +1917,6 @@ def patch_silent_context_lifecycle_v1(
             hermes_dir,
             "tests",
             "gateway",
-            "test_restart_resume_pending.py",
-        ): patch_restart_test_text,
-        _target(
-            hermes_dir,
-            "tests",
-            "gateway",
-            "test_drain_inbox.py",
-        ): patch_drain_consumer_test_text,
-        _target(
-            hermes_dir,
-            "tests",
-            "gateway",
             "test_command_bypass_active_session.py",
         ): patch_slash_sender_test_text,
         _target(
@@ -1723,6 +1982,17 @@ def patch_silent_context_lifecycle_v1(
         ): patch_teams_approval_text,
         _target(hermes_dir, "gateway", "slash_commands.py"): patch_slash_approval_text,
     }
+    # Current Hermes retired the drain-inbox test with its drain-inbox
+    # implementation. The production delivery/recovery seams above remain
+    # required; only the no-longer-shipped test fixture is optional.
+    drain_test = hermes_dir / "tests" / "gateway" / "test_drain_inbox.py"
+    if drain_test.is_file():
+        targets[drain_test] = patch_drain_consumer_test_text
+    restart_test = hermes_dir / "tests" / "gateway" / "test_restart_resume_pending.py"
+    if restart_test.is_file():
+        restart_source = restart_test.read_text(encoding="utf-8")
+        if STARTUP_CLAIM_TEST_OLD in restart_source:
+            targets[restart_test] = patch_restart_test_text
     originals = {path: path.read_text(encoding="utf-8") for path in targets}
     patched = {path: fn(originals[path]) for path, fn in targets.items()}
     changed = [path for path in targets if patched[path] != originals[path]]

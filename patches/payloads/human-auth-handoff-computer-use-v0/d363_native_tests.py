@@ -24,6 +24,8 @@ def native(monkeypatch, tmp_path):
     return t
 
 class NativeBackend:
+    def start(self): pass
+    def stop(self): pass
     def __init__(self, t, states):
         self.t=t; self.states=list(states); self._last_target={'pid':1,'window_id':2}; self._last_app='Chrome'; self.inputs=[]; self.targets=[]
     def capture(self, **kw):

@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import io
 import shutil
+import tokenize
 from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_TRANSACTION_CANARY_v1"
@@ -445,6 +447,15 @@ def _patch_method_lexical(
     method_name: str,
     patcher,
 ) -> str:
+    # Exact AST boundaries handle decorators and class-level fields in the pin.
+    # Missing ledger calls can leave an empty suite, so repair that known damage
+    # lexically first; the caller still parses and validates the repaired tree.
+    try:
+        ast.parse(text)
+    except SyntaxError:
+        pass
+    else:
+        return _patch_method(text, class_name, method_name, patcher)
     class_prefix = f"class {class_name}"
     if text.count(class_prefix) != 1:
         raise RuntimeError(f"missing unique class boundary: {class_name}")
@@ -460,12 +471,21 @@ def _patch_method_lexical(
     if class_text.count(prefix) != 1:
         raise RuntimeError(f"missing unique {class_name}.{method_name} boundary")
     start = class_start + class_text.index(prefix)
-    candidates = [
-        position
-        for token in ("\n    async def ", "\n    def ")
-        if (position := text.find(token, start + len(prefix))) >= 0
-    ]
-    end = min(candidates) + 1 if candidates else len(text)
+    # Tokenization accepts an empty if suite while still respecting multiline
+    # expressions. Stop at the method dedent, before class fields or decorators.
+    lines = text[start:class_end].splitlines(keepends=True)
+    end = class_end
+    depth = 0
+    body_started = False
+    for token in tokenize.generate_tokens(io.StringIO("".join(lines)).readline):
+        if token.type == tokenize.INDENT:
+            depth += 1
+            body_started |= depth == 2
+        elif token.type == tokenize.DEDENT:
+            depth -= 1
+            if body_started and depth == 1:
+                end = start + sum(map(len, lines[:token.start[0] - 1]))
+                break
     return text[:start] + patcher(text[start:end]) + text[end:]
 
 

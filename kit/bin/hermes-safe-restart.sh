@@ -22,7 +22,8 @@ COMPILE_GATE_CHECK="$HERMES_HOME/bin/compile-gate-check.py"
 DOC_SANITY_CHECK="$HERMES_HOME/bin/doc-profile-sanity-check.py"
 
 usage() {
-    echo "usage: $0 {doc|gateway|<profile-name>}" >&2
+    echo "usage: $0 {doc|gateway|<profile-name>} [--refresh-binding]" >&2
+    echo "  --refresh-binding — verify and refresh the live process binding without restarting" >&2
     echo "  doc       — Linux/Spark systemd unit hermes-doc" >&2
     echo "  gateway   — platform-detected client gateway (Linux/systemd or macOS/launchd)" >&2
     echo "  <name>    — named gateway profile; Linux/systemd or macOS/launchd" >&2
@@ -439,9 +440,20 @@ try:
 except Exception:
     fail("runtime fingerprint manifest is invalid")
 files = fingerprint.get("files") if isinstance(fingerprint, dict) else None
+exact_assembly = fingerprint.get("exact_assembly")
+if exact_assembly is False:
+    overlay = fingerprint.get("maintenance_overlay")
+    if (
+        not isinstance(overlay, dict)
+        or not overlay
+        or overlay != binding.get("maintenance_overlay")
+        or overlay.get("runtime_fingerprint_digest") != fingerprint_digest
+        or overlay.get("base_composition_digest") != binding.get("runtime_composition_digest")
+    ):
+        fail("runtime maintenance overlay binding is invalid")
 if (
     fingerprint.get("verified") is not True
-    or fingerprint.get("exact_assembly") is not True
+    or exact_assembly not in (True, False)
     or fingerprint.get("runtime_dir") != str(runtime_root)
     or fingerprint.get("golden_sha") != target_sha
     or fingerprint.get("digest") != fingerprint_digest
@@ -714,7 +726,7 @@ gateway_state_is_healthy_for_pid() {
         "$HERMES_HOME/gateway_state.json" \
         "$HERMES_HOME/state/gateway_state.json"; do
         [ -f "$state_file" ] || continue
-        if python3 - "$state_file" "$expected_pid" <<'PY' >/dev/null 2>&1
+        if python3 - "$state_file" "$expected_pid" "${2:-}" <<'PY' >/dev/null 2>&1
 import json
 import os
 import sys
@@ -727,13 +739,31 @@ telegram_row = platforms.get("telegram")
 telegram = telegram_row.get("state") if isinstance(telegram_row, dict) else None
 if pid != int(sys.argv[2]) or state.get("gateway_state") != "running":
     raise SystemExit(1)
-if telegram_row is not None and telegram != "connected":
-    raise SystemExit(1)
-if telegram_row is None and not any(
+connected = telegram == "connected" if telegram_row is not None else any(
     isinstance(row, dict) and row.get("state") == "connected"
     for row in platforms.values()
-):
-    raise SystemExit(1)
+)
+if not connected:
+    # Refresh may verify a deliberately cron-only runtime. Never infer that
+    # disconnected platforms are disabled from state alone.
+    if not sys.argv[3]:
+        raise SystemExit(1)
+    import yaml
+    config = yaml.safe_load(Path(sys.argv[3]).read_text(encoding="utf-8")) or {}
+    configured = config.get("platforms") or {}
+    if not configured:
+        raise SystemExit(1)
+    for name in set(platforms) | set(configured):
+        settings = configured.get(name)
+        if isinstance(settings, dict) and settings.get("enabled") is False:
+            continue
+        row = platforms.get(name)
+        if not (
+            isinstance(row, dict)
+            and row.get("state") == "connected"
+            and row.get("writer_pid") == pid
+        ):
+            raise SystemExit(1)
 os.kill(pid, 0)
 PY
         then
@@ -754,7 +784,8 @@ restart_linux_client_gateway() {
     local agent_dir="" cand old_pid new_pid
 
     if [ -z "${XDG_RUNTIME_DIR:-}" ] || [ ! -d "$XDG_RUNTIME_DIR" ]; then
-        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        export XDG_RUNTIME_DIR
     fi
     if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
         export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
@@ -789,42 +820,21 @@ PY
         return 1
     fi
 
-    local try state_file state_line gateway_state telegram_state state_pid
+    local try
     for try in $(seq 1 "$attempts"); do
         if [ "$(systemctl --user is-active "$systemd_unit" 2>/dev/null || true)" = "active" ]; then
             new_pid=$(systemctl --user show -p MainPID --value "$systemd_unit" 2>/dev/null || true)
             if [ -n "$new_pid" ] && [ "$new_pid" != "0" ] && [ "$new_pid" != "$old_pid" ] \
                 && case "$new_pid" in *[!0-9]*) false ;; *) true ;; esac \
                 && kill -0 "$new_pid" 2>/dev/null; then
-                for state_file in \
-                "$PROFILE_HOME/gateway_state.json" \
-                "$HERMES_HOME/gateway_state.json" \
-                "$HERMES_HOME/state/gateway_state.json"; do
-                [ -f "$state_file" ] || continue
-                state_line=$(python3 - "$state_file" <<'PY' 2>/dev/null || true
-import json, sys
-from pathlib import Path
-try:
-    data = json.loads(Path(sys.argv[1]).read_text())
-except Exception:
-    raise SystemExit
-telegram = ((data.get("platforms") or {}).get("telegram") or {}).get("state") or "?"
-print((data.get("gateway_state") or "?") + " " + telegram + " " + str(data.get("pid") or 0))
-PY
-)
-                gateway_state=${state_line%% *}
-                state_line=${state_line#* }
-                telegram_state=${state_line%% *}
-                state_pid=${state_line#* }
-                if [ "$gateway_state" = "running" ] && [ "$telegram_state" = "connected" ] && [ "$state_pid" = "$new_pid" ]; then
+                if gateway_state_is_healthy_for_pid "$new_pid" "$PROFILE_HOME/config.yaml"; then
                     refresh_runtime_binding "$new_pid" || return 1
                     signal_post_restart_resume
                     release_runtime_mutation_lease
-                    log "verified healthy after Linux gateway restart (unit=$systemd_unit state_file=$state_file attempt=$try)"
+                    log "verified healthy after Linux gateway restart (unit=$systemd_unit attempt=$try)"
                     echo "ok"
                     return 0
                 fi
-                done
             fi
         fi
         [ "$try" -ge "$attempts" ] || sleep "$sleep_seconds"
@@ -838,6 +848,20 @@ if [ "${HERMES_SAFE_RESTART_DRY_RUN:-0}" = "1" ]; then
     PIDS="$(_find_all_gw_pids | tr "\n" " ")"
     log "dry-run profile=$PROFILE unit=$UNIT profile_home=$PROFILE_HOME pids=${PIDS% }"
     echo "dry_run profile=$PROFILE unit=$UNIT profile_home=$PROFILE_HOME pids=${PIDS% }"
+    exit 0
+fi
+
+if [ "${2:-}" = "--refresh-binding" ]; then
+    [ -f "$PROFILE_HOME/state/runtime-binding.json" ] || { echo "runtime_binding_missing"; exit 1; }
+    CURRENT_PID="$(_find_gw_pid)"
+    if [ -z "$CURRENT_PID" ] || ! gateway_state_is_healthy_for_pid "$CURRENT_PID" "$PROFILE_HOME/config.yaml"; then
+        echo "gateway_not_healthy"
+        exit 1
+    fi
+    refresh_runtime_binding "$CURRENT_PID" || exit 1
+    release_runtime_mutation_lease
+    log "refreshed live process binding without restart pid=$CURRENT_PID"
+    echo "binding_refreshed"
     exit 0
 fi
 
@@ -990,6 +1014,8 @@ run_doc_sanity() {
 
 restore_doc_config_backup() {
   local latest_backup
+  # Timestamped backup names are generated by the config writer.
+  # shellcheck disable=SC2012
   latest_backup="$(ls -1t "$PROFILE_HOME"/config.yaml.bak-* 2>/dev/null | head -n 1 || true)"
   if [ -z "$latest_backup" ]; then
     log "doc self-heal found no config backup"

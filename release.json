@@ -1,10 +1,10 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
-    "file_count": 125
+    "digest": "0500402836f11a24f3c6f37742388386234857105c49afeba8f5a0eb06afbab3",
+    "file_count": 328
   },
-  "baseline_wiring_digest": "43efecc32e8ba8abea0c029f591a734c98d85d03fec5e209f594a9032356548a",
-  "canonical_upstream_sha": "cb5a8f0eb8ac935c04561ac4e1f837db5ff9dbe4",
+  "baseline_wiring_digest": "d5050e4ffbefeb7315c299660915fcf3ba5968ed75783d5dce550dcc83ebab4d",
+  "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
     "contract": {
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "a2e7c4613ac517beb757bdf93b6863572f5504f37e7d08ac48f9efb2a0892a61",
-  "golden_sha": "e828031c59925dcada79e136d674cf1cbc27ca0d",
+  "deployment_digest": "e3ea5eb164930b4144ae726d493247217e706c0be7144b659dbd993f0a8b3cb5",
+  "golden_sha": "c0eb6a60720e70611e0ae699e1b65e0d6d282858",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.09.06-golden-e828031c",
+  "release": "botdoctor-hermes-2026.10.05-golden-c0eb6a60",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "be8110339b7da8384590049b1c0fdee41566f418ba9ce61aaef719e679c333ac",
+  "runtime_payload_digest": "b8a7f5986ded17577d0ad042d6c7bebcab9ac5077835480a18cef9c678e74157",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Previously verified 49 fresh patches and 0 repeat changes; this release changes only the profile configuration merger. Current exact 125-file runtime verification passes with unchanged fingerprint cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f.",
-    "golden_suite": "Golden e828031c59925dcada79e136d674cf1cbc27ca0d: actual Refero merger suite 86 passed, 8 schema-specific skips; public release suite 66 passed. Bound macOS legacy launch and selfheal recovery delegate to the verified launchd service through hermes-safe-restart; unbound launcher behavior and runtime fingerprint are unchanged. Published safe-restart helper matches Golden1054 (05a6f560), removing the live state.db quick_check during restart."
+    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced 0500402836f11a24f3c6f37742388386234857105c49afeba8f5a0eb06afbab3 across 328 changed runtime files.",
+    "golden_suite": "Exact reviewed Golden source: c0eb6a60720e70611e0ae699e1b65e0d6d282858"
   }
 }

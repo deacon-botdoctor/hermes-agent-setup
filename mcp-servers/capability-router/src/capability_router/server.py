@@ -28,6 +28,7 @@ Usage db: $HERMES_HOME/state/capability-router-usage.db
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import re
 import sqlite3
@@ -82,7 +83,7 @@ def _load_registry() -> dict[str, Any]:
             "_error": f"registry not found: {REGISTRY_PATH}",
         }
     try:
-        return json.loads(REGISTRY_PATH.read_text(encoding="utf-8"))
+        return _with_native_skills(json.loads(REGISTRY_PATH.read_text(encoding="utf-8")))
     except Exception as exc:
         return {
             "schema_version": 1,
@@ -94,6 +95,35 @@ def _load_registry() -> dict[str, Any]:
 
 # === 2026-04-28: per-host self-filter ====================================
 # _DECLARED_MCP_SERVERS_FILTER_SENTINEL
+
+def _with_native_skills(registry):
+    """Refresh installed skill metadata at discovery time, without writing a catalog.
+
+    This uses registry-sync's tenant-bound scanner so installation/removal does
+    not depend on a separate promotion notification or a stale sync timestamp.
+    """
+    helper = DEFAULT_HERMES_HOME / "bin/registry-sync.py"
+    try:
+        spec = importlib.util.spec_from_file_location("_router_registry_sync", helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        module.HERMES_HOME = DEFAULT_HERMES_HOME
+        caps, status = module._native_skill_capabilities()
+    except Exception:
+        caps, status = [], "scanner_unavailable"
+    registry["native_skill_inventory"] = {"status": status, "count": len(caps)}
+    # Previously generated claims must not survive a failed current scan.
+    existing = {c["id"]: c for c in registry.get("capabilities", [])
+                if c.get("source") != "autogen:native-skills"}
+    if status == "scanned":
+        existing.update({c["id"]: c for c in caps})
+        categories = {c["id"]: c for c in registry.get("categories", [])}
+        categories["runtime-skills"] = {"id":"runtime-skills", "label":"Installed runtime skills"}
+        registry["categories"] = list(categories.values())
+    registry["capabilities"] = list(existing.values())
+    return registry
+
+
 # Filter search_capabilities + describe_capability results by host's actual
 # mcp_servers declarations. Fail-safe: empty declared (parse failure / no
 # config.yaml / pyyaml missing) -> no filter, behavior unchanged.
@@ -273,6 +303,12 @@ def _capability_availability(cap: dict[str, Any], active: set[str] | None = None
     if active is None:
         active = _load_runtime_active_mcp_servers()
     srv = cap.get("mcp_server")
+    if cap.get("kind") == "skill" and cap.get("source") == "autogen:native-skills":
+        return {
+            "availability": "skill_available", "can_invoke_now": True,
+            "activation_required": False,
+            "route_hint": "Read the installed skill with skill_view(name=" + repr(cap["invocation"]["skill"]) + ").",
+        }
     if not srv:
         return {
             "availability": "reference",
@@ -533,6 +569,7 @@ def list_categories() -> dict[str, Any]:
         "ok": True,
         "schema_version": reg.get("schema_version"),
         "registry_path": str(REGISTRY_PATH),
+        "native_skill_inventory": reg.get("native_skill_inventory", {"status":"not_scanned"}),
         "category_count": len(cats),
         "total_capabilities": len(caps),
         "categories": enriched,
@@ -598,6 +635,7 @@ def search_capabilities(
     return {
         "ok": True,
         "query": query,
+        "native_skill_inventory": reg.get("native_skill_inventory", {"status":"not_scanned"}),
         "category": category or None,
         "result_count": len(scored),
         "truncated": len(scored) > max_hits,
@@ -783,6 +821,7 @@ def registry_status() -> dict[str, Any]:
         "server": SERVER_NAME,
         "version": "0.2.0",
         "registry_path": str(REGISTRY_PATH),
+        "native_skill_inventory": reg.get("native_skill_inventory", {"status":"not_scanned"}),
         "usage_db_path": str(USAGE_DB_PATH),
         "schema_version": reg.get("schema_version"),
         "registry_updated_at": reg.get("updated_at"),

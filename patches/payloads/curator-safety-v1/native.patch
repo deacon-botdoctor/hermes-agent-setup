@@ -1,0 +1,501 @@
+diff --git a/agent/curator.py b/agent/curator.py
+index 5a8a69c94c97c1ab79ade7491c052dfbccf20f60..dd1a5b4a252c4edb63a322466f8548de40499cdc 100644
+--- a/agent/curator.py
++++ b/agent/curator.py
+@@ -10,6 +10,7 @@ from __future__ import annotations
+ 
+ import contextlib
+ import json
++import hashlib
+ import logging
+ import os
+ import re
+@@ -435,15 +436,21 @@ CURATOR_REVIEW_PROMPT = (
+     "goes through skill_manage above so it is ledgered and rollback-able "
+     "(issue #96962). Reading files works through skill_view (including "
+     "skill_view(name, file_path=...) for support files).\n\n"
+-    "'keep' is a legitimate decision ONLY when the skill is already a "
+-    "class-level umbrella and none of the proposed merges would improve "
+-    "discoverability. 'This is narrow but distinct from its siblings' "
+-    "is NOT a reason to keep — it's a reason to move it under an "
+-    "umbrella as a subsection or support file.\n\n"
++    "'keep' is a legitimate decision when no consolidation would make "
++    "the skill easier to find and read than it is today — normally "
++    "because it is already a class-level umbrella, but also when the "
++    "library is small or already well-consolidated. Keep distinct workflows "
++    "when combining them would obscure their triggers, prerequisites, or "
++    "required outcomes. Before archiving a source, read the completed target "
++    "and check representative triggers against both versions. Preserve every "
++    "unique rule, support-file dependency, and verification step. State which "
++    "checks you performed; do not claim runtime behavior you did not test.\n\n"
+     "Expected output: real umbrella-ification. Process every obvious "
+-    "cluster. If you end the pass with fewer than 10 archives, you "
+-    "stopped too early — go back and look at the clusters you left "
+-    "alone.\n\n"
++    "cluster. The pass is done when every cluster has been decided on "
++    "its merits, not when a count is reached — zero consolidations is "
++    "a valid result when no merge genuinely improves discoverability, "
++    "and merging or archiving a skill merely to reach a count is never "
++    "justified.\n\n"
+     "When done, write a human summary AND a structured machine-readable "
+     "block so downstream tooling can distinguish consolidation from "
+     "pruning. Format EXACTLY:\n\n"
+@@ -720,6 +727,11 @@ def _write_run_report(
+     tc_counts: Dict[str, int] = dict(Counter(tc.get("name", "unknown") for tc in tool_calls))
+     cron_rewrites = _rewrite_cron_refs(diff.consolidated, diff.pruned)
+     jobs_updated = int(cron_rewrites.get("jobs_updated", 0))
++    source_hashes = {}
++    source_root = Path(__file__).resolve().parent.parent
++    for relative in ("agent/curator.py", "tools/skill_manager_tool.py", "tools/skill_provenance.py"):
++        with contextlib.suppress(OSError):
++            source_hashes[relative] = hashlib.sha256((source_root / relative).read_bytes()).hexdigest()
+     payload = {
+         "started_at": started_at.isoformat(), "duration_seconds": round(elapsed_seconds, 2),
+         "model": llm_meta.get("model", ""), "provider": llm_meta.get("provider", ""), "auto_transitions": auto_counts,
+@@ -733,6 +745,7 @@ def _write_run_report(
+         "pruned_names": [p["name"] for p in diff.pruned], "added": diff.added, "state_transitions": transitions, "cron_rewrites": cron_rewrites,
+         "llm_final": llm_meta.get("final", ""), "llm_summary": llm_meta.get("summary", ""),
+         "llm_error": llm_meta.get("error"), "tool_calls": llm_meta.get("tool_calls", []),
++        "source_files_sha256": source_hashes,
+     }
+     _write_file(run_dir / "run.json", "run.json", payload)
+     _write_file(run_dir / "REPORT.md", "REPORT.md", lambda: _render_report_markdown(payload))
+@@ -796,7 +809,7 @@ def _render_report_markdown(p: Dict[str, Any]) -> str:
+     lines = [
+         f"# Curator run — {p.get('started_at', '')}\n",
+         f"Model: `{p.get('model') or '(not resolved)'}` via `{p.get('provider') or '(not resolved)'}`  ·  Duration: {dur_label}  ·  "
+-        f"Agent-created skills: {counts.get('before', 0)} → {counts.get('after', 0)} ({counts.get('delta', 0):+d})\n",
++        f"Managed skills (LLM phase): {counts.get('before', 0)} → {counts.get('after', 0)} ({counts.get('delta', 0):+d})\n",
+         *([f"> ⚠ LLM pass error: `{error}`\n"] if error else []),
+         "## Auto-transitions (pure, no LLM)\n", f"- checked: {auto.get('checked', 0)}", f"- marked stale: {auto.get('marked_stale', 0)}",
+         f"- archived (no LLM, pure time-based staleness): {auto.get('archived', 0)}", f"- reactivated: {auto.get('reactivated', 0)}", "",
+@@ -845,10 +858,28 @@ def _render_candidate_list() -> str:
+     the same-tool-failure halt ends the run with zero findings.
+     """
+     disabled = get_disabled_skill_names()
++    from agent.skill_utils import is_external_skill_path
++    from tools.skill_manager_tool import _find_skill
++    from tools.skills_tool import _locate_skill, _skill_search_dirs
++    roots, _ = _skill_search_dirs()
+     rows = [
+         r for r in skill_usage.curated_report()
+-        if not skill_usage.is_bundled(r["name"]) and r["name"] not in disabled
++        if not r.get("pinned") and r.get("state") != skill_usage.STATE_ARCHIVED
++        and not skill_usage.is_bundled(r["name"])
++        and not skill_usage.is_hub_installed(r["name"]) and r["name"] not in disabled
+     ]
++    usable = []
++    for row in rows:
++        name = row["name"]
++        error, read_dir, _ = _locate_skill(name, None, roots)
++        write_target = _find_skill(name)
++        if (error or read_dir is None or not write_target
++                or read_dir.resolve() != write_target["path"].resolve()
++                or is_external_skill_path(read_dir)):
++            logger.info("Curator skipped '%s': read/write target is unavailable or ambiguous", name)
++            continue
++        usable.append(row)
++    rows = usable
+     if not rows:
+         return "No agent-created skills to review."
+     cron_referenced = _cron_referenced_skills()
+@@ -894,7 +925,12 @@ def _consolidation_pass(prefix: str, auto_summary: str, dry_run: bool, before_na
+             prompt = f"{CURATOR_REVIEW_PROMPT}\n\n{candidate_list}"
+             if dry_run:
+                 prompt = f"{CURATOR_DRY_RUN_BANNER}\n\n{prompt}"
+-            llm_meta = _run_llm_review(prompt)
++            from tools.skill_provenance import reset_skill_writes_read_only, set_skill_writes_read_only
++            read_only_token = set_skill_writes_read_only(dry_run)
++            try:
++                llm_meta = _run_llm_review(prompt)
++            finally:
++                reset_skill_writes_read_only(read_only_token)
+             final_summary = f"{prefix}{auto_summary}; llm: {llm_meta.get('summary', 'no change')}"
+     except Exception as e:
+         logger.debug("Curator LLM pass failed: %s", e, exc_info=True)
+@@ -920,11 +956,12 @@ def run_curator_review(
+     candidates, fork an AIAgent on the review prompt; (3) update .curator_state; (4) call *on_summary*.
+     *synchronous* runs the LLM review in the calling thread (default: daemon thread). *consolidate* ``None`` reads
+     ``curator.consolidate`` (OFF by default); when off only the deterministic prune runs — no fork, no aux cost.
+-    *dry_run* SKIPS the stale/archive transitions and instructs the fork to report only; REPORT.md is still written and
++    *dry_run* SKIPS the stale/archive transitions and enforces read-only skill tools; REPORT.md is still written and
+     recorded in ``state.last_report_path`` so users can read what WOULD have happened."""
+     consolidate = get_consolidate() if consolidate is None else consolidate
+     start = datetime.now(timezone.utc)
+     hermes_home = get_hermes_home()  # the LLM pass may run on a thread with no profile binding
++    backup_error = None
+     if dry_run:  # count candidates without mutating state
+         counts = {"checked": len(_safe_curated_report()), "marked_stale": 0, "archived": 0, "reactivated": 0}
+     else:
+@@ -933,13 +970,17 @@ def run_curator_review(
+         # ledgered; only the LLM consolidation pass rewrites content in place, so only it earns a
+         # whole-tree snapshot. Retention still runs so old snapshots age out either way.
+         if consolidate:
+-            # Best-effort, never blocks the run: a transient disk issue must not silently disable the curator forever.
++            # Content rewrites need a recovery snapshot. Inspection and recoverable
++            # deterministic archival still run if this pass cannot take one.
+             try:
+                 snap = curator_backup.snapshot_skills(reason="pre-curator-run")
+                 if snap is not None:
+                     _notify(on_summary, f"curator: snapshot created ({snap.name})")
++                else:
++                    backup_error = "pre-run backup unavailable; enable curator.backup and check storage"
+             except Exception as e:
+-                logger.debug("Curator pre-run snapshot failed: %s", e, exc_info=True)
++                logger.warning("Curator pre-run snapshot failed: %s", e, exc_info=True)
++                backup_error = "pre-run backup failed; check storage and retry"
+         else:
+             with contextlib.suppress(Exception):
+                 curator_backup.prune_old_snapshots()
+@@ -961,7 +1002,10 @@ def run_curator_review(
+         # Snapshot skill state BEFORE the LLM pass so the report can diff.
+         before_report = _safe_curated_report()
+         before_names = set(_by_name(before_report))
+-        if consolidate:
++        if consolidate and backup_error:
++            final_summary = f"{prefix}{auto_summary}; llm: skipped ({backup_error})"
++            llm_meta = _llm_meta(f"skipped ({backup_error})", backup_error)
++        elif consolidate:
+             final_summary, llm_meta = _consolidation_pass(prefix, auto_summary, dry_run, before_names)
+         else:
+             # Prune-only run: record it and write a report, but never fork.
+diff --git a/tests/agent/test_curator.py b/tests/agent/test_curator.py
+index 7b154609632f92037a9ce7222d1f07424d7d7c6c..84b6ebe1632148e0a7ad5aefae58901ae3ce49b1 100644
+--- a/tests/agent/test_curator.py
++++ b/tests/agent/test_curator.py
+@@ -580,10 +580,7 @@ def test_run_review_records_state(curator_env):
+ 
+ 
+ def test_dry_run_injects_report_only_banner(curator_env, monkeypatch):
+-    """The dry-run prompt must carry a banner instructing the LLM not to
+-    call any mutating tool. This is defense in depth — the caller also
+-    skips automatic transitions — but the LLM prompt is the only guard
+-    against the model calling skill_manage directly."""
++    """The report-only banner explains the enforced preview boundary to the model."""
+     c = curator_env["curator"]
+     u = curator_env["usage"]
+     skills_dir = curator_env["home"] / "skills"
+@@ -601,6 +598,99 @@ def test_dry_run_injects_report_only_banner(curator_env, monkeypatch):
+     assert c.CURATOR_DRY_RUN_BANNER in captured["prompt"]
+ 
+ 
++@pytest.mark.parametrize("operation", [
++    {"action": "create", "name": "new-skill", "content": "unused"},
++    {"action": "edit", "name": "a", "content": "unused"},
++    {"action": "patch", "name": "a", "old_string": "x", "new_string": "changed"},
++    {"action": "delete", "name": "a", "absorbed_into": "target"},
++    {"action": "write_file", "name": "a", "file_path": "references/new.md", "file_content": "changed"},
++    {"action": "remove_file", "name": "a", "file_path": "references/keep.md"},
++    {"name": "a", "action": "", "operations": [{"action": "delete", "name": "a"}]},
++])
++def test_dry_run_refuses_real_skill_writes_in_copied_tool_context(curator_env, monkeypatch, operation):
++    """A model that ignores the banner must not mutate, stage, or ledger any skill write."""
++    from contextvars import copy_context
++    from tools.skill_manager_tool import skill_manage
++    from tools.skill_provenance import skill_writes_read_only
++    c, u, home = (curator_env[k] for k in ("curator", "usage", "home"))
++    skills = home / "skills"
++    source = _write_skill(skills, "a")
++    _write_skill(skills, "target")
++    (source / "references").mkdir()
++    (source / "references" / "keep.md").write_text("preserve", encoding="utf-8")
++    u.mark_agent_created("a")
++    def skill_bytes():
++        # Preview records its report pointer, but must leave packages, usage,
++        # pending approvals, and mutation ledger bytes untouched.
++        return {str(p.relative_to(skills)): p.read_bytes() for p in skills.rglob("*")
++                if p.is_file() and p != c._state_file()}
++    before = skill_bytes()
++    replies = []
++
++    def attempt_write(prompt):
++        replies.append(json.loads(copy_context().run(skill_manage, **operation)))
++        return c._llm_meta("proposed changes only")
++
++    monkeypatch.setattr(c, "_run_llm_review", attempt_write)
++    c.run_curator_review(synchronous=True, dry_run=True, consolidate=True)
++
++    assert replies and replies[0]["success"] is False
++    assert "read-only" in replies[0]["error"]
++    assert before == skill_bytes()
++    assert not c.load_state().get("last_run_at")
++    assert not skill_writes_read_only(), "preview scope must not block later foreground writes"
++
++
++@pytest.mark.parametrize("failure", ["missing", "exception", "disabled"])
++def test_consolidation_requires_recovery_snapshot(curator_env, monkeypatch, failure):
++    from agent import curator_backup
++    c, u, home = (curator_env[k] for k in ("curator", "usage", "home"))
++    source = _write_skill(home / "skills", "a")
++    u.mark_agent_created("a")
++    before = (source / "SKILL.md").read_bytes()
++    calls = []
++    monkeypatch.setattr(c, "_run_llm_review", lambda prompt: calls.append(prompt))
++    if failure == "exception":
++        def fail_snapshot(**kwargs):
++            raise OSError("storage unavailable")
++        monkeypatch.setattr(curator_backup, "snapshot_skills", fail_snapshot)
++    elif failure == "missing":
++        monkeypatch.setattr(curator_backup, "snapshot_skills", lambda **kwargs: None)
++    else:
++        monkeypatch.setattr(curator_backup, "is_enabled", lambda: False)
++
++    result = c.run_curator_review(synchronous=True, consolidate=True)
++
++    assert result["auto_transitions"]["checked"] >= 1
++    assert not calls
++    assert (source / "SKILL.md").read_bytes() == before
++    state = c.load_state()
++    assert "llm: skipped (pre-run backup" in state["last_run_summary"]
++    report = json.loads((Path(state["last_report_path"]) / "run.json").read_text())
++    assert "pre-run backup" in report["llm_error"]
++
++
++def test_candidates_require_one_owned_live_read_write_target(curator_env, monkeypatch):
++    c, u, home = (curator_env[k] for k in ("curator", "usage", "home"))
++    skills = home / "skills"
++    for name in ("alias", "collision", "pinned", "archived-live"):
++        u.mark_agent_created(name)
++    alias = _write_skill(skills, "package-dir")
++    (alias / "SKILL.md").write_text("---\nname: alias\ndescription: x\n---\n", encoding="utf-8")
++    for category in ("one", "two"):
++        _write_skill(skills / category, "collision")
++    _write_skill(skills, "pinned")
++    u.set_pinned("pinned", True)
++    _write_skill(skills, "archived-live")
++    u.set_state("archived-live", u.STATE_ARCHIVED)
++
++    listing = c._render_candidate_list()
++
++    assert "- alias " in listing
++    for name in ("collision", "pinned", "archived-live"):
++        assert f"- {name} " not in listing
++
++
+ 
+ 
+ def test_run_review_synchronous_invokes_llm_stub(curator_env, monkeypatch):
+diff --git a/tests/tools/test_skill_manager_tool.py b/tests/tools/test_skill_manager_tool.py
+index 9370adfecd0877090d2aed23fd285422f1057f58..e95c7336163b69b7cb85ea09e91e40ef965949bf 100644
+--- a/tests/tools/test_skill_manager_tool.py
++++ b/tests/tools/test_skill_manager_tool.py
+@@ -63,6 +63,37 @@ description: Updated description.
+ Step 1: Do the new thing.
+ """
+ 
++
++def test_frontmatter_alias_writes_the_same_package_as_reader(tmp_path):
++    from tools.skills_tool import _locate_skill
++    from agent.skill_utils import TIER_LOCAL
++    package = tmp_path / "category" / "different-directory"
++    package.mkdir(parents=True)
++    (package / "SKILL.md").write_text(VALID_SKILL_CONTENT, encoding="utf-8")
++    with _skill_dir(tmp_path):
++        error, read_dir, _ = _locate_skill("test-skill", None, [(TIER_LOCAL, tmp_path)])
++        assert error is None
++        assert _find_skill("test-skill")["path"] == read_dir == package
++        result = _patch_skill("test-skill", "Do the thing.", "Do the corrected thing.")
++        assert result["success"]
++    assert "Do the corrected thing." in (package / "SKILL.md").read_text()
++
++
++def test_ambiguous_write_refuses_even_identical_skill_text(tmp_path):
++    packages = [tmp_path / category / "test-skill" for category in ("one", "two")]
++    for package in packages:
++        package.mkdir(parents=True)
++        (package / "SKILL.md").write_text(VALID_SKILL_CONTENT, encoding="utf-8")
++    with _skill_dir(tmp_path):
++        assert _find_skill("test-skill") is None
++        result = _delete_skill("test-skill")
++        assert not result["success"] and "Ambiguous" in result["error"]
++        assert _find_skill("one/test-skill")["path"] == packages[0]
++        result = _patch_skill("one/test-skill", "Do the thing.", "Do the selected thing.")
++        assert result["success"]
++    assert "Do the selected thing." in (packages[0] / "SKILL.md").read_text()
++    assert (packages[1] / "SKILL.md").read_text() == VALID_SKILL_CONTENT
++
+ LONG_DESC_CONTENT = """\
+ ---
+ name: long-desc
+@@ -1173,6 +1204,30 @@ class TestCuratorConsolidationDeleteGuard:
+         # Skill must remain active on disk — fail closed, no archive.
+         assert (skills_root / "active-skill").exists()
+ 
++    def test_consolidation_requires_source_and_target_reads(self, tmp_path, monkeypatch):
++        from tools.skills_tool import skill_view
++        from tools.skill_manager_guards import _reset_background_review_read_marks
++        _reset_background_review_read_marks()
++        try:
++            with _curator_pass(tmp_path, monkeypatch=monkeypatch) as skills_root:
++                _create_curator_skill("source", _skill_content("source"))
++                _create_curator_skill("target", _skill_content("target"))
++                result = _delete_skill("source", absorbed_into="target")
++                assert result.get("_read_before_write_required")
++                assert json.loads(skill_view("source"))["success"]
++                result = _delete_skill("source", absorbed_into="target")
++                assert result.get("_read_before_write_required")
++                assert (skills_root / "source" / "SKILL.md").exists()
++                assert json.loads(skill_view("target"))["success"]
++                result = _delete_skill("source", absorbed_into="target")
++                assert result["success"] and result["_archived"]
++                assert (skills_root / "target" / "SKILL.md").exists()
++                from tools.skill_usage import restore_skill
++                ok, _ = restore_skill("source")
++                assert ok and (skills_root / "source" / "SKILL.md").exists()
++        finally:
++            _reset_background_review_read_marks()
++
+     def test_background_review_read_survives_copied_tool_contexts(
+         self, tmp_path, monkeypatch
+     ):
+diff --git a/tools/skill_manager_tool.py b/tools/skill_manager_tool.py
+index 1dc0f1db4ffb028c47099e0a7ae78e3c2db02afd..727446020513611f9cd9803eabb137ad9965bae3 100644
+--- a/tools/skill_manager_tool.py
++++ b/tools/skill_manager_tool.py
+@@ -216,32 +216,19 @@ def _iter_skill_dirs(root: Path):
+ 
+ 
+ def _find_skill(name: str) -> Optional[Dict[str, Any]]:
+-    """Find a skill (local skills dir, then skills.external_dirs) -> ``{"path": Path}`` | None.
++    """Resolve directory and frontmatter names using the reader's discovery rules.
+ 
+-    Accepts the bare dir name (``axolotl``; matches category-nested skills too) and the
+-    categorized relative path (``mlops/axolotl``) — the two forms skill_view resolves. The
+-    categorized form matches RELATIVE to the local root only (relative_to raises for external dirs)."""
++    Writes require one package, even when duplicate SKILL.md bytes let the reader rank
++    identical copies: their supporting files may differ. Qualified paths disambiguate.
++    """
+     from agent.skill_utils import get_all_skills_dirs
+-    local_root = None
+-    if "/" in name or "\\" in name:
+-        try:
+-            local_root = _skills_dir().resolve()
+-        except OSError:
+-            logger.debug(
+-                "skills dir resolve failed; categorized lookups fall back to the unresolved path",
+-                exc_info=True)
+-            local_root = _skills_dir()
+-    for skills_dir in get_all_skills_dirs():
+-        if not skills_dir.exists():
+-            continue
+-        for skill_dir in _iter_skill_dirs(skills_dir):
+-            if skill_dir.name == name:
+-                return {"path": skill_dir}
+-            if local_root is not None:
+-                resolved = skill_dir.resolve()
+-                if (resolved.is_relative_to(local_root)
+-                        and resolved.relative_to(local_root).as_posix() == name):  # POSIX form
+-                    return {"path": skill_dir}
++    from tools.skills_tool import _collect_skill_candidates, _skill_lookup_path_error
++
++    if _skill_lookup_path_error(name):
++        return None
++    candidates = _collect_skill_candidates(name, None, get_all_skills_dirs())
++    if len(candidates) == 1 and candidates[0][0] is not None:
++        return {"path": candidates[0][0]}
+     return None
+ 
+ 
+@@ -285,6 +272,14 @@ def _find_skill_in_other_profiles(name: str) -> List[Tuple[str, Path]]:
+ 
+ def _skill_not_found_error(name: str, suffix: str = "") -> str:
+     """Not-found error naming other profiles that hold the skill, plus ``suffix``."""
++    from agent.skill_utils import get_all_skills_dirs
++    from tools.skills_tool import _collect_skill_candidates, _skill_lookup_path_error
++    if not _skill_lookup_path_error(name):
++        candidates = _collect_skill_candidates(name, None, get_all_skills_dirs())
++        if len(candidates) > 1:
++            paths = "; ".join(str(md) for _, md in candidates)
++            return (f"Ambiguous skill name '{name}': {paths}. "
++                    "Use a unique category-qualified path before writing.")
+     from agent.file_safety import _resolve_active_profile_name
+     base = f"Skill '{name}' not found in active profile '{_resolve_active_profile_name()}'."
+     others = _find_skill_in_other_profiles(name)
+@@ -519,9 +514,16 @@ def _delete_skill(name: str, absorbed_into: Optional[str] = None) -> Dict[str, A
+     if absorbed_target:
+         if absorbed_target == name:
+             return _err(f"absorbed_into='{absorbed_target}' cannot equal the skill being deleted.")
+-        if not _find_skill(absorbed_target):
++        target = _find_skill(absorbed_target)
++        if not target:
+             return _err(f"absorbed_into='{absorbed_target}' does not exist. "
+                         f"Create or patch the umbrella skill first, then retry the delete.")
++        if target["path"].resolve() == skill_dir.resolve():
++            return _err("The absorption target resolves to the source package. Keep the source active.")
++        for read_name, read_dir in ((name, skill_dir), (absorbed_target, target["path"])):
++            if read_guard := _background_review_read_before_write_guard(
++                    read_name, read_dir / "SKILL.md", "delete", "SKILL.md"):
++                return read_guard
+     skills_root = _containing_skills_root(skill_dir)
+     if unsafe := _validate_delete_target(skill_dir):  # defense-in-depth before rmtree
+         return _err(unsafe)
+@@ -720,6 +722,11 @@ def skill_manage(
+     session_id: str = None, operations=None) -> str:
+     """Dispatch to the action handler -> JSON string. ``operations`` (atomic batch shape,
+     see _skill_manage_batch) overrides the flat fields."""
++    from tools.skill_provenance import skill_writes_read_only
++    if skill_writes_read_only():
++        # Refuse before staging, locks, ledger capture, or batch dispatch can write bytes.
++        return tool_error("Curator dry-run is read-only. Report the proposed change; "
++                          "run without --dry-run to apply it.", success=False)
+     if operations is not None:
+         return _skill_manage_batch(
+             operations, default_name=name or None, task_id=task_id, session_id=session_id)
+diff --git a/tools/skill_provenance.py b/tools/skill_provenance.py
+index 4ab73ce25634d642a831a3de4b66283ada19e4e0..5abd6765cdef6f4a022ea6731125e4de17569775 100644
+--- a/tools/skill_provenance.py
++++ b/tools/skill_provenance.py
+@@ -8,6 +8,22 @@ import contextvars
+ _write_origin: contextvars.ContextVar[str] = contextvars.ContextVar("skill_write_origin", default="foreground")
+ BACKGROUND_REVIEW = "background_review"  # sentinel used by run_agent._spawn_background_review
+ 
++_skill_writes_read_only: contextvars.ContextVar[bool] = contextvars.ContextVar(
++    "skill_writes_read_only", default=False)
++
++
++def set_skill_writes_read_only(read_only: bool) -> contextvars.Token[bool]:
++    """Bind preview policy independently of write origin; copied tool contexts inherit it."""
++    return _skill_writes_read_only.set(bool(read_only))
++
++
++def reset_skill_writes_read_only(token: contextvars.Token[bool]) -> None:
++    _skill_writes_read_only.reset(token)
++
++
++def skill_writes_read_only() -> bool:
++    return _skill_writes_read_only.get()
++
+ 
+ def set_current_write_origin(origin: str) -> contextvars.Token[str]:
+     return _write_origin.set(origin or "foreground")
+diff --git a/website/docs/user-guide/features/curator.md b/website/docs/user-guide/features/curator.md
+index fcd16c1610f3fca87820e41468d8cc3f8c2116e5..d4b35a3f55b021455dd0c8a8dd2ebf3924b407e0 100644
+--- a/website/docs/user-guide/features/curator.md
++++ b/website/docs/user-guide/features/curator.md
+@@ -30,7 +30,7 @@ If both are true, it spawns a background fork of `AIAgent` — the same pattern
+ :::info First-run behavior
+ On a brand-new install (or the first time a pre-curator install ticks after `hermes update`), the curator **does not run immediately**. The first observation seeds `last_run_at` to "now" and defers the first real pass by one full `interval_hours`. This gives you a full interval to review your skill library, pin anything important, or opt out entirely before the curator ever touches it.
+ 
+-If you want to see what the curator *would* do before it runs for real, run `hermes curator run --dry-run` — it produces the same review report without mutating the library.
++If you want to see what the curator *would* do before it runs for real, run `hermes curator run --dry-run` — it produces the same review report without mutating the library. Preview mode refuses every `skill_manage` write, including batch writes, before staging or ledger capture.
+ :::
+ 
+ A run has two phases:
+@@ -124,7 +124,7 @@ hermes curator purge [--days N] [--dry-run]  # delete archived skills older than
+ 
+ ## Backups and rollback
+ 
+-Before a consolidation pass (`consolidate: true`, the only pass that rewrites skill content in place), Hermes takes a tar.gz snapshot of `~/.hermes/skills/` at `~/.hermes/skills/.curator_backups/<utc-iso>/skills.tar.gz`. The snapshot covers the live skill tree only: `.archive/`, the audit ledger, `.hub/`, and the backups themselves are never rolled in, and a rollback never rewinds them (an older copy would lose archived skills or ledger entries). If a pass archives or consolidates something you didn't want touched, you can undo the whole run with one command:
++Before a consolidation pass (`consolidate: true`, the only pass that rewrites skill content in place), Hermes takes a tar.gz snapshot of `~/.hermes/skills/` at `~/.hermes/skills/.curator_backups/<utc-iso>/skills.tar.gz`. If the snapshot is unavailable or fails, Hermes skips the LLM pass and records the reason in the report. Deterministic inactivity transitions still run because their archives are recoverable. Enable backups and repair the storage failure before retrying consolidation. The snapshot covers the live skill tree only: `.archive/`, the audit ledger, `.hub/`, and the backups themselves are never rolled in, and a rollback never rewinds them (an older copy would lose archived skills or ledger entries). If a pass archives or consolidates something you didn't want touched, you can undo the whole run with one command:
+ 
+ ```bash
+ hermes curator rollback        # restore newest snapshot (with confirmation)
+@@ -145,7 +145,7 @@ curator:
+     keep: 2
+ ```
+ 
+-Set `curator.backup.enabled: false` to disable automatic snapshotting. The manual `hermes curator backup` command still works when backups are disabled only if you set `enabled: true` first — the flag gates both paths symmetrically so there's no way to accidentally skip the pre-run snapshot on mutating runs.
++Set `curator.backup.enabled: false` to disable snapshotting and mutating LLM consolidation. Prune-only runs and read-only previews remain available. Enable backups before a manual `hermes curator backup` or a mutating consolidation run.
+ 
+ `hermes curator status` also lists the five least-recently-used skills — a quick way to see what's likely to become stale next.
+ 

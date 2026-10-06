@@ -788,6 +788,8 @@ def _send_payload(
             )
         raise err
     result = body.get("result") or {}
+    _record_acknowledged_history(result, chat_id=chat_id, thread_id=thread_id,
+                                 text=str(payload.get("text") or ""))
     if "text" in payload:
         _remember_successful_repeat_candidate(
             chat_id=chat_id,
@@ -806,6 +808,31 @@ def _send_payload(
             summary=summary or "telegram message delivered",
             detail=detail,
         )
+    return result
+
+
+def _record_acknowledged_history(result, *, chat_id, thread_id, text):
+    """Preserve the platform ack even when this producer lacks Hermes imports."""
+    import importlib.util
+    helper = Path(__file__).with_name("telegram_delivery_history.py")
+    if not helper.is_file():
+        # Source checkout uses the canonical kit payload; installed clients use
+        # the sibling installed by sync_kit_bin_scripts.
+        helper = Path(__file__).resolve().parents[1] / "kit/bin/telegram_delivery_history.py"
+    try:
+        spec = importlib.util.spec_from_file_location("telegram_delivery_history", helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        # Prefer the platform's acknowledged route over the requested route.
+        actual_chat = (result.get("chat") or {}).get("id", chat_id)
+        actual_thread = result.get("message_thread_id", thread_id)
+        result["history"] = module.record_acknowledged_message(home=HERMES,
+            platform="telegram", chat_id=actual_chat, thread_id=actual_thread,
+            user_id=None, message_id=result.get("message_id"), text=text,
+            revision=int(result.get("edit_date") or 0))
+    except Exception as exc:
+        # This is post-send. Never raise into callers' platform resend paths.
+        result["history"] = {"status": "unavailable", "error_type": type(exc).__name__}
     return result
 
 
@@ -973,6 +1000,8 @@ def send_document_message(
         )
         raise err
     result = body.get("result") or {}
+    _record_acknowledged_history(result, chat_id=chat_id, thread_id=thread_id,
+                                 text=caption or ("[Document delivered: " + path.name + "]"))
     record_delivery_proof(
         sender=sender or "unknown",
         status="delivered",

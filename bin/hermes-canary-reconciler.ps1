@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Continue'
+$TaskContracts = @{}
 $Bin = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Hermes = Split-Path -Parent $Bin
 $HomeDir = Split-Path -Parent $Hermes
@@ -31,13 +32,19 @@ function WriteJsonAtomic($Path, $Obj) {
   }
 }
 function PsLiteral($Value) { "'" + ([string]$Value).Replace("'", "''") + "'" }
-function IsoDurationMinutes($Minutes) { 'PT' + [int]$Minutes + 'M' }
+
+function GatewayTaskName {
+  # Reuse the installed restart authority for hosts with a custom task name.
+  $settings = ReadJson (Join-Path $State 'safe-restart-settings.json')
+  if ($settings -and $settings.TaskName) { return [string]$settings.TaskName }
+  return 'HermesGateway'
+}
 
 function ResolveGatewayPython {
   # The scheduled gateway is the live runtime authority.  A stale
   # runtime-binding.json must never keep a health task on an older candidate.
   try {
-    $gateway = Get-ScheduledTask -TaskName 'HermesGateway' -ErrorAction SilentlyContinue
+    $gateway = Get-ScheduledTask -TaskName (GatewayTaskName) -ErrorAction SilentlyContinue
     $actions = @($gateway.Actions)
     if ($actions.Count -ne 1) { return $null }
     $arguments = [string]$actions[0].Arguments
@@ -82,7 +89,7 @@ function NewBoundedSettings($ExecutionMinutes) {
     -StartWhenAvailable
 }
 
-function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes) {
+function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes, $Principal) {
   if (-not $Task) { return $false }
   try {
     $actions = @($Task.Actions)
@@ -91,12 +98,15 @@ function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $Execu
     $policy = [string]$xml.Task.Settings.MultipleInstancesPolicy
     $limit = [System.Xml.XmlConvert]::ToTimeSpan([string]$xml.Task.Settings.ExecutionTimeLimit)
     return [bool](
-      $Task.Principal.UserId -eq 'SYSTEM' -and
+      $Task.Principal.UserId -eq $Principal.UserId -and
+      $Task.Principal.LogonType -eq $Principal.LogonType -and
+      $Task.Principal.RunLevel -eq $Principal.RunLevel -and
       $actions.Count -eq 1 -and
       [string]$actions[0].Execute -ieq $Execute -and
       [string]$actions[0].Arguments -eq $Arguments -and
+      [string]$actions[0].WorkingDirectory -eq '' -and
       [string]$actions[0].Arguments.IndexOf($Script, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
-      $interval -eq (IsoDurationMinutes $Minutes) -and
+      [System.Xml.XmlConvert]::ToTimeSpan($interval).TotalMinutes -eq $Minutes -and
       $policy -eq 'StopExisting' -and
       $limit.TotalMinutes -eq $ExecutionMinutes -and
       $Task.Settings.DisallowStartIfOnBatteries -eq $false -and
@@ -106,11 +116,20 @@ function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $Execu
   } catch { return $false }
 }
 
-function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes) {
+function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes, $OutputPath) {
   if (-not (Test-Path -LiteralPath $Script)) { return 'script_missing' }
   try {
+    # Tool readiness reads the gateway account's protected environment file.
+    # Keep other maintenance tasks on SYSTEM. Never broaden secret-file ACLs.
+    $principal = if ($Name -eq 'HermesToolReadiness') {
+      (Get-ScheduledTask -TaskName (GatewayTaskName) -ErrorAction Stop).Principal
+    } else {
+      New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    }
+    if (-not $principal -or -not $principal.UserId) { throw 'health task principal unavailable' }
+    $TaskContracts[$Name] = @{Execute=$Execute;Arguments=$Arguments;Script=$Script;Minutes=$Minutes;ExecutionMinutes=$ExecutionMinutes;Principal=$principal;OutputPath=$OutputPath}
     $existing = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-    if (TestTaskContract $existing $Execute $Arguments $Script $Minutes $ExecutionMinutes) { return 'already_compliant' }
+    if (TestTaskContract $existing $Execute $Arguments $Script $Minutes $ExecutionMinutes $principal) { return 'already_compliant' }
     $action = New-ScheduledTaskAction -Execute $Execute -Argument $Arguments
     $trigger = New-ScheduledTaskTrigger `
       -Once `
@@ -123,13 +142,12 @@ function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMi
       -Action $action `
       -Trigger $trigger `
       -Settings $settings `
-      -User 'SYSTEM' `
-      -RunLevel Highest `
+      -Principal $principal `
       -Force | Out-Null
     $xml = [xml](Export-ScheduledTask -TaskName $Name -ErrorAction Stop)
     if ($null -eq $xml.Task.Settings.MultipleInstancesPolicy) { throw 'scheduled task XML has no MultipleInstancesPolicy' }
     $xml.Task.Settings.MultipleInstancesPolicy = 'StopExisting'
-    Register-ScheduledTask -TaskName $Name -Xml $xml.OuterXml -User 'SYSTEM' -Force | Out-Null
+    Register-ScheduledTask -TaskName $Name -Xml $xml.OuterXml -Force | Out-Null
     return 'ensured'
   } catch { return ('failed: ' + $_.Exception.Message) }
 }
@@ -159,10 +177,20 @@ function TaskEvidence($Name, $IntervalMinutes, $ExecutionMinutes) {
     $instancePolicy = [string]$xml.Task.Settings.MultipleInstancesPolicy
     $limit = [int]([System.Xml.XmlConvert]::ToTimeSpan([string]$xml.Task.Settings.ExecutionTimeLimit).TotalSeconds)
   } catch {}
+  $contract = $TaskContracts[$Name]
+  $contractOk = $false
+  if ($contract) {
+    $contractOk = TestTaskContract $task $contract.Execute $contract.Arguments $contract.Script $contract.Minutes $contract.ExecutionMinutes $contract.Principal
+  }
+  $scriptHash = $null
+  if ($contract -and (Test-Path -LiteralPath $contract.Script -PathType Leaf)) {
+    $scriptHash = (Get-FileHash -LiteralPath $contract.Script -Algorithm SHA256).Hash.ToLowerInvariant()
+  }
   $verdict = 'pass'
   if ([string]$task.State -eq 'Disabled') { $verdict = 'disabled' }
   elseif ($null -ne $runningSeconds -and $runningSeconds -gt ($IntervalMinutes * 120)) { $verdict = 'running_too_long' }
   elseif ($null -ne $lastResult -and $lastResult -ne 0 -and [string]$task.State -ne 'Running') { $verdict = 'last_result_failed' }
+  elseif (-not $contractOk) { $verdict = 'definition_mismatch' }
   elseif ($instancePolicy -ne 'StopExisting') { $verdict = 'instance_policy_unsafe' }
   elseif ($null -eq $limit -or $limit -ne ($ExecutionMinutes * 60)) { $verdict = 'execution_limit_unsafe' }
   [ordered]@{
@@ -171,6 +199,13 @@ function TaskEvidence($Name, $IntervalMinutes, $ExecutionMinutes) {
     state=[string]$task.State
     enabled=([string]$task.State -ne 'Disabled')
     interval_minutes=$IntervalMinutes
+    contract_ok=[bool]$contractOk
+    principal=[ordered]@{user_id=[string]$task.Principal.UserId;logon_type=[string]$task.Principal.LogonType;run_level=[string]$task.Principal.RunLevel}
+    actions=@($task.Actions | ForEach-Object { [ordered]@{execute=[string]$_.Execute;arguments=[string]$_.Arguments;working_directory=[string]$_.WorkingDirectory} })
+    script=$contract.Script
+    script_sha256=$scriptHash
+    output_path=$contract.OutputPath
+    next_run_time=$(if ($info -and $info.NextRunTime -and $info.NextRunTime.Year -gt 1900) { $info.NextRunTime.ToUniversalTime().ToString('o') } else { $null })
     last_run_time=$lastRun
     last_result=$lastResult
     running_seconds=$runningSeconds
@@ -190,21 +225,21 @@ $failedActions = @()
 
 $selfScript = Join-Path $Bin 'hermes-local-selfcheck.py'
 $selfState = Join-Path $State 'local-selfcheck-latest.json'
-$selfStatus = EnsureTask 'HermesLocalSelfCheck' 'powershell.exe' (PythonArguments $python $selfScript '') $selfScript 15 3
+$selfStatus = EnsureTask 'HermesLocalSelfCheck' 'powershell.exe' (PythonArguments $python $selfScript '') $selfScript 15 3 $selfState
 $capabilities += [ordered]@{id='hermes_core';title='Hermes runtime core';detected=$true;reasons=@('config_or_runtime_home');canary=[ordered]@{id='local_selfcheck';script=$selfScript;state=$selfState;status=$(if(Test-Path -LiteralPath $selfScript){'enabled'}else{'missing'});schedule=$selfStatus}}
 if (-not (Test-Path -LiteralPath $selfScript)) { $missing += [ordered]@{capability='hermes_core';canary='local_selfcheck';reason='script missing';script=$selfScript} }
 
 $readinessScript = Join-Path $Bin 'tool-readiness-probe.py'
 $readinessState = Join-Path $State 'tool-readiness-probe-latest.json'
 $readinessExtra = '--smoke --output ' + (PsLiteral $readinessState)
-$readinessStatus = EnsureTask 'HermesToolReadiness' 'powershell.exe' (PythonArguments $python $readinessScript $readinessExtra) $readinessScript 30 3
+$readinessStatus = EnsureTask 'HermesToolReadiness' 'powershell.exe' (PythonArguments $python $readinessScript $readinessExtra) $readinessScript 30 3 $readinessState
 $capabilities += [ordered]@{id='tool_readiness';title='End-to-end tool readiness';detected=(Test-Path -LiteralPath $readinessScript);reasons=@('installed_probe');canary=[ordered]@{id='tool_readiness';script=$readinessScript;state=$readinessState;status=$(if(Test-Path -LiteralPath $readinessScript){'enabled'}else{'missing'});schedule=$readinessStatus}}
 if (-not (Test-Path -LiteralPath $readinessScript)) { $missing += [ordered]@{capability='tool_readiness';canary='tool_readiness';reason='script missing';script=$readinessScript} }
 
 $retentionScript = Join-Path $Bin 'hermes-disk-retention.py'
 $retentionState = Join-Path $State 'disk-retention-last.json'
 $retentionExtra = '--apply --json --clear-flags --home ' + (PsLiteral $HomeDir) + ' --hermes-home ' + (PsLiteral $Hermes)
-$retentionStatus = EnsureTask 'HermesDiskRetention' 'powershell.exe' (PythonArguments $python $retentionScript $retentionExtra) $retentionScript 120 30
+$retentionStatus = EnsureTask 'HermesDiskRetention' 'powershell.exe' (PythonArguments $python $retentionScript $retentionExtra) $retentionScript 120 30 $retentionState
 $capabilities += [ordered]@{id='disk_retention';title='Runtime and snapshot retention';detected=$true;reasons=@('fleet_health_floor');canary=[ordered]@{id='disk_retention';script=$retentionScript;state=$retentionState;status=$(if(Test-Path -LiteralPath $retentionScript){'enabled'}else{'missing'});schedule=$retentionStatus}}
 if (-not (Test-Path -LiteralPath $retentionScript)) { $missing += [ordered]@{capability='disk_retention';canary='disk_retention';reason='script missing';script=$retentionScript} }
 
@@ -213,7 +248,7 @@ $capacityConfig = Join-Path $Hermes 'config\windows-capacity-containment.json'
 $capacityStatus = $null
 if (Test-Path -LiteralPath $capacityConfig) {
   $capacityArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $capacityScript + '" -Apply -ConfigPath "' + $capacityConfig + '"'
-  $capacityStatus = EnsureTask 'HermesWindowsCapacityContainment' 'powershell.exe' $capacityArgs $capacityScript 15 5
+  $capacityStatus = EnsureTask 'HermesWindowsCapacityContainment' 'powershell.exe' $capacityArgs $capacityScript 15 5 (Join-Path $State 'windows-capacity-containment-latest.json')
   $capabilities += [ordered]@{id='windows_capacity_containment';title='Bounded Windows capacity containment';detected=$true;reasons=@('explicit_config');canary=[ordered]@{id='windows_capacity_containment';script=$capacityScript;state=(Join-Path $State 'windows-capacity-containment-latest.json');status=$(if(Test-Path -LiteralPath $capacityScript){'enabled'}else{'missing'});schedule=$capacityStatus}}
   if (-not (Test-Path -LiteralPath $capacityScript)) { $missing += [ordered]@{capability='windows_capacity_containment';canary='windows_capacity_containment';reason='script missing';script=$capacityScript} }
 }
@@ -223,7 +258,7 @@ if ($configText.Contains('mcp_servers') -or $configText.Contains('mcp:')) {
 }
 
 $selfTaskArgs = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $MyInvocation.MyCommand.Path + '"'
-$reconcilerStatus = EnsureTask 'HermesCanaryReconciler' 'powershell.exe' $selfTaskArgs $MyInvocation.MyCommand.Path 30 3
+$reconcilerStatus = EnsureTask 'HermesCanaryReconciler' 'powershell.exe' $selfTaskArgs $MyInvocation.MyCommand.Path 30 3 (Join-Path $State 'canary-reconciler-latest.json')
 $taskEvidence = @(
   (TaskEvidence 'HermesLocalSelfCheck' 15 3),
   (TaskEvidence 'HermesToolReadiness' 30 3),
@@ -260,6 +295,7 @@ $payload = [ordered]@{
   agent_name=$agentId
   home=$HomeDir
   hermes_home=$Hermes
+  runtime_python=$python
   capabilities=$capabilities
   scheduled_tasks=$taskEvidence
   missing_canaries=$missing

@@ -201,3 +201,31 @@ permissions, destructive data, provider limits, and uncertain external side
 effects remain hard stops. The operator receives either a verified recovery or
 the concrete boundary that stopped automatic repair—never an instruction to
 repair the agent's script or configuration.
+
+## Build a new public release
+
+The private release owner supplies a reviewed, sanitized tar archive. The archive
+contains `runtime-payload-source-manifest.json` and exactly the regular files
+listed in its two deployment components. It contains no private runtime path,
+operator state, tenant data, or credentials. The archive hash binds the handoff.
+
+From the public repository checkout, run:
+
+```bash
+python3 bin/build-release.py \
+  --release-id RELEASE_ID \
+  --candidate EXACT_GOLDEN_SHA \
+  --source-artifact /absolute/path/to/sanitized-source.tar \
+  --source-sha256 EXACT_ARCHIVE_SHA256
+```
+
+The command checks the archive and source blobs, creates an isolated public
+bundle, and runs the existing assembler against the pinned upstream. It publishes
+the local build directory only after source and runtime verification pass. The
+source checkout and live installations remain unchanged. Separately pinned
+continuity and runtime-coherence packages stay in the public bundle.
+
+The result includes a receipt under the checkout's sibling `public-release-builds`
+directory. Repeating the exact command verifies and reuses that build. A verified
+local build is ready for repository review; it does not mean public publication
+or fleet deployment. `--upstream-source` can reuse an existing upstream checkout.

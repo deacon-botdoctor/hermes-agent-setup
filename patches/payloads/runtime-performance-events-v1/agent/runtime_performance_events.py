@@ -658,10 +658,6 @@ def _bytes(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, default=str).encode("utf-8"))
 
 
-def _tokens(byte_count: int) -> int:
-    return (max(0, int(byte_count)) + 3) // 4
-
-
 def _content(message: Any) -> Any:
     return message.get("content", "") if isinstance(message, dict) else ""
 
@@ -677,7 +673,11 @@ def _selector_controls() -> dict[str, Any]:
     skills = config.get("skills") if isinstance(config.get("skills"), dict) else {}
     policy = config.get("mcp_policy") if isinstance(config.get("mcp_policy"), dict) else {}
     servers = config.get("mcp_servers") if isinstance(config.get("mcp_servers"), dict) else {}
-    hot = {str(item) for item in (policy.get("hot_path") or [])}
+    hot = {
+        str(item)
+        for key in ("hot_path", "hot_path_enabled", "active_enabled")
+        for item in (policy.get(key) or [])
+    }
     on_demand = {str(item) for item in (policy.get("on_demand") or [])}
     return {
         "mcp_unclassified_count": len({str(item) for item in servers} - hot - on_demand),
@@ -690,8 +690,13 @@ def build_payload_breakdown(
     tools: Any,
     *,
     toolset_for_tool: Any = None,
+    instructions: Any = None,
 ) -> dict[str, Any]:
-    safe_messages = messages if isinstance(messages, list) else []
+    safe_messages = list(messages) if isinstance(messages, list) else []
+    if isinstance(messages, str):
+        safe_messages = [{"role": "user", "content": messages}]
+    if isinstance(instructions, str) and instructions:
+        safe_messages.insert(0, {"role": "system", "content": instructions})
     safe_tools = tools if isinstance(tools, list) else []
     system_bytes = tool_result_bytes = 0
     tool_sizes: list[int] = []
@@ -701,10 +706,10 @@ def build_payload_breakdown(
     for index, message in enumerate(safe_messages):
         if not isinstance(message, dict):
             continue
-        content = _content(message)
+        content = message.get("output", "") if message.get("type") == "function_call_output" else _content(message)
         size = _bytes(content)
         role = message.get("role")
-        if role == "system":
+        if role in {"system", "developer"}:
             system_bytes += size
             if isinstance(content, str):
                 start = content.find("<available_skills>")
@@ -713,7 +718,7 @@ def build_payload_breakdown(
                     skills_index_bytes += _bytes(
                         content[start : end + len("</available_skills>")]
                     )
-        elif role == "tool":
+        elif role == "tool" or message.get("type") == "function_call_output":
             tool_result_bytes += size
             tool_sizes.append(size)
             tool_hashes.append(
@@ -741,7 +746,7 @@ def build_payload_breakdown(
     for tool in safe_tools:
         size = _bytes(tool)
         schema_bytes += size
-        function = tool.get("function") if isinstance(tool, dict) else {}
+        function = tool.get("function", tool) if isinstance(tool, dict) else {}
         name = str(function.get("name") or "") if isinstance(function, dict) else ""
         try:
             toolset = toolset_for_tool(name) if callable(toolset_for_tool) and name else None
@@ -750,11 +755,15 @@ def build_payload_breakdown(
         if isinstance(toolset, str) and toolset.startswith("mcp-"):
             mcp_bytes += size
             mcp_count += 1
-    request_bytes = _bytes(safe_messages) + schema_bytes
+    # Use the runtime estimator: opaque provider replay is not priced as text,
+    # and multimodal inputs have model-aware costs rather than base64 byte costs.
+    from agent.model_metadata import estimate_request_tokens_rough
+
+    estimated_tokens = estimate_request_tokens_rough(safe_messages, tools=safe_tools)
     payload = {
         "baseline_system": {"bytes": system_bytes},
         "context_injections": {},
-        "estimated_request": {"estimated_tokens": _tokens(request_bytes)},
+        "estimated_request": {"estimated_tokens": estimated_tokens},
         "mcp_schemas": {"bytes": mcp_bytes, "count": mcp_count},
         "selector_controls": _selector_controls(),
         "skills": {

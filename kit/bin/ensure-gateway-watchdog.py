@@ -55,8 +55,10 @@ def detect_gateway_unit(hermes_home: Path, current_platform: str) -> str:
             if (Path.home() / "Library" / "LaunchAgents" / f"{unit}.plist").is_file():
                 return unit
         return "ai.hermes.gateway"
-    if hermes_home.name == "doc":
-        return "hermes-doc.service"
+    if hermes_home.parent.name == "profiles":
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", hermes_home.name):
+            raise ValueError("unsafe Hermes profile name")
+        return f"hermes-{hermes_home.name}.service"
     return "hermes-gateway.service"
 
 
@@ -162,9 +164,15 @@ def run_checked(command: list[str], *, dry_run: bool) -> dict[str, Any]:
 def install_linux(
     argv: list[str], hermes_home: Path, supervisor_unit: str, *, dry_run: bool
 ) -> dict[str, Any]:
+    # Keep the existing Doc unit stable; other profiles need their own timer.
+    name = WATCHDOG_NAME
+    if hermes_home.parent.name == "profiles" and hermes_home.name != "doc":
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", hermes_home.name):
+            raise ValueError("unsafe Hermes profile name")
+        name += "-" + hermes_home.name
     unit_dir = Path.home() / ".config" / "systemd" / "user"
-    service = unit_dir / f"{WATCHDOG_NAME}.service"
-    timer = unit_dir / f"{WATCHDOG_NAME}.timer"
+    service = unit_dir / f"{name}.service"
+    timer = unit_dir / f"{name}.timer"
     service_text = "\n".join(
         [
             "[Unit]",
@@ -185,9 +193,10 @@ def install_linux(
             "[Timer]",
             "OnBootSec=5min",
             "OnUnitActiveSec=5min",
+            "OnCalendar=*-*-* *:0/5:00",
             "AccuracySec=15s",
             "Persistent=true",
-            f"Unit={WATCHDOG_NAME}.service",
+            f"Unit={name}.service",
             "",
             "[Install]",
             "WantedBy=timers.target",
@@ -201,13 +210,13 @@ def install_linux(
     commands = [
         run_checked(["systemctl", "--user", "daemon-reload"], dry_run=dry_run),
         run_checked(
-            ["systemctl", "--user", "enable", "--now", f"{WATCHDOG_NAME}.timer"],
+            ["systemctl", "--user", "enable", "--now", f"{name}.timer"],
             dry_run=dry_run,
         ),
     ]
     return {
         "kind": "systemd-user-timer",
-        "unit": f"{WATCHDOG_NAME}.timer",
+        "unit": f"{name}.timer",
         "gateway_supervisor_unit": supervisor_unit,
         "files": [str(service), str(timer)],
         "commands": commands,
@@ -218,6 +227,18 @@ def install_macos(
     argv: list[str], supervisor_unit: str, *, dry_run: bool
 ) -> dict[str, Any]:
     destination = Path.home() / "Library" / "LaunchAgents" / f"{MAC_LABEL}.plist"
+    domain = f"gui/{os.getuid()}"
+    if not dry_run:
+        disabled = subprocess.run(
+            ["/bin/launchctl", "print-disabled", domain],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        if disabled.returncode:
+            raise RuntimeError("cannot verify watchdog maintenance state")
+        if re.search(rf'["\']?{re.escape(MAC_LABEL)}["\']?\s*=>\s*(?:true|disabled)\b', disabled.stdout):
+            return {"kind": "launchd", "unit": MAC_LABEL,
+                    "gateway_supervisor_unit": supervisor_unit,
+                    "status": "paused", "files": [], "commands": []}
     payload = {
         "Label": MAC_LABEL,
         "ProgramArguments": argv,
@@ -230,7 +251,6 @@ def install_macos(
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         destination.write_bytes(plistlib.dumps(payload, sort_keys=False))
-    domain = f"gui/{os.getuid()}"
     if not dry_run:
         subprocess.run(
             ["/bin/launchctl", "bootout", domain, str(destination)],
@@ -239,6 +259,9 @@ def install_macos(
             timeout=30,
             check=False,
         )
+    enabled = run_checked(
+        ["/bin/launchctl", "enable", f"{domain}/{MAC_LABEL}"], dry_run=dry_run
+    )
     command = run_checked(
         ["/bin/launchctl", "bootstrap", domain, str(destination)], dry_run=dry_run
     )
@@ -247,7 +270,7 @@ def install_macos(
         "unit": MAC_LABEL,
         "gateway_supervisor_unit": supervisor_unit,
         "files": [str(destination)],
-        "commands": [command],
+        "commands": [enabled, command],
     }
 
 
@@ -372,6 +395,17 @@ def install(
     if not SAFE_UNIT.fullmatch(unit):
         raise ValueError(f"unsafe gateway supervisor unit: {unit!r}")
     destination = hermes_home / "bin" / source.name
+    dependencies = []
+    if "client-medic.json" in source.read_text():
+        names = ["client_medic.py", "client-medic-run.py"]
+        if current_platform == "linux":
+            # Both scheduled repair callers must share the opted-in ledger.
+            names.append("client-selfheal-heartbeat.sh")
+        dependency_sources = [source.with_name(name) for name in names]
+        if not all(path.is_file() and not path.is_symlink() for path in dependency_sources):
+            raise ValueError("watchdog medic dependencies missing")
+        dependencies = [atomic_copy(path, hermes_home / "bin" / path.name, dry_run=dry_run)
+                        for path in dependency_sources]
     file_result = atomic_copy(source, destination, dry_run=dry_run)
     kind = {
         "linux": "systemd-user",
@@ -393,6 +427,7 @@ def install(
             if dry_run
             else "idempotent"
             if file_result["status"] == "idempotent"
+            and all(item["status"] == "idempotent" for item in dependencies)
             and wrapper_status in {None, "idempotent"}
             else "installed"
         ),
@@ -400,6 +435,7 @@ def install(
         "platform": current_platform,
         "watchdog": service,
         "file": file_result,
+        "dependencies": dependencies,
     }
 
 

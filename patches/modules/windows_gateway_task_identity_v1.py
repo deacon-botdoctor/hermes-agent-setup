@@ -270,8 +270,9 @@ def patch_windows_gateway_task_identity_v1(root: Path) -> bool:
         Path(root) / "hermes_cli/config_defaults.py": (patch_config_defaults_text),
         Path(root) / "cli-config.yaml.example": patch_config_example_text,
     }
-    if not all(target.is_file() for target in targets):
-        return False
+    missing = [str(target) for target in targets if not target.is_file()]
+    if missing:
+        raise RuntimeError("windows_gateway_task_identity_v1: required targets missing: " + ", ".join(missing))
     originals = {target: target.read_text(encoding="utf-8") for target in targets}
     patched = {target: patcher(originals[target]) for target, patcher in targets.items()}
     changed = [target for target in targets if patched[target] != originals[target]]

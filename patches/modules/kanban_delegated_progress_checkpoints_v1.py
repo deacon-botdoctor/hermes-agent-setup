@@ -713,6 +713,9 @@ def _patch_native(root: Path) -> bool:
         source = path.read_text(encoding="utf-8")
         originals[path] = source
         for before, after in replacements:
+            if before == "        if not await self._send_pings():\n" and "        async with self._owner_scope():\n" in source:
+                before = "    " + before
+                after = "".join("    " + line if line.strip() else line for line in after.splitlines(keepends=True))
             if source.count(after) == 1:
                 states.add("post")
             elif (previous := _native_previous_reservation(after)) != after and source.count(previous) == 1:
@@ -742,6 +745,25 @@ def _patch_native(root: Path) -> bool:
     return True
 
 
+def _has_split_phase_owners(root: Path) -> bool:
+    """Recognize the reviewed split Kanban layout by every owned seam.
+
+    Hermes kept this layout after the original d363 carrier commit but changed
+    its repository head.  Matching every pre/post seam is narrower evidence
+    than accepting a branch name or arbitrary revision.
+    """
+    try:
+        for relative, replacements in _native_replacements().items():
+            source = (root / relative).read_text(encoding="utf-8")
+            for before, after in replacements:
+                previous = _native_previous_reservation(after)
+                if not any(source.count(candidate) == 1 for candidate in (before, after, previous)):
+                    return False
+    except OSError:
+        return False
+    return True
+
+
 def patch_kanban_delegated_progress_checkpoints_v1(hermes_dir: Path) -> bool:
     """Patch the pinned Hermes Kanban DB and gateway watcher atomically."""
     root = Path(hermes_dir)
@@ -750,7 +772,9 @@ def patch_kanban_delegated_progress_checkpoints_v1(hermes_dir: Path) -> bool:
         ["git", "-C", str(root), "rev-parse", "HEAD"],
         capture_output=True, text=True, check=False,
     )
-    if revision.returncode == 0 and revision.stdout.strip() == _NATIVE_COMMIT:
+    if (
+        revision.returncode == 0 and revision.stdout.strip() == _NATIVE_COMMIT
+    ) or _has_split_phase_owners(root):
         return _patch_native(root)
     targets = {
         root / "hermes_cli/kanban_db.py": patch_kanban_db_text,

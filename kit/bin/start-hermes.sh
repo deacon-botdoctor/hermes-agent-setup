@@ -28,6 +28,7 @@ PY_BOUND
     exec "$HOME/.hermes/bin/hermes-safe-restart.sh" gateway
 fi
 
+
 AUTH_PROFILES="$HOME/.hermes/auth-profiles.json"
 LOG="$HOME/.hermes/logs/start-hermes.log"
 mkdir -p "$(dirname "$LOG")"

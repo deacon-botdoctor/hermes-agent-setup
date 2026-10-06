@@ -102,7 +102,7 @@ RUN_METHODS = f'''    # [{MARKER}]
         self, source, session_key: str, content: str
     ) -> bool:
         """Edit the existing Telegram checkpoint; never fan out after edit failure."""
-        adapter = self._adapter_for_source(source)
+        adapter = self._delivery_adapter_for(source)
         if adapter is None:
             return False
         try:
@@ -211,7 +211,7 @@ RUN_METHODS = f'''    # [{MARKER}]
             )
             return
 
-        adapter = self._adapter_for_source(source)
+        adapter = self._delivery_adapter_for(source)
         if adapter is None:
             await self._stop_inactivity_recovery(
                 source, session_key, "adapter_unavailable"
@@ -442,8 +442,8 @@ def _patch_native_inactivity_recovery(root: Path) -> bool:
     session_methods = "\n".join(line for line in SESSION_METHODS.split("\n") if "entry.updated_at = _now()" not in line)
     session = _replace_once(session, "    def set_model_override(", session_methods + "    def set_model_override(", "native session methods")
     methods = RUN_METHODS.replace(
-        '        adapter = self._adapter_for_source(source)\n',
-        '        from gateway.run import _non_conversational_metadata\n        adapter = self._adapter_for_source(source)\n',
+        '        adapter = self._delivery_adapter_for(source)\n',
+        '        from gateway.run import _non_conversational_metadata\n        adapter = self._delivery_adapter_for(source)\n',
     ).replace(
         '        deadline = asyncio.get_running_loop().time() + 30.0\n',
         '        from gateway.run import _AGENT_PENDING_SENTINEL\n        from gateway.platforms.base import MessageType\n        deadline = asyncio.get_running_loop().time() + 30.0\n',

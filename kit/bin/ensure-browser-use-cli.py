@@ -693,6 +693,27 @@ def _receipt_matches_install(
     )
 
 
+def verified_command(hermes_home: Path, contract: dict[str, Any], *, system: str | None = None) -> list[str] | None:
+    """Resolve an installed v2 receipt without executing code or changing state."""
+    target = hermes_home / contract["installer"]["target"]
+    receipt = _read_receipt(hermes_home / "state" / RECEIPT_NAME)
+    if not _receipt_matches_install(receipt, contract=contract, target=target,
+                                    hermes_home=hermes_home, system=system):
+        return None
+    try:
+        python = _venv_python(target, system)
+        cli = _venv_cli(target, system)
+        if (system or platform.system()) != "Windows" and not all(os.access(p, os.X_OK) for p in (python, cli)):
+            return None
+        if (_environment_sha256(target) != receipt["environment_sha256"]
+                or _sha256(cli, max_bytes=CLI_MAX_BYTES) != receipt["cli_sha256"]
+                or _interpreter_integrity(target, system) != receipt["interpreter"]):
+            return None
+        return [str(cli)] if (system or platform.system()) == "Windows" else [str(python), "-I", "-B", str(cli)]
+    except (OSError, ValueError, RuntimeError):
+        return None
+
+
 def _lexists(path: Path) -> bool:
     return os.path.lexists(path)
 

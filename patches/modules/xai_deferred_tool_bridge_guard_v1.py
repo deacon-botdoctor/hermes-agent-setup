@@ -8,78 +8,6 @@ from pathlib import Path
 
 MARKER = "HERMES_XAI_DEFERRED_TOOL_BRIDGE_GUARD_v1"
 
-DESCRIPTION_OLD = '''    desc_call = (
-        "Invoke a deferred tool by name with the given arguments. Argument shape "
-        f"matches the tool's schema (see `{TOOL_DESCRIBE_NAME}`). Policy, hooks, "
-        "and approvals run exactly as for any directly-listed tool."
-    )
-'''
-DESCRIPTION_NEW = f'''    # {MARKER}
-    desc_call = (
-        "Invoke ONLY a deferred tool returned by tool_search. Never use this "
-        "wrapper for a tool already listed directly, and never use it to invoke "
-        "tool_search, tool_describe, or itself. The nested `arguments` object "
-        f"must match the deferred tool's schema (see `{{TOOL_DESCRIBE_NAME}}`). "
-        "Policy, hooks, and approvals run exactly as for any directly-listed tool."
-    )
-'''
-
-# d363 inlined the bridge description instead of naming ``desc_call``.
-D363_DESCRIPTION_OLD = '''            "Invoke a deferred tool by name with the given arguments. Argument shape "
-            f"matches the tool's schema (see `{TOOL_DESCRIBE_NAME}`). Policy, hooks, "
-            "and approvals run exactly as for any directly-listed tool.",
-'''
-D363_DESCRIPTION_NEW = f'''            # {MARKER}
-            "Invoke ONLY a deferred tool returned by tool_search. Never use this "
-            "wrapper for a tool already listed directly, and never use it to invoke "
-            "tool_search, tool_describe, or itself. The nested `arguments` object "
-            f"must match the deferred tool's schema (see `{{TOOL_DESCRIBE_NAME}}`). "
-            "Policy, hooks, and approvals run exactly as for any directly-listed tool.",
-'''
-D363_ARGUMENTS_SCHEMA_OLD = '''                "arguments": {
-                    "type": "object",
-                    "description": "Arguments for the tool, matching its schema.",
-                },
-'''
-D363_ARGUMENTS_SCHEMA_NEW = '''                "arguments": {
-                    "type": "object",
-                    "description": "Arguments for the tool, matching its schema.",
-                    "additionalProperties": True,
-                },
-'''
-D363_DIRECT_TOOL_ERROR_OLD = '''        return None, {}, (
-            f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
-            "list already, call it directly instead of via tool_call.")
-'''
-D363_DIRECT_TOOL_ERROR_NEW = '''        return None, {}, (
-            f"Route correction required: '{name}' is not a deferrable tool. Do not "
-            f"call tool_call again for '{name}'; call '{name}' directly with its "
-            "arguments at the top level. tool_call is only for deferred tools "
-            "returned by tool_search.")
-'''
-
-ARGUMENTS_SCHEMA_OLD = '''                        "arguments": {
-                            "type": "object",
-                            "description": "Arguments for the tool, matching its schema.",
-                        },
-'''
-ARGUMENTS_SCHEMA_NEW = '''                        "arguments": {
-                            "type": "object",
-                            "description": "Arguments for the tool, matching its schema.",
-                            "additionalProperties": True,
-                        },
-'''
-
-RECURSION_ERROR_OLD = (
-    "        return None, {}, f\"tool_call cannot invoke '{name}' "
-    "(it is itself a bridge tool)\"\n"
-)
-RECURSION_ERROR_NEW = '''        return None, {}, (
-            f"Route correction required: tool_call cannot invoke '{name}' because "
-            "it is a bridge tool. Call tool_search or tool_describe directly, or "
-            "call a deferred tool returned by tool_search."
-        )
-'''
 
 DIRECT_TOOL_ERROR_OLD = '''        return None, {}, (
             f"'{name}' is not a deferrable tool. If it appears in the model-facing tools "
@@ -94,33 +22,6 @@ DIRECT_TOOL_ERROR_NEW = '''        return None, {}, (
         )
 '''
 
-CONCURRENT_BLOCK_OLD = '''                if _activation_attempted and (_err or not _underlying):
-                    _ts_scope_block = json.dumps(
-                        {"error": _err or "MCP activation failed"}, ensure_ascii=False
-                    )
-                if not _err and _underlying:
-'''
-CONCURRENT_BLOCK_NEW = f'''                if _activation_attempted and (_err or not _underlying):
-                    _ts_scope_block = json.dumps(
-                        {{"error": _err or "MCP activation failed"}}, ensure_ascii=False
-                    )
-                # {MARKER}: resolution rejects are not executions of tool_call.
-                if _err and _ts_scope_block is None:
-                    _ts_scope_block = _err
-                if not _err and _underlying:
-'''
-
-SEQUENTIAL_BLOCK_OLD = '''                if _activation_attempted and (_err or not _underlying):
-                    _ts_scope_block = _err or "MCP activation failed"
-                if not _err and _underlying:
-'''
-SEQUENTIAL_BLOCK_NEW = f'''                if _activation_attempted and (_err or not _underlying):
-                    _ts_scope_block = _err or "MCP activation failed"
-                # {MARKER}: return route correction without dispatch or guardrail accounting.
-                if _err and _ts_scope_block is None:
-                    _ts_scope_block = _err
-                if not _err and _underlying:
-'''
 
 TOOL_SEARCH_TEST_ANCHOR = "\n\nclass TestLegacyMcpAliasDispatch:\n"
 TOOL_SEARCH_TESTS = '''
@@ -138,17 +39,15 @@ TOOL_SEARCH_TESTS = '''
         assert arguments["type"] == "object"
         assert arguments["additionalProperties"] is True
 
-    def test_direct_tool_bridge_error_gives_explicit_route_correction(self):
+    def test_out_of_scope_direct_tool_wrapper_is_rejected(self):
         from tools.tool_search import resolve_underlying_call
 
-        _, _, err = resolve_underlying_call(
+        name, arguments, err = resolve_underlying_call(
             {"name": "session_search", "arguments": {}},
             scoped_names=frozenset(),
         )
-        assert err is not None
-        assert "Route correction required" in err
-        assert "call 'session_search' directly" in err
-        assert "Do not call tool_call again" in err
+        assert name is None and arguments == {}
+        assert err is not None and "session_search" in err
 
     def test_scoped_direct_tool_wrapper_resolves_without_widening_scope(self):
         from tools.tool_search import resolve_underlying_call
@@ -166,84 +65,13 @@ TOOL_SEARCH_TESTS = '''
             scoped_names=frozenset({"terminal"}),
         )
         assert excluded_err is not None
-        assert "Route correction required" in excluded_err
+        assert "write_file" in excluded_err
 
 '''
 
 GUARDRAIL_TEST_ANCHOR = (
     "\ndef test_relay_rewrite_precedes_sequential_policy_approval_checkpoint_and_dispatch():\n"
 )
-GUARDRAIL_TESTS = f'''
-def test_scoped_direct_tool_wrappers_dispatch_as_the_real_tools():
-    """{MARKER}: recover the observed Enoch/Grok wrapper failure in scope."""
-    agent = _make_agent(
-        "terminal",
-        "write_file",
-        "tool_search",
-        "tool_describe",
-        "tool_call",
-        config=_hard_stop_config(),
-    )
-    requested = [
-        ("terminal", {{"command": "pwd"}}),
-        ("write_file", {{"path": "/tmp/enoch-canary", "content": "ok"}}),
-    ]
-    calls = [
-        _mock_tool_call(
-            "tool_call",
-            json.dumps({{"name": name, "arguments": arguments}}),
-            f"c-{{i}}",
-        )
-        for i, (name, arguments) in enumerate(requested)
-    ]
-    messages = []
-
-    with (
-        patch(
-            "agent.tool_executor._tool_search_scoped_names",
-            return_value=frozenset(name for name, _ in requested),
-        ),
-        patch("run_agent.handle_function_call", return_value='{{"ok": true}}') as mock_hfc,
-    ):
-        agent._execute_tool_calls_concurrent(
-            SimpleNamespace(content="", tool_calls=calls), messages, "task-1"
-        )
-
-    # Native execution is concurrent; prove exact dispatch without assuming start order.
-    assert sorted(
-        (call.args[0], json.dumps(call.args[1], sort_keys=True))
-        for call in mock_hfc.call_args_list
-    ) == sorted((name, json.dumps(arguments, sort_keys=True)) for name, arguments in requested)
-    assert agent._tool_guardrail_halt_decision is None
-    assert len(messages) == len(calls)
-    assert all('"ok": true' in message["content"] for message in messages)
-
-
-def test_out_of_scope_direct_tool_wrapper_is_still_blocked():
-    agent = _make_agent("session_search", "tool_call", config=_hard_stop_config())
-    call = _mock_tool_call(
-        "tool_call",
-        json.dumps({{"name": "session_search"}}),
-        "c-direct-misroute",
-    )
-    messages = []
-
-    with (
-        patch(
-            "agent.tool_executor._tool_search_scoped_names",
-            return_value=frozenset(),
-        ),
-        patch("run_agent.handle_function_call", return_value="SHOULD_NOT_RUN") as mock_hfc,
-    ):
-        agent._execute_tool_calls_sequential(
-            SimpleNamespace(content="", tool_calls=[call]), messages, "task-1"
-        )
-
-    mock_hfc.assert_not_called()
-    assert agent._tool_guardrail_halt_decision is None
-    assert "call 'session_search' directly" in messages[0]["content"]
-
-'''
 
 D363_GUARDRAIL_TESTS = f'''
 def test_scoped_direct_tool_wrappers_dispatch_as_the_real_tools():
@@ -316,9 +144,118 @@ def test_out_of_scope_direct_tool_wrapper_is_still_blocked():
 
     mock_hfc.assert_not_called()
     assert agent._tool_guardrail_halt_decision is None
-    assert "call 'session_search' directly" in messages[0]["content"]
+    assert "session_search" in messages[0]["content"]
 
 '''
+
+
+
+NESTED_DISCOVERY_HELPER = '''def _restore_wrapped_discovery_call(name, arguments, aliases):
+    """HERMES_NESTED_DISCOVERY_ALIAS_v1: recover only a declared discovery alias.
+
+    A provider may wrap its advertised alias in tool_call. Lift a single valid
+    call before dispatch so normal direct-tool scope and schema checks apply.
+    Never infer aliases from spelling, unwrap batches, or execute unknown names.
+    """
+    if name != "tool_call" or not aliases:
+        return name, arguments
+    try:
+        body = json.loads(arguments) if isinstance(arguments, str) else arguments
+        if not isinstance(body, dict) or set(body) != {"calls"}:
+            return name, arguments
+        calls = body["calls"]
+        if not isinstance(calls, list) or len(calls) != 1:
+            return name, arguments
+        call = calls[0]
+        if not isinstance(call, dict) or set(call) != {"name", "arguments"}:
+            return name, arguments
+        wire_name = call["name"]
+        if not isinstance(wire_name, str) or aliases.get(wire_name) != "tool_search":
+            return name, arguments
+        nested = call["arguments"]
+        nested = json.loads(nested) if isinstance(nested, str) else nested
+        if not isinstance(nested, dict):
+            return name, arguments
+        return "tool_search", json.dumps(nested)
+    except (TypeError, ValueError):
+        return name, arguments
+
+
+'''
+NESTED_DISCOVERY_TESTS = '''import json
+from types import SimpleNamespace
+import pytest
+from agent.transports import get_transport
+
+@pytest.mark.parametrize('mode', ['codex_responses', 'chat_completions'])
+@pytest.mark.parametrize('alias', ['hermes_tool_search', 'hermes_tool_search_2'])
+def test_nested_discovery_alias_uses_request_provenance(mode, alias, monkeypatch):
+    import agent.transports.codex
+    import agent.transports.chat_completions
+    transport = get_transport(mode)
+    transport._last_wire_aliases = {alias: 'tool_search'}
+    arguments = json.dumps({'calls': [{'name': alias, 'arguments': {'queries': ['gbrain get_page'], 'limit': 5}}]})
+    call = SimpleNamespace(id='same-call-id', function=SimpleNamespace(name='tool_call', arguments=arguments))
+    msg = SimpleNamespace(content=None, reasoning=None, tool_calls=[call])
+    response = SimpleNamespace(choices=[SimpleNamespace(message=msg, finish_reason='tool_calls')], usage=None, output=[], status='completed')
+    monkeypatch.setattr('agent.codex_responses_adapter._normalize_codex_response', lambda *a, **k: (msg, 'tool_calls'))
+    normalized = transport.normalize_response(response).tool_calls[0]
+    assert normalized.id == 'same-call-id'
+    assert normalized.name == 'tool_search'
+    assert json.loads(normalized.arguments) == {'queries': ['gbrain get_page'], 'limit': 5}
+
+@pytest.mark.parametrize('mode', ['codex_responses', 'chat_completions'])
+@pytest.mark.parametrize('aliases,body', [
+    ({}, {'calls':[{'name':'hermes_tool_search','arguments':{}}]}),
+    (None, {'calls':[{'name':'hermes_tool_search','arguments':{}}]}),
+    ({'hermes_tool_search_2':'tool_search'}, {'calls':[{'name':'hermes_tool_search','arguments':{}}]}),
+    ({'hermes_terminal':'terminal'}, {'calls':[{'name':'hermes_terminal','arguments':{}}]}),
+    ({'hermes_tool_search':'tool_search'}, {'calls':[{'name':'hermes_tool_search','arguments':{}}, {'name':'other','arguments':{}}]}),
+    ({'hermes_tool_search':'tool_search'}, {'calls':[{'name':'hermes_tool_search','arguments':[] }]}),
+    ({'hermes_tool_search':'tool_search'}, {'calls':[{'name':'hermes_tool_search','arguments':{}}], 'unexpected':True}),
+])
+def test_nested_alias_never_guesses_or_widens_scope(mode, aliases, body, monkeypatch):
+    import agent.transports.codex
+    import agent.transports.chat_completions
+    transport=get_transport(mode);transport._last_wire_aliases=aliases
+    arguments=json.dumps(body)
+    call=SimpleNamespace(id='preserved',function=SimpleNamespace(name='tool_call',arguments=arguments))
+    msg=SimpleNamespace(content=None,reasoning=None,tool_calls=[call])
+    response=SimpleNamespace(choices=[SimpleNamespace(message=msg,finish_reason='tool_calls')],usage=None,output=[],status='completed')
+    monkeypatch.setattr('agent.codex_responses_adapter._normalize_codex_response',lambda *a,**k:(msg,'tool_calls'))
+    result=transport.normalize_response(response).tool_calls[0]
+    assert (result.id,result.name,result.arguments)==('preserved','tool_call',arguments)
+'''
+
+def patch_codex_discovery_alias(source: str) -> str:
+    if "HERMES_NESTED_DISCOVERY_ALIAS_v1" in source:
+        return source
+    source = _replace_exact(source, "def _alias_reserved_tools(\n",
+                            NESTED_DISCOVERY_HELPER + "def _alias_reserved_tools(\n",
+                            count=1, label="discovery alias helper")
+    old = "                tool_calls.append(ToolCall(\n"
+    new = ('                arguments = tc.function.arguments if has_fn else getattr(tc, "arguments", "{}")\n'
+           '                name, arguments = _restore_wrapped_discovery_call(name, arguments, alias_map)\n' + old)
+    source = _replace_exact(source, old, new, count=1, label="Responses nested alias")
+    return _replace_exact(source,
+        '                    arguments=tc.function.arguments if has_fn else getattr(tc, "arguments", "{}"),\n',
+        '                    arguments=arguments,\n', count=1, label="Responses normalized arguments")
+
+
+def patch_chat_discovery_alias(source: str) -> str:
+    if "HERMES_NESTED_DISCOVERY_ALIAS_v1" in source:
+        return source
+    old = '        arguments = getattr(tc_function, "arguments", None)\n'
+    new = (old + '        # HERMES_NESTED_DISCOVERY_ALIAS_v1\n'
+           '        from agent.transports.codex import _restore_wrapped_discovery_call\n'
+           '        name, arguments = _restore_wrapped_discovery_call(name, arguments, alias_map)\n')
+    return _replace_exact(source, old, new, count=1, label="Chat Completions nested alias")
+
+
+def patch_discovery_alias_tests(source: str) -> str:
+    if "def test_nested_discovery_alias_uses_request_provenance(" in source:
+        return source
+    return source + "\n\n" + NESTED_DISCOVERY_TESTS
 
 
 def _replace_exact(source: str, old: str, new: str, *, count: int, label: str) -> str:
@@ -332,42 +269,22 @@ def _replace_exact(source: str, old: str, new: str, *, count: int, label: str) -
 def patch_tool_search_text(source: str) -> str:
     if MARKER in source:
         return source
-    is_d363 = D363_DESCRIPTION_OLD in source
-    if is_d363:
-        source = _replace_exact(source, D363_DESCRIPTION_OLD, D363_DESCRIPTION_NEW,
-                                count=1, label="d363 bridge description")
-        source = _replace_exact(source, D363_ARGUMENTS_SCHEMA_OLD, D363_ARGUMENTS_SCHEMA_NEW,
-                                count=1, label="d363 bridge arguments schema")
-    else:
-        source = _replace_exact(source, DESCRIPTION_OLD, DESCRIPTION_NEW,
-                                count=1, label="bridge description")
-        source = _replace_exact(source, ARGUMENTS_SCHEMA_OLD, ARGUMENTS_SCHEMA_NEW,
-                                count=1, label="bridge arguments schema")
-    source = _replace_exact(source, RECURSION_ERROR_OLD, RECURSION_ERROR_NEW,
-                            count=1, label="bridge recursion error")
-    return _replace_exact(
-        source,
-        D363_DIRECT_TOOL_ERROR_OLD if is_d363 else DIRECT_TOOL_ERROR_OLD,
-        D363_DIRECT_TOOL_ERROR_NEW if is_d363 else DIRECT_TOOL_ERROR_NEW,
-        count=1, label="direct tool route correction",
-    )
+    if '"Invoke deferred tools. Takes `calls`' in source:
+        source = _replace_exact(source,
+            '            "Invoke deferred tools. Takes `calls`, an array of {name, arguments} "',
+            f'            # {MARKER}\n'
+            '            "Invoke ONLY deferred tools returned by tool_search; never bridge tools or directly listed tools. "\n'
+            '            "Takes `calls`, an array of {name, arguments} "', count=1, label="batch bridge description")
+        source = _replace_exact(source,
+            '"arguments": {"type": "object", "description": "Arguments matching the tool schema."}',
+            '"arguments": {"type": "object", "description": "Arguments matching the tool schema.", "additionalProperties": True}',
+            count=1, label="batch arguments schema")
+        if "return None, {}, not_deferrable_error(name)" in source:
+            return source
+        return _replace_exact(source, DIRECT_TOOL_ERROR_OLD, DIRECT_TOOL_ERROR_NEW,
+                              count=1, label="batch direct route correction")
+    raise RuntimeError("batch bridge description anchor drift")
 
-def patch_tool_executor_text(source: str) -> str:
-    # d363's single unwrap is made fail-closed by the alias residual itself:
-    # resolver errors become scope blocks before guardrails/execution. The old
-    # generation still needs these two cold-activation-shaped blocks.
-    if "scoped_names=_scoped_names" in source and (
-        "return function_name, function_args, err or \"tool_call could not be resolved\"" in source
-    ):
-        return source
-    source = _replace_exact(
-        source, CONCURRENT_BLOCK_OLD, CONCURRENT_BLOCK_NEW,
-        count=1, label="concurrent bridge rejection",
-    )
-    return _replace_exact(
-        source, SEQUENTIAL_BLOCK_OLD, SEQUENTIAL_BLOCK_NEW,
-        count=1, label="sequential bridge rejection",
-    )
 
 def patch_tool_search_tests_text(source: str) -> str:
     if "test_bridge_schema_allows_arbitrary_nested_arguments" in source:
@@ -389,31 +306,8 @@ def _patch_guardrail_tests_text(source: str, tests: str) -> str:
     return source.replace(GUARDRAIL_TEST_ANCHOR, "\n" + tests + GUARDRAIL_TEST_ANCHOR, 1)
 
 
-def patch_guardrail_tests_text(source: str) -> str:
-    return _patch_guardrail_tests_text(source, GUARDRAIL_TESTS)
-
-
 def patch_d363_guardrail_tests_text(source: str) -> str:
     return _patch_guardrail_tests_text(source, D363_GUARDRAIL_TESTS)
-
-
-def patch_xai_deferred_tool_bridge_guard_v1(hermes_dir: Path) -> bool:
-    transforms = {
-        "tools/tool_search.py": patch_tool_search_text,
-        "agent/tool_executor.py": patch_tool_executor_text,
-        "tests/tools/test_tool_search.py": patch_tool_search_tests_text,
-        "tests/run_agent/test_tool_call_guardrail_runtime.py": patch_guardrail_tests_text,
-    }
-    pending: list[tuple[Path, str]] = []
-    for relative, transform in transforms.items():
-        path = Path(hermes_dir) / relative
-        original = path.read_text(encoding="utf-8")
-        patched = transform(original)
-        if patched != original:
-            pending.append((path, patched))
-    for path, patched in pending:
-        path.write_text(patched, encoding="utf-8")
-    return bool(pending)
 
 
 def _load_sibling(name: str):
@@ -427,29 +321,41 @@ def _load_sibling(name: str):
 
 
 def patch_mcp_legacy_alias_bridge_v1(hermes_dir: Path) -> bool:
-    """Compose d363's scoped alias residual with the xAI guard.
+    """Compose scoped alias resolution with provider-safe nested arguments.
 
-    d363 already provides lazy MCP schema registration and first-call connect;
-    do not revive the removed cold-control plugin. Historical cb input retains
-    the old composition for exact generated compatibility.
+    Supported Hermes versions own lazy MCP activation and shared tool execution.
     """
     legacy = _load_sibling("mcp_legacy_alias_dispatch_v1.py")
     root = Path(hermes_dir)
-    model_source = (root / "model_tools.py").read_text(encoding="utf-8")
-    is_d363 = legacy.D363_MODEL_TOOLS_CALL in model_source or legacy.MARKER in model_source
     transforms = {
         "tools/tool_search.py": (legacy.patch_tool_search_text, patch_tool_search_text),
         "model_tools.py": (legacy.patch_model_tools_text,),
         "agent/tool_executor.py": (legacy.patch_tool_executor_text,),
         "tests/tools/test_tool_search.py": (legacy.patch_tool_search_tests_text, patch_tool_search_tests_text),
-        "tests/run_agent/test_tool_call_guardrail_runtime.py": (
-            patch_d363_guardrail_tests_text if is_d363 else patch_guardrail_tests_text,
-        ),
+        "tests/agent/test_tool_call_guardrail_runtime.py": (patch_d363_guardrail_tests_text,),
     }
-    if not is_d363:
-        cold = _load_sibling("mcp_legacy_cold_alias_activation_v1.py")
-        transforms["model_tools.py"] += (cold.patch_model_tools_text,)
-        transforms["agent/tool_executor.py"] += (cold.patch_tool_executor_text, patch_tool_executor_text)
+    if (root / "tools/tool_search_validation.py").is_file():
+        def validation(source):
+            if "def not_deferrable_error(" in source:
+                return source  # Native validation now owns corrective error guidance.
+            old = '            return [], f"tool_call cannot invoke \'{name}\' (it is itself a bridge tool)"\n'
+            new = ('            return [], (f"Route correction required: tool_call cannot invoke \'{name}\' because "\n'
+                   '                        "it is a bridge tool. Call tool_search or tool_describe directly, or "\n'
+                   '                        "call a deferred tool returned by tool_search.")\n')
+            return source if new in source else _replace_exact(source, old, new, count=1, label="batch recursion correction")
+        transforms["tools/tool_search_validation.py"] = (validation,)
+        # Native provider schema now contains a list of calls; test its actual nested arguments.
+        def batch_tests(source):
+            source = patch_tool_search_tests_text(source)
+            return source.replace('arguments = call_schema["parameters"]["properties"]["arguments"]',
+                                  'arguments = call_schema["parameters"]["properties"]["calls"]["items"]["properties"]["arguments"]')
+        transforms["tests/tools/test_tool_search.py"] = (legacy.patch_tool_search_tests_text, batch_tests)
+    if (root / "agent/transports/codex.py").is_file():
+        transforms.update({
+            "agent/transports/codex.py": (patch_codex_discovery_alias,),
+            "agent/transports/chat_completions.py": (patch_chat_discovery_alias,),
+            "tests/agent/transports/test_codex_transport.py": (patch_discovery_alias_tests,),
+        })
     pending: list[tuple[Path, str]] = []
     for relative, steps in transforms.items():
         path = root / relative

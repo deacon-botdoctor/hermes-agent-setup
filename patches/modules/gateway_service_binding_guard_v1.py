@@ -7,7 +7,7 @@ from pathlib import Path
 
 MARKER = "HERMES_GATEWAY_SERVICE_BINDING_GUARD_v1"
 
-HELPER_ANCHOR = "def systemd_unit_is_current(system: bool = False) -> bool:\n"
+HELPER_ANCHOR = "def launchd_plist_is_current() -> bool:\n"
 HELPER = f'''def _operator_runtime_binding(service_kind: str):
     """Return a verified profile-local runtime binding or fail closed."""
     # [{MARKER}] A checkout-local generated service definition cannot overrule
@@ -236,7 +236,6 @@ def patch_gateway_source(source: str) -> str:
         source = source.replace(HELPER_ANCHOR, HELPER + HELPER_ANCHOR, 1)
     native_install = NATIVE_SYSTEMD_INSTALL_ANCHOR in source
     for anchor, replacement, label in (
-        (SYSTEMD_CURRENT_ANCHOR, SYSTEMD_CURRENT_REPLACEMENT, "systemd current"),
         (NATIVE_SYSTEMD_INSTALL_ANCHOR if native_install else SYSTEMD_INSTALL_ANCHOR,
          NATIVE_SYSTEMD_INSTALL_REPLACEMENT if native_install else SYSTEMD_INSTALL_REPLACEMENT, "systemd install"),
         (LAUNCHD_CURRENT_ANCHOR if LAUNCHD_CURRENT_ANCHOR in source else LAUNCHD_CURRENT_ANCHOR.replace("\n\n", "\n"),
@@ -246,6 +245,12 @@ def patch_gateway_source(source: str) -> str:
     ):
         source = _replace_once(source, anchor, replacement, label)
     return source
+
+
+def patch_service_unit_source(source: str) -> str:
+    replacement = SYSTEMD_CURRENT_REPLACEMENT.replace(
+        "_operator_runtime_binding", "_gw()._operator_runtime_binding")
+    return _replace_once(source, SYSTEMD_CURRENT_ANCHOR, replacement, "systemd current")
 
 
 def patch_windows_source(source: str) -> str:
@@ -264,8 +269,46 @@ def patch_gateway_service_binding_guard_v1(hermes_dir: Path) -> bool:
         root / "hermes_cli/gateway.py": patch_gateway_source,
         root / "hermes_cli/gateway_windows.py": patch_windows_source,
     }
-    if not all(path.is_file() for path in targets):
-        return False
+    launchd = root / "hermes_cli/gateway_launchd.py"
+    if launchd.is_file():
+        def patch_split_gateway(source: str) -> str:
+            source = _replace_once(source, "def get_service_name() -> str:\n",
+                                   HELPER + "def get_service_name() -> str:\n", "split helper")
+            source = _replace_once(source, NATIVE_SYSTEMD_INSTALL_ANCHOR,
+                                   NATIVE_SYSTEMD_INSTALL_REPLACEMENT, "systemd install")
+            return _replace_once(source,
+                SYSTEMD_CURRENT_ANCHOR.replace('encoding="utf-8"', 'encoding="utf-8-sig"'),
+                SYSTEMD_CURRENT_REPLACEMENT.replace('encoding="utf-8"', 'encoding="utf-8-sig"'),
+                "current systemd definition")
+
+        def patch_split_launchd(source: str) -> str:
+            for anchor, replacement, label in (
+                (LAUNCHD_CURRENT_ANCHOR.replace("\n\n", "\n"), LAUNCHD_CURRENT_REPLACEMENT, "launchd current"),
+                (LAUNCHD_INSTALL_ANCHOR, LAUNCHD_INSTALL_REPLACEMENT, "launchd install"),
+                (LAUNCHD_START_ANCHOR, LAUNCHD_START_REPLACEMENT, "launchd start"),
+            ):
+                if label == "launchd install" and "def launchd_install(force: bool = False, *, start_now: bool = True):" in source:
+                    anchor = "def launchd_install(force: bool = False, *, start_now: bool = True):\n    plist_path = get_launchd_plist_path()\n"
+                    replacement = anchor + (
+                        '    if _operator_runtime_binding_preserves_service("launchd-user"):\n'
+                        '        print(f"Service is protected by the active runtime binding: {plist_path}")\n'
+                        '        return\n'
+                    )
+                for name in ("get_launchd_plist_path", "get_launchd_label",
+                             "_operator_runtime_binding_preserves_service", "_operator_runtime_binding"):
+                    anchor = anchor.replace(name + "(", "_gw()." + name + "(")
+                    replacement = replacement.replace(name + "(", "_gw()." + name + "(")
+                if label == "launchd current":
+                    anchor = anchor.replace('encoding="utf-8"', 'encoding="utf-8-sig"')
+                    replacement = replacement.replace('encoding="utf-8"', 'encoding="utf-8-sig"')
+                source = _replace_once(source, anchor, replacement, label)
+            return source
+
+        targets[root / "hermes_cli/gateway.py"] = patch_split_gateway
+        targets[launchd] = patch_split_launchd
+    missing = [str(path) for path in targets if not path.is_file()]
+    if missing:
+        raise RuntimeError("gateway_service_binding_guard_v1: required targets missing: " + ", ".join(missing))
     original = {path: path.read_text(encoding="utf-8") for path in targets}
     patched = {path: patcher(original[path]) for path, patcher in targets.items()}
     changed = [path for path in targets if patched[path] != original[path]]

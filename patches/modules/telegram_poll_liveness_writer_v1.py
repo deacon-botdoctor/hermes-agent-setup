@@ -17,7 +17,7 @@ from pathlib import Path
 
 MARKER = "HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1"
 
-HELPER_METHOD = '''    def _hermes_write_poll_liveness_stamp(self, *, require_updater: bool = False) -> None:
+_DIRECT_FILE_HELPER_METHOD = '''    def _hermes_write_poll_liveness_stamp(self, *, require_updater: bool = False) -> None:
         """Export a positive polling heartbeat for out-of-process watchdogs.
 
         [HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1]
@@ -81,7 +81,57 @@ HELPER_METHOD = '''    def _hermes_write_poll_liveness_stamp(self, *, require_up
 
 '''
 
-_PREVIOUS_HELPER_METHOD = HELPER_METHOD.replace('            # A running updater/getMe does not prove a new polling generation ready.\n            if getattr(self, "_send_path_degraded", False):\n                return\n', "", 1)
+_PREVIOUS_HELPER_METHOD = _DIRECT_FILE_HELPER_METHOD.replace('            # A running updater/getMe does not prove a new polling generation ready.\n            if getattr(self, "_send_path_degraded", False):\n                return\n', "", 1)
+_DIRECT_WRITE_START = _DIRECT_FILE_HELPER_METHOD.index("            from gateway.status import (")
+_DIRECT_WRITE_END = _DIRECT_FILE_HELPER_METHOD.index("        except Exception as exc:", _DIRECT_WRITE_START)
+HELPER_METHOD = (
+    _DIRECT_FILE_HELPER_METHOD[:_DIRECT_WRITE_START]
+    + '            from gateway.status import publish_runtime_status\n\n'
+    + '            publish_runtime_status(platform="telegram", last_successful_poll_at=now)\n'
+    + _DIRECT_FILE_HELPER_METHOD[_DIRECT_WRITE_END:]
+)
+
+
+_HEARTBEAT_ONLY_HELPER_METHOD = HELPER_METHOD
+HELPER_METHOD = HELPER_METHOD.replace(
+    '                "bot_api_ok": True,\n',
+    '                "bot_api_ok": True,\n'
+    '                "ingress": {\n'
+    '                    "received": getattr(self, "_updates_received_total", 0),\n'
+    '                    "dispatched": getattr(self, "_updates_dispatched_total", 0),\n'
+    '                    "generation": getattr(self, "_polling_generation", 0),\n'
+    '                    "stalled": (not getattr(self, "_webhook_mode", False)\n'
+    '                        and getattr(self, "_ingress_stalled_heartbeats", 0) >= _INGRESS_DISPATCH_STALL_HEARTBEATS\n'
+    '                        and getattr(self, "_updates_received_total", 0) > getattr(self, "_updates_dispatched_total", 0)),\n'
+    '                },\n',
+).replace(
+    'publish_runtime_status(platform="telegram", last_successful_poll_at=now)',
+    'publish_runtime_status(platform="telegram", last_successful_poll_at=now, telegram_ingress=payload["ingress"])',
+)
+
+_STATUS_PARAMETER = "    multiplex_standalone_reason: Any = _UNSET,\n"
+_STATUS_PARAMETER_PATCHED = _STATUS_PARAMETER + "    last_successful_poll_at: Any = _UNSET,\n"
+_STATUS_FIELD = '                ("listener_base", listener_base, None),\n'
+_STATUS_FIELD_PATCHED = _STATUS_FIELD + '                ("last_successful_poll_at", last_successful_poll_at, None),\n'
+
+
+def _patched_status_source(source: str) -> str:
+    # Use the native snapshot and queued writer so later status updates retain
+    # the heartbeat. Direct file writes are overwritten by the native cache.
+    for old, new, label in (
+        (_STATUS_PARAMETER, _STATUS_PARAMETER_PATCHED, "status parameter"),
+        (_STATUS_FIELD, _STATUS_FIELD_PATCHED, "status field"),
+        ("    last_successful_poll_at: Any = _UNSET,\n",
+         "    last_successful_poll_at: Any = _UNSET,\n    telegram_ingress: Any = _UNSET,\n", "ingress parameter"),
+        ('                ("last_successful_poll_at", last_successful_poll_at, None),\n',
+         '                ("last_successful_poll_at", last_successful_poll_at, None),\n                ("ingress", telegram_ingress, None),\n', "ingress field"),
+    ):
+        if new not in source:
+            source = _replace_once(source, old, new, label)
+        elif source.count(new) != 1:
+            raise RuntimeError(f"[telegram_poll_liveness_writer] {label} drifted")
+    ast.parse(source)
+    return source
 
 LOOP_DEF_ANCHOR = "    async def _polling_heartbeat_loop(self) -> None:"
 PROBE_TIMEOUT_ANCHOR = (
@@ -126,53 +176,35 @@ def patch_telegram_poll_liveness_writer_v1(hermes_dir: Path) -> bool:
             f"{target}"
         )
 
+    status_path = hermes_dir / "gateway" / "status.py"
+    status_original = status_path.read_text(encoding="utf-8")
+    status_source = _patched_status_source(status_original)
     src = target.read_text(encoding="utf-8")
+    original = src
+    if "_INGRESS_DISPATCH_STALL_HEARTBEATS =" not in src:
+        raise RuntimeError("[telegram_poll_liveness_writer] native ingress threshold missing")
     if MARKER in src:
-        original = src
         if _PREVIOUS_PROBE_SUCCESS_STAMP in src:
             src = _replace_once(src, _PREVIOUS_PROBE_SUCCESS_STAMP, PROBE_SUCCESS_STAMP, "installed probe upgrade")
         if INITIAL_STAMP not in src or PROBE_SUCCESS_STAMP not in src:
             raise RuntimeError("[telegram_poll_liveness_writer] installed hooks drifted")
         if HELPER_METHOD not in src:
-            src = _replace_once(src, _PREVIOUS_HELPER_METHOD, HELPER_METHOD, "installed helper upgrade")
-        if src == original:
-            print(f"[telegram_poll_liveness_writer] already patched ({target.name})")
-            return False
-        ast.parse(src)
-        backup = target.with_suffix(target.suffix + f".bak-{time.strftime('%Y%m%d-%H%M%S')}-poll-liveness-writer")
-        shutil.copy2(target, backup)
-        target.write_text(src, encoding="utf-8")
-        return True
-    if LOOP_DEF_ANCHOR not in src:
-        raise RuntimeError(
-            "[telegram_poll_liveness_writer] native heartbeat loop missing; "
-            "upstream layout changed"
-        )
-
-    src = _replace_once(
-        src,
-        LOOP_DEF_ANCHOR,
-        HELPER_METHOD + LOOP_DEF_ANCHOR,
-        "helper method",
-    )
-    src = _replace_once(
-        src,
-        PROBE_TIMEOUT_ANCHOR,
-        INITIAL_STAMP,
-        "initial stamp",
-    )
-    src = _replace_once(
-        src,
-        PROBE_SUCCESS_ANCHOR,
-        PROBE_SUCCESS_STAMP,
-        "successful probe stamp",
-    )
-
+            old = (_HEARTBEAT_ONLY_HELPER_METHOD if _HEARTBEAT_ONLY_HELPER_METHOD in src
+                   else _DIRECT_FILE_HELPER_METHOD if _DIRECT_FILE_HELPER_METHOD in src
+                   else _PREVIOUS_HELPER_METHOD)
+            src = _replace_once(src, old, HELPER_METHOD, "installed helper upgrade")
+    else:
+        src = _replace_once(src, LOOP_DEF_ANCHOR, HELPER_METHOD + LOOP_DEF_ANCHOR, "helper method")
+        src = _replace_once(src, PROBE_TIMEOUT_ANCHOR, INITIAL_STAMP, "initial stamp")
+        src = _replace_once(src, PROBE_SUCCESS_ANCHOR, PROBE_SUCCESS_STAMP, "successful probe stamp")
     ast.parse(src)
-    backup = target.with_suffix(
-        target.suffix + f".bak-{time.strftime('%Y%m%d-%H%M%S')}-poll-liveness-writer"
-    )
-    shutil.copy2(target, backup)
-    target.write_text(src, encoding="utf-8")
-    print(f"[telegram_poll_liveness_writer] PATCHED {target} (backup {backup.name})")
-    return True
+    changed = False
+    # Validate both files before changing either one.
+    for path, before, after in ((status_path, status_original, status_source), (target, original, src)):
+        if before == after:
+            continue
+        backup = path.with_suffix(path.suffix + f".bak-{time.strftime('%Y%m%d-%H%M%S')}-poll-liveness-writer")
+        shutil.copy2(path, backup)
+        path.write_text(after, encoding="utf-8")
+        changed = True
+    return changed

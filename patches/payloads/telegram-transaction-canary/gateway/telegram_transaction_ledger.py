@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+from contextlib import closing
 import hashlib
 import json
 import math
@@ -475,3 +476,27 @@ def classify(transaction_id: str) -> dict[str, Any]:
         else "Pending"
     )
     return {"transaction_id": transaction_id, "status": status, "events": rows}
+
+
+def health_since(since: float, *, now: float | None = None) -> dict[str, Any]:
+    """Content-free proof of the receive → model → accepted-reply transaction."""
+    now = time.time() if now is None else now
+    with closing(_connect()) as db:
+        rows = db.execute(
+            "SELECT r.occurred_at, "
+            "MAX(CASE WHEN e.event_type IN ('failed','run_failure_observed') THEN e.occurred_at END), "
+            "MAX(CASE WHEN e.event_type='model_finished' THEN e.occurred_at END), "
+            "MAX(CASE WHEN e.event_type='run_finished' THEN e.occurred_at END), "
+            "MAX(CASE WHEN e.event_type='telegram_accepted' THEN e.occurred_at END) "
+            "FROM events r JOIN events e ON e.transaction_id=r.transaction_id "
+            "WHERE r.event_type='received' AND r.occurred_at>=? GROUP BY r.transaction_id",
+            (since,),
+        ).fetchall()
+    replied = [max(model, finished, accepted) for received, failed, model, finished, accepted in rows
+               if failed is None and model is not None and finished is not None and accepted is not None]
+    failures = sum(failed is not None and now - failed <= 600 for _, failed, _, _, _ in rows)
+    stalled = sum(failed is None and (finished is None or accepted is None) and now - received > 900
+                  for received, failed, _, finished, accepted in rows)
+    latest = max(replied, default=None)
+    return {"status": "fail" if failures or stalled else "pass" if latest and now - latest <= 86400 else "unverified",
+            "last_verified_reply_at": latest, "recent_failures": failures, "stalled": stalled}

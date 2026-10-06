@@ -63,18 +63,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 820
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 34
+    assert manifest["components"]["runtime_payload"]["file_count"] == 762
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 50
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "cda397cbce480c3106428871bbb68f088ccf14434317426137ab336422f9071f",
-        "file_count": 125,
+        "digest": "0500402836f11a24f3c6f37742388386234857105c49afeba8f5a0eb06afbab3",
+        "file_count": 328,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 125
+    assert manifest["runtime_fingerprint"]["file_count"] == 328
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -84,7 +84,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 125
+    assert len(manifest["runtime_fingerprint"]["files"]) == 328
     assert set(release) == {
         "schema_version",
         "release",
@@ -110,7 +110,7 @@ def test_release_identity_matches_source_manifest():
 
 
 @pytest.mark.parametrize("typing_progress", [None, False, True])
-@pytest.mark.parametrize("failure", [None, "global_typing", "immediate_telegram", "marker", "binding", "live_root", "generation"])
+@pytest.mark.parametrize("failure", [None, "global_typing", "callback", "marker", "binding", "live_root", "generation"])
 def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, typing_progress, failure):
     module = load_script("automatic_checkpoint_contract", "hermes-local-selfcheck.py")
     home = tmp_path / "profile"
@@ -122,7 +122,6 @@ def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, 
     checkpoint = yaml.safe_load((ROOT / "shared-defaults/config-telegram-organic-checkpoints.yaml").read_text())
     config["agent"] = checkpoint["agent"]
     config["display"]["platforms"]["telegram"].update(checkpoint["display"]["platforms"]["telegram"])
-    config["display"].pop("progress_on_typing")
     telegram = config["display"]["platforms"]["telegram"]
     if typing_progress is None:
         telegram.pop("progress_on_typing")
@@ -131,10 +130,12 @@ def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, 
     if failure == "global_typing": config["display"]["progress_on_typing"] = True
     (home / "config.yaml").write_text(yaml.safe_dump(config))
     marker = "# HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3\n"
-    guard = "_is_immediate_heartbeat = _first_heartbeat and _progress_on_typing and source.platform != Platform.TELEGRAM\n"
-    if failure == "immediate_telegram": guard = "_is_immediate_heartbeat = _first_heartbeat and _progress_on_typing\n"
-    (runtime / "gateway/run.py").write_text(marker + 'setting = "progress_on_typing"\n' + guard)
-    (runtime / "run_agent.py").write_text("missing" if failure == "marker" else marker)
+    (runtime / "gateway/run_turn.py").write_text(marker)
+    callback = "agent._telegram_checkpoint_commentary_capture = callback\n"
+    (runtime / "gateway/run_turn_runner.py").write_text(
+        ("missing" if failure == "marker" else marker)
+        + ("" if failure == "callback" else callback)
+    )
     (runtime / "agent/codex_runtime.py").write_text(marker)
     binding = {"kind":"botdoctor_runtime_binding", "status":"held" if failure == "binding" else "active",
                "runtime_root":str(runtime), "generated_at":"2026-09-07T17:38:34Z"}
@@ -148,7 +149,7 @@ def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, 
     immersion = module.check_immersion_quality()
     checkpoints = module.check_telegram_organic_checkpoints()
     assert immersion["status"] == ("fail" if failure == "global_typing" else "pass"), immersion
-    assert checkpoints["status"] == ("pass" if failure in {None, "global_typing"} else "fail"), checkpoints
+    assert checkpoints["status"] == ("pass" if typing_progress is True and failure in {None, "global_typing"} else "fail"), checkpoints
     assert {p:p.read_bytes() for p in before} == before
 
 
@@ -196,7 +197,7 @@ def test_host_health_and_cron_self_repair_are_release_owned():
         "bin/hermes-canary-reconciler.py",
         "bin/hermes-disk-retention.py",
         "bin/tool-readiness-probe.py",
-    } <= set(health_installer["sources"])
+    } <= {entry["source"] if isinstance(entry, dict) else entry for entry in health_installer["sources"]}
 
     host_rule = (ROOT / "shared-rules" / "host-health.md").read_text(
         encoding="utf-8"
@@ -208,7 +209,7 @@ def test_host_health_and_cron_self_repair_are_release_owned():
     cron_patch = (
         ROOT / "patches" / "modules" / "cron_operator_delivery_v1.py"
     ).read_text(encoding="utf-8")
-    assert 'SELF_REMEDIATION_MARKER = "HERMES_CRON_SELF_REMEDIATION_v1"' in cron_patch
+    assert "# HERMES_CRON_SELF_REMEDIATION_v1" in cron_patch
     assert '"_cron_repair_attempt": True' in cron_patch
     assert "Do not blindly rerun external side effects" in cron_patch
     assert "Never tell the operator to inspect logs" in cron_patch
@@ -610,11 +611,11 @@ def test_release_payload_keeps_critical_blobs():
     }
     assert (
         blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
-        == "e5cbbcef89aa9635971d77ba9977535cd23aabc6"
+        == "997d49f723c41653ccf5a41c2f5f8316399b7853"
     )
     assert (
         blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "e91c52c8bb8525dbba25d932d51bcca422ad3147"
+        == "65b70c2ad89538de89a9e1ebfb68b92d6ee308bd"
     )
 
 
@@ -623,7 +624,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 49
+    assert len(patches) == 57
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -2157,7 +2158,7 @@ def test_public_text_has_no_private_runtime_routes():
     for relative in sorted(paths):
         text = (ROOT / relative).read_text(encoding="utf-8", errors="ignore")
         for match in posix_runtime_route.finditer(text):
-            assert match.group(1) in {"Agent", "hermes-test"}, (
+            assert match.group(1) in {"Agent", "hermes-test", "{owner}"}, (
                 f"{relative} contains a non-neutral POSIX runtime route"
             )
         for match in windows_runtime_route.finditer(text):
@@ -2266,6 +2267,8 @@ def test_candidate_python_cleans_probe_after_execution_failure(tmp_path, monkeyp
 
 @pytest.mark.parametrize("system,arch,expected", [("darwin", "arm64", True), ("darwin", "x86_64", False), ("linux", "aarch64", False)])
 def test_candidate_python_catalog_is_platform_scoped(tmp_path, monkeypatch, system, arch, expected):
+    import urllib.request  # Load platform-specific stdlib before emulating macOS.
+
     assembler = load_script("public_python_catalog_scope", "assemble-runtime.py")
     monkeypatch.setattr(assembler.sys, "platform", system)
     monkeypatch.setattr(assembler.platform, "machine", lambda: arch)
@@ -2584,3 +2587,89 @@ def test_macos_selfheal_failure_never_runs_nominal_fallback(tmp_path):
     assert result.returncode == 23
     assert (tmp_path / "called").read_text() == 'called'
     assert not (tmp_path / "fallback").exists()
+
+
+@pytest.fixture
+def public_source_archive(tmp_path):
+    import io
+    import tarfile
+    content = b"upstream fixture\n"
+    entry = {"path": "upstream.lock", "type": "blob", "mode": "100644",
+             "blob": hashlib.sha1(f"blob {len(content)}\0".encode() + content).hexdigest()}
+    manifest = {"schema_version": 1, "kind": "golden_runtime_payload_manifest", "golden_sha": "a" * 40,
+                "canonical_upstream_sha": "b" * 40, "deployment_digest": "c" * 64,
+                "components": {"runtime_payload": {"files": [entry], "digest": "d" * 64},
+                               "baseline_wiring": {"files": [], "digest": "e" * 64}},
+                "runtime_fingerprint": {"verified": True, "digest": "f" * 64, "file_count": 1}}
+    def create(extra=None, mutate=None):
+        value = json.loads(json.dumps(manifest))
+        if mutate:
+            mutate(value)
+        rows = {"upstream.lock": content, "runtime-payload-source-manifest.json": json.dumps(value).encode()}
+        rows.update(extra or {})
+        path = tmp_path / "source.tar"
+        with tarfile.open(path, "w") as archive:
+            for name, data in rows.items():
+                member = tarfile.TarInfo(name)
+                member.size = len(data)
+                archive.addfile(member, io.BytesIO(data))
+        return path, hashlib.sha256(path.read_bytes()).hexdigest()
+    return create
+
+
+def test_public_build_rejects_unbound_or_extra_source(public_source_archive):
+    build = load_script("public_build_rejection", "build-release.py")
+    source, digest = public_source_archive()
+    with pytest.raises(ValueError, match="digest mismatch"):
+        build.read_artifact(source, "0" * 64, "a" * 40)
+    with pytest.raises(ValueError, match="Exact public"):
+        build.read_artifact(source, digest, "b" * 40)
+    source, digest = public_source_archive({"../outside": b"unsafe"})
+    with pytest.raises(ValueError, match="Unsafe source"):
+        build.read_artifact(source, digest, "a" * 40)
+    source, digest = public_source_archive({"private-state.json": b"not payload"})
+    with pytest.raises(ValueError, match="exactly match"):
+        build.read_artifact(source, digest, "a" * 40)
+    source, digest = public_source_archive(mutate=lambda d: d["runtime_fingerprint"].update(runtime_dir="/private/path"))
+    with pytest.raises(ValueError, match="sanitized"):
+        build.read_artifact(source, digest, "a" * 40)
+
+
+def test_public_build_verifies_before_publishing_and_reuses_exact_build(tmp_path, public_source_archive, monkeypatch):
+    build = load_script("public_build_transaction", "build-release.py")
+    root = tmp_path / "checkout"
+    root.mkdir()
+    (root / "upstream.lock").write_text("old pin\n")
+    (root / "helper.py").write_text("fixture\n")
+    original = {p.name: p.read_bytes() for p in root.iterdir()}
+    def copy_checkout(_root, bundle):
+        shutil.copytree(root, bundle)
+        (bundle / "runtime-payload-source-manifest.json").write_text(json.dumps({"components": {"old": {"files": []}}}))
+        (bundle / "release.json").write_text(json.dumps({"cua_driver": {"helper": {"path": "helper.py"}}}))
+        return hashlib.sha256((root / "helper.py").read_bytes()).hexdigest()
+    monkeypatch.setattr(build, "copy_checkout", copy_checkout)
+    source, digest = public_source_archive()
+    def refused(*_args):
+        raise ValueError("verification failed")
+    monkeypatch.setattr(build, "verify", refused)
+    with pytest.raises(ValueError, match="verification failed"):
+        build.build_release(root, source, digest, "a" * 40, "release-one")
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == original
+    assert not list((tmp_path / "public-release-builds").iterdir())
+    calls = []
+    monkeypatch.setattr(build, "verify", lambda *_args: {"ok": True, "runtime_fingerprint": {"digest": "f" * 64}})
+    def assemble(argv):
+        calls.append(argv)
+        Path(argv[argv.index("--output") + 1]).mkdir()
+        return ""
+    monkeypatch.setattr(build, "run", assemble)
+    receipt_path = build.build_release(root, source, digest, "a" * 40, "release-one")
+    assert json.loads(receipt_path.read_text())["status"] == "built"
+    assert build.build_release(root, source, digest, "a" * 40, "release-one") == receipt_path
+    assert len(calls) == 1
+    assert {p.name: p.read_bytes() for p in root.iterdir()} == original
+
+    (root / "helper.py").write_text("changed public maintainer input\n")
+    next_receipt = build.build_release(root, source, digest, "a" * 40, "release-one")
+    assert next_receipt != receipt_path
+    assert len(calls) == 2

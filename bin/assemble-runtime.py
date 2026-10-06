@@ -317,6 +317,7 @@ def main() -> int:
             python_proof = prepare_posix_dependencies(output, args.prepare_home)
     env = os.environ.copy()
     env["HERMES_APPLY_SKIP_SNAPSHOT"] = "1"
+    env["HERMES_EXACT_SOURCE_MANIFEST"] = str(ROOT / "runtime-payload-source-manifest.json")
     patch = run(
         [
             sys.executable,

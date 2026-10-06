@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Fail-closed runtime and snapshot retention for one Hermes profile.
 
-Only explicit runtime-candidate, rollback-backup, snapshot, and regenerable
-cache roots are eligible.  Memories, sessions, workspaces, credentials, and
-client artifacts are never candidates.
+Only explicit runtime-candidate, rollback-backup, snapshot, completed-rollout
+SQLite working copies, unverified superseded sqlite-families, and regenerable
+cache roots are eligible. Current/pending/referenced sqlite-families, live
+profile databases, memories, sessions, workspaces, credentials, and client
+artifacts are never candidates.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import hashlib
 import json
 import os
 import re
+import time
 import shutil
 import stat
 import subprocess
@@ -56,6 +59,7 @@ CACHE_REL_PATHS = (
     "Library/Caches/pnpm",
 )
 BACKUP_PATTERNS = ("*-swap-*", "*-migration-*", "*-upgrade-*")
+SQLITE_FAMILY_GRACE_S = int(os.environ.get("HERMES_DISK_RETENTION_SQLITE_GRACE_S", str(6 * 3600)))
 
 
 @dataclass(frozen=True)
@@ -65,6 +69,7 @@ class Candidate:
     size_bytes: int
     mtime: float
     reason: str
+    evidence: tuple[tuple[Path, tuple[int, ...]], ...] = ()
 
 
 def now_iso() -> str:
@@ -150,7 +155,20 @@ def candidate_roots(hermes_home: Path) -> tuple[Path, ...]:
         homes.append(hermes_home.parent.parent)
     roots: list[Path] = []
     for home in homes:
-        roots.extend((home / "state/runtime-candidates", home / "runtime-candidates"))
+        legacy = home / "state/runtime-candidates"
+        canonical = home / "runtime-candidates"
+        if legacy.is_symlink():
+            # This exact redundant alias is not a second deletion root. Keep
+            # traversals and runtime evidence on the real directory; arbitrary,
+            # dangling, chained, or cyclic root links remain fail-closed.
+            target = Path(os.path.normpath(legacy.parent / os.readlink(legacy)))
+            if target != canonical or canonical.is_symlink() or not canonical.is_dir():
+                raise ValueError(f"unsafe runtime candidate root: {legacy}")
+        else:
+            roots.append(legacy)
+        if canonical.is_symlink():
+            raise ValueError(f"unsafe runtime candidate root: {canonical}")
+        roots.append(canonical)
     return tuple(dict.fromkeys(roots))
 
 
@@ -262,12 +280,21 @@ def rollback_runtime_root(hermes_home: Path) -> tuple[Path, list[Path]]:
     if len(relative.parts) != 2 or relative.parts[1] not in {
         "receipt.before",
         "runtime-binding.before",
+        "unmanaged-predecessor.json",
     }:
         raise ValueError(f"unsafe current rollback source: {source}")
     source_payload, source_bytes = read_json(source, "current rollback source")
     if hashlib.sha256(source_bytes).hexdigest() != source_digest.lower():
         raise ValueError(f"invalid current rollback source digest: {source}")
-    source_root = receipt_runtime_root(source_payload)
+    if source.name == "unmanaged-predecessor.json":
+        if (not isinstance(source_payload, dict)
+                or source_payload.get("schema_version") != 1
+                or source_payload.get("kind") != "unmanaged_systemd_predecessor"
+                or source_payload.get("home") != str(hermes_home)):
+            raise ValueError(f"invalid unmanaged rollback source: {source}")
+        source_root = runtime_root(source_payload.get("runtime_root"))
+    else:
+        source_root = receipt_runtime_root(source_payload)
     pointer_root = runtime_root(payload.get("runtime_root"))
     if source_root is None or pointer_root != source_root:
         raise ValueError(f"invalid current rollback pointer: {pointer}")
@@ -351,6 +378,33 @@ def reference_texts(hermes_home: Path, active: Path) -> list[str]:
     return texts
 
 
+def mapped_runtime_reference_paths() -> list[str]:
+    """Include loaded dependencies of managed runtimes and their subprocesses."""
+    import psutil
+
+    processes = {process.pid: process for process in psutil.process_iter(["ppid", "exe", "cmdline"])}
+    related = {
+        pid for pid, process in processes.items()
+        if extract_candidate_roots(" ".join([
+            process.info["exe"] or "", *(process.info["cmdline"] or [])
+        ]))
+    }
+    while True:
+        children = {pid for pid, process in processes.items() if process.info["ppid"] in related} - related
+        if not children:
+            break
+        related.update(children)
+    paths: list[str] = []
+    for pid in sorted(related):
+        try:
+            paths.extend(mapping.path for mapping in processes[pid].memory_maps())
+        except psutil.NoSuchProcess:
+            continue
+        except psutil.AccessDenied as exc:
+            raise ValueError(f"runtime module reference inventory unreadable: pid={pid}") from exc
+    return paths
+
+
 def live_reference_text() -> str:
     if os.name == "nt":
         script = (
@@ -374,6 +428,7 @@ def live_reference_text() -> str:
             raise ValueError("Windows runtime reference inventory invalid") from exc
         if isinstance(values, str):
             values = [values]
+        values.extend(mapped_runtime_reference_paths())
         return "\n".join(str(value) for value in values if value)
     probe = subprocess.run(
         ["ps", "-axo", "command="],
@@ -535,6 +590,388 @@ def generations(root: Path, kind: str, reason: str) -> list[Candidate]:
     )
 
 
+def retention_identity(path: Path) -> tuple[int, ...]:
+    """Bind verified bytes to the file without treating our own atime read as a change."""
+    info = path.lstat()
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns, info.st_uid, info.st_gid, info.st_nlink)
+
+
+def checked_rollout_path(path: Path, home: Path, *, directory: bool = False) -> tuple[int, ...]:
+    relative = path.relative_to(home)
+    if not relative.parts or ".." in relative.parts:
+        raise ValueError("rollout evidence escapes profile owner home")
+    if any(part.is_symlink() for part in (path, *path.parents)):
+        raise ValueError("rollout evidence contains a symlink")
+    identity = retention_identity(path)
+    if not (stat.S_ISDIR(identity[2]) if directory else stat.S_ISREG(identity[2])):
+        raise ValueError("rollout evidence is not an ordinary file/directory")
+    return identity
+
+
+def require_closed_rollout_files(paths: list[Path]) -> None:
+    if sys.platform == "linux":
+        # fuser inspects the named inodes without lsof's unrelated mount scan.
+        # Cross-user visibility requires root; reuse existing noninteractive
+        # sudo authority for this read-only command, never grant it here.
+        if not paths or any(not path.is_absolute() for path in paths):
+            raise ValueError("rollout handle probe requires absolute files")
+        filesystem = subprocess.run(
+            ["stat", "-f", "-c", "%T", *(str(path) for path in paths)],
+            capture_output=True, text=True, timeout=30, check=False,
+        )
+        # fuser cannot reliably match mapped btrfs files; unknown filesystems
+        # are not a reason to weaken the open-handle invariant.
+        if (filesystem.returncode or filesystem.stderr.strip()
+                or len(filesystem.stdout.splitlines()) != len(paths)
+                or any(kind not in {"ext2/ext3", "xfs", "tmpfs"}
+                       for kind in filesystem.stdout.splitlines())):
+            raise ValueError("rollout handle probe filesystem is unverified")
+        command = ["/usr/bin/fuser", "-v", *(str(path) for path in paths)]
+        if os.geteuid() != 0:
+            command = ["/usr/bin/sudo", "-n", *command]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+        if result.returncode != 1 or result.stdout.strip() or result.stderr.strip():
+            raise ValueError("rollout files are open or handle inventory is unverified")
+        return
+    # The SQLite producer is POSIX-only. Do not infer Windows handle ownership
+    # or silently omit the open-file check when the native probe is unavailable.
+    command = shutil.which("lsof") if os.name != "nt" else None
+    if command is None:
+        raise ValueError("rollout open-file inventory unavailable")
+    result = subprocess.run(
+        [command, "-Fn", "--", *(str(path) for path in paths)],
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    if result.returncode != 1 or result.stdout.strip() or result.stderr.strip():
+        raise ValueError("rollout files are open or handle inventory is unverified")
+
+
+def rollout_reference_present(generation: Path, texts: list[str]) -> bool:
+    pattern = re.escape(str(generation)) + r"(?=[/\\\s\"']|$)"
+    return any(re.search(pattern, text) for text in texts)
+
+
+def rollout_evidence_unchanged(evidence: tuple | list, home: Path) -> bool:
+    return all(checked_rollout_path(path, home, directory=stat.S_ISDIR(identity[2])) == identity
+               for path, identity in evidence)
+
+
+def rollout_file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def completed_rollout_work(
+    home: Path, hermes_home: Path, protected: set[Path],
+) -> tuple[list[Candidate], list[dict[str, object]]]:
+    """Prune only reconstructible work; never retire a raw family or its restore paths.
+
+    A later rollout archives its predecessor's verified host receipt as
+    receipt.before. Those receipts prove completion without a new producer
+    schema. Directory age, a terminal family phase, or absence of a pending
+    marker alone does not prove the enclosing rollout completed.
+    """
+    workdirs = [
+        path
+        for root in rollout_roots(hermes_home)
+        for path in sorted(root.glob("*/sqlite-families/*/work"))
+    ]
+    if not workdirs:
+        return [], []
+    candidates: list[Candidate] = []
+    inventory: list[dict[str, object]] = []
+    try:
+        pointer_path = hermes_home / "state/current-rollback.json"
+        binding_path = hermes_home / "state/runtime-binding.json"
+        guards = [(path, checked_rollout_path(path, home)) for path in (pointer_path, binding_path)]
+        # Reuse the digest-bound rollback and active-binding checks even for a
+        # control profile with no runtime generations (which normally no-ops).
+        rollback_runtime_root(hermes_home)
+        active, _ = active_runtime_root(hermes_home)
+        pointer, _ = read_json(pointer_path, "current rollback pointer")
+        rollback_source = Path(pointer["source_path"])
+        guards.append((rollback_source, checked_rollout_path(rollback_source, home)))
+        current = rollback_source.parent
+        references = [live_reference_text(), *reference_texts(hermes_home, active)]
+        completions: dict[Path, tuple[dict, Path, tuple[int, ...]]] = {}
+        for root in rollout_roots(hermes_home):
+            for source in sorted(root.glob("*/receipt.before")):
+                try:
+                    identity = checked_rollout_path(source, home)
+                    receipt, _ = read_json(source, "archived rollout receipt")
+                    if not isinstance(receipt, dict):
+                        continue
+                    contract = receipt.get("runtime_contract") or {}
+                    block = receipt.get("sqlite_cutover") or {}
+                    rollback = receipt.get("rollback") or {}
+                    if not all(isinstance(item, dict) for item in (contract, block, rollback)):
+                        continue
+                    artifact = runtime_root(rollback.get("artifact"))
+                    if (receipt.get("schema_version") != 1 or receipt.get("verified") is not True
+                            or receipt.get("closure_eligible") is not True or receipt.get("recovery_pending")
+                            or contract.get("profile_home", contract.get("hermes_home")) != str(hermes_home)
+                            or artifact is None or artifact.parent not in rollout_roots(hermes_home)
+                            or block.get("schema_version") != 1
+                            or block.get("backup_root") != str(artifact / "sqlite-families")
+                            or block.get("phase") != "candidate_start_attempted"
+                            or block.get("candidate_start_attempted") is not True
+                            or block.get("failure_kind")):
+                        continue
+                    completions[artifact] = (receipt, source, identity)
+                except (OSError, ValueError, TypeError):
+                    continue
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        for path in workdirs:
+            inventory.append(record(Candidate(path, "rollout_sqlite_work", path_size(path), mtime(path),
+                                              str(exc)), "keep_unverified"))
+        return [], inventory
+    for work in workdirs:
+        family, generation = work.parent, work.parents[2]
+        candidate = Candidate(work, "rollout_sqlite_work", path_size(work), mtime(work), "")
+        try:
+            if generation == current or os.path.lexists(generation / "rollback-transaction.pending"):
+                raise ValueError("current rollback or pending rollout")
+            if generation not in completions:
+                raise ValueError("no verified completed-rollout receipt")
+            receipt, source, source_identity = completions[generation]
+            completed_runtime = receipt_runtime_root(receipt)
+            if completed_runtime is None:
+                raise ValueError("completed rollout runtime identity missing")
+            if (any(is_relative_to(completed_runtime, item) or is_relative_to(item, completed_runtime)
+                    for item in protected) or rollout_reference_present(generation, references)):
+                raise ValueError("active, rollback, or referenced rollout")
+            manifest_path = family / "manifest.json"
+            evidence = [*guards, (source, source_identity)]
+            for directory in (generation, family.parent, family, work, family / "raw"):
+                evidence.append((directory, checked_rollout_path(directory, home, directory=True)))
+            evidence.append((manifest_path, checked_rollout_path(manifest_path, home)))
+            manifest, _ = read_json(manifest_path, "SQLite family manifest")
+            if not isinstance(manifest, dict):
+                raise ValueError("invalid SQLite family manifest")
+            db = runtime_root(manifest.get("db"))
+            block = receipt["sqlite_cutover"]
+            result = manifest.get("result") or {}
+            if (db is None or not is_relative_to(db, hermes_home)
+                    or family.name != hashlib.sha256(str(db).encode()).hexdigest()[:24]
+                    or manifest.get("schema_version") != 1 or manifest.get("phase") != "installed"
+                    or manifest.get("capture_kind") != "quiescent_rollback"
+                    or manifest.get("consistent_backup") is not True
+                    or not re.fullmatch(r"[0-9a-f]{32}", str(manifest.get("operation_id") or ""))
+                    or manifest.get("operation_id") != block.get("operation_id")
+                    or not isinstance(block.get("databases"), list) or str(db) not in block["databases"]
+                    or not isinstance(result, dict) or result.get("ok") is not True
+                    or result.get("integrity_check") != "ok"):
+                raise ValueError("SQLite family is not a completed owned installation")
+            # These are exactly the producer's temporary copies. Unexpected
+            # content is not presumed disposable, even inside a directory named work.
+            files = sorted(work.iterdir())
+            if not files or any(path.name not in {"database", "database-wal", "database-shm", "final"}
+                                for path in files):
+                raise ValueError("unknown SQLite working-copy contents")
+            for path in files:
+                identity = checked_rollout_path(path, home)
+                if identity[-1] != 1:
+                    raise ValueError("SQLite working copy has other hard links")
+                evidence.append((path, identity))
+            members = manifest.get("members")
+            if (not isinstance(members, dict) or set(members) != {"", "-wal", "-shm"}
+                    or not isinstance(members.get(""), dict) or members[""].get("present") is not True):
+                raise ValueError("raw SQLite family coverage is incomplete")
+            for suffix, member in members.items():
+                path = family / "raw" / ("database" + suffix)
+                if not isinstance(member, dict) or type(member.get("present")) is not bool:
+                    raise ValueError("invalid raw SQLite member")
+                if not member["present"]:
+                    if os.path.lexists(path):
+                        raise ValueError("unexpected raw SQLite member")
+                    continue
+                identity = checked_rollout_path(path, home)
+                digest = rollout_file_digest(path)
+                if (identity != retention_identity(path) or identity[3] != member.get("size")
+                        or digest != member.get("sha256")):
+                    raise ValueError("raw SQLite recovery bytes do not match manifest")
+                evidence.append((path, identity))
+            staged = manifest.get("staged_metadata") or {}
+            if not isinstance(staged, dict):
+                raise ValueError("invalid installed working-copy evidence")
+            for path in files:
+                expected = {staged.get("sha256")} if path.name == "final" else {
+                    members[path.name.removeprefix("database")].get("sha256")}
+                if path.name == "database":
+                    expected.add(staged.get("sha256"))
+                if rollout_file_digest(path) not in expected:
+                    raise ValueError("working copy contains unverified unique bytes")
+            require_closed_rollout_files(files)
+            if not rollout_evidence_unchanged(evidence, home):
+                raise ValueError("rollout evidence changed while planning")
+            candidate = Candidate(work, candidate.kind, candidate.size_bytes, candidate.mtime,
+                                  "completed superseded rollout; raw recovery family hash-verified", tuple(evidence))
+            candidates.append(candidate)
+            inventory.append(record(candidate, "prune"))
+        except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+            inventory.append(record(Candidate(work, candidate.kind, candidate.size_bytes, candidate.mtime,
+                                              str(exc)), "keep_unverified"))
+    return candidates, inventory
+
+
+def current_rollback_generation(hermes_home: Path) -> Path | None:
+    pointer = hermes_home / "state/current-rollback.json"
+    try:
+        payload, _ = read_json(pointer, "current rollback pointer")
+    except ValueError:
+        return None
+    if not isinstance(payload, dict) or payload.get("kind") != "botdoctor_current_rollback":
+        return None
+    source = payload.get("source_path")
+    if not isinstance(source, str) or not source.strip():
+        return None
+    path = Path(source)
+    if path.name not in {"receipt.before", "runtime-binding.before"}:
+        return None
+    generation = path.parent
+    if generation.parent.name != "fleet-rollouts":
+        return None
+    return generation
+
+
+def stale_unverified_sqlite_families(
+    home: Path,
+    hermes_home: Path,
+    protected: set[Path],
+    verified_work: list[Candidate],
+) -> tuple[list[Candidate], list[dict[str, object]]]:
+    """Prune sqlite-families on superseded generations that were not receipt-verified.
+
+    Verified completed rollouts still only lose reconstructible work copies.
+    Current rollback, pending, referenced, and fresh in-progress generations stay.
+    """
+    candidates: list[Candidate] = []
+    inventory: list[dict[str, object]] = []
+    verified_generations = {
+        candidate.path.parents[2].resolve()
+        for candidate in verified_work
+        if candidate.kind == "rollout_sqlite_work"
+    }
+    current = current_rollback_generation(hermes_home)
+    current_resolved = current.resolve() if current is not None else None
+    try:
+        active, _ = active_runtime_root(hermes_home)
+        references = [live_reference_text(), *reference_texts(hermes_home, active)]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        references = [live_reference_text()]
+    now = time.time()
+    for root in rollout_roots(hermes_home):
+        if not root.is_dir() or root.is_symlink():
+            continue
+        try:
+            generations_found = list(root.iterdir())
+        except OSError:
+            continue
+        for generation in generations_found:
+            families = generation / "sqlite-families"
+            if (
+                not generation.is_dir()
+                or generation.is_symlink()
+                or not families.is_dir()
+                or families.is_symlink()
+            ):
+                continue
+            resolved_generation = generation.resolve()
+            if resolved_generation in verified_generations:
+                continue
+            if current_resolved is not None and resolved_generation == current_resolved:
+                inventory.append(
+                    record(
+                        Candidate(
+                            families,
+                            "rollout_sqlite_families",
+                            path_size(families),
+                            mtime(families),
+                            "current rollback generation",
+                        ),
+                        "keep_protected",
+                    )
+                )
+                continue
+            if os.path.lexists(generation / "rollback-transaction.pending"):
+                inventory.append(
+                    record(
+                        Candidate(
+                            families,
+                            "rollout_sqlite_families",
+                            path_size(families),
+                            mtime(families),
+                            "pending rollout",
+                        ),
+                        "keep_protected",
+                    )
+                )
+                continue
+            try:
+                age = now - generation.stat().st_mtime
+            except OSError:
+                continue
+            if age < SQLITE_FAMILY_GRACE_S:
+                inventory.append(
+                    record(
+                        Candidate(
+                            families,
+                            "rollout_sqlite_families",
+                            path_size(families),
+                            mtime(families),
+                            "in-progress rollout grace",
+                        ),
+                        "keep_protected",
+                    )
+                )
+                continue
+            if rollout_reference_present(generation, references):
+                inventory.append(
+                    record(
+                        Candidate(
+                            families,
+                            "rollout_sqlite_families",
+                            path_size(families),
+                            mtime(families),
+                            "referenced rollout",
+                        ),
+                        "keep_protected",
+                    )
+                )
+                continue
+            if any(
+                is_relative_to(families, item) or is_relative_to(item, families)
+                for item in protected
+            ):
+                inventory.append(
+                    record(
+                        Candidate(
+                            families,
+                            "rollout_sqlite_families",
+                            path_size(families),
+                            mtime(families),
+                            "protected runtime overlap",
+                        ),
+                        "keep_protected",
+                    )
+                )
+                continue
+            candidate = Candidate(
+                families,
+                "rollout_sqlite_families",
+                path_size(families),
+                mtime(families),
+                "unverified superseded sqlite-families",
+            )
+            candidates.append(candidate)
+            inventory.append(record(candidate, "prune"))
+    return candidates, inventory
+
+
 def collect_plan(
     home: Path,
     hermes_home: Path,
@@ -546,6 +983,14 @@ def collect_plan(
 ) -> tuple[list[Candidate], list[dict[str, object]]]:
     candidates: list[Candidate] = []
     inventory: list[dict[str, object]] = []
+    rollout_candidates, rollout_inventory = completed_rollout_work(home, hermes_home, protected)
+    candidates.extend(rollout_candidates)
+    inventory.extend(rollout_inventory)
+    stale_candidates, stale_inventory = stale_unverified_sqlite_families(
+        home, hermes_home, protected, rollout_candidates
+    )
+    candidates.extend(stale_candidates)
+    inventory.extend(stale_inventory)
     for root in candidate_roots(hermes_home):
         for candidate in generations(root, "runtime_candidate", f"direct child of {root}"):
             target = candidate.path.resolve()
@@ -788,21 +1233,62 @@ def removal_error_handler(root: Path, clear_flags: bool):
 
 def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> int:
     before = shutil.disk_usage(home).free
-    protected, protection = protected_runtime_roots(hermes_home)
-    candidates, inventory = collect_plan(
-        home,
-        hermes_home,
-        protected,
-        args.keep_backups,
-        args.keep_snapshots,
-        args.prune_caches,
-        args.min_cache_bytes,
-    )
+    protection: dict[str, list[str]] = {"active": [], "rollback": [], "referenced": []}
+    candidates: list[Candidate] = []
+    inventory: list[dict[str, object]] = []
     deleted: list[dict[str, object]] = []
     errors: list[dict[str, str]] = []
+    try:
+        if getattr(args, "preserve_all", False):
+            # Adoption has no managed binding yet. Do not invent one or build
+            # a deletion plan: retain every path and measure free space only.
+            if args.apply:
+                raise ValueError("preserve-all cannot apply retention")
+            protection["preserved"] = [str(hermes_home)]
+        else:
+            protected, protection = protected_runtime_roots(hermes_home)
+            candidates, inventory = collect_plan(
+                home, hermes_home, protected, args.keep_backups,
+                args.keep_snapshots, args.prune_caches, args.min_cache_bytes,
+            )
+    except (ValueError, OSError) as exc:
+        # Publish failed preflight to the existing health consumer instead of
+        # leaving an old successful receipt behind. No partial plan may run.
+        errors.append({"path": str(hermes_home), "error": f"{type(exc).__name__}: {exc}"})
     if args.apply:
         for candidate in candidates:
             try:
+                if candidate.kind == "rollout_sqlite_work":
+                    generation = candidate.path.parents[2]
+                    active, _ = active_runtime_root(hermes_home)
+                    if (os.path.lexists(generation / "rollback-transaction.pending")
+                            or not rollout_evidence_unchanged(candidate.evidence, home)
+                            or rollout_reference_present(generation, [live_reference_text(),
+                                                                     *reference_texts(hermes_home, active)])):
+                        raise ValueError("rollout protection or verified evidence changed before removal")
+                    require_closed_rollout_files(list(candidate.path.iterdir()))
+                    if not rollout_evidence_unchanged(candidate.evidence, home):
+                        raise ValueError("rollout evidence changed during the open-file probe")
+                elif candidate.kind == "rollout_sqlite_families":
+                    if candidate.path.name != "sqlite-families" or candidate.path.is_symlink():
+                        raise ValueError("unsafe sqlite-families path")
+                    generation = candidate.path.parent
+                    if generation.parent.name != "fleet-rollouts":
+                        raise ValueError("sqlite-families is not under fleet-rollouts")
+                    current = current_rollback_generation(hermes_home)
+                    active, _ = active_runtime_root(hermes_home)
+                    if (
+                        os.path.lexists(generation / "rollback-transaction.pending")
+                        or (
+                            current is not None
+                            and generation.resolve() == current.resolve()
+                        )
+                        or rollout_reference_present(
+                            generation,
+                            [live_reference_text(), *reference_texts(hermes_home, active)],
+                        )
+                    ):
+                        raise ValueError("sqlite-families protection changed before removal")
                 if candidate.path.is_dir() and not candidate.path.is_symlink():
                     removal_path = filesystem_removal_path(candidate.path)
                     shutil.rmtree(
@@ -817,7 +1303,7 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
     after_runtime_retention = shutil.disk_usage(home).free
     relief_results: list[dict[str, object]] = []
     relief_errors: list[dict[str, str]] = []
-    relief_config = fileprovider_relief_config(args.fileprovider_config, home, hermes_home)
+    relief_config = None if errors else fileprovider_relief_config(args.fileprovider_config, home, hermes_home)
     if args.apply and relief_config is not None and after_runtime_retention < int(relief_config["target_free_bytes"]):
         relief_results, relief_errors = run_fileprovider_relief(
             relief_config,
@@ -837,6 +1323,7 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
         "kind": "hermes_disk_retention",
         "checked_at": checked_at,
         "mode": "apply" if args.apply else "dry-run",
+        "preserve_all": bool(getattr(args, "preserve_all", False)),
         "status": status,
         "home": str(home),
         "hermes_home": str(hermes_home),
@@ -845,6 +1332,7 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
             "keep_snapshots": args.keep_snapshots,
             "runtime_candidate_policy": "active_plus_one_rollback_plus_referenced_dependencies",
             "memory_policy": "never_eligible",
+            "rollout_payload_policy": "verified_sqlite_work_plus_unverified_superseded_sqlite_families",
             "clear_flags": args.clear_flags,
             "fileprovider_relief_config": str(args.fileprovider_config),
             "fileprovider_relief_enabled": relief_config is not None,
@@ -879,6 +1367,8 @@ def run_retention(args: argparse.Namespace, home: Path, hermes_home: Path) -> in
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--preserve-all", action="store_true",
+                        help="Read-only free-space check; preserve all paths without a deletion plan")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--home", default=str(Path.home()))
     parser.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
@@ -923,6 +1413,8 @@ def main(argv: Iterable[str] | None = None) -> int:
         clear_flags=os.environ.get("HERMES_DISK_RETENTION_CLEAR_FLAGS") == "1",
     )
     args = parser.parse_args(list(argv) if argv is not None else None)
+    if args.preserve_all and args.apply:
+        parser.error("--preserve-all cannot be combined with --apply")
     if args.keep_backups != 1 or args.keep_snapshots != 1:
         raise SystemExit("fleet policy requires exactly one rollback backup and one snapshot")
     home = Path(args.home).expanduser().resolve()
@@ -930,6 +1422,10 @@ def main(argv: Iterable[str] | None = None) -> int:
     args.fileprovider_config = Path(args.fileprovider_config).expanduser().resolve()
     if not home.is_dir() or not hermes_home.is_dir():
         raise SystemExit("home or Hermes home not found")
+    if args.preserve_all:
+        # This mode never plans or applies deletion. It must work while the
+        # adopting controller owns the rollout lease; normal cleanup stays locked.
+        return run_retention(args, home, hermes_home)
     state = hermes_home / "state/promotion/executor"
     with mutation_lease(state / "active-rollout.lock"):
         with mutation_lease(state / "runtime-mutation.lock"):

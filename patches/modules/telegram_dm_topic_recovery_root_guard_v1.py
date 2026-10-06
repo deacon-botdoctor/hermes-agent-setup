@@ -167,39 +167,6 @@ def _patch_base_topic_tests(hermes_dir: Path) -> bool:
     return changed
 
 
-def _patch_text_batching_test(hermes_dir: Path) -> bool:
-    path = hermes_dir / "tests" / "gateway" / "test_telegram_text_batching.py"
-    if not path.exists():
-        print("[telegram_dm_topic_recovery_root_guard_v1] test_telegram_text_batching.py not found, skip")
-        return False
-    content = path.read_text(encoding="utf-8")
-    needle = """            ),\n        )\n\n        adapter._enqueue_text_event(event)\n"""
-    replacement = """            ),\n            reply_to_message_id="10",\n        )\n\n        adapter._enqueue_text_event(event)\n"""
-    if replacement in content:
-        print("[telegram_dm_topic_recovery_root_guard_v1] text batching test already patched")
-        return False
-    test_name = "test_dm_topic_batching_recovers_thread_before_keying"
-    idx = content.find(test_name)
-    if idx < 0:
-        print("[telegram_dm_topic_recovery_root_guard_v1] batching recovery test missing, skip")
-        return False
-    local = content[idx : idx + 1500]
-    if needle not in local:
-        print("[telegram_dm_topic_recovery_root_guard_v1] batching test anchor missing")
-        return False
-    local_patched = local.replace(needle, replacement, 1)
-    patched = content[:idx] + local_patched + content[idx + len(local) :]
-    try:
-        ast.parse(patched)
-    except SyntaxError as exc:
-        print(f"[telegram_dm_topic_recovery_root_guard_v1] ABORT: test_telegram_text_batching.py parse failed: {exc}")
-        return False
-    changed = _write_if_changed(path, patched)
-    if changed:
-        print(f"[telegram_dm_topic_recovery_root_guard_v1] PATCHED {path}")
-    return changed
-
-
 def _patch_active_session_test(hermes_dir: Path) -> bool:
     path = hermes_dir / "tests" / "gateway" / "test_active_session_text_merge.py"
     if not path.exists():
@@ -247,7 +214,6 @@ def patch_telegram_dm_topic_recovery_root_guard_v1(hermes_dir: Path) -> bool:
     changed = False
     changed |= _patch_base_adapter(hermes_dir)
     changed |= _patch_base_topic_tests(hermes_dir)
-    changed |= _patch_text_batching_test(hermes_dir)
     changed |= _patch_active_session_test(hermes_dir)
     return changed
 

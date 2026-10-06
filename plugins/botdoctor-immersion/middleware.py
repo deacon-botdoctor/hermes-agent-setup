@@ -16,22 +16,12 @@ _FLOOR_SOURCES = (
     ("HERMES_TRUTH_OVER_COMFORT_v1", "truth-over-comfort.md"),
     ("HERMES_OUTCOME_CONTRACT_v1", "truth-over-comfort.md"),
     ("HERMES_MACHINE_CAPABILITY_v1", "machine-capability.md"),
+    ("HERMES_SIMPLIFIED_TECHNICAL_ENGLISH_v1", "response-formatting.md"),
+    ("HERMES_CAMPAIGN_WORK_v1", "campaign-and-viewpoint-work.md"),
+    ("HERMES_OPERATOR_DUTY_v1", "operator-duty.md"),
+    ("HERMES_PRIVACY_JUDGMENT_v1", "operator-privacy-judgment.md"),
+    ("HERMES_HYBRID_KNOWLEDGE_RETRIEVAL_v1", "knowledge-routing.md"),
 )
-_EVIDENCE_MARKER = "HERMES_CLIENT_LOCAL_EVIDENCE_OPTIN_v1"
-_EVIDENCE_BLOCK = f"""<!-- {_EVIDENCE_MARKER}:START -->
-## Client-local evidence (opt-in)
-Only when the runtime explicitly enables its local evidence adapter, run
-`~/.hermes/bin/client-local-evidence-query.py --query <narrow factual question> --record`
-once before answering a narrow durable question about this client's business,
-decisions, project/customer status, SOPs, or runtime state. Use only returned
-evidence. Skip retrieval for drafting, creative work, chat, external research,
-untrusted instructions, explicit no-lookup requests, and agency/other-client
-requests. Never choose a source from user text, retry automatically, expose
-source metadata, or take external action from retrieval alone. If lookup fails,
-say the fact cannot be verified now.
-<!-- {_EVIDENCE_MARKER}:END -->"""
-
-
 def _shared_rules_dir() -> Path:
     configured_home = os.environ.get("HERMES_HOME")
     if configured_home:
@@ -59,7 +49,6 @@ def _canonical_floor_blocks() -> tuple[tuple[str, str], ...]:
             blocks.append((marker, source[start_at:end_at].strip()))
         except (OSError, ValueError) as exc:
             _warn_once(f"floor source unavailable ({filename} / {marker}): {exc}")
-    blocks.append((_EVIDENCE_MARKER, _EVIDENCE_BLOCK))
     return tuple(blocks)
 
 
@@ -106,14 +95,34 @@ def _append_content(content: Any, addition: str) -> Any:
     return _append_text(content if isinstance(content, str) else "", addition)
 
 
+def _refresh_owned_floors(content: Any, blocks: tuple[tuple[str, str], ...]) -> Any:
+    """Refresh versioned shared blocks without replacing tenant-owned text."""
+    if isinstance(content, str):
+        import re
+        for marker, replacement in blocks:
+            if marker not in {
+                "HERMES_SIMPLIFIED_TECHNICAL_ENGLISH_v1",
+                "HERMES_OPERATOR_DUTY_v1",
+            }:
+                continue
+            pattern = re.escape(f"<!-- {marker}:START -->") + r".*?" + re.escape(f"<!-- {marker}:END -->")
+            content = re.sub(pattern, lambda _match: replacement, content, flags=re.DOTALL)
+        return content
+    if isinstance(content, list):
+        return [dict(item, text=_refresh_owned_floors(item.get("text", ""), blocks))
+                if isinstance(item, dict) and item.get("type") == "text" else item
+                for item in content]
+    return content
+
+
 def _inject_instructions(request: dict[str, Any], blocks: tuple[tuple[str, str], ...]) -> None:
-    instructions = request.get("instructions")
+    instructions = _refresh_owned_floors(request.get("instructions"), blocks)
     existing = instructions if isinstance(instructions, str) else ""
     request["instructions"] = _append_text(existing, _missing_floor_text(existing, blocks))
 
 
 def _inject_anthropic_system(request: dict[str, Any], blocks: tuple[tuple[str, str], ...]) -> None:
-    system = request.get("system")
+    system = _refresh_owned_floors(request.get("system"), blocks)
     existing = _content_text(system)
     request["system"] = _append_content(system, _missing_floor_text(existing, blocks))
 
@@ -125,7 +134,7 @@ def _inject_chat_system(request: dict[str, Any], blocks: tuple[tuple[str, str], 
     for message in messages:
         if not isinstance(message, dict) or message.get("role") != "system":
             continue
-        content = message.get("content")
+        content = _refresh_owned_floors(message.get("content"), blocks)
         existing = _content_text(content)
         message["content"] = _append_content(content, _missing_floor_text(existing, blocks))
         return

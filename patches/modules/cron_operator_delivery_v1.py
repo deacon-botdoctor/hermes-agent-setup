@@ -1,33 +1,34 @@
-#!/usr/bin/env python3
-# ruff: noqa: E501 -- embedded upstream source anchors preserve exact lines
 """Keep cron receipts detailed while making human delivery glanceable."""
+
 
 from __future__ import annotations
 
+
 from pathlib import Path
 
+
 MARKER = "HERMES_CRON_OPERATOR_DELIVERY_v1"
-NO_EMPTY_SUCCESS_MARKER = "HERMES_CRON_NO_EMPTY_SUCCESS_NOISE_v1"
-SELF_REMEDIATION_MARKER = "HERMES_CRON_SELF_REMEDIATION_v1"
-LONG_SUCCESS_DELIVERY_MARKER = "HERMES_CRON_LONG_SUCCESS_DELIVERY_v1"
-PLAIN_SUCCESS_DELIVERY_MARKER = "HERMES_CRON_PLAIN_SUCCESS_DELIVERY_v1"
-JOB_ITERATION_BUDGET_MARKER = "HERMES_CRON_JOB_ITERATION_BUDGET_v1"
+
+
 TARGET = Path("cron/scheduler.py")
-CONTENT_POLICY_TARGET = Path("agent/conversation_loop.py")
 
-HELPER_ANCHOR = """def _parse_wake_gate(script_output: str) -> bool:
-"""
 
-HELPER_SOURCE = r"""# __MARKER__
-# HERMES_CRON_NO_EMPTY_SUCCESS_NOISE_v1
-# HERMES_CRON_SELF_REMEDIATION_v1
-_CRON_OPERATOR_FALLBACK = SILENT_MARKER
-_CRON_OPERATOR_WITHHELD = (
+CURRENT_PROMPT_TARGET = Path("cron/scheduler_prompt.py")
+
+
+WITHHELD_CONSTANT_OLD = '''_CRON_OPERATOR_WITHHELD = (
     "completed, but its result was withheld because it did not meet the delivery "
     "safety contract. Review the saved receipt."
 )
 
 
+'''
+
+
+HELPER_SOURCE = r"""# __MARKER__
+# HERMES_CRON_NO_EMPTY_SUCCESS_NOISE_v1
+# HERMES_CRON_SELF_REMEDIATION_v1
+_CRON_OPERATOR_FALLBACK = SILENT_MARKER
 class _CronOperatorFailure(str):
     def __new__(cls, value: str, kind: str):
         instance = super().__new__(cls, value)
@@ -49,7 +50,8 @@ def _cron_operator_has_unicode_control(text: str) -> bool:
 
 def _cron_operator_job_name(job_name: str) -> str:
     raw_name = str(job_name or "")
-    name = " ".join(raw_name.split())
+    label = re.sub(r"https?://[^\s<>]+", "", raw_name)
+    name = " ".join(_cron_operator_delivery_candidate(label).split())
     if name.lower().endswith(" cron"):
         name = name[:-5].rstrip()
     unsafe = (
@@ -62,62 +64,36 @@ def _cron_operator_job_name(job_name: str) -> str:
 
 
 def _cron_operator_has_hard_detail(text: str) -> bool:
-    from gateway.platforms.base import MEDIA_DELIVERY_EXTS
+    # Delivery is not an answer-format validator. Only concrete credential
+    # material belongs at this boundary; routing and permissions are enforced
+    # independently by the delivery adapter and tool runtime.
+    from urllib.parse import unquote, urlsplit
 
-    if not text or "\n" in text or "\r" in text:
-        return True
-    if re.search(r"[\x00-\x1f\x7f-\x9f]", text):
-        return True
-    if _cron_operator_has_unicode_control(text):
-        return True
-    decoder = json.JSONDecoder()
-    for index, character in enumerate(text):
-        if character not in "[{":
-            continue
+    for match in re.finditer(r"https?://[^\s<>()\[\]{}]+", text):
         try:
-            value, _ = decoder.raw_decode(text[index:])
-        except (json.JSONDecodeError, RecursionError):
+            parsed = urlsplit(match.group(0))
+            if parsed.username is not None or parsed.password is not None:
+                return True
+        except ValueError:
             continue
-        if isinstance(value, (dict, list)):
-            return True
-    if re.search(
-        r"(?<!\w)(?:[A-Za-z][A-Za-z0-9+.-]*:/{1,3}|~[/\\]|\.\.?[/\\]|"
-        r"[/\\]|[A-Za-z]:[/\\])\S+",
-        text,
-    ):
-        return True
-    for match in re.finditer(
-        r"(?<![@\w])(?:[A-Za-z0-9_-]+\.)+([A-Za-z0-9]+)\b|"
-        r"(?<!\w)\.([A-Za-z0-9]+)\b",
-        text,
-    ):
-        extension = next(group for group in match.groups() if group)
-        if (
-            f".{extension.lower()}" in MEDIA_DELIVERY_EXTS
-            or extension.isalpha()
-            and extension.islower()
-            and 2 <= len(extension) <= 10
+        decoded = unquote("/".join((parsed.path, parsed.query, parsed.fragment)))
+        if re.search(
+            r"(?:^|[/?&])(?:token|access[_-]?token|api[_-]?key|password|secret|session|signature|sig)\s*=\s*[^&#/\s]+",
+            decoded, re.I,
         ):
             return True
-    if re.search(
-        r"\b(?:(?i:(?:[A-Za-z][A-Za-z0-9]*[_-])*"
-        r"(?:id|pid|uuid|token|trace[_ -]?id))|"
-        r"[A-Za-z][A-Za-z0-9]*(?:Id|ID|Token|TOKEN))\s*[:=#]\s*[A-Za-z0-9_-]+\b",
-        text,
-    ):
-        return True
-    return bool(
-        re.search(
-            r"\b(?:[0-9a-f]{12,}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\b",
-            text,
-            re.I,
-        )
-    )
+    return bool(re.search(
+        r"\bauthorization\s*:\s*bearer\s+\S+|"
+        r"\b(?:access[_-]?token|api[_-]?key|password|client[_-]?secret)\s*[:=]\s*\S+",
+        text, re.I,
+    ))
+
 
 def _cron_operator_failure_message(failure_kind: str) -> str:
     if failure_kind == "blocked_config":
         failure_kind = "configuration"
     return {
+        "delivery_contract": "result was retained privately because it failed delivery validation.",
         "safety": (
             "was stopped by a safety check. No action was taken; the saved receipt "
             "records the protected boundary."
@@ -325,7 +301,7 @@ def _cron_repair_outcome(job: dict, response: str) -> tuple[str, bool]:
     if not formatted or formatted == SILENT_MARKER:
         return "", False
     if recovered:
-        return f"{name} cron — automatic repair attempted; the original run remains failed.", False
+        return f"{name} — automatic repair attempted; the original run remains failed.", False
     return formatted, False
 
 
@@ -359,9 +335,13 @@ def _attempt_cron_failure_remediation(
     deferred_agents: list,
     failure_detail: object = None,
 ) -> tuple[str, bool]:
+    if output_file is None:
+        # Self-removal has no durable receipt and must not start a repair turn.
+        return "", False
+    output_file = Path(output_file)
     if job.get("no_agent"):
         name = _cron_operator_job_name(job.get("name") or job.get("id"))
-        return f"{name} cron — failed in its script or runtime. Automatic repair skipped: script-only execution. Review the saved receipt.", False
+        return SILENT_MARKER, False
     if failure_kind == "blocked_config":
         failure_kind = "configuration"
     if failure_kind not in _CRON_REPAIRABLE_FAILURE_KINDS:
@@ -376,7 +356,7 @@ def _attempt_cron_failure_remediation(
             "runtime release, and failure class already failed inside the bounded cooldown.",
         )
         return (
-            f"{name} cron — automatic repair paused: the same configuration and "
+            f"{name} — automatic repair paused: the same configuration and "
             "runtime already failed automatic recovery; the saved receipt records "
             "the suppressed repeat.",
             False,
@@ -440,20 +420,23 @@ def _attempt_cron_failure_remediation(
 
 # HERMES_CRON_LONG_SUCCESS_DELIVERY_v1
 # HERMES_CRON_PLAIN_SUCCESS_DELIVERY_v1
+# HERMES_CRON_USER_FACING_DELIVERY_v1
 def _cron_operator_delivery_candidate(value: str) -> str:
-    raw = str(value or "")
-    # Line-oriented cron reports are ordinary operator prose. Preserve LF/CRLF
-    # boundaries, while leaving tabs, lone CR, Unicode controls and all existing
-    # path/identifier/JSON detail checks disqualifying.
-    if "\r" in raw.replace("\r\n", ""):
+    raw = str(value or "").strip()
+    if _cron_operator_has_hard_detail(raw):
         return ""
-    normalized_newlines = raw.replace("\r\n", "\n")
-    if _cron_operator_has_hard_detail(normalized_newlines.replace("\n", " ")):
+    if re.search(r"failed in (?:its script|the local runtime)|review the saved receipt", raw, re.I):
         return ""
-    normalized = "\n".join(
-        " ".join(line.split()) for line in normalized_newlines.split("\n")
-    ).strip()
-    return normalized if normalized and len(normalized) <= 3500 else ""
+    # Match public URLs first so their slashes are not treated as local paths.
+    # Credential-bearing URLs were rejected above.
+    raw = re.sub(
+        r"(?P<url>https?://[^\s<>()\[\]{}]+)|"
+        r"(?P<quote>[\x22\x27])(?:[A-Za-z]:[\\/]|\\\\|~/|/).*?(?P=quote)|"
+        r"(?<!\w)(?:[A-Za-z]:[\\/]|\\\\|~/|/)[^\s<>]+",
+        lambda match: match.group("url") or "",
+        raw,
+    )
+    return "\n".join(" ".join(line.split()).strip() for line in raw.splitlines()).strip()
 
 
 def _format_cron_operator_delivery(
@@ -465,21 +448,23 @@ def _format_cron_operator_delivery(
     failure_kind: str,
 ) -> str:
     name = _cron_operator_job_name(job_name)
-    prefix = f"{name} cron — "
+    prefix = f"{name} — "
     if not success:
+        if failure_kind in {"script", "runtime"}:
+            return SILENT_MARKER
         return prefix + _cron_operator_failure_message(failure_kind)
 
     text = str(output or "").strip()
-    if not text or _is_cron_silence_response(text):
+    if not text or text.upper() in {"[SILENT]", "SILENT", "NO_REPLY", "NO REPLY"}:
         return SILENT_MARKER
 
     candidate = ""
-    if job_lane == "script" and len(text) <= 4096:
+    if job_lane == "script":
         try:
             payload = json.loads(text)
         except (json.JSONDecodeError, RecursionError, TypeError, ValueError):
             payload = None
-        if isinstance(payload, dict):
+        if isinstance(payload, dict) and any(isinstance(payload.get(key), str) for key in ("message", "summary")):
             # Keep the existing message-then-summary fallback: a rejected
             # message must not hide a safe summary in the same receipt.
             for field in ("message", "summary"):
@@ -491,11 +476,18 @@ def _format_cron_operator_delivery(
         else:
             candidate = _cron_operator_delivery_candidate(text)
     elif job_lane == "model":
-        required_prefix = f"{name} cron — "
-        value = text[len(required_prefix):] if text.startswith(required_prefix) else text
-        candidate = _cron_operator_delivery_candidate(value)
+        legacy_prefix = f"{name} cron — "
+        if text.startswith(prefix):
+            candidate = _cron_operator_delivery_candidate(text)
+        else:
+            value = text[len(legacy_prefix):] if text.startswith(legacy_prefix) else text
+            candidate = _cron_operator_delivery_candidate(value)
 
-    return prefix + (candidate or _CRON_OPERATOR_WITHHELD)
+    if candidate.startswith(prefix):
+        return candidate
+    if not candidate:
+        return _CronOperatorFailure(SILENT_MARKER, "delivery_contract")
+    return prefix + candidate
 
 
 def _format_cron_operator_delivery_with_media(
@@ -517,6 +509,8 @@ def _format_cron_operator_delivery_with_media(
         job_lane=job_lane,
         failure_kind=failure_kind,
     )
+    if isinstance(formatted, _CronOperatorFailure):
+        return formatted
     if formatted == SILENT_MARKER:
         if not media_files or not success or _is_cron_silence_response(visible):
             return formatted
@@ -535,413 +529,322 @@ def _format_cron_operator_delivery_with_media(
     return "\n".join(part for part in (formatted, *directives) if part)
 
 
+def _cron_operator_success_error(job: dict, final_response: str):
+    # Classify rejected output before incidents, routing and final run status.
+    formatted = final_response
+    if not isinstance(formatted, _CronOperatorFailure):
+        formatted = _format_cron_operator_delivery_with_media(
+            job.get("name") or job.get("id"), final_response,
+            success=True, job_lane="script" if job.get("no_agent") else "model",
+            failure_kind="execution",
+        )
+    if isinstance(formatted, _CronOperatorFailure):
+        return _CronOperatorFailure(
+            "Cron result rejected by delivery safety contract; original output retained in run receipt.",
+            "delivery_contract",
+        )
+    return None
+
+
 def _is_cron_operator_delivery(content: str) -> bool:
     first_line = str(content or "").splitlines()[0] if content else ""
     if first_line.startswith(("MEDIA:", "[[as_document]]", "[[audio_as_voice]]")):
         return True
-    return bool(re.match(r"^[^\r\n]{1,100} cron — ", first_line))
+    return bool(re.match(r"^[^\r\n]{1,100} (?:cron )?— ", first_line))
 
 
 """.replace("__MARKER__", MARKER)
 
-SELF_REMEDIATION_FAILURE_OLD = """def _cron_operator_failure_message(failure_kind: str) -> str:
-    if failure_kind == "blocked_config":
-        failure_kind = "configuration"
-    return {
-        "safety": (
-            "was blocked by a safety check. Audit its prompt and configuration; "
-            "the saved receipt has the reason."
-        ),
-        "configuration": (
-            "was blocked by configuration. Repair the job setup; the saved receipt "
-            "has the reason."
-        ),
-        "script": (
-            "failed in its script or runtime. Review the saved receipt and repair "
-            "the script or configuration."
-        ),
-        "runtime": "failed in the local runtime. Review the saved receipt and retry.",
-        "interrupted": "was interrupted during gateway shutdown and needs to run again.",
-        "provider_auth": (
-            "could not authenticate with its configured provider. Repair the provider "
-            "credentials; the saved receipt has the reason."
-        ),
-        "provider_limit": (
-            "hit a provider limit. Check quota or billing and retry after reset; "
-            "the saved receipt has the reason."
-        ),
-        "timeout": (
-            "timed out before completing. Retry later; "
-            "the saved receipt has the reason."
-        ),
-        "execution": "failed during execution. Review the saved receipt and retry.",
-    }.get(failure_kind, "failed during execution. Review the saved receipt and retry.")
-"""
-_SELF_REMEDIATION_HELPER_START = HELPER_SOURCE.index("def _cron_operator_failure_message(")
-_SELF_REMEDIATION_HELPER_END = HELPER_SOURCE.index(
-    "\ndef _format_cron_operator_delivery(",
-    _SELF_REMEDIATION_HELPER_START,
-)
-SELF_REMEDIATION_FAILURE_NEW = (
-    f"# {SELF_REMEDIATION_MARKER}\n" + HELPER_SOURCE[_SELF_REMEDIATION_HELPER_START:_SELF_REMEDIATION_HELPER_END]
-)
 
-_LONG_SUCCESS_HELPER_START = HELPER_SOURCE.index(
-    f"# {LONG_SUCCESS_DELIVERY_MARKER}\n"
-)
-_LONG_SUCCESS_CONSTANT_START = HELPER_SOURCE.index("_CRON_OPERATOR_WITHHELD = (")
-_LONG_SUCCESS_CONSTANT_END = HELPER_SOURCE.index(
-    "\n\n", _LONG_SUCCESS_CONSTANT_START
-) + 2
-LONG_SUCCESS_CONSTANT_NEW = HELPER_SOURCE[
-    _LONG_SUCCESS_CONSTANT_START:_LONG_SUCCESS_CONSTANT_END
-]
-_LONG_SUCCESS_HELPER_END = HELPER_SOURCE.index(
-    "\ndef _format_cron_operator_delivery_with_media(",
-    _LONG_SUCCESS_HELPER_START,
-)
-LONG_SUCCESS_DELIVERY_NEW = HELPER_SOURCE[
-    _LONG_SUCCESS_HELPER_START:_LONG_SUCCESS_HELPER_END
-]
-
-
-def _upgrade_long_success_delivery(source: str) -> str:
-    if LONG_SUCCESS_DELIVERY_MARKER in source:
-        start = source.index(f"# {LONG_SUCCESS_DELIVERY_MARKER}\n")
-        end = source.index("\ndef _format_cron_operator_delivery_with_media(", start)
-        current = source[start:end]
-        if PLAIN_SUCCESS_DELIVERY_MARKER not in current:
-            # A prior carrier treated formatting as a safety boundary: it silently
-            # discarded ordinary script prose and model text without a display prefix.
-            return source[:start] + LONG_SUCCESS_DELIVERY_NEW + source[end:]
-        return source
-    fallback = "_CRON_OPERATOR_FALLBACK = SILENT_MARKER\n"
-    if LONG_SUCCESS_CONSTANT_NEW not in source:
-        source = _replace_once(
-            source,
-            fallback,
-            fallback + LONG_SUCCESS_CONSTANT_NEW,
-            "long-success safety fallback",
+CURRENT_NO_AGENT_FAILURE_OLD = '''        # Deliver the error: a silently broken watchdog is the worst-case outcome.
+        alert = (
+            f"⚠ Cron watchdog '{job_name}' script failed\\n\\n"
+            f"{output}\\n\\n"
+            f"Time: {now_iso}"
         )
-    old_start = source.index("def _format_cron_operator_delivery(")
-    old_end = source.index(
-        "\ndef _format_cron_operator_delivery_with_media(", old_start
-    )
-    return source[:old_start] + LONG_SUCCESS_DELIVERY_NEW + source[old_end:]
+        return False, f"{header}**Status:** script failed\\n\\n{output}\\n", alert, output
+'''
 
-EMPTY_SUCCESS_FALLBACK_OLD = """_CRON_OPERATOR_FALLBACK = "completed. Details are available in the run receipt."
-"""
-EMPTY_SUCCESS_FALLBACK_NEW = """# HERMES_CRON_NO_EMPTY_SUCCESS_NOISE_v1
-_CRON_OPERATOR_FALLBACK = SILENT_MARKER
-"""
 
-EMPTY_SUCCESS_RETURN_OLD = """    return prefix + (candidate or _CRON_OPERATOR_FALLBACK)
-"""
-EMPTY_SUCCESS_RETURN_NEW = """    return prefix + candidate if candidate else _CRON_OPERATOR_FALLBACK
-"""
+CURRENT_NO_AGENT_FAILURE_NEW = '''        # Keep the full failure in the durable run document, but never send raw
+        # script output (paths, JSON, counters, or tracebacks) to a human lane.
+        alert = _format_cron_operator_delivery_with_media(
+            job_name, output, success=False, job_lane="script", failure_kind="script"
+        )
+        return False, f"{header}**Status:** script failed\\n\\n{output}\\n", alert, output
+'''
 
-EMPTY_MEDIA_FALLBACK_OLD = """        name = _cron_operator_job_name(job_name)
-        formatted = f"{name} cron — {_CRON_OPERATOR_FALLBACK}"
-"""
-EMPTY_MEDIA_FALLBACK_NEW = """        # A valid media directive is already the report. Do not add a
-        # content-free success caption merely because visible text was empty.
-        formatted = ""
-"""
 
-EMPTY_MEDIA_RETURN_OLD = """    return formatted + "\\n" + "\\n".join(directives)
-"""
-EMPTY_MEDIA_RETURN_NEW = """    return "\\n".join(part for part in (formatted, *directives) if part)
-"""
+CURRENT_NO_AGENT_SUCCESS_OLD = '''    return True, f"{header}\\n---\\n\\n{output}\\n", output, None
+'''
 
-MEDIA_ONLY_DELIVERY_OLD = """def _is_cron_operator_delivery(content: str) -> bool:
-    first_line = str(content or "").splitlines()[0] if content else ""
-    return bool(re.match(r"^[^\\r\\n]{1,100} cron — ", first_line))
-"""
-MEDIA_ONLY_DELIVERY_NEW = """def _is_cron_operator_delivery(content: str) -> bool:
-    first_line = str(content or "").splitlines()[0] if content else ""
-    if first_line.startswith(("MEDIA:", "[[as_document]]", "[[audio_as_voice]]")):
-        return True
-    return bool(re.match(r"^[^\\r\\n]{1,100} cron — ", first_line))
-"""
 
-CRON_HINT_OLD = """        "the output yourself. Just produce your report/output as your "
-        "final response and the system handles the rest. "
-        "SILENT: If there is genuinely nothing new to report, respond "
-"""
+CURRENT_NO_AGENT_SUCCESS_NEW = '''    return True, f"{header}\\n---\\n\\n{output}\\n", _format_cron_operator_delivery_with_media(
+        job_name, output, success=True, job_lane="script", failure_kind="script"
+    ), None
+'''
 
-CRON_HINT_PREVIOUS = """        "the output yourself. Just produce your report/output as your "
-        "final response and the system handles the rest. "
-        f"FORMAT: Start with '{_cron_operator_job_name(job.get('name') or job.get('id'))} "
-        "cron — <plain-language outcome>'. Keep it to one clear sentence. "
-        "Include numbers only when they change a decision. Never include IDs, "
-        "log timestamps, paths, token or iteration counts, tool traces, raw JSON, "
-        "or logs; those belong in the saved run receipt. "
-        "SILENT: If there is genuinely nothing new to report, respond "
-"""
 
-CRON_HINT_NEW = CRON_HINT_PREVIOUS.replace(
-    "        f\"FORMAT: Start with '{_cron_operator_job_name(job.get('name') or job.get('id'))} \"\n"
-    "        \"cron — <plain-language outcome>'. Keep it to one clear sentence. \"\n",
-    '        "FORMAT: Write a concise plain-language report. The system adds the job label. "\n',
+CURRENT_DELIVERY_SUCCESS_OLD = '''    elif success:
+        deliver_content = final_response
+'''
+
+
+CURRENT_DELIVERY_SUCCESS_NEW = '''    elif success:
+        deliver_content = _format_cron_operator_delivery_with_media(
+            job.get("name") or job.get("id"),
+            final_response,
+            success=True,
+            job_lane="model",
+            failure_kind="execution",
+        )
+'''
+
+
+CURRENT_DELIVERY_FAILURE_OLD = '                _summarize_cron_failure_for_delivery(job, error) + _failure_streak_nudge(job)\n'
+
+
+CURRENT_DELIVERY_FAILURE_NEW = '                _format_cron_operator_delivery_with_media(\n                    job.get("name") or job.get("id"), error, success=False,\n                    job_lane="script" if job.get("no_agent") else "model",\n                    failure_kind=getattr(error, "kind", "script" if job.get("no_agent") else "execution"),\n                ) + _failure_streak_nudge(job)\n'
+
+
+CURRENT_DELIVERY_REMEDIATION_ANCHOR = '''    # Whitespace-only == empty: skip delivery; the guard below marks it a soft failure.
+    d.should_deliver = bool(deliver_content.strip()) and not _silent_alert
+'''
+
+
+CURRENT_DELIVERY_REMEDIATION_LEGACY = '''    if not d.success and not blocked_config and not drift_skip:
+        # A bounded repair turn is allowed only after the original receipt is
+        # durable.  It never changes the original workload's failure state.
+        repair_delivery, _recovered = _attempt_cron_failure_remediation(
+            job,
+            failure_kind="script" if job.get("no_agent") else "execution",
+            output_file=output_file,
+            deferred_agents=deferred_agents,
+            failure_detail=error,
+        )
+        if repair_delivery:
+            deliver_content = repair_delivery
+    # Whitespace-only == empty: skip delivery; the guard below marks it a soft failure.
+    d.should_deliver = bool(deliver_content.strip()) and not _silent_alert
+'''
+
+
+CURRENT_DELIVERY_REMEDIATION_RETIRED_DRIFT = CURRENT_DELIVERY_REMEDIATION_LEGACY.replace(
+    "if not d.success and not blocked_config and not drift_skip:",
+    "if not d.success and not d.blocked_config and not any(\n"
+    "        marker in str(d.error or '')\n"
+    "        for marker in (DRIFT_SKIP_MARKER, DRIFT_SKIP_SILENT_MARKER)\n"
+    "    ):",
+).replace("failure_detail=error,", "failure_detail=d.error,").replace(
+    'failure_kind="script" if job.get("no_agent") else "execution",',
+    'failure_kind=getattr(d.error, "kind", "script" if job.get("no_agent") else "execution"),',
 )
 
-DELIVERY_BOUNDARY_OLD = """            if blocked_config and not success:
-                # Blocked-config alert: bypass the generic failure summarizer
-                # (whose auth/timeout heuristics would mislabel this as a
-                # provider runtime failure) — say plainly that config
-                # validation blocked the run and nothing was spent.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                deliver_content = final_response if success else _summarize_cron_failure_for_delivery(job, error)
-            # Treat whitespace-only final responses the same as empty
-"""
 
-DELIVERY_BOUNDARY_LATEST_OLD = """            if blocked_config and not success:
-                # Blocked-config alert: bypass the generic failure summarizer
-                # (whose auth/timeout heuristics would mislabel this as a
-                # provider runtime failure) — say plainly that config
-                # validation blocked the run and nothing was spent.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                deliver_content = final_response if success else _summarize_cron_failure_for_delivery(job, error)
-                if drift_skip and not success:
-                    # Drift-skip alert: bypass the generic summarizer's
-                    # 180-char truncation (it would eat the remediation
-                    # command) and strip the internal marker — deliver the
-                    # guard's own actionable message intact.
-                    _drift_text = re.sub(
-                        r"\\[drift_skip[^\\]]*\\]\\s*", "", str(error)
-                    ).strip()
-                    deliver_content = (
-                        f"⚠️ Cron '{job.get('name') or job['id']}' skipped: "
-                        f"{_drift_text}"
-                    )
-            # Treat whitespace-only final responses the same as empty
-"""
+CURRENT_DELIVERY_REMEDIATION_UNGUARDED = CURRENT_DELIVERY_REMEDIATION_RETIRED_DRIFT.replace(
+    "if not d.success and not d.blocked_config and not any(\n"
+    "        marker in str(d.error or '')\n"
+    "        for marker in (DRIFT_SKIP_MARKER, DRIFT_SKIP_SILENT_MARKER)\n"
+    "    ):",
+    "if not d.success and not d.blocked_config:",
+)
 
-DELIVERY_BOUNDARY_STREAK_OLD = """            if blocked_config and not success:
-                # Blocked-config alert: bypass the generic failure summarizer
-                # (whose auth/timeout heuristics would mislabel this as a
-                # provider runtime failure) — say plainly that config
-                # validation blocked the run and nothing was spent.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                deliver_content = final_response if success else (
-                    _summarize_cron_failure_for_delivery(job, error)
-                    + _failure_streak_nudge(job)
-                )
-                if drift_skip and not success:
-                    # Drift-skip alert: bypass the generic summarizer's
-                    # 180-char truncation (it would eat the remediation
-                    # command) and strip the internal marker — deliver the
-                    # guard's own actionable message intact.
-                    _drift_text = re.sub(
-                        r"\\[drift_skip[^\\]]*\\]\\s*", "", str(error)
-                    ).strip()
-                    deliver_content = (
-                        f"⚠️ Cron '{job.get('name') or job['id']}' skipped: "
-                        f"{_drift_text}"
-                    )
-            # Treat whitespace-only final responses the same as empty
-"""
 
-DELIVERY_BOUNDARY_INCIDENT_OLD = """            if blocked_config and not success:
-                # Blocked-config alert: bypass the generic failure summarizer
-                # (whose auth/timeout heuristics would mislabel this as a
-                # provider runtime failure) — say plainly that config
-                # validation blocked the run and nothing was spent.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                if success:
-                    deliver_content = final_response
-                else:
-                    # Durable failure incident: record this job+error
-                    # signature once and, when the operator already acked it,
-                    # suppress the per-run failure ping (the streak nudge and
-                    # the failure summarizer stay intact for un-acked
-                    # failures). Best-effort — an incident-store error never
-                    # breaks the delivery path (see _upsert_incident_for_failure).
-                    incident_acked, failure_incident_id = _upsert_incident_for_failure(
-                        job, error or "", output_file=output_file
-                    )
-                    if incident_acked and not drift_skip:
-                        deliver_content = ""
-                    else:
-                        deliver_content = (
-                            _summarize_cron_failure_for_delivery(job, error)
-                            + _failure_streak_nudge(job)
-                        )
-                if drift_skip and not success:
-                    # Drift-skip alert: bypass the generic summarizer's
-                    # 180-char truncation (it would eat the remediation
-                    # command) and strip the internal marker — deliver the
-                    # guard's own actionable message intact.
-                    # Deliberately NOT gated on incident ack: a drift skip
-                    # means the run was never attempted and the message
-                    # carries the remediation command — acking the failure
-                    # signature silences failure pings, not drift alerts
-                    # (which already alert once via the drift_alerted marker).
-                    _drift_text = re.sub(
-                        r"\\[drift_skip[^\\]]*\\]\\s*", "", str(error)
-                    ).strip()
-                    deliver_content = (
-                        f"⚠️ Cron '{job.get('name') or job['id']}' skipped: "
-                        f"{_drift_text}"
-                    )
-            # Treat whitespace-only final responses the same as empty
-"""
+CURRENT_DELIVERY_REMEDIATION_NEW = CURRENT_DELIVERY_REMEDIATION_UNGUARDED.replace(
+    "if not d.success and not d.blocked_config:",
+    "if (not d.success and not d.blocked_config and not d.incident_acked\n"
+    "            and not d.agent_declared\n"
+    "            and output_file is not None\n"
+    "            and not _is_interrupted(job[\"id\"], execution_token)):",
+)
 
-DELIVERY_BOUNDARY_V1 = """            deliver_content = _format_cron_operator_delivery_with_media(
-                job.get("name") or job.get("id"),
-                final_response if success else error,
-                success=success,
-                job_lane="script" if job.get("no_agent") else "model",
-                failure_kind=failure_kind,
-            )
-            # Treat whitespace-only final responses the same as empty
-"""
 
-DELIVERY_BOUNDARY_NEW = """            remediation_delivery = ""
-            remediation_recovered = False
-            remediation_suppressed = blocked_config_silent or bool(
-                locals().get("drift_skip_silent", False)
-            ) or _cron_repair_claim_lost(locals())
-            if not success and not remediation_suppressed:
-                remediation_delivery, remediation_recovered = (
-                    _attempt_cron_failure_remediation(
-                        job,
-                        failure_kind=failure_kind,
-                        output_file=output_file,
-                        deferred_agents=_deferred_agents,
-                        failure_detail=error,
-                    )
-                )
-                # A repair-model report cannot change the original workload outcome.
-            if remediation_delivery:
-                deliver_content = remediation_delivery
-            elif blocked_config and not success:
-                # Preserve upstream's actionable no-spend configuration alert
-                # instead of leaking its internal marker through the generic
-                # failure formatter.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                deliver_content = _format_cron_operator_delivery_with_media(
-                    job.get("name") or job.get("id"),
-                    final_response if success else error,
-                    success=success,
-                    job_lane="script" if job.get("no_agent") else "model",
-                    failure_kind=failure_kind,
-                )
-            # Treat whitespace-only final responses the same as empty
-"""
+CURRENT_PRERUN_FAILURE_OLD = '''        _ran_ok, _script_output = prerun_script
+        if _ran_ok and not _parse_wake_gate(_script_output):
+'''
 
-DELIVERY_BOUNDARY_INCIDENT_NEW = """            remediation_delivery = ""
-            remediation_recovered = False
-            remediation_suppressed = blocked_config_silent or bool(
-                locals().get("drift_skip_silent", False)
-            ) or _cron_repair_claim_lost(locals())
-            if not success and not remediation_suppressed:
-                remediation_delivery, remediation_recovered = (
-                    _attempt_cron_failure_remediation(
-                        job,
-                        failure_kind=failure_kind,
-                        output_file=output_file,
-                        deferred_agents=_deferred_agents,
-                        failure_detail=error,
-                    )
-                )
-                # A repair-model report cannot change the original workload outcome.
-            if remediation_delivery:
-                deliver_content = remediation_delivery
-            elif blocked_config and not success:
-                # Preserve upstream's actionable no-spend configuration alert
-                # instead of leaking its internal marker through the generic
-                # failure formatter.
-                _pf_text = re.sub(
-                    r"\\[blocked_config[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⛔ Cron '{job.get('name') or job['id']}' blocked by "
-                    f"configuration validation (no LLM call was made): "
-                    f"{_pf_text} "
-                    "This alert is sent once; the job stays blocked until "
-                    "the configuration is fixed."
-                )
-            else:
-                deliver_content = _format_cron_operator_delivery_with_media(
-                    job.get("name") or job.get("id"),
-                    final_response if success else error,
-                    success=success,
-                    job_lane="script" if job.get("no_agent") else "model",
-                    failure_kind=failure_kind,
-                )
-                if not success:
-                    deliver_content += _failure_streak_nudge(job)
-            # Preserve upstream's durable incident acknowledgement without
-            # letting it bypass a successful bounded repair.
-            if not success and not blocked_config:
-                incident_acked, failure_incident_id = _upsert_incident_for_failure(
-                    job, error or "", output_file=output_file
-                )
-                if incident_acked and not drift_skip:
-                    deliver_content = ""
-            if drift_skip and not success:
-                # Preserve the complete upstream remediation command; the
-                # generic formatter intentionally bounds ordinary failures.
-                _drift_text = re.sub(
-                    r"\\[drift_skip[^\\]]*\\]\\s*", "", str(error)
-                ).strip()
-                deliver_content = (
-                    f"⚠️ Cron '{job.get('name') or job['id']}' skipped: "
-                    f"{_drift_text}"
-                )
-            # Treat whitespace-only final responses the same as empty
+
+CURRENT_PRERUN_FAILURE_NEW = '''        _ran_ok, _script_output = prerun_script
+        # A failed collection is not model input or a successful client report.
+        # Preserve the error for the existing incident/repair and failure lane.
+        if not _ran_ok:
+            header = _job_doc_header(job_name, job_id,
+                                     _hermes_now().strftime("%Y-%m-%d %H:%M:%S"),
+                                     "pre-agent script")
+            return (False, f"{header}**Status:** script failed\\n\\n{_script_output}\\n",
+                    "", _script_output), None
+        if _ran_ok and not _parse_wake_gate(_script_output):
+'''
+
+
+def _upgrade_sensitive_url_guard(source: str) -> str:
+    # Existing marker-bearing runtimes also need the corrected URL guard.
+    return source.replace(
+        r"(?:access[_-]?token|api[_-]?key|auth(?:entication)?|",
+        r"(?:token|access[_-]?token|api[_-]?key|auth(?:entication)?|",
+    )
+
+
+def _patch_current_split_scheduler(hermes_dir: Path) -> bool:
+    """Patch Hermes' split cron implementation (scheduler + prompt owner)."""
+    scheduler = hermes_dir / TARGET
+    prompt = hermes_dir / CURRENT_PROMPT_TARGET
+    if not scheduler.is_file() or not prompt.is_file():
+        return False
+    scheduler_source = _upgrade_sensitive_url_guard(scheduler.read_text(encoding="utf-8"))
+    prompt_source = prompt.read_text(encoding="utf-8")
+    scheduler_source = _upgrade_rejected_success(scheduler_source) if MARKER in scheduler_source else scheduler_source
+    previous_failure = CURRENT_DELIVERY_FAILURE_NEW.replace(
+        'getattr(error, "kind", "script" if job.get("no_agent") else "execution")',
+        '"script" if job.get("no_agent") else "execution"',
+    )
+    scheduler_source = scheduler_source.replace(previous_failure, CURRENT_DELIVERY_FAILURE_NEW)
+    scheduler_source = scheduler_source.replace(
+        CURRENT_DELIVERY_REMEDIATION_RETIRED_DRIFT, CURRENT_DELIVERY_REMEDIATION_NEW)
+    scheduler_source = scheduler_source.replace(
+        CURRENT_DELIVERY_REMEDIATION_UNGUARDED, CURRENT_DELIVERY_REMEDIATION_NEW)
+    previous_remediation = CURRENT_DELIVERY_REMEDIATION_RETIRED_DRIFT.replace(
+        'getattr(d.error, "kind", "script" if job.get("no_agent") else "execution")',
+        '"script" if job.get("no_agent") else "execution"',
+    )
+    scheduler_source = scheduler_source.replace(previous_remediation, CURRENT_DELIVERY_REMEDIATION_NEW)
+    if CURRENT_PRERUN_FAILURE_NEW not in scheduler_source:
+        scheduler_source = _replace_once(
+            scheduler_source, CURRENT_PRERUN_FAILURE_OLD, CURRENT_PRERUN_FAILURE_NEW,
+            "split pre-agent script failure boundary",
+        )
+    if MARKER not in scheduler_source:
+        scheduler_source = _replace_once(
+            scheduler_source,
+            'SILENT_MARKER = "[SILENT]"\n',
+            'SILENT_MARKER = "[SILENT]"\n\n' + HELPER_SOURCE,
+            "split scheduler helper",
+        )
+    scheduler_source = _replace_once(
+        scheduler_source,
+        CURRENT_NO_AGENT_FAILURE_OLD,
+        CURRENT_NO_AGENT_FAILURE_NEW,
+        "split no-agent failure delivery",
+    ) if CURRENT_NO_AGENT_FAILURE_NEW not in scheduler_source else scheduler_source
+    scheduler_source = _replace_once(
+        scheduler_source,
+        CURRENT_NO_AGENT_SUCCESS_OLD,
+        CURRENT_NO_AGENT_SUCCESS_NEW,
+        "split no-agent success delivery",
+    ) if CURRENT_NO_AGENT_SUCCESS_NEW not in scheduler_source else scheduler_source
+    scheduler_source = _replace_once(
+        scheduler_source,
+        CURRENT_DELIVERY_SUCCESS_OLD,
+        CURRENT_DELIVERY_SUCCESS_NEW,
+        "split model success delivery",
+    ) if CURRENT_DELIVERY_SUCCESS_NEW not in scheduler_source else scheduler_source
+    scheduler_source = _replace_once(
+        scheduler_source,
+        CURRENT_DELIVERY_FAILURE_OLD,
+        CURRENT_DELIVERY_FAILURE_NEW,
+        "split failure delivery",
+    ) if CURRENT_DELIVERY_FAILURE_NEW not in scheduler_source else scheduler_source
+    if CURRENT_DELIVERY_REMEDIATION_LEGACY in scheduler_source:
+        scheduler_source = _replace_once(
+            scheduler_source,
+            CURRENT_DELIVERY_REMEDIATION_LEGACY,
+            CURRENT_DELIVERY_REMEDIATION_NEW,
+            "split repair delivery state migration",
+        )
+    scheduler_source = _replace_once(
+        scheduler_source,
+        CURRENT_DELIVERY_REMEDIATION_ANCHOR,
+        CURRENT_DELIVERY_REMEDIATION_NEW,
+        "split repair delivery boundary",
+    ) if CURRENT_DELIVERY_REMEDIATION_NEW not in scheduler_source else scheduler_source
+    # The owning run body already keeps original agents live until after
+    # `_save_compose_deliver`; hand repair agents through that exact list too.
+    old_signature = '''    adapters, loop, verbose: bool, execution_token,
+) -> None:
+'''
+    new_signature = '''    adapters, loop, verbose: bool, execution_token, deferred_agents: list,
+) -> None:
+'''
+    if new_signature not in scheduler_source:
+        scheduler_source = _replace_once(
+            scheduler_source, old_signature, new_signature, "split delivery signature"
+        )
+    old_call = '''                d, fence, final_response, output, adapters=adapters, loop=loop, verbose=verbose,
+                execution_token=execution_token)
+'''
+    new_call = '''                d, fence, final_response, output, adapters=adapters, loop=loop, verbose=verbose,
+                execution_token=execution_token, deferred_agents=_deferred_agents)
+'''
+    if new_call not in scheduler_source:
+        scheduler_source = _replace_once(
+            scheduler_source, old_call, new_call, "split delivery deferred agents"
+        )
+    rejection_anchor = "    (\n        deliver_content, d.blocked_config, _silent_alert, d.incident_acked, d.failure_incident_id,\n"
+    rejection_guard = """    if d.success:
+        rejection = _cron_operator_success_error(job, final_response)
+        if rejection is not None:
+            d.success, d.error = False, rejection
+
 """
+    if rejection_guard not in scheduler_source:
+        scheduler_source = _replace_once(scheduler_source, rejection_anchor,
+                                         rejection_guard + rejection_anchor,
+                                         "split rejected-success boundary")
+    previous_format_hint = ('    "FORMAT: Write a concise plain-language report. The system adds the job label. "\n'
+                            '    "Keep paths, IDs, raw logs, and detailed counters in the saved receipt. "\n')
+    format_hint = ('    "FORMAT: Give the complete report requested by the job in clear technical English. "\n'
+                   '    "Include the findings, relevant evidence, reasons, limitations, and useful next steps. "\n'
+                   '    "Preserve the agent personality. The system adds the job label. "\n'
+                   '    "Keep raw logs and internal identifiers in the saved receipt, but include any "\n'
+                   '    "details, counts, or artifact links the user needs to understand or use the result. "\n')
+    if previous_format_hint in prompt_source:
+        prompt_source = _replace_once(prompt_source, previous_format_hint, format_hint,
+                                     "upgrade cron report depth")
+    elif format_hint not in prompt_source:
+        anchor = '    "SILENT: If there is genuinely nothing new to report, respond "\n'
+        prompt_source = _replace_once(prompt_source, anchor, format_hint + anchor, "split cron prompt")
+    if scheduler_source == scheduler.read_text(encoding="utf-8") and prompt_source == prompt.read_text(encoding="utf-8"):
+        return False
+    compile(scheduler_source, str(scheduler), "exec")
+    compile(prompt_source, str(prompt), "exec")
+    scheduler.write_text(scheduler_source, encoding="utf-8")
+    prompt.write_text(prompt_source, encoding="utf-8")
+    return True
+
+
+def _upgrade_rejected_success(source: str) -> str:
+    import ast
+    existing = {node.name: node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
+    source = source.replace(WITHHELD_CONSTANT_OLD, "")
+    for name in ("_attempt_cron_failure_remediation", "_cron_operator_has_hard_detail", "_cron_operator_delivery_candidate", "_format_cron_operator_delivery", "_is_cron_operator_delivery"):
+        start = HELPER_SOURCE.index(f"def {name}(")
+        end = HELPER_SOURCE.find("\ndef ", start + 1)
+        replacement = HELPER_SOURCE[start:] if end == -1 else HELPER_SOURCE[start:end]
+        if end == -1 and source.find("\ndef ", source.index(f"def {name}(") + 1) != -1:
+            replacement = replacement.removesuffix("\n")
+        if name in existing and ast.dump(existing[name]) == ast.dump(ast.parse(replacement).body[0]):
+            continue
+        source = _replace_helper_function(source, name, replacement)
+    if "def _cron_operator_success_error(" in source:
+        return source
+    for name in ("_cron_operator_failure_message",):
+        start = HELPER_SOURCE.index(f"def {name}(")
+        end = HELPER_SOURCE.index("\ndef ", start + 1)
+        source = _replace_helper_function(source, name, HELPER_SOURCE[start:end])
+    start = HELPER_SOURCE.index("def _format_cron_operator_delivery(")
+    end = HELPER_SOURCE.index("def _is_cron_operator_delivery(", start)
+    old_start = source.index("def _format_cron_operator_delivery(")
+    old_end = source.index("def _is_cron_operator_delivery(", old_start)
+    return source[:old_start] + HELPER_SOURCE[start:end] + source[old_end:]
+
+
+def _replace_helper_function(source: str, name: str, replacement: str) -> str:
+    start = source.index(f"def {name}(")
+    end = source.find("\ndef ", start + 1)
+    if end == -1:
+        end = len(source)
+    return source[:start] + replacement + source[end:]
+
 
 OUTER_EXCEPTION_DELIVERY_OLD = """                delivery_error = _deliver_result(
                     job,
@@ -950,6 +853,7 @@ OUTER_EXCEPTION_DELIVERY_OLD = """                delivery_error = _deliver_resu
                     loop=loop,
                 )
 """
+
 
 OUTER_EXCEPTION_DELIVERY_NEW = """                delivery_error = _deliver_result(
                     job,
@@ -965,9 +869,11 @@ OUTER_EXCEPTION_DELIVERY_NEW = """                delivery_error = _deliver_resu
                 )
 """
 
+
 OUTER_EXCEPTION_DELIVERY_LATEST_OLD = """                        _summarize_cron_failure_for_delivery(job, _err_text)
                         + _failure_streak_nudge(job),
 """
+
 
 OUTER_EXCEPTION_DELIVERY_LATEST_NEW = """                        _format_cron_operator_delivery_with_media(
                             job.get("name") or job.get("id"),
@@ -979,622 +885,18 @@ OUTER_EXCEPTION_DELIVERY_LATEST_NEW = """                        _format_cron_op
                         + _failure_streak_nudge(job),
 """
 
-WRAP_RESPONSE_OLD = """    if wrap_response:
-        task_name = job.get("name", job["id"])
-"""
-
-WRAP_RESPONSE_NEW = """    if wrap_response and not _is_cron_operator_delivery(content):
-        task_name = job.get("name", job["id"])
-"""
-
-PROMPT_SAFETY_OLD = """        return False, blocked_doc, "", str(block_exc)
-"""
-
-PROMPT_SAFETY_NEW = """        return False, blocked_doc, "", _CronOperatorFailure(str(block_exc), "safety")
-"""
-
-CREDENTIAL_SAFETY_OLD = """        _guard_job_credential_exfil(job)
-"""
-
-CREDENTIAL_SAFETY_NEW = """        try:
-            _guard_job_credential_exfil(job)
-        except Exception as exc:
-            raise _cron_operator_failure_exception("safety", RuntimeError, str(exc)) from exc
-"""
-
-MODEL_CONFIG_OLD = """        if not (isinstance(model, str) and model.strip()):
-            raise RuntimeError(
-                f"Cron job '{job_name}' has no model configured "
-"""
-
-MODEL_CONFIG_NEW = """        if not (isinstance(model, str) and model.strip()):
-            raise _cron_operator_failure_exception(
-                "configuration",
-                RuntimeError,
-                f"Cron job '{job_name}' has no model configured "
-"""
-
-CWD_TIMEOUT_OLD = """            raise TimeoutError(
-                f"Timed out waiting for the TERMINAL_CWD "
-"""
-
-CWD_TIMEOUT_NEW = """            raise _cron_operator_failure_exception(
-                "runtime",
-                TimeoutError,
-                f"Timed out waiting for the TERMINAL_CWD "
-"""
-
-INTERRUPTED_OLD = """                success = False
-                error = (
-                    "Interrupted by gateway shutdown before the run finished "
-"""
-
-INTERRUPTED_NEW = """                success = False
-                failure_kind = "interrupted"
-                error = (
-                    "Interrupted by gateway shutdown before the run finished "
-"""
-
-PROVIDER_AUTH_OLD = """            if runtime is None:
-                raise RuntimeError(format_runtime_provider_error(auth_exc)) from auth_exc
-"""
-
-PROVIDER_AUTH_NEW = """            if runtime is None:
-                raise _cron_operator_failure_exception(
-                    "provider_auth", RuntimeError, format_runtime_provider_error(auth_exc)
-                ) from auth_exc
-"""
-
-PROVIDER_AUTH_LATEST_OLD = """            if runtime is None:
-                raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
-"""
-
-PROVIDER_AUTH_LATEST_NEW = """            if runtime is None:
-                raise _cron_operator_failure_exception(
-                    "provider_auth", RuntimeError, format_runtime_provider_error(resolve_exc)
-                ) from resolve_exc
-"""
-
-PROVIDER_CONFIG_OLD = """        except Exception as exc:
-            message = format_runtime_provider_error(exc)
-            raise RuntimeError(message) from exc
-"""
-
-PROVIDER_CONFIG_NEW = """        except Exception as exc:
-            message = format_runtime_provider_error(exc)
-            if isinstance(exc, ValueError):
-                raise _cron_operator_failure_exception(
-                    "configuration", RuntimeError, message
-                ) from exc
-            raise RuntimeError(message) from exc
-"""
-
-PROVIDER_CONFIG_LATEST_OLD = """            if not (is_auth or is_transient_net):
-                raise RuntimeError(format_runtime_provider_error(resolve_exc)) from resolve_exc
-"""
-
-PROVIDER_CONFIG_LATEST_NEW = """            if not (is_auth or is_transient_net):
-                raise _cron_operator_failure_exception(
-                    "configuration" if isinstance(resolve_exc, ValueError) else "runtime",
-                    RuntimeError,
-                    format_runtime_provider_error(resolve_exc),
-                ) from resolve_exc
-"""
-
-UNKNOWN_TOOLSET_OLD = """            if _unknown_toolsets:
-                raise RuntimeError(
-                    "Cron job requests unknown toolset(s): "
-                    + ", ".join(_unknown_toolsets)
-                )
-"""
-
-UNKNOWN_TOOLSET_NEW = """            if _unknown_toolsets:
-                raise _cron_operator_failure_exception(
-                    "configuration",
-                    RuntimeError,
-                    "Cron job requests unknown toolset(s): "
-                    + ", ".join(_unknown_toolsets),
-                )
-"""
-
-MODEL_DRIFT_OLD = """                raise RuntimeError(
-                    f"Skipped to prevent unintended spend: global inference config "
-"""
-
-MODEL_DRIFT_NEW = """                raise _cron_operator_failure_exception(
-                    "configuration",
-                    RuntimeError,
-                    f"Skipped to prevent unintended spend: global inference config "
-"""
-
-MODEL_DRIFT_LATEST_OLD = """                raise RuntimeError(
-                    f"{_drift_marker} Skipped to prevent unintended spend: global "
-"""
-
-MODEL_DRIFT_LATEST_NEW = """                raise _cron_operator_failure_exception(
-                    "configuration",
-                    RuntimeError,
-                    f"{_drift_marker} Skipped to prevent unintended spend: global "
-"""
-
-INACTIVITY_TIMEOUT_OLD = """            raise TimeoutError(
-                f"Cron job '{job_name}' idle for "
-"""
-
-INACTIVITY_TIMEOUT_NEW = """            raise _cron_operator_failure_exception(
-                "timeout",
-                TimeoutError,
-                f"Cron job '{job_name}' idle for "
-"""
-
-RESULT_FAILURE_OLD = """        if result.get("failed") is True or (result.get("completed") is False and not max_iteration_summary):
-            _err_text = (
-                result.get("error")
-                or final_response_text
-                or "agent reported failure"
-            )
-            raise RuntimeError(_err_text)
-"""
-
-RESULT_FAILURE_NEW = """        _result_turn_failure_kind = {
-            "empty_response_exhausted": "execution",
-            "guardrail_halt": "safety",
-            "ollama_runtime_context_too_small": "configuration",
-            "partial_stream_recovery": "execution",
-            "session_persistence_failed": "runtime",
-        }.get(turn_exit_reason) or (
-            "runtime" if turn_exit_reason.startswith("local_processing_error(") else
-            "execution" if turn_exit_reason.startswith("error_near_max_iterations(") else
-            None
-        )
-        if (
-            result.get("failed") is True
-            or (result.get("completed") is False and not max_iteration_summary)
-            or _result_turn_failure_kind
-        ):
-            _err_text = (
-                result.get("error")
-                or final_response_text
-                or "agent reported failure"
-            )
-            _result_failure_kind = {
-                "auth": "provider_auth",
-                "auth_permanent": "provider_auth",
-                "rate_limit": "provider_limit",
-                "upstream_rate_limit": "provider_limit",
-                "billing": "provider_limit",
-                "timeout": "timeout",
-                "local_resource_exhaustion": "runtime",
-                "content_policy_blocked": "safety",
-                "ssl_cert_verification": "runtime",
-                "model_not_found": "configuration",
-                "provider_policy_blocked": "safety",
-                "format_error": "configuration",
-                "invalid_encrypted_content": "configuration",
-                "multimodal_tool_content_unsupported": "configuration",
-                "thinking_signature": "configuration",
-                "oauth_long_context_beta_forbidden": "configuration",
-                "llama_cpp_grammar_pattern": "configuration",
-                "context_overflow": "configuration",
-                "payload_too_large": "configuration",
-                "image_too_large": "configuration",
-                "long_context_tier": "configuration",
-            }.get(str(result.get("failure_reason") or "")) or (
-                "interrupted" if result.get("interrupted") is True else
-                "configuration" if result.get("compression_exhausted") is True else
-                _result_turn_failure_kind
-            )
-            if _result_failure_kind:
-                raise _cron_operator_failure_exception(
-                    _result_failure_kind, RuntimeError, _err_text
-                )
-            raise RuntimeError(_err_text)
-"""
-
-MEDIA_ADAPTER_SIGNATURE_OLD = """def _send_media_via_adapter(
-    adapter,
-    chat_id: str,
-    media_files: list,
-    metadata: dict | None,
-    loop,
-    job: dict,
-    platform=None,
-) -> None:
-"""
-
-MEDIA_ADAPTER_SIGNATURE_NEW = """def _send_media_via_adapter(
-    adapter,
-    chat_id: str,
-    media_files: list,
-    metadata: dict | None,
-    loop,
-    job: dict,
-    platform=None,
-    force_document: bool = False,
-) -> None:
-"""
-
-MEDIA_ADAPTER_SIGNATURE_LATEST_OLD = """def _send_media_via_adapter(
-    adapter,
-    chat_id: str,
-    media_files: list,
-    metadata: dict | None,
-    loop,
-    job: dict,
-    platform=None,
-) -> list:
-"""
-
-MEDIA_ADAPTER_SIGNATURE_LATEST_NEW = """def _send_media_via_adapter(
-    adapter,
-    chat_id: str,
-    media_files: list,
-    metadata: dict | None,
-    loop,
-    job: dict,
-    platform=None,
-    force_document: bool = False,
-) -> list:
-"""
-
-MEDIA_IMAGE_ROUTE_OLD = """            elif ext in _IMAGE_EXTS:
-                coro = adapter.send_image_file(chat_id=chat_id, image_path=media_path, metadata=metadata)
-"""
-
-MEDIA_IMAGE_ROUTE_NEW = """            elif ext in _IMAGE_EXTS and not force_document:
-                coro = adapter.send_image_file(chat_id=chat_id, image_path=media_path, metadata=metadata)
-"""
-
-MEDIA_EXTRACT_OLD = """    # Extract MEDIA: tags so attachments are forwarded as files, not raw text
-    from gateway.platforms.base import BasePlatformAdapter
-    media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
-"""
-
-MEDIA_EXTRACT_NEW = """    # Extract MEDIA: tags so attachments are forwarded as files, not raw text
-    from gateway.platforms.base import BasePlatformAdapter
-    force_document = "[[as_document]]" in delivery_content
-    media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
-"""
-
-MEDIA_EXTRACT_LATEST_OLD = """    media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
-    requested_media = [(str(p), v) for p, v in media_files]
-"""
-
-MEDIA_EXTRACT_LATEST_NEW = """    force_document = "[[as_document]]" in delivery_content
-    media_files, cleaned_delivery_content = BasePlatformAdapter.extract_media(delivery_content)
-    requested_media = [(str(p), v) for p, v in media_files]
-"""
-
-MEDIA_ADAPTER_CALL_OLD = """                    _send_media_via_adapter(
-                        runtime_adapter,
-                        chat_id,
-                        media_files,
-                        routed_media_metadata or None,
-                        loop,
-                        job,
-                        platform=platform,
-                    )
-"""
-
-MEDIA_ADAPTER_CALL_NEW = """                    _send_media_via_adapter(
-                        runtime_adapter,
-                        chat_id,
-                        media_files,
-                        routed_media_metadata or None,
-                        loop,
-                        job,
-                        platform=platform,
-                        force_document=(
-                            force_document and platform == Platform.TELEGRAM
-                        ),
-                    )
-"""
-
-MEDIA_ADAPTER_CALL_LATEST_OLD = """                    _media_errors = _send_media_via_adapter(
-                        runtime_adapter,
-                        chat_id,
-                        media_files,
-                        routed_media_metadata or None,
-                        loop,
-                        job,
-                        platform=platform,
-                    )
-"""
-
-MEDIA_ADAPTER_CALL_LATEST_NEW = """                    _media_errors = _send_media_via_adapter(
-                        runtime_adapter,
-                        chat_id,
-                        media_files,
-                        routed_media_metadata or None,
-                        loop,
-                        job,
-                        platform=platform,
-                        force_document=(
-                            force_document and platform == Platform.TELEGRAM
-                        ),
-                    )
-"""
-
-MEDIA_STANDALONE_CALL_OLD = """            coro = _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files)
-"""
-
-MEDIA_STANDALONE_CALL_NEW = """            coro = _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files, force_document=(force_document and platform == Platform.TELEGRAM))
-"""
-
-MEDIA_STANDALONE_FALLBACK_OLD = """                        future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files))
-"""
-
-MEDIA_STANDALONE_FALLBACK_NEW = """                        future = pool.submit(asyncio.run, _send_to_platform(platform, pconfig, chat_id, cleaned_delivery_content, thread_id=thread_id, media_files=media_files, force_document=(force_document and platform == Platform.TELEGRAM)))
-"""
-
-CONTENT_POLICY_RESULT_OLD = """        "failed": True,
-        "error": f"content_policy_blocked: {error_detail}",
-"""
-
-CONTENT_POLICY_RESULT_NEW = """        "failed": True,
-        "error": f"content_policy_blocked: {error_detail}",
-        "failure_reason": "content_policy_blocked",
-"""
-
-NONRETRYABLE_RESULT_OLD = """                    return {
-                        "final_response": _nonretryable_summary,
-                        "messages": messages,
-                        "api_calls": api_call_count,
-                        "completed": False,
-                        "failed": True,
-                        "error": _nonretryable_summary,
-                    }
-"""
-
-NONRETRYABLE_RESULT_NEW = """                    return {
-                        "final_response": _nonretryable_summary,
-                        "messages": messages,
-                        "api_calls": api_call_count,
-                        "completed": False,
-                        "failed": True,
-                        "error": _nonretryable_summary,
-                        "failure_reason": classified.reason.value,
-                    }
-"""
-
-NOUS_RATE_LIMIT_RESULT_OLD = """                            "failed": True,
-                            "error": _nous_msg,
-"""
-
-NOUS_RATE_LIMIT_RESULT_NEW = """                            "failed": True,
-                            "error": _nous_msg,
-                            "failure_reason": "rate_limit",
-"""
-
-COMPACTION_DISABLED_RESULT_OLD = """                        "failed": True,
-                        "compaction_disabled": True,
-"""
-
-COMPACTION_DISABLED_RESULT_NEW = """                        "failed": True,
-                        "compaction_disabled": True,
-                        "failure_reason": classified.reason.value,
-"""
-
-UNPARSEABLE_OUTPUT_CAP_RESULT_OLD = """                            "failed": True,
-                        }
-
-                    # Error is about the INPUT being too large.  Only reduce
-"""
-
-UNPARSEABLE_OUTPUT_CAP_RESULT_NEW = """                            "failed": True,
-                            "failure_reason": classified.reason.value,
-                        }
-
-                    # Error is about the INPUT being too large.  Only reduce
-"""
-
-THINKING_EXHAUSTED_RESULT_OLD = """                            "partial": True,
-                            "error": _exhaust_error,
-                        }
-"""
-
-THINKING_EXHAUSTED_RESULT_NEW = """                            "partial": True,
-                            "error": _exhaust_error,
-                            "failure_reason": "format_error",
-                        }
-"""
-
-SCRATCHPAD_EXHAUSTED_RESULT_OLD = """                    return {
-                        "final_response": "Incomplete REASONING_SCRATCHPAD after 2 retries",
-                        "messages": rolled_back_messages,
-                        "api_calls": api_call_count,
-                        "completed": False,
-                        "partial": True,
-                        "error": "Incomplete REASONING_SCRATCHPAD after 2 retries"
-                    }
-"""
-
-SCRATCHPAD_EXHAUSTED_RESULT_NEW = """                    return {
-                        "final_response": "Incomplete REASONING_SCRATCHPAD after 2 retries",
-                        "messages": rolled_back_messages,
-                        "api_calls": api_call_count,
-                        "completed": False,
-                        "partial": True,
-                        "error": "Incomplete REASONING_SCRATCHPAD after 2 retries",
-                        "failure_reason": "format_error",
-                    }
-"""
-
-CONTINUATION_EXHAUSTED_RESULT_OLD = """                                "completed": False,
-                                "partial": True,
-                                "error": "Response remained truncated after 4 continuation attempts",
-                            }
-"""
-
-CONTINUATION_EXHAUSTED_RESULT_NEW = """                                "completed": False,
-                                "partial": True,
-                                "error": "Response remained truncated after 4 continuation attempts",
-                                "failure_reason": "format_error",
-                            }
-"""
-
-INVALID_JSON_TRUNCATION_RESULT_OLD = """                            "completed": False,
-                            "partial": True,
-                            "error": _final_response,
-                        }
-"""
-
-INVALID_JSON_TRUNCATION_RESULT_NEW = """                            "completed": False,
-                            "partial": True,
-                            "error": _final_response,
-                            "failure_reason": "format_error",
-                        }
-"""
-
-INVALID_TOOL_RESULT_OLD = """                        return {
-                            "final_response": _final_response,
-                            "messages": messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "partial": True,
-                            "error": _final_response
-                        }
-"""
-
-INVALID_TOOL_RESULT_NEW = """                        return {
-                            "final_response": _final_response,
-                            "messages": messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "partial": True,
-                            "failure_reason": "format_error",
-                            "error": _final_response,
-                        }
-"""
-
-ROLLBACK_TRUNCATION_RESULT_OLD = """                            "messages": rolled_back_messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "partial": True,
-                            "error": "Response truncated due to output length limit"
-                        }
-"""
-
-ROLLBACK_TRUNCATION_RESULT_NEW = """                            "messages": rolled_back_messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "partial": True,
-                            "error": "Response truncated due to output length limit",
-                            "failure_reason": "format_error",
-                        }
-"""
-
-FIRST_TRUNCATION_RESULT_OLD = """                            "messages": messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "failed": True,
-                            "error": "First response truncated due to output length limit"
-                        }
-"""
-
-FIRST_TRUNCATION_RESULT_NEW = """                            "messages": messages,
-                            "api_calls": api_call_count,
-                            "completed": False,
-                            "failed": True,
-                            "error": "First response truncated due to output length limit",
-                            "failure_reason": "format_error",
-                        }
-"""
-
-CODEX_INCOMPLETE_RESULT_OLD = """                return {
-                    "final_response": "Codex response remained incomplete after 3 continuation attempts",
-                    "messages": messages,
-                    "api_calls": api_call_count,
-                    "completed": False,
-                    "partial": True,
-                    "error": "Codex response remained incomplete after 3 continuation attempts",
-                }
-"""
-
-CODEX_INCOMPLETE_RESULT_NEW = """                return {
-                    "final_response": "Codex response remained incomplete after 3 continuation attempts",
-                    "messages": messages,
-                    "api_calls": api_call_count,
-                    "completed": False,
-                    "partial": True,
-                    "error": "Codex response remained incomplete after 3 continuation attempts",
-                    "failure_reason": "format_error",
-                }
-"""
-
-RUN_ONE_KIND_OLD = """        delivery_error = None
-        blocked_config = False
-"""
-
-RUN_ONE_KIND_NEW = """        failure_kind = "script" if job.get("no_agent") else "execution"
-        if isinstance(error, _CronOperatorFailure):
-            failure_kind = error.kind
-        delivery_error = None
-        blocked_config = False
-"""
-
-RUN_ONE_KIND_LATEST_OLD = """        blocked_config = False
-        side_effect_ownership_lost = False
-"""
-
-RUN_ONE_KIND_LATEST_NEW = """        failure_kind = "script" if job.get("no_agent") else "execution"
-        if isinstance(error, _CronOperatorFailure):
-            failure_kind = error.kind
-        blocked_config = False
-        side_effect_ownership_lost = False
-"""
-
-BLOCKED_CONFIG_OLD = """            blocked_config_silent = (
-                bool(error) and BLOCKED_CONFIG_SILENT_MARKER in str(error)
-            )
-            blocked_config = blocked_config_silent or (
-                bool(error) and BLOCKED_CONFIG_MARKER in str(error)
-            )
-"""
-
-BLOCKED_CONFIG_NEW = """            blocked_config_silent = (
-                failure_kind == "blocked_config"
-                and bool(error)
-                and BLOCKED_CONFIG_SILENT_MARKER in str(error)
-            )
-            blocked_config = failure_kind == "blocked_config"
-"""
-
-MISSING_SCRIPT_OLD = """            return False, "", "", err
-"""
-
-MISSING_SCRIPT_NEW = """            return False, "", "", _CronOperatorFailure(err, "configuration")
-"""
 
-MISSING_SCRIPT_LATEST_OLD = """    return False, doc, alert, reason
+OUTER_EXCEPTION_DELIVERY_SPLIT_OLD = """            _summarize_cron_failure_for_delivery(job, err_text) + _failure_streak_nudge(job),
 """
 
-MISSING_SCRIPT_LATEST_NEW = """    return False, doc, alert, _CronOperatorFailure(reason, "configuration")
-"""
-
-MONITOR_FAILURE_OLD = """            return False, _mon_doc, _mon_alert, _mon.error
-"""
-
-MONITOR_FAILURE_NEW = """            return False, _mon_doc, _mon_alert, _CronOperatorFailure(_mon.error, "script")
-"""
-
-BLOCKED_RETURN_OLD = """            return False, blocked_doc, "", f"{marker} {_pf_reason}"
-"""
-
-BLOCKED_RETURN_NEW = """            return False, blocked_doc, "", _CronOperatorFailure(
-                f"{marker} {_pf_reason}", "blocked_config"
-            )
-"""
-
-ERROR_RESULT_OLD = """    except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-"""
 
-ERROR_RESULT_NEW = """    except Exception as e:
-        error_msg = f"{type(e).__name__}: {str(e)}"
-        error_kind = getattr(e, "_cron_operator_kind", None)
-        if error_kind:
-            error_msg = _CronOperatorFailure(error_msg, error_kind)
+OUTER_EXCEPTION_DELIVERY_SPLIT_NEW = """            _format_cron_operator_delivery_with_media(
+                job.get("name") or job.get("id"),
+                err_text,
+                success=False,
+                job_lane="script" if job.get("no_agent") else "model",
+                failure_kind="pre_repair",
+            ) + _failure_streak_nudge(job),
 """
 
 
@@ -1606,18 +908,15 @@ def _replace_once(source: str, old: str, new: str, label: str) -> str:
 
 
 def _patch_optional_outer_exception_delivery(source: str) -> str:
-    if (
-        OUTER_EXCEPTION_DELIVERY_NEW in source
-        or OUTER_EXCEPTION_DELIVERY_LATEST_NEW in source
-    ):
-        return source
     candidates = (
         OUTER_EXCEPTION_DELIVERY_OLD,
         OUTER_EXCEPTION_DELIVERY_LATEST_OLD,
+        OUTER_EXCEPTION_DELIVERY_SPLIT_OLD,
     )
     replacements = (
         OUTER_EXCEPTION_DELIVERY_NEW,
         OUTER_EXCEPTION_DELIVERY_LATEST_NEW,
+        OUTER_EXCEPTION_DELIVERY_SPLIT_NEW,
     )
     counts = tuple(source.count(candidate) for candidate in candidates)
     if sum(counts) > 1:
@@ -1630,529 +929,232 @@ def _patch_optional_outer_exception_delivery(source: str) -> str:
     return source
 
 
-def _has_native_scoped_cron_cwd(source: str) -> bool:
-    """Hermes 0.21 removed the process-global TERMINAL_CWD lock entirely."""
-    return all(
-        seam in source
-        for seam in (
-            "record_session_cwd as _record_tool_session_cwd",
-            "_record_tool_session_cwd(_cron_task_id, _job_workdir)",
-            "_clear_tool_session_cwd(_cron_task_id)",
-        )
-    )
 
 
-JOB_ITERATION_BUDGET_OLD = """        # Max iterations
-        max_iterations = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
-"""
-JOB_ITERATION_BUDGET_NEW = """        # Max iterations
-        max_iterations = _cfg.get("agent", {}).get("max_turns") or _cfg.get("max_turns") or 90
-        # HERMES_CRON_JOB_ITERATION_BUDGET_v1
-        job_max_iterations = job.get("max_iterations")
-        if isinstance(job_max_iterations, int) and 1 <= job_max_iterations <= 90:
-            max_iterations = min(max_iterations, job_max_iterations)
-"""
-JOB_ITERATION_BUDGET_LATEST_OLD = """        max_iterations = _resolve_turn_limit(_mt)
-"""
-JOB_ITERATION_BUDGET_LATEST_NEW = """        max_iterations = _resolve_turn_limit(_mt)
-        # HERMES_CRON_JOB_ITERATION_BUDGET_v1
-        job_max_iterations = job.get("max_iterations")
-        if isinstance(job_max_iterations, int) and 1 <= job_max_iterations <= 90:
-            max_iterations = min(max_iterations, job_max_iterations)
+
+
+PRIVATE_JOBS_HELPER = """
+# golden-cron-private-failure-delivery-v1
+# Successful destinations are unchanged; operational failures stay tenant-local.
+def _golden_private_cron_jobs(jobs):
+    import os
+    # Trusted launcher configuration may allow one operator-owned destination.
+    operator_destination = os.environ.get("HERMES_CRON_OPERATOR_FAILURE_DESTINATION", "").strip()
+    for job in jobs:
+        if isinstance(job, dict):
+            explicit = job.get("failure_deliver")
+            if not operator_destination or explicit != operator_destination:
+                job["failure_deliver"] = "local"
+    return jobs
+
 """
 
 
-def _patch_optional_job_iteration_budget(source: str) -> str:
-    if JOB_ITERATION_BUDGET_MARKER in source:
-        return source
-    candidates = (JOB_ITERATION_BUDGET_OLD, JOB_ITERATION_BUDGET_LATEST_OLD)
-    replacements = (JOB_ITERATION_BUDGET_NEW, JOB_ITERATION_BUDGET_LATEST_NEW)
-    counts = tuple(source.count(candidate) for candidate in candidates)
-    if sum(counts) == 0:
-        return source
-    if sum(counts) != 1:
-        raise RuntimeError(f"cron job iteration budget anchor drift: {sum(counts)}")
-    index = counts.index(1)
-    return source.replace(candidates[index], replacements[index], 1)
+def patch_private_failure_jobs(source: str) -> str:
+    """Protect loaded jobs and all native saves, including reconciliation merges."""
+    import ast
 
-
-_REPAIR_BOUNDARY_UPGRADES = [('            "enabled_toolsets": None,\n', '            # Preserve the original job tool allowlist; native config still applies.\n'), ('    return formatted, recovered\n', '    if recovered:\n        return f"{name} cron — automatic repair attempted; the original run remains failed.", False\n    return formatted, False\n'), ('    if not media_files:\n        return formatted\n', '    if not success or not media_files:\n        return formatted\n'), ('                if remediation_recovered:\n                    success = True\n                    final_response = remediation_delivery\n                    error = None\n', '                # A repair-model report cannot change the original workload outcome.\n')]
-
-
-_REPAIR_BOUNDARY_UPGRADES.append(('            "provider": None,\n            "model": None,\n            "base_url": None,\n            "provider_snapshot": None,\n            "model_snapshot": None,\n', '            # Keep job-bound provider, endpoint, model and snapshot constraints.\n'))
-
-_REPAIR_BOUNDARY_UPGRADES.extend([('        "failure_kind": failure_kind,\n        "failure_detail": str(failure_detail or "")[:1000],\n', '        "failure_kind": failure_kind,\n        # Volatile diagnostic text must not bypass the repair cooldown.\n'), ('def _attempt_cron_failure_remediation(\n    job: dict,\n    *,\n    failure_kind: str,\n    output_file: Path,\n    deferred_agents: list,\n    failure_detail: object = None,\n) -> tuple[str, bool]:\n    if failure_kind == "blocked_config":\n', 'def _attempt_cron_failure_remediation(\n    job: dict,\n    *,\n    failure_kind: str,\n    output_file: Path,\n    deferred_agents: list,\n    failure_detail: object = None,\n) -> tuple[str, bool]:\n    if job.get("no_agent"):\n        name = _cron_operator_job_name(job.get("name") or job.get("id"))\n        return f"{name} cron — failed in its script or runtime. Automatic repair skipped: script-only execution. Review the saved receipt.", False\n    if failure_kind == "blocked_config":\n')])
-
-def _upgrade_repair_boundaries(source: str) -> str:
-    for before, after in _REPAIR_BOUNDARY_UPGRADES:
-        if before in source:
-            source = _replace_once(source, before, after, "repair authorization/outcome boundary")
-        elif after not in source:
-            raise RuntimeError("cron repair authorization/outcome boundary drift")
-    return source
-
-
-def patch_source(source: str) -> str:
-    if MARKER in source:
-        baseline_required = (
-            "def _format_cron_operator_delivery(",
-            "failure_kind=failure_kind,",
-            "if wrap_response and not _is_cron_operator_delivery(content):",
-            "class _CronOperatorFailure(str):",
-            "_cron_operator_failure_exception(",
-            'failure_kind = "interrupted"',
-            "_cron_operator_has_unicode_control",
-            "MEDIA_DELIVERY_EXTS",
-            'force_document = "[[as_document]]" in delivery_content',
-            '"rate_limit": "provider_limit"',
-            '"ssl_cert_verification": "runtime"',
-            '"format_error": "configuration"',
-            '"context_overflow": "configuration"',
-            '"long_context_tier": "configuration"',
-            'result.get("interrupted") is True',
-            'result.get("compression_exhausted") is True',
-        )
-        baseline_missing = [item for item in baseline_required if item not in source]
-        if baseline_missing:
-            raise RuntimeError("cron operator delivery marker is incomplete: " + ", ".join(baseline_missing))
-        source = _upgrade_long_success_delivery(source)
-        if CRON_HINT_PREVIOUS in source:
-            source = _replace_once(source, CRON_HINT_PREVIOUS, CRON_HINT_NEW, "plain-report prompt")
-        source = _patch_optional_job_iteration_budget(source)
-        if NO_EMPTY_SUCCESS_MARKER not in source:
-            source = _replace_once(
-                source,
-                EMPTY_SUCCESS_FALLBACK_OLD,
-                EMPTY_SUCCESS_FALLBACK_NEW,
-                "empty-success fallback",
-            )
-            source = _replace_once(
-                source,
-                EMPTY_SUCCESS_RETURN_OLD,
-                EMPTY_SUCCESS_RETURN_NEW,
-                "empty-success return",
-            )
-            source = _replace_once(
-                source,
-                EMPTY_MEDIA_FALLBACK_OLD,
-                EMPTY_MEDIA_FALLBACK_NEW,
-                "empty media fallback",
-            )
-            source = _replace_once(
-                source,
-                EMPTY_MEDIA_RETURN_OLD,
-                EMPTY_MEDIA_RETURN_NEW,
-                "empty media return",
-            )
-            source = _replace_once(
-                source,
-                MEDIA_ONLY_DELIVERY_OLD,
-                MEDIA_ONLY_DELIVERY_NEW,
-                "media-only delivery wrapper",
-            )
-        if SELF_REMEDIATION_MARKER not in source:
-            source = _replace_once(
-                source,
-                SELF_REMEDIATION_FAILURE_OLD,
-                SELF_REMEDIATION_FAILURE_NEW,
-                "self-remediation helpers",
-            )
-            source = _replace_once(
-                source,
-                DELIVERY_BOUNDARY_V1,
-                DELIVERY_BOUNDARY_NEW,
-                "self-remediation delivery boundary",
-            )
-        source = _patch_optional_outer_exception_delivery(source)
-        required = (
-            *baseline_required,
-            NO_EMPTY_SUCCESS_MARKER,
-            SELF_REMEDIATION_MARKER,
-            "def _attempt_cron_failure_remediation(",
-            '"_cron_repair_attempt": True',
-            "remediation_recovered = False",
-        )
-        missing = [item for item in required if item not in source]
-        if missing:
-            raise RuntimeError("cron operator delivery marker is incomplete: " + ", ".join(missing))
-        return _upgrade_repair_boundaries(source)
-
-    anchors = (
-        ("helper", HELPER_ANCHOR, HELPER_SOURCE + HELPER_ANCHOR),
-        ("cron prompt", CRON_HINT_OLD, CRON_HINT_NEW),
-        (
-            "delivery boundary",
-            (
-                DELIVERY_BOUNDARY_OLD,
-                DELIVERY_BOUNDARY_LATEST_OLD,
-                DELIVERY_BOUNDARY_STREAK_OLD,
-                DELIVERY_BOUNDARY_INCIDENT_OLD,
-            ),
-            (
-                DELIVERY_BOUNDARY_NEW,
-                DELIVERY_BOUNDARY_NEW,
-                DELIVERY_BOUNDARY_NEW,
-                DELIVERY_BOUNDARY_INCIDENT_NEW,
-            ),
-        ),
-        ("legacy response wrapper", WRAP_RESPONSE_OLD, WRAP_RESPONSE_NEW),
-        ("prompt safety kind", PROMPT_SAFETY_OLD, PROMPT_SAFETY_NEW),
-        ("credential safety kind", CREDENTIAL_SAFETY_OLD, CREDENTIAL_SAFETY_NEW),
-        ("model configuration kind", MODEL_CONFIG_OLD, MODEL_CONFIG_NEW),
-        ("runtime failure kind", CWD_TIMEOUT_OLD, CWD_TIMEOUT_NEW),
-        ("interruption kind", INTERRUPTED_OLD, INTERRUPTED_NEW),
-        (
-            "provider authentication kind",
-            (PROVIDER_AUTH_OLD, PROVIDER_AUTH_LATEST_OLD),
-            (PROVIDER_AUTH_NEW, PROVIDER_AUTH_LATEST_NEW),
-        ),
-        (
-            "provider configuration kind",
-            (PROVIDER_CONFIG_OLD, PROVIDER_CONFIG_LATEST_OLD),
-            (PROVIDER_CONFIG_NEW, PROVIDER_CONFIG_LATEST_NEW),
-        ),
-        ("unknown toolset kind", UNKNOWN_TOOLSET_OLD, UNKNOWN_TOOLSET_NEW),
-        (
-            "model drift kind",
-            (MODEL_DRIFT_OLD, MODEL_DRIFT_LATEST_OLD),
-            (MODEL_DRIFT_NEW, MODEL_DRIFT_LATEST_NEW),
-        ),
-        ("provider inactivity kind", INACTIVITY_TIMEOUT_OLD, INACTIVITY_TIMEOUT_NEW),
-        ("structured provider failure kind", RESULT_FAILURE_OLD, RESULT_FAILURE_NEW),
-        (
-            "run one failure kind",
-            (RUN_ONE_KIND_OLD, RUN_ONE_KIND_LATEST_OLD),
-            (RUN_ONE_KIND_NEW, RUN_ONE_KIND_LATEST_NEW),
-        ),
-        ("blocked configuration kind", BLOCKED_CONFIG_OLD, BLOCKED_CONFIG_NEW),
-        (
-            "missing script kind",
-            (MISSING_SCRIPT_OLD, MISSING_SCRIPT_LATEST_OLD),
-            (MISSING_SCRIPT_NEW, MISSING_SCRIPT_LATEST_NEW),
-        ),
-        ("monitor failure kind", MONITOR_FAILURE_OLD, MONITOR_FAILURE_NEW),
-        ("blocked return kind", BLOCKED_RETURN_OLD, BLOCKED_RETURN_NEW),
-        ("exception failure kind", ERROR_RESULT_OLD, ERROR_RESULT_NEW),
-        (
-            "media adapter signature",
-            (MEDIA_ADAPTER_SIGNATURE_OLD, MEDIA_ADAPTER_SIGNATURE_LATEST_OLD),
-            (MEDIA_ADAPTER_SIGNATURE_NEW, MEDIA_ADAPTER_SIGNATURE_LATEST_NEW),
-        ),
-        ("media image route", MEDIA_IMAGE_ROUTE_OLD, MEDIA_IMAGE_ROUTE_NEW),
-        (
-            "media extraction",
-            (MEDIA_EXTRACT_OLD, MEDIA_EXTRACT_LATEST_OLD),
-            (MEDIA_EXTRACT_NEW, MEDIA_EXTRACT_LATEST_NEW),
-        ),
-        (
-            "media adapter call",
-            (MEDIA_ADAPTER_CALL_OLD, MEDIA_ADAPTER_CALL_LATEST_OLD),
-            (MEDIA_ADAPTER_CALL_NEW, MEDIA_ADAPTER_CALL_LATEST_NEW),
-        ),
-        ("standalone media call", MEDIA_STANDALONE_CALL_OLD, MEDIA_STANDALONE_CALL_NEW),
-        (
-            "standalone media fallback",
-            MEDIA_STANDALONE_FALLBACK_OLD,
-            MEDIA_STANDALONE_FALLBACK_NEW,
-        ),
-    )
-    patched = source
-    native_unknown_toolset_marker = "HERMES_CRON_UNKNOWN_TOOLSET_VALIDATION_v1"
-    if (
-        UNKNOWN_TOOLSET_OLD not in patched
-        and native_unknown_toolset_marker not in patched
-        and "def _resolve_cron_enabled_toolsets(" in patched
-    ):
-        checked_resolver = f'''\n\ndef _resolve_cron_enabled_toolsets_checked(job: dict, cfg: dict) -> list[str] | None:
-    """Fail closed before inference when a stored cron toolset is unknown."""
-    # {native_unknown_toolset_marker}
-    # HERMES_CRON_TOOLSET_VALIDATION_v1
-    resolved = _resolve_cron_enabled_toolsets(job, cfg)
-    if resolved is None:
-        return None
-    from agent.outcome_stop import unknown_requested_toolsets
-    from hermes_cli.tools_config import enabled_mcp_server_names
-    from tools.registry import registry as _tool_registry
-
-    # HERMES_CRON_CONFIGURED_MCP_TOOLSET_VALIDATION_v2: a configured cold MCP
-    # is valid before its on-demand activation registers live definitions.
-    unknown = unknown_requested_toolsets(
-        resolved,
-        _tool_registry.get_registered_toolset_names(),
-        _tool_registry.get_registered_toolset_aliases(),
-        enabled_mcp_server_names(cfg),
-    )
-    if unknown:
-        raise _cron_operator_failure_exception(
-            "configuration",
-            RuntimeError,
-            "Cron job requests unknown toolset(s): " + ", ".join(unknown),
-        )
-    return resolved
-'''
-        patched = _replace_once(
-            patched,
-            "\n\ndef _resolve_job_reasoning_config(",
-            checked_resolver + "\n\ndef _resolve_job_reasoning_config(",
-            "native unknown toolset validator",
-        )
-        patched = _replace_once(
-            patched,
-            "enabled_toolsets=_resolve_cron_enabled_toolsets(job, _cfg),",
-            "enabled_toolsets=_resolve_cron_enabled_toolsets_checked(job, _cfg),",
-            "native unknown toolset validator call",
-        )
-    for label, anchor, replacement in anchors:
-        candidates = anchor if isinstance(anchor, tuple) else (anchor,)
-        replacements = replacement if isinstance(replacement, tuple) else None
-        counts = tuple(patched.count(candidate) for candidate in candidates)
-        if (
-            label == "runtime failure kind"
-            and sum(counts) == 0
-            and _has_native_scoped_cron_cwd(patched)
-        ):
-            # The failure path no longer exists: each cron run owns a scoped
-            # cwd record and never waits on the old process-global lock.
-            continue
-        if (
-            label == "unknown toolset kind"
-            and sum(counts) == 0
-            and native_unknown_toolset_marker in patched
-        ):
-            continue
-        if sum(counts) != 1:
-            raise RuntimeError(f"cron operator delivery {label} anchor drift: {sum(counts)}")
-        selected_index = counts.index(1)
-        selected = candidates[selected_index]
-        selected_replacement = replacements[selected_index] if replacements else replacement
-        patched = patched.replace(selected, selected_replacement, 1)
-    patched = _patch_optional_outer_exception_delivery(patched)
-    return _patch_optional_job_iteration_budget(patched)
-
-
-def patch_content_policy_source(source: str) -> str:
-    patched = source
-    if CONTENT_POLICY_RESULT_NEW not in patched:
-        count = patched.count(CONTENT_POLICY_RESULT_OLD)
-        if count != 1:
-            raise RuntimeError(f"cron operator delivery content policy result anchor drift: {count}")
-        patched = patched.replace(
-            CONTENT_POLICY_RESULT_OLD,
-            CONTENT_POLICY_RESULT_NEW,
-            1,
-        )
-    if NONRETRYABLE_RESULT_NEW not in patched:
-        count = patched.count(NONRETRYABLE_RESULT_OLD)
-        if count != 1:
-            raise RuntimeError(f"cron operator delivery nonretryable result anchor drift: {count}")
-        patched = patched.replace(
-            NONRETRYABLE_RESULT_OLD,
-            NONRETRYABLE_RESULT_NEW,
-            1,
-        )
-    terminal_results = (
-        (
-            "Nous rate-limit result",
-            NOUS_RATE_LIMIT_RESULT_OLD,
-            NOUS_RATE_LIMIT_RESULT_NEW,
-        ),
-        (
-            "compaction-disabled result",
-            COMPACTION_DISABLED_RESULT_OLD,
-            COMPACTION_DISABLED_RESULT_NEW,
-        ),
-        (
-            "unparseable output-cap result",
-            UNPARSEABLE_OUTPUT_CAP_RESULT_OLD,
-            UNPARSEABLE_OUTPUT_CAP_RESULT_NEW,
-        ),
-        (
-            "thinking exhaustion result",
-            THINKING_EXHAUSTED_RESULT_OLD,
-            THINKING_EXHAUSTED_RESULT_NEW,
-        ),
-        (
-            "scratchpad exhaustion result",
-            SCRATCHPAD_EXHAUSTED_RESULT_OLD,
-            SCRATCHPAD_EXHAUSTED_RESULT_NEW,
-        ),
-        (
-            "continuation exhaustion result",
-            CONTINUATION_EXHAUSTED_RESULT_OLD,
-            CONTINUATION_EXHAUSTED_RESULT_NEW,
-        ),
-        (
-            "invalid JSON truncation result",
-            INVALID_JSON_TRUNCATION_RESULT_OLD,
-            INVALID_JSON_TRUNCATION_RESULT_NEW,
-        ),
-        (
-            "invalid tool exhaustion result",
-            INVALID_TOOL_RESULT_OLD,
-            INVALID_TOOL_RESULT_NEW,
-        ),
-        (
-            "rollback truncation result",
-            ROLLBACK_TRUNCATION_RESULT_OLD,
-            ROLLBACK_TRUNCATION_RESULT_NEW,
-        ),
-        (
-            "first truncation result",
-            FIRST_TRUNCATION_RESULT_OLD,
-            FIRST_TRUNCATION_RESULT_NEW,
-        ),
-        (
-            "Codex incomplete result",
-            CODEX_INCOMPLETE_RESULT_OLD,
-            CODEX_INCOMPLETE_RESULT_NEW,
-        ),
-    )
-    for label, anchor, replacement in terminal_results:
-        if replacement in patched:
-            continue
-        count = patched.count(anchor)
-        if count != 1:
-            raise RuntimeError(f"cron operator delivery {label} anchor drift: {count}")
-        patched = patched.replace(anchor, replacement, 1)
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    if "_golden_private_cron_jobs" in functions:
+        # Exact owned code, not a marker alone, proves this policy is installed.
+        helper = ast.get_source_segment(source, functions["_golden_private_cron_jobs"])
+        expected = PRIVATE_JOBS_HELPER[PRIVATE_JOBS_HELPER.index("def "):].strip()
+        if helper != expected:
+            previous = 'def _golden_private_cron_jobs(jobs):\n    for job in jobs:\n        if isinstance(job, dict):\n            job["failure_deliver"] = "local"\n    return jobs'
+            if helper != previous:
+                raise RuntimeError("cron private failure helper drift")
+            source = source.replace(helper, expected, 1)
+            return patch_private_failure_jobs(source)
+    load = functions.get("load_jobs")
+    saver = functions.get("_stage_jobs_payload") or functions.get("save_jobs")
+    if load is None or saver is None:
+        raise RuntimeError("cron job storage boundary missing")
+    lines = source.splitlines(keepends=True)
+    edits = []
+    returns = [node for node in ast.walk(load) if isinstance(node, ast.Return)
+               and ast.unparse(node.value) in {"jobs", "_golden_private_cron_jobs(jobs)"}]
+    if len(returns) != 1:
+        raise RuntimeError("cron load boundary drift")
+    returned = returns[0]
+    if ast.unparse(returned.value) == "jobs":
+        edits.append((returned.lineno - 1, returned.end_lineno,
+                      " " * returned.col_offset + "return _golden_private_cron_jobs(jobs)\n"))
+    body = saver.body
+    first = 1 if isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str) else 0
+    insertion = body[first]
+    if ast.unparse(insertion) != "_golden_private_cron_jobs(jobs)":
+        edits.append((insertion.lineno - 1, insertion.lineno - 1,
+                      " " * insertion.col_offset + "_golden_private_cron_jobs(jobs)\n"))
+    for start, end, text in sorted(edits, reverse=True):
+        lines[start:end] = [text]
+    patched = "".join(lines)
+    if "_golden_private_cron_jobs" not in functions:
+        patched += PRIVATE_JOBS_HELPER
+    compile(patched, "cron/jobs.py", "exec")
     return patched
 
 
-_NATIVE_D363_COMMIT = "d3630f853239e8c41ce7201e09fbdf39bcbc5431"
-_NATIVE_D363_PAYLOAD = Path(__file__).resolve().parents[1] / "payloads" / "cron-operator-delivery-d363-v1"
+DELIVERY_ACK_HELPER = r'''
 
-
-def _is_native_d363(hermes_dir: Path) -> bool:
-    import subprocess
-    result = subprocess.run(["git", "rev-parse", "HEAD"], cwd=hermes_dir, capture_output=True, text=True)
-    return result.returncode == 0 and result.stdout.strip() == _NATIVE_D363_COMMIT
-
-
-def _patch_native_d363(hermes_dir: Path, *, dry_run: bool = False) -> bool:
-    """Install only the reviewed native residual on its exact pre/post images."""
+def _record_cron_delivery_ack(job: dict, output_file, final_response: str) -> None:
+    """Record confirmed delivery beside the retained output, never generated-only state."""
     import hashlib
     import json
-    import re
-    import subprocess
-    if not _is_native_d363(hermes_dir):
-        raise RuntimeError("native carrier requires exact d363 HEAD")
-    manifest = json.loads((_NATIVE_D363_PAYLOAD / "manifest.json").read_text())
-    patch = (_NATIVE_D363_PAYLOAD / "native.patch").read_bytes()
-    digest = lambda value: hashlib.sha256(value).hexdigest() if value is not None else None
-    if manifest["upstream_commit"] != _NATIVE_D363_COMMIT or digest(patch) != manifest["patch_sha256"]:
-        raise RuntimeError("native d363 payload integrity mismatch")
-    # Reviewed unified hunks are the owned source seam. Unrelated prior Golden
-    # changes may compose in the same file; every hunk must still be byte exact.
-    hunks = {}
-    name = None
-    old, new = [], []
-    active = False
-    def flush():
-        if active:
-            hunks.setdefault(name, []).append(("".join(old), "".join(new)))
-    for line in patch.decode().splitlines(keepends=True):
-        if line.startswith("--- "):
-            flush()
-            active = False
-        elif line.startswith("+++ b/"):
-            name = line[6:].rstrip("\n")
-        elif line.startswith("@@ "):
-            flush()
-            old, new = [], []
-            active = True
-        elif active:
-            if line.startswith((" ", "-")):
-                old.append(line[1:])
-            if line.startswith((" ", "+")):
-                new.append(line[1:])
-    flush()
-    if set(hunks) != set(manifest["files"]):
-        raise RuntimeError("native d363 payload file inventory mismatch")
-    originals = {}
-    states = []
-    upgrades = {}
-    def source_states(name, original):
-        expected = manifest["files"][name]
-        if expected["pre"] == [None]:
-            if digest(original) in expected["post"]:
-                return ["post"]
-            if original is None:
-                return ["pre"]
-            raise RuntimeError(f"native d363 source drift: {name}")
-        if original is None:
-            raise RuntimeError(f"native d363 source missing: {name}")
-        content = original.decode()
-        result = []
-        def occurrences(fragment):
-            return len(re.findall(r"(?m)^" + re.escape(fragment), content))
-        for before, after in hunks[name]:
-            if after and occurrences(after) == 1:
-                result.append("post")
-            elif before and occurrences(before) == 1:
-                result.append("pre")
-            else:
-                raise RuntimeError(f"native d363 source drift at owned hunk: {name}")
-        return result
-    for name in manifest["files"]:
-        path = hermes_dir / name
-        if path.is_symlink():
-            raise RuntimeError(f"native d363 source is a symlink: {name}")
-        original = path.read_bytes() if path.exists() else None
-        originals[name] = original
-        if name == 'cron/scheduler_operator.py' and original is not None:
-            before, after = (b'            "provider": None,\n            "model": None,\n            "base_url": None,\n            "provider_snapshot": None,\n            "model_snapshot": None,\n', b'            # Keep job-bound provider, endpoint, model and snapshot constraints.\n')
-            if original.count(before) == 1 and after not in original:
-                candidate = original.replace(before, after, 1)
-                if all(state == "post" for state in source_states(name, candidate)):
-                    upgrades[name] = candidate
-                    original = candidate
-        states.extend(source_states(name, original))
-    if all(state == "post" for state in states):
-        if upgrades and not dry_run:
-            for name, content in upgrades.items():
-                (hermes_dir / name).write_bytes(content)
-        return bool(upgrades)
-    if not all(state == "pre" for state in states):
-        raise RuntimeError("native d363 partial installation refused")
-    check = subprocess.run(["git", "apply", "--check", "-"], cwd=hermes_dir, input=patch, capture_output=True)
-    if check.returncode:
-        raise RuntimeError("native d363 patch preflight failed: " + check.stderr.decode())
-    if dry_run:
-        return True
+    import os
+    import tempfile
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    path = Path(output_file)
+    temporary = None
     try:
-        subprocess.run(["git", "apply", "-"], cwd=hermes_dir, input=patch, capture_output=True, check=True)
-        for name in manifest["files"]:
-            if any(state != "post" for state in source_states(name, (hermes_dir / name).read_bytes())):
-                raise RuntimeError(f"native d363 postimage mismatch: {name}")
-    except Exception:
-        for name, original in originals.items():
-            path = hermes_dir / name
-            if original is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_bytes(original)
-        raise
-    return True
+        receipt = {
+            "version": 1,
+            "job_id": str(job["id"]),
+            "output_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "response_sha256": hashlib.sha256(final_response.encode("utf-8")).hexdigest(),
+            "delivered_at": datetime.now(timezone.utc).isoformat(),
+        }
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,
+                                         prefix=".delivery-", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(receipt, stream, sort_keys=True)
+        os.replace(temporary, path.with_suffix(".delivery.json"))
+    except (OSError, ValueError, UnicodeError):
+        # A receipt write cannot undo a send or authorize sending it again.
+        logger.exception("Delivery succeeded but acknowledgment persistence failed for job %s", job["id"])
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+'''
+
+
+def patch_delivery_ack_source(source: str) -> str:
+    """Attach acknowledgment to the existing confirmed-success boundary."""
+    import ast
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    edits = []
+    owner = "_save_compose_deliver" if any(isinstance(node, ast.FunctionDef) and node.name == "_save_compose_deliver" for node in tree.body) else "_run_one_job_body"
+    for function in tree.body:
+        if not isinstance(function, ast.FunctionDef) or function.name != owner:
+            continue
+        if any(isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+               and node.func.id == "_record_cron_delivery_ack" for node in ast.walk(function)):
+            continue
+        calls = [node for node in ast.walk(function) if isinstance(node, ast.Assign)
+                 and isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                 and node.value.func.id == "_deliver_result" and len(node.value.args) > 1
+                 and ast.unparse(node.value.args[1]) == "deliver_content"]
+        if len(calls) != 1:
+            raise RuntimeError(f"delivery acknowledgment anchor drift: {function.name}")
+        node = calls[0]
+        state = "d." if function.name == "_save_compose_deliver" else ""
+        indent = " " * node.col_offset
+        addition = (f"{indent}if {state}success and not {state}delivery_error and _resolve_delivery_targets(job):\n"
+                    f"{indent}    _record_cron_delivery_ack(job, output_file, final_response)\n")
+        edits.append((node.end_lineno, addition))
+    for line, addition in sorted(edits, reverse=True):
+        lines.insert(line, addition)
+    source = "".join(lines)
+    if edits and "def _record_cron_delivery_ack(" not in source:
+        source += DELIVERY_ACK_HELPER
+    # External workers execute this module with -m. An appended helper is not
+    # defined until after __main__ returns, so a successful send raised NameError.
+    # Move the existing definition; never retry or rewrite a delivery receipt.
+    nodes = ast.parse(source).body
+    helper = next((node for node in nodes if isinstance(node, ast.FunctionDef)
+                   and node.name == "_record_cron_delivery_ack"), None)
+    entry = next((node for node in nodes if isinstance(node, ast.If)
+                  and ast.unparse(node.test) == "__name__ == '__main__'"), None)
+    if helper is not None and entry is not None and helper.lineno > entry.lineno:
+        lines = source.splitlines(keepends=True)
+        definition = lines[helper.lineno - 1:helper.end_lineno]
+        del lines[helper.lineno - 1:helper.end_lineno]
+        lines[entry.lineno - 1:entry.lineno - 1] = definition + ["\n\n"]
+        source = "".join(lines)
+    # The whole reply must be a silence token; a token at the edge of a report
+    # does not cancel its useful content. Other gateway lanes are unchanged.
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.FunctionDef) and node.name == "_is_cron_silence_response":
+            lines = source.splitlines(keepends=True)
+            lines[node.lineno - 1:node.end_lineno] = [
+                'def _is_cron_silence_response(text: str) -> bool:\n'
+                '    return isinstance(text, str) and text.strip().upper() in {"[SILENT]", "SILENT", "NO_REPLY", "NO REPLY"}\n']
+            source = "".join(lines)
+            break
+    compile(source, "cron/scheduler.py", "exec")
+    return source
+
+
+def patch_legacy_rejected_delivery(source: str) -> str:
+    """Keep rejected results private on schedulers predating failure routing."""
+    import ast
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    for function in tree.body:
+        if not isinstance(function, ast.FunctionDef) or function.name != "_run_one_job_body":
+            continue
+        for node in ast.walk(function):
+            if (isinstance(node, ast.Assign)
+                    and len(node.targets) == 1
+                    and ast.unparse(node.targets[0]) == "should_deliver"
+                    and ast.unparse(node.value) == "bool(deliver_content.strip())"):
+                lines[node.lineno - 1:node.end_lineno] = [
+                    " " * node.col_offset
+                    + 'should_deliver = bool(deliver_content.strip()) and failure_kind != "delivery_contract"\n'
+                ]
+    return "".join(lines)
+
 
 def patch_cron_operator_delivery_v1(hermes_dir: Path) -> bool:
-    if _is_native_d363(hermes_dir):
-        return _patch_native_d363(hermes_dir)
-    target = Path(hermes_dir) / TARGET
-    if not target.is_file():
-        return False
-    content_policy_target = Path(hermes_dir) / CONTENT_POLICY_TARGET
-    source = target.read_text(encoding="utf-8")
-    patched = patch_source(source)
-    if not content_policy_target.is_file():
-        raise RuntimeError(f"cron operator delivery required file missing: {content_policy_target}")
-    content_policy_source = content_policy_target.read_text(encoding="utf-8")
-    patched_content_policy = patch_content_policy_source(content_policy_source)
-    if patched == source and patched_content_policy == content_policy_source:
-        return False
-    if patched != source:
-        target.write_text(patched, encoding="utf-8")
-    if patched_content_policy != content_policy_source:
-        content_policy_target.write_text(patched_content_policy, encoding="utf-8")
-    return True
+    jobs = Path(hermes_dir) / "cron/jobs.py"
+    # Some scheduler-only compatibility fixtures omit storage. Complete runtime
+    # assembly separately requires cron/jobs.py through the release-floor gate.
+    original = jobs.read_text(encoding="utf-8") if jobs.is_file() else None
+    updated = patch_private_failure_jobs(original) if original is not None else None
+    changed = _patch_cron_operator_delivery(hermes_dir)
+    scheduler = Path(hermes_dir) / TARGET
+    if scheduler.is_file():
+        before_ack = scheduler.read_text(encoding="utf-8")
+        after_ack = _patch_optional_outer_exception_delivery(
+            patch_legacy_rejected_delivery(patch_delivery_ack_source(before_ack))
+        )
+        if after_ack != before_ack:
+            scheduler.write_text(after_ack, encoding="utf-8")
+            changed = True
+    if updated is not None and updated != original:
+        jobs.write_text(updated, encoding="utf-8")
+        changed = True
+    # Upstream edge-token suppression conflicts with Golden's whole-reply rule.
+    tests = Path(hermes_dir) / "tests/cron/test_scheduler.py"
+    if tests.is_file():
+        import ast
+        before = tests.read_text(encoding="utf-8")
+        lines = before.splitlines(keepends=True)
+        for node in sorted(ast.walk(ast.parse(before)), key=lambda n: getattr(n, "lineno", 0), reverse=True):
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            if node.name == "test_silent_trailing_suppresses_delivery":
+                block = "".join(lines[node.lineno - 1:node.end_lineno])
+                block = block.replace("test_silent_trailing_suppresses_delivery", "test_silent_trailing_preserves_report")
+                block = block.replace("must still suppress.", "Golden preserves the report.")
+                block = block.replace("deliver_mock.assert_not_called()", "deliver_mock.assert_called_once()\n        assert response in deliver_mock.call_args.args[1]")
+                lines[node.lineno - 1:node.end_lineno] = [block]
+            elif node.name == "test_silent_is_case_insensitive":
+                block = "".join(lines[node.lineno - 1:node.end_lineno])
+                lines[node.lineno - 1:node.end_lineno] = [block.replace('"[silent] nothing new"', '"[silent]"')]
+        after = "".join(lines)
+        if after != before:
+            compile(after, str(tests), "exec")
+            tests.write_text(after, encoding="utf-8")
+            changed = True
+    return changed
+
+
+def _patch_cron_operator_delivery(hermes_dir: Path) -> bool:
+    return _patch_current_split_scheduler(Path(hermes_dir))
 
 
 def main() -> int:

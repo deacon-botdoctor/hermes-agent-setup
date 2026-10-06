@@ -4,6 +4,23 @@ receipt:
   roster_key_env: HERMES_ROSTER_KEY
 
 installers:
+  - name: install_memory_review_scripts
+    owner_lane: baseline_wiring
+    description: Deliver memory review scripts without creating or enabling schedules.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    sources:
+      - bin/dream.py
+      - bin/dream_consolidate.py
+      - bin/native_memory_limits.py
+    destination_dir: "{hermes_home}/bin"
+    mode: "0755"
+    post_install_check:
+      type: files_exist
+      paths:
+        - "{hermes_home}/bin/dream.py"
+        - "{hermes_home}/bin/dream_consolidate.py"
+        - "{hermes_home}/bin/native_memory_limits.py"
   - name: install_default_mcp_floor
     owner_lane: baseline_wiring
     current_registry_entry: default_mcp_floor
@@ -163,7 +180,20 @@ installers:
     platforms: [linux, macos, windows]
     operation: copy_many
     sources:
+      - source: kit/bin/probe-client-health.py
+        destination: "{hermes_home}/bin/probe-client-health.py"
+        existing_profile_overlays: true
+      - source: kit/bin/probe-client-health.ps1
+        destination: "{hermes_home}/bin/probe-client-health.ps1"
+        existing_profile_overlays: true
+      - source: kit/bin/gateway-health-probe.ps1
+        destination: "{hermes_home}/bin/gateway-health-probe.ps1"
+        existing_profile_overlays: true
+      - source: kit/bin/telegram-watchdog-depth-probe.ps1
+        destination: "{hermes_home}/bin/telegram-watchdog-depth-probe.ps1"
+        existing_profile_overlays: true
       - bin/hermes-local-selfcheck.py
+      - bin/agent-probe-mac.py
       - bin/hermes-cron-toolset-preflight.py
       - bin/hermes-canary-reconciler.py
       - bin/hermes-canary-reconciler.ps1
@@ -182,6 +212,10 @@ installers:
     post_install_check:
       type: files_exist
       paths:
+        - "{hermes_home}/bin/probe-client-health.py"
+        - "{hermes_home}/bin/probe-client-health.ps1"
+        - "{hermes_home}/bin/gateway-health-probe.ps1"
+        - "{hermes_home}/bin/telegram-watchdog-depth-probe.ps1"
         - "{hermes_home}/bin/hermes-local-selfcheck.py"
         - "{hermes_home}/bin/hermes-cron-toolset-preflight.py"
         - "{hermes_home}/bin/hermes-windows-capacity-containment.ps1"
@@ -274,11 +308,11 @@ installers:
     post_install_check:
       type: python_json
       path: "{hermes_home}/bin/hermes-host-steward.py"
-      args: ["snapshot"]
+      args: ["installation-check"]
       expected:
-        # Initialization proof only; snapshot warns remain visible in health.
-        # The CLI still rejects fail/invalid/error with a nonzero exit.
-        schema: hermes-host-steward/v1
+        # File hashes and CLI startup prove installation; snapshot owns health.
+        schema: hermes-host-steward-installation/v1
+        status: pass
     rollback: restore per-file .bak-host-artifact-* backups; local ownership leases and the inert capability marker remain state
 
   - name: install_host_steward_windows
@@ -295,12 +329,20 @@ installers:
     post_install_check:
       type: python_json
       path: "{hermes_home}/bin/hermes-host-steward.py"
-      args: ["snapshot"]
+      args: ["installation-check"]
       expected:
-        # Initialization proof only; snapshot warns remain visible in health.
-        # The CLI still rejects fail/invalid/error with a nonzero exit.
-        schema: hermes-host-steward/v1
+        # File hashes and CLI startup prove installation; snapshot owns health.
+        schema: hermes-host-steward-installation/v1
+        status: pass
     rollback: restore per-file .bak-host-artifact-* backups; local browser ownership leases and the inert capability marker remain state
+
+  - name: relocate_skill_archives
+    owner_lane: baseline_wiring
+    current_registry_entry: relocate_skill_archives
+    description: Move retained skill archives outside native skill discovery before activation.
+    platforms: [linux, macos, windows]
+    operation: relocate_skill_archives
+    rollback: Rename each receipt moves.target back to moves.source only when its original path is absent.
 
   - name: sync_kit_bin_scripts
     owner_lane: baseline_wiring
@@ -309,6 +351,9 @@ installers:
     platforms: [linux, macos, windows]
     operation: sync_existing_files
     sources:
+      - source: kit/bin/telegram_delivery_history.py
+        existing_only: false
+      - kit/bin/hermes-skillify-nightly-ship.sh
       - kit/bin/check-sqlite-wal.py
       - kit/bin/hermes-safe-restart.sh
       - kit/bin/telegram_delivery.py
