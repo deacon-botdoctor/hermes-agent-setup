@@ -7769,7 +7769,7 @@ index dbb8972a633c6b8edbffe1f1d8e0f6b261631a4f..88b1c3aba3207be6de5c57dcafa781c9
      no_credentials: "⚠️ I couldn't connect to the AI model service, so this message wasn't processed. Use /login to sign in again, or /model to pick a different model. If it keeps failing, run `hermes doctor` on the host."
  
 diff --git a/pyproject.toml b/pyproject.toml
-index a16898701ee238fa32597de4e810d70bfd36ebec..bf5b5c16cf915c839a72af8760c13ecd15bc8b34 100644
+index a16898701ee238fa32597de4e810d70bfd36ebec..fd2214785a862d2446fb3a52abbe645cfd51a0bb 100644
 --- a/pyproject.toml
 +++ b/pyproject.toml
 @@ -216,6 +216,8 @@ dependencies = [
@@ -7777,7 +7777,7 @@ index a16898701ee238fa32597de4e810d70bfd36ebec..bf5b5c16cf915c839a72af8760c13ecd
  
  [project.optional-dependencies]
 +# Existing operator-side MCP server imports. Enable only on their owning host.
-+operator-mcp = ["beautifulsoup4==4.12.3", "opencv-python-headless==4.12.0.88"]
++operator-mcp = ["beautifulsoup4==4.12.3", "opencv-python-headless==4.13.0.92"]
  # High-performance event loop — uvloop replaces the stdlib asyncio loop with
  # a libuv-backed implementation for ~2-4x throughput on uvicorn.  Gated as an
  # optional extra because libuv's ./configure does not run on Android/Termux
@@ -18777,3 +18777,293 @@ diff --git a/pm/lock.json b/pm/lock.json
      },
      "dmgbuild": {
        "artifacts": {
+diff --git a/uv.lock b/uv.lock
+index 5389dde571a2d2cbe421fb65ec3f60301ef02c3f..fce0216f63ddc2f6b3173c278c27f400e69cd0cb 100644
+--- a/uv.lock
++++ b/uv.lock
+@@ -14,106 +14,106 @@ exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for
+ exclude-newer-span = "P14D"
+ 
+ [options.exclude-newer-package]
+-agent-client-protocol = false
++elevenlabs = false
++langfuse = "2026-09-09T16:01:26Z"
++setuptools = false
++modal = false
++pyyaml = false
++maturin = false
++numpy = false
++pvporcupine = false
++google-auth = false
+ aiohttp = false
+-aiohttp-socks = false
+-aiosqlite = false
+-alibabacloud-dingtalk = false
++starlette = false
++mistralai = false
++firecrawl-py = false
++parallel-web = false
++markdown = false
++opentelemetry-sdk = false
++prompt-toolkit = false
++fastapi = false
+ anthropic = false
++pathspec = false
++ruff = false
++defusedxml = false
++websockets = false
++exa-py = false
++mcp = false
++python-olm = false
++wheel = false
++pytest = false
++pillow = false
++setuptools-rust = false
++tenacity = false
++sherpa-onnx-core = "2026-09-10T15:58:47Z"
++pyjwt = false
++slack-bolt = false
++fal-client = false
+ asyncpg = false
+-azure-identity = false
+ boto3 = false
+-brotlicffi = false
+-browser-harness = false
++ruamel-yaml = false
++sherpa-onnx = "2026-09-10T17:00:04Z"
++huggingface-hub = false
++pytest-asyncio = false
++google-cloud-pubsub = false
++slack-sdk = false
++discord-py = false
++rich = false
++faster-whisper = false
+ certifi = false
+-concurrent-log-handler = false
+-croniter = false
+-cryptography = false
+-daytona = false
+-ddgs = "2026-08-26T21:52:34Z"
+ debugpy = false
+-defusedxml = false
+-dingtalk-stream = false
+-discord-py = false
++ddgs = "2026-08-26T21:52:34Z"
++packaging = false
++unpaddedbase64 = false
++youtube-transcript-api = false
++h2 = false
+ edge-tts = false
+-elevenlabs = false
+-exa-py = false
+-fal-client = false
+-fastapi = false
+-faster-whisper = false
+-fire = false
++microsoft-teams-apps = false
++aiohttp-socks = false
++sentencepiece = false
++opentelemetry-exporter-otlp-proto-http = false
++croniter = false
++browser-harness = false
++azure-identity = false
++lark-oapi = false
+ firecrawl-anydoc = false
+-firecrawl-py = false
+ google-api-python-client = false
+-google-auth = false
+-google-auth-httplib2 = false
+-google-auth-oauthlib = false
+-google-cloud-pubsub = false
+-h2 = false
+-httplib2 = false
+-httpx = false
+-httpx2 = false
+-huggingface-hub = false
+-jinja2 = false
+-langfuse = "2026-09-09T16:01:26Z"
+-lark-oapi = false
+-markdown = false
+-maturin = false
+-mautrix = false
+-mcp = false
++brotlicffi = false
+ mem0ai = false
+-microsoft-teams-apps = false
+-mistralai = false
+-modal = false
++qrcode = false
++soundfile = "2026-06-06T08:58:48Z"
++vercel = false
++aiosqlite = false
++tzdata = false
++python-dotenv = false
++daytona = false
++uvicorn = false
+ nemo-relay = false
+-neutts = "2026-07-22T14:54:23Z"
+-numpy = false
+-openai = false
+-opentelemetry-exporter-otlp-proto-http = false
+-opentelemetry-sdk = false
+-packaging = false
+-parallel-web = false
+-pathspec = false
+-pillow = false
++requests = false
++httplib2 = false
++httpx = false
+ piper-tts = "2026-09-04T16:47:32Z"
+-prompt-toolkit = false
+-psutil = false
+-pvporcupine = false
+ pyasn1 = false
++snowballstemmer = false
++concurrent-log-handler = false
++cryptography = false
+ pydantic = false
+-pyjwt = false
+-pytest = false
+-pytest-asyncio = false
+-python-dotenv = false
++agent-client-protocol = false
++fire = false
++httpx2 = false
++google-auth-oauthlib = false
+ python-multipart = false
+-python-olm = false
++ty = false
++openai = false
++google-auth-httplib2 = false
++neutts = "2026-07-22T14:54:23Z"
++mautrix = false
++psutil = false
+ python-telegram-bot = false
+-pyyaml = false
+-qrcode = false
+-requests = false
+-rich = false
+-ruamel-yaml = false
+-ruff = false
+-sentencepiece = false
+-setuptools = false
+-setuptools-rust = false
+-sherpa-onnx = "2026-09-10T17:00:04Z"
+-sherpa-onnx-core = "2026-09-10T15:58:47Z"
+-slack-bolt = false
+-slack-sdk = false
+-snowballstemmer = false
++jinja2 = false
+ sounddevice = false
+-soundfile = "2026-06-06T08:58:48Z"
+-starlette = false
+-tenacity = false
+-ty = false
+-tzdata = false
+-unpaddedbase64 = false
+-uvicorn = false
+-vercel = false
+-websockets = false
+-wheel = false
+-youtube-transcript-api = false
++alibabacloud-dingtalk = false
++dingtalk-stream = false
+ 
+ [manifest]
+ overrides = [
+@@ -680,6 +680,18 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/4a/45/ec96b29162a402fc4c1c5512d114d7b3787b9d1c2ec241d9568b4816ee23/base58-2.1.1-py3-none-any.whl", hash = "sha256:11a36f4d3ce51dfc1043f3218591ac4eb1ceb172919cebe05b52a5bcc8d245c2", size = 5621, upload-time = "2021-10-30T22:12:16.658Z" },
+ ]
+ 
++[[package]]
++name = "beautifulsoup4"
++version = "4.12.3"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "soupsieve" },
++]
++sdist = { url = "https://files.pythonhosted.org/packages/b3/ca/824b1195773ce6166d388573fc106ce56d4a805bd7427b624e063596ec58/beautifulsoup4-4.12.3.tar.gz", hash = "sha256:74e3d1928edc070d21748185c46e3fb33490f22f52a3addee9aee0f4f7781051", size = 581181, upload-time = "2024-01-17T16:53:17.902Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/b1/fe/e8c672695b37eecc5cbf43e1d0638d88d66ba3a44c4d321c796f4e59167f/beautifulsoup4-4.12.3-py3-none-any.whl", hash = "sha256:b80878c9f40111313e55da8ba20bdba06d8fa3969fc68304167741bbf9e082ed", size = 147925, upload-time = "2024-01-17T16:53:12.779Z" },
++]
++
+ [[package]]
+ name = "blis"
+ version = "1.3.3"
+@@ -2517,6 +2529,10 @@ mistral = [
+ modal = [
+     { name = "modal" },
+ ]
++operator-mcp = [
++    { name = "beautifulsoup4" },
++    { name = "opencv-python-headless" },
++]
+ otlp = [
+     { name = "opentelemetry-exporter-otlp-proto-http" },
+     { name = "opentelemetry-sdk" },
+@@ -2658,6 +2674,7 @@ requires-dist = [
+     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "==0.87.0" },
+     { name = "asyncpg", marker = "sys_platform == 'linux' and extra == 'matrix'", specifier = "==0.31.0" },
+     { name = "azure-identity", marker = "extra == 'azure-identity'", specifier = "==1.25.3" },
++    { name = "beautifulsoup4", marker = "extra == 'operator-mcp'", specifier = "==4.12.3" },
+     { name = "boto3", marker = "extra == 'bedrock'", specifier = "==1.42.89" },
+     { name = "brotlicffi", marker = "extra == 'messaging'", specifier = "==1.2.0.2" },
+     { name = "browser-harness", marker = "python_full_version >= '3.14'", specifier = "==0.1.13" },
+@@ -2731,6 +2748,7 @@ requires-dist = [
+     { name = "numpy", marker = "extra == 'voice'", specifier = "==2.4.3" },
+     { name = "numpy", marker = "extra == 'wake'", specifier = "==2.4.3" },
+     { name = "openai", marker = "python_full_version >= '3.14'", specifier = "==2.24.0" },
++    { name = "opencv-python-headless", marker = "extra == 'operator-mcp'", specifier = "==4.13.0.92" },
+     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otlp'", specifier = "==1.39.1" },
+     { name = "opentelemetry-sdk", marker = "extra == 'otlp'", specifier = "==1.39.1" },
+     { name = "packaging", marker = "python_full_version >= '3.14'", specifier = "==26.0" },
+@@ -2805,7 +2823,7 @@ requires-dist = [
+     { name = "winrt-windows-services-store", marker = "python_full_version >= '3.14' and sys_platform == 'win32'", specifier = ">=3.2.1,<4" },
+     { name = "youtube-transcript-api", marker = "extra == 'youtube'", specifier = "==1.2.4" },
+ ]
+-provides-extras = ["uvloop", "anthropic", "exa", "firecrawl", "parallel-web", "ddgs", "fal", "edge-tts", "neutts", "kittentts", "piper", "modal", "daytona", "vercel", "google-meet", "messaging", "cron", "slack", "matrix", "wecom", "tts-premium", "voice", "wake", "telegram", "discord", "stt-whisper", "audio-io", "silk", "wake-openwakeword", "wake-sherpa", "wake-porcupine", "google-chat", "doc-extract", "trace-upload", "mem0", "vision", "pty", "mcp", "nemo-relay", "sms", "teams", "computer-use", "acp", "mistral", "otlp", "langfuse", "bedrock", "vertex", "azure-identity", "termux", "termux-all", "dingtalk", "feishu", "google", "youtube", "web", "all"]
++provides-extras = ["operator-mcp", "uvloop", "anthropic", "exa", "firecrawl", "parallel-web", "ddgs", "fal", "edge-tts", "neutts", "kittentts", "piper", "modal", "daytona", "vercel", "google-meet", "messaging", "cron", "slack", "matrix", "wecom", "tts-premium", "voice", "wake", "telegram", "discord", "stt-whisper", "audio-io", "silk", "wake-openwakeword", "wake-sherpa", "wake-porcupine", "google-chat", "doc-extract", "trace-upload", "mem0", "vision", "pty", "mcp", "nemo-relay", "sms", "teams", "computer-use", "acp", "mistral", "otlp", "langfuse", "bedrock", "vertex", "azure-identity", "termux", "termux-all", "dingtalk", "feishu", "google", "youtube", "web", "all"]
+ 
+ [package.metadata.requires-dev]
+ dev = [
+@@ -4368,6 +4386,24 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/c9/30/844dc675ee6902579b8eef01ed23917cc9319a1c9c0c14ec6e39340c96d0/openai-2.24.0-py3-none-any.whl", hash = "sha256:fed30480d7d6c884303287bde864980a4b137b60553ffbcf9ab4a233b7a73d94", size = 1120122, upload-time = "2026-02-24T20:02:05.669Z" },
+ ]
+ 
++[[package]]
++name = "opencv-python-headless"
++version = "4.13.0.92"
++source = { registry = "https://pypi.org/simple" }
++dependencies = [
++    { name = "numpy" },
++]
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/79/42/2310883be3b8826ac58c3f2787b9358a2d46923d61f88fedf930bc59c60c/opencv_python_headless-4.13.0.92-cp37-abi3-macosx_13_0_arm64.whl", hash = "sha256:1a7d040ac656c11b8c38677cc8cccdc149f98535089dbe5b081e80a4e5903209", size = 46247192, upload-time = "2026-02-05T07:01:35.187Z" },
++    { url = "https://files.pythonhosted.org/packages/2d/1e/6f9e38005a6f7f22af785df42a43139d0e20f169eb5787ce8be37ee7fcc9/opencv_python_headless-4.13.0.92-cp37-abi3-macosx_14_0_x86_64.whl", hash = "sha256:3e0a6f0a37994ec6ce5f59e936be21d5d6384a4556f2d2da9c2f9c5dc948394c", size = 32568914, upload-time = "2026-02-05T07:01:51.989Z" },
++    { url = "https://files.pythonhosted.org/packages/21/76/9417a6aef9def70e467a5bf560579f816148a4c658b7d525581b356eda9e/opencv_python_headless-4.13.0.92-cp37-abi3-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:5c8cfc8e87ed452b5cecb9419473ee5560a989859fe1d10d1ce11ae87b09a2cb", size = 33703709, upload-time = "2026-02-05T10:24:46.469Z" },
++    { url = "https://files.pythonhosted.org/packages/92/ce/bd17ff5772938267fd49716e94ca24f616ff4cb1ff4c6be13085108037be/opencv_python_headless-4.13.0.92-cp37-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:0525a3d2c0b46c611e2130b5fdebc94cf404845d8fa64d2f3a3b679572a5bd22", size = 56016764, upload-time = "2026-02-05T10:26:48.904Z" },
++    { url = "https://files.pythonhosted.org/packages/8f/b4/b7bcbf7c874665825a8c8e1097e93ea25d1f1d210a3e20d4451d01da30aa/opencv_python_headless-4.13.0.92-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:eb60e36b237b1ebd40a912da5384b348df8ed534f6f644d8e0b4f103e272ba7d", size = 35010236, upload-time = "2026-02-05T10:28:11.031Z" },
++    { url = "https://files.pythonhosted.org/packages/4b/33/b5db29a6c00eb8f50708110d8d453747ca125c8b805bc437b289dbdcc057/opencv_python_headless-4.13.0.92-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:0bd48544f77c68b2941392fcdf9bcd2b9cdf00e98cb8c29b2455d194763cf99e", size = 60391106, upload-time = "2026-02-05T10:30:14.236Z" },
++    { url = "https://files.pythonhosted.org/packages/fb/c3/52cfea47cd33e53e8c0fbd6e7c800b457245c1fda7d61660b4ffe9596a7f/opencv_python_headless-4.13.0.92-cp37-abi3-win32.whl", hash = "sha256:a7cf08e5b191f4ebb530791acc0825a7986e0d0dee2a3c491184bd8599848a4b", size = 30812232, upload-time = "2026-02-05T07:02:29.594Z" },
++    { url = "https://files.pythonhosted.org/packages/4a/90/b338326131ccb2aaa3c2c85d00f41822c0050139a4bfe723cfd95455bd2d/opencv_python_headless-4.13.0.92-cp37-abi3-win_amd64.whl", hash = "sha256:77a82fe35ddcec0f62c15f2ba8a12ecc2ed4207c17b0902c7a3151ae29f37fb6", size = 40070414, upload-time = "2026-02-05T07:02:26.448Z" },
++]
++
+ [[package]]
+ name = "opentelemetry-api"
+ version = "1.39.1"
+@@ -6262,6 +6298,15 @@ wheels = [
+     { url = "https://files.pythonhosted.org/packages/f4/83/55c65e61cf457805ce2ec157c1c6ae17715d0851aa2374422de0538838ca/soundfile-0.14.0-py2.py3-none-win_arm64.whl", hash = "sha256:e090704718e124e7c844695236f1fce8d18a5e761eaf7c82dfcd124620805f98", size = 888858, upload-time = "2026-06-06T08:58:46.593Z" },
+ ]
+ 
++[[package]]
++name = "soupsieve"
++version = "2.9.2"
++source = { registry = "https://pypi.org/simple" }
++sdist = { url = "https://files.pythonhosted.org/packages/69/99/a6ca3beb3ccacb41fb3321d8a60e5566f9e6467601ef8eba6a17e1b89778/soupsieve-2.9.2.tar.gz", hash = "sha256:4a55d8cf158a9c2e587fa4922f1bbb91d68ac829e2d6f25403a85747c71daf74", size = 122445, upload-time = "2026-08-07T00:57:24.801Z" }
++wheels = [
++    { url = "https://files.pythonhosted.org/packages/eb/dc/ad025c1ee131eba60c69f4dd5779b18fcf1e6b21a343e2162a84d5d133c7/soupsieve-2.9.2-py3-none-any.whl", hash = "sha256:8089a26fd974ca7a1f30276d3d8492ab266ab15af581642dfe8aa162e0c1c823", size = 37370, upload-time = "2026-08-07T00:57:23.524Z" },
++]
++
+ [[package]]
+ name = "spacy"
+ version = "3.8.16"

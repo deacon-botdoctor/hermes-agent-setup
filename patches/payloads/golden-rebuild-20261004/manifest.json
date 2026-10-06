@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-  "patch_sha256": "d85e81804e7a589621be0c80a35c5cbb213fb841fef22b272a3e66ed6f02b40e",
-  "baseline_tree": "ae9419c46cdb5bee27f1e9bba2784f2d9b5e5781",
-  "result_tree": "5568aa408c02c51aedd40deae9529c5f59a2b551",
+  "patch_sha256": "0994f7a8377dacf21d1c1ca889d25f6332afd291e07acfd715ecc120ad941fff",
+  "baseline_tree": "956d674902bd6a6f9f7c34acc20228a353a01689",
+  "result_tree": "586b5c98188307024d9d08a4220dc86d993be0d1",
   "files": {
     "agent/agent_init.py": {
       "before": {
@@ -508,7 +508,7 @@
         "git_mode": "100644"
       },
       "after": {
-        "sha256": "6ceefb2fe5b4ed8675a74fe65e15d4f6000f750fc449163e6152bf81ae4383cf",
+        "sha256": "ddd5864de6a0bc053ca5f3b1840fb76c7b2600c9afc194bb46a2ed46ad837f71",
         "mode": 420,
         "git_mode": "100644"
       }
@@ -1897,6 +1897,18 @@
       },
       "after": {
         "sha256": "d7e82b8e8bf8a2cb6805e6e821580a18d8690bbfcecf362410a31dfe08c97c4b",
+        "mode": 420,
+        "git_mode": "100644"
+      }
+    },
+    "uv.lock": {
+      "before": {
+        "sha256": "5f81d0f7057b13bac07a8ee663ee5f501f4f0d743b2beefd5ee1d1fd334c85a5",
+        "mode": 420,
+        "git_mode": "100644"
+      },
+      "after": {
+        "sha256": "469b55a1c09437043a90c697b3d8f50f499377ebfb4afc0cf33efd7c3d562d9e",
         "mode": 420,
         "git_mode": "100644"
       }

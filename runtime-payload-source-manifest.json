@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "6968cd340de5dd078c4cf222af154e286f1b38a07eb54da240231e0e0a3a5c4e",
+      "digest": "0d2fa16a0537c2afa3aa4f9800feaf8c77f196e83b2b3b897aa5f504b271d101",
       "excluded_paths": [],
       "file_count": 762,
       "files": [
@@ -1218,13 +1218,13 @@
           "type": "blob"
         },
         {
-          "blob": "0de3c4f2f219a8821cf18d0ab0fde2d4c0cd035b",
+          "blob": "01cba5814e8bb8eeddfad35bbc56a7d25ec23ad6",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "1f5fa4362b1a96fb0ccabaeae743f0f4f06af939",
+          "blob": "938fafc1de022361190f6f015ade9b59e7ebe4ae",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -5175,15 +5175,15 @@
       ]
     }
   },
-  "deployment_digest": "dd70b1eaac87d588e54461e0f52c85bad7f979253d71026af7205eddbceff30d",
-  "golden_sha": "7ce0b9c5bf269f91591d41ae532febf105fb1c93",
+  "deployment_digest": "d612908f7d04aeeced024a425cc2bd7fb42c02c168d78b3d1203acb7c8592c21",
+  "golden_sha": "2d455456b8d21767d3f35e95488dd248ef4fe493",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "f4f4e10f5fab3da1e6d2170e2a2b476b736133db0384bf684f1cf7dc4967ba52",
+    "digest": "5b78261cd1fdd0c163095aacd64794bb61aa85308ed1b5ee3faa7a7a2f9b7d52",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 329,
+    "file_count": 330,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5192,7 +5192,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "66faffb35ff1eb602e961e535532bdf903e7748a313b26ae4a85dc9568ef1356",
+        "sha256": "7a2876167f854e81ad0d6ffc79997e8e9c823bbb1672defc5ed2fe149b827d3d",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5857,7 +5857,7 @@
       },
       "pyproject.toml": {
         "mode": "100644",
-        "sha256": "6ceefb2fe5b4ed8675a74fe65e15d4f6000f750fc449163e6152bf81ae4383cf",
+        "sha256": "ddd5864de6a0bc053ca5f3b1840fb76c7b2600c9afc194bb46a2ed46ad837f71",
         "type": "blob"
       },
       "run_agent.py": {
@@ -6710,6 +6710,11 @@
         "sha256": "bd7aeda28f393a5de168a4215ee8e5d6f5435fcbcaf6b6cb1f7e90eb573876cc",
         "type": "blob"
       },
+      "uv.lock": {
+        "mode": "100644",
+        "sha256": "469b55a1c09437043a90c697b3d8f50f499377ebfb4afc0cf33efd7c3d562d9e",
+        "type": "blob"
+      },
       "website/docs/user-guide/features/curator.md": {
         "mode": "100644",
         "sha256": "1fd000ef2bfa5df0a346a276d9d7834f95b96bf9ce9d89c7474ad5e4aea6c047",
@@ -6831,7 +6836,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "7ce0b9c5bf269f91591d41ae532febf105fb1c93",
+    "golden_sha": "2d455456b8d21767d3f35e95488dd248ef4fe493",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
