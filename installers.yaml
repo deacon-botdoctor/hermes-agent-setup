@@ -513,6 +513,17 @@ installers:
     timeout_seconds: 3300
     rollback: restore the prior browser-use-cli-install-v1.json receipt and versioned tool directory; the existing browser backend remains available
 
+  - name: ensure_agent_browser
+    owner_lane: baseline_wiring
+    current_registry_entry: golden_rebuild_20261004
+    description: Install the exact native CLI with strict CDP target binding in the active Hermes profile.
+    platforms: [linux, macos, windows]
+    operation: ensure_agent_browser
+    helper: kit/bin/ensure-agent-browser.py
+    contract: kit/config/agent-browser-release-v1.json
+    timeout_seconds: 120
+    rollback: rebind the prior immutable runtime and preserve the versioned artifact; no global executable or browser configuration is changed
+
   - name: ensure_gateway_watchdog
     owner_lane: baseline_wiring
     current_registry_entry: ensure_gateway_watchdog

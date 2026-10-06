@@ -64,17 +64,17 @@ def test_release_identity_matches_source_manifest():
         == manifest["components"]["runtime_payload"]["digest"]
     )
     assert manifest["components"]["runtime_payload"]["file_count"] == 762
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 50
+    assert manifest["components"]["baseline_wiring"]["file_count"] == 52
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "0500402836f11a24f3c6f37742388386234857105c49afeba8f5a0eb06afbab3",
-        "file_count": 328,
+        "digest": "f4f4e10f5fab3da1e6d2170e2a2b476b736133db0384bf684f1cf7dc4967ba52",
+        "file_count": 329,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 328
+    assert manifest["runtime_fingerprint"]["file_count"] == 329
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -84,7 +84,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 328
+    assert len(manifest["runtime_fingerprint"]["files"]) == 329
     assert set(release) == {
         "schema_version",
         "release",
@@ -835,6 +835,60 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
     assert calls[0][calls[0].index("--hermes-python") + 1] == str(runtime_python)
     assert calls[0][calls[0].index("--hermes-home") + 1] == str(home)
     assert "--require-ready" not in calls[0]
+
+
+@pytest.mark.parametrize("status,code,expected_ok", [
+    ("installed", 0, True), ("idempotent", 0, True),
+    ("failed", 1, False), ("would_install", 0, False),
+])
+def test_profile_installer_requires_verified_native_browser(
+    tmp_path, monkeypatch, status, code, expected_ok
+):
+    installer = load_script("public_install_browser", "install-profile.py")
+    home = tmp_path / "profile"
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=code, stderr="", stdout=json.dumps(
+            {"ok": code == 0, "status": status, "version": "0.38.2"}
+        ))
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    if expected_ok:
+        assert installer.ensure_agent_browser(home)["status"] == status
+    else:
+        with pytest.raises(RuntimeError, match="Pinned native browser installation failed"):
+            installer.ensure_agent_browser(home)
+    assert calls == [[sys.executable, str(ROOT / "kit/bin/ensure-agent-browser.py"),
+                      "--hermes-home", str(home), "--contract",
+                      str(ROOT / "kit/config/agent-browser-release-v1.json")]]
+    assert not home.exists()
+
+
+def test_profile_install_stops_before_profile_writes_when_browser_install_fails(
+    tmp_path, monkeypatch
+):
+    installer = load_script("public_install_browser_failure", "install-profile.py")
+    home = tmp_path / "profile"
+    home.mkdir()
+    config = home / "config.yaml"
+    config.write_text("preserved: true\n", encoding="utf-8")
+    monkeypatch.setattr(installer, "verify_runtime", lambda _runtime: None)
+    monkeypatch.setattr(installer, "runtime_python", lambda *_args: Path(sys.executable))
+    monkeypatch.setattr(installer, "ensure_cua_driver", lambda *_args, **_kwargs: {})
+
+    def fail_browser(target):
+        assert target == home
+        raise RuntimeError("Pinned native browser installation failed")
+
+    monkeypatch.setattr(installer, "ensure_agent_browser", fail_browser)
+    monkeypatch.setattr(sys, "argv", ["install-profile.py", "--hermes-home", str(home),
+                                    "--runtime-dir", str(tmp_path / "runtime")])
+    with pytest.raises(RuntimeError, match="Pinned native browser installation failed"):
+        installer.main()
+    assert config.read_text(encoding="utf-8") == "preserved: true\n"
+    assert sorted(p.name for p in home.iterdir()) == ["config.yaml"]
 
 
 def test_profile_installer_can_require_gui_driver_readiness(tmp_path, monkeypatch):
@@ -1970,6 +2024,9 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
             "doctor_ready": False,
         },
     )
+    monkeypatch.setattr(installer, "ensure_agent_browser", lambda _home: {
+        "ok": True, "status": "idempotent", "version": "0.38.2",
+    })
     monkeypatch.setattr(
         installer,
         "profile_files",
@@ -2673,3 +2730,19 @@ def test_public_build_verifies_before_publishing_and_reuses_exact_build(tmp_path
     next_receipt = build.build_release(root, source, digest, "a" * 40, "release-one")
     assert next_receipt != receipt_path
     assert len(calls) == 2
+
+
+def test_explicit_runtime_python_preserves_virtual_environment(tmp_path):
+    import os
+    import venv
+
+    installer = load_script("explicit_runtime_python", "install-profile.py")
+    environment = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False, symlinks=os.name != "nt").create(environment)
+    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    selected = installer.runtime_python(tmp_path / "runtime", python)
+    result = subprocess.run(
+        [str(selected), "-c", "import sys; print(sys.prefix)"],
+        capture_output=True, text=True, check=True,
+    )
+    assert Path(result.stdout.strip()) == environment

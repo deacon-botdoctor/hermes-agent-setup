@@ -888,7 +888,7 @@ patches:
   - name: golden_rebuild_20261004
     module: modules/golden_rebuild_20261004.py
     function: patch_golden_rebuild_20261004
-    target: agent + gateway + tools + tests
+    target: agent + gateway + tools + tests + pm/lock.json
     owner: engineering-lead
     idempotency: HERMES_GOLDEN_REBUILD_20261004
     test: python3 -m pytest -q bin/test/test_golden_rebuild_20261004.py

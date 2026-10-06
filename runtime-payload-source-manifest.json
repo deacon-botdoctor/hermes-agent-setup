@@ -3,9 +3,9 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "d5050e4ffbefeb7315c299660915fcf3ba5968ed75783d5dce550dcc83ebab4d",
+      "digest": "5fe0de5b93b0b29cfb8f0d82aaac5bd8039143696eaedbdedaf3fb62612e3d06",
       "excluded_paths": [],
-      "file_count": 50,
+      "file_count": 52,
       "files": [
         {
           "blob": "06357d511e8454e7001bcd5cb1f75cbbcd933d6f",
@@ -80,7 +80,7 @@
           "type": "blob"
         },
         {
-          "blob": "533507ceeef7deac59d5d895c9c9c490266d168d",
+          "blob": "1fb74ee68201dd74e676abc18e6cd4e0b6a86d0f",
           "mode": "100644",
           "path": "installers.yaml",
           "type": "blob"
@@ -134,13 +134,19 @@
           "type": "blob"
         },
         {
+          "blob": "ca89a342342813467f71b45c2a866cc41da4d250",
+          "mode": "100755",
+          "path": "kit/bin/ensure-agent-browser.py",
+          "type": "blob"
+        },
+        {
           "blob": "5bc1ce967c2360024542e5dcd95a9ba19be07de0",
           "mode": "100644",
           "path": "kit/bin/ensure-browser-use-cli.py",
           "type": "blob"
         },
         {
-          "blob": "5f43f681864072c5ac663f159bff66a373adedef",
+          "blob": "79a04542e454b3eecf5a0d0f1ea715cf45544931",
           "mode": "100755",
           "path": "kit/bin/ensure-cua-driver.py",
           "type": "blob"
@@ -284,6 +290,12 @@
           "type": "blob"
         },
         {
+          "blob": "721a39ca9b1767519eef1bc8726f239ed254f3bd",
+          "mode": "100644",
+          "path": "kit/config/agent-browser-release-v1.json",
+          "type": "blob"
+        },
+        {
           "blob": "0c94563c7ef51534f870869e2386a7adf52f71e5",
           "mode": "100644",
           "path": "kit/config/browser-use-cli-release-v1.json",
@@ -330,6 +342,7 @@
         "kit/bin/client-selfheal-heartbeat.sh",
         "kit/bin/ensure-cua-driver.py",
         "kit/bin/ensure-browser-use-cli.py",
+        "kit/bin/ensure-agent-browser.py",
         "kit/bin/ensure-gateway-watchdog.py",
         "kit/bin/enforce-gbrain-provider-routing.py",
         "kit/bin/gbrain-enable-embeddings.py",
@@ -359,13 +372,14 @@
         "kit/bin/start-hermes.sh",
         "kit/config/cua-driver-release-v1.json",
         "kit/config/browser-use-cli-release-v1.json",
+        "kit/config/agent-browser-release-v1.json",
         "kit/config/pylock.browser-use-cli-v1.toml",
         "kit/config/native-agent-continuity-v1.json"
       ]
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "b8a7f5986ded17577d0ad042d6c7bebcab9ac5077835480a18cef9c678e74157",
+      "digest": "479c04fd4a284474abcaa2f49c6b4b2cdea1b9603a04335d18d0091b454d5611",
       "excluded_paths": [],
       "file_count": 762,
       "files": [
@@ -1204,13 +1218,13 @@
           "type": "blob"
         },
         {
-          "blob": "3f509a71be245c0a30259fb2d2c1a84899e2f9d0",
+          "blob": "0de3c4f2f219a8821cf18d0ab0fde2d4c0cd035b",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "b1050cd5ce0f788d88a622d4025e1c2060f01c8a",
+          "blob": "1f5fa4362b1a96fb0ccabaeae743f0f4f06af939",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1300,7 +1314,7 @@
           "type": "blob"
         },
         {
-          "blob": "0ba5ef71cadb0b2758a92d35ea29a58aac9e3ca4",
+          "blob": "4eb6c3a7bd7451114fbe0baf66d27827ddb059ff",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -5161,15 +5175,15 @@
       ]
     }
   },
-  "deployment_digest": "e3ea5eb164930b4144ae726d493247217e706c0be7144b659dbd993f0a8b3cb5",
-  "golden_sha": "c0eb6a60720e70611e0ae699e1b65e0d6d282858",
+  "deployment_digest": "e3b0ce44402198e2b48a4bda01995116f2467330704ee2c531c32d88871c3cc3",
+  "golden_sha": "e0738ca8a93f24d98db0c394215b0784b4e735f8",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "0500402836f11a24f3c6f37742388386234857105c49afeba8f5a0eb06afbab3",
+    "digest": "f4f4e10f5fab3da1e6d2170e2a2b476b736133db0384bf684f1cf7dc4967ba52",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 328,
+    "file_count": 329,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5178,7 +5192,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "a964d6d4204d36738ee45184a517a6f81bee7ae6319e6300ba585f27a7ca4f50",
+        "sha256": "66faffb35ff1eb602e961e535532bdf903e7748a313b26ae4a85dc9568ef1356",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5834,6 +5848,11 @@
       "plugins/platforms/telegram/adapter.py": {
         "mode": "100644",
         "sha256": "0124057ad6e16caaf2512034d9552276c64fe4f0bc5f18a3662ee5fbca75f07b",
+        "type": "blob"
+      },
+      "pm/lock.json": {
+        "mode": "100644",
+        "sha256": "d7e82b8e8bf8a2cb6805e6e821580a18d8690bbfcecf362410a31dfe08c97c4b",
         "type": "blob"
       },
       "pyproject.toml": {
@@ -6812,7 +6831,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "c0eb6a60720e70611e0ae699e1b65e0d6d282858",
+    "golden_sha": "e0738ca8a93f24d98db0c394215b0784b4e735f8",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
