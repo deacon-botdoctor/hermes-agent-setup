@@ -18,8 +18,17 @@ def _identity(path: Path) -> dict | None:
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"rebuild source is not a regular file: {path.name}")
     mode = path.stat().st_mode & 0o777
-    return {"sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    content = path.read_bytes()
+    if os.name == "nt":
+        content = content.replace(b"\r\n", b"\n")
+    return {"sha256": hashlib.sha256(content).hexdigest(),
             "mode": mode, "git_mode": "100755" if mode & 0o111 else "100644"}
+
+
+def _matches(actual: dict | None, expected: dict | None) -> bool:
+    if os.name == "nt" and actual is not None and expected is not None:
+        return actual["sha256"] == expected["sha256"]
+    return actual == expected
 
 
 def patch_golden_rebuild_20261004(root: Path) -> bool:
@@ -33,7 +42,9 @@ def patch_golden_rebuild_20261004(root: Path) -> bool:
                            (["HEAD"], manifest["upstream_commit"])):
         result = subprocess.run(["git", "rev-parse", *args], cwd=root,
                                 capture_output=True, text=True, check=True)
-        if result.stdout.strip() != expected:
+        actual = result.stdout.strip()
+        matches = Path(actual) == Path(expected) if args == ["--absolute-git-dir"] else actual == expected
+        if not matches:
             raise RuntimeError("rebuild requires its pinned standalone upstream tree")
     paths = {}
     for relative in manifest["files"]:
@@ -47,23 +58,27 @@ def patch_golden_rebuild_20261004(root: Path) -> bool:
     receipt = {"idempotency": _IDEMPOTENCY, "patch_sha256": manifest["patch_sha256"]}
     if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) != receipt:
         raise RuntimeError("rebuild carrier receipt drift")
-    if all(identities[name] == record["after"] for name, record in manifest["files"].items()):
+    if all(_matches(identities[name], record["after"]) for name, record in manifest["files"].items()):
         if marker.exists():
             return False
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
         return True
-    if marker.exists() or any(identities[name] != record["before"]
+    if marker.exists() or any(not _matches(identities[name], record["before"])
                              for name, record in manifest["files"].items()):
         raise RuntimeError("rebuild source drift or partial installation")
-    subprocess.run(["git", "apply", "--no-index", "--whitespace=nowarn", "--check", str(patch)],
-                   cwd=root, capture_output=True, check=True)
     originals = {name: path.read_bytes() if path.exists() else None for name, path in paths.items()}
     try:
+        if os.name == "nt":
+            for name, content in originals.items():
+                if content is not None:
+                    paths[name].write_bytes(content.replace(b"\r\n", b"\n"))
+        subprocess.run(["git", "apply", "--no-index", "--whitespace=nowarn", "--check", str(patch)],
+                       cwd=root, capture_output=True, check=True)
         subprocess.run(["git", "apply", "--no-index", "--whitespace=nowarn", str(patch)],
                        cwd=root, capture_output=True, check=True)
         for name, path in paths.items():
-            if _identity(path) != manifest["files"][name]["after"]:
+            if not _matches(_identity(path), manifest["files"][name]["after"]):
                 raise RuntimeError(f"rebuild postimage mismatch: {name}")
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")

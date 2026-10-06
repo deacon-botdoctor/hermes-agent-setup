@@ -16,12 +16,13 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
 MACOS_PYTHON_CATALOG = "contracts/python-downloads-macos-arm64.json"
-MACOS_PYTHON_CATALOG_SHA256 = "cae33933f03d359951da43606430e447ccc8859fffc0940871d115443f18070d"
+MACOS_PYTHON_CATALOG_SHA256 = "e8c446d4a69df1dc9c3bdb6e6c7daf41245857f0c0da1795a375cca2f62bd2aa"
 
 
 def run(
@@ -30,12 +31,14 @@ def run(
     env: dict[str, str] | None = None,
     timeout: int = 600,
 ) -> subprocess.CompletedProcess[str]:
+    process_env = dict(os.environ if env is None else env, PYTHONUTF8="1")
     proc = subprocess.run(
         argv,
         text=True,
+        encoding="utf-8",
         capture_output=True,
         check=False,
-        env=env,
+        env=process_env,
         timeout=timeout,
     )
     if proc.returncode:
@@ -154,16 +157,17 @@ def clone_upstream(
                 upstream_sha,
             ]
         )
+    run(["git", "-C", str(output), "config", "core.autocrlf", "false"])
     run(["git", "-C", str(output), "checkout", "--detach", upstream_sha])
     verify_clean_upstream(output, upstream_sha)
 
 
 def candidate_python_proof(output: Path, env: dict[str, str]) -> dict:
     """Inspect only the candidate interpreter; never open a Hermes database."""
-    python = output / "venv" / "bin" / "python"
+    python = output / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     store = (output / ".hermes-runtime" / "python").resolve()
     if (not store.is_relative_to(output.resolve()) or not python.is_file()
-            or not python.resolve().is_relative_to(store)):
+            or (os.name != "nt" and not python.resolve().is_relative_to(store))):
         raise RuntimeError("candidate Python is not in its private managed store")
     script = (
         "import json, sqlite3, sys; print(json.dumps({"
@@ -191,12 +195,7 @@ def candidate_python_proof(output: Path, env: dict[str, str]) -> dict:
     return proof
 
 
-def prepare_posix_dependencies(output: Path, profile_home: Path) -> dict:
-    if os.name == "nt":
-        raise ValueError(
-            "--prepare-home is POSIX-only; use the documented isolated "
-            "PowerShell installer contract on Windows"
-        )
+def prepare_dependencies(output: Path, profile_home: Path) -> dict:
     profile_home = profile_home.expanduser()
     if not profile_home.is_absolute():
         raise ValueError("--prepare-home must be absolute")
@@ -211,12 +210,15 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> dict:
     isolated_user_home = profile_home / ".installer-user"
     isolated_user_home.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    # The pinned installer owns uv provisioning. Force its normal find/install
-    # path into this candidate so a host's old Python cannot seed a new venv.
+    # The pinned installer bootstraps uv. Keep that tool and Python private
+    # to the candidate; dependency installation follows the verified assembly.
     for key in tuple(env):
         if key.startswith(("UV_", "PYTHON", "CONDA_")) or key == "VIRTUAL_ENV":
             env.pop(key)
+    tools = (profile_home / ".bootstrap-tools" if os.name == "nt"
+             else output / ".hermes-runtime" / "python" / ".bootstrap-tools")
     env.update({
+        "HERMES_RUNTIME_DIR": str(tools),
         "UV_MANAGED_PYTHON": "1",
         "UV_PYTHON_INSTALL_DIR": str(output / ".hermes-runtime" / "python"),
         "UV_PYTHON_INSTALL_BIN": "0",
@@ -225,7 +227,7 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> dict:
     catalog_proof = None
     if sys.platform == "darwin" and platform.machine() == "arm64":
         # Python patch versions alone do not identify their bundled SQLite.
-        # Older uv catalogs select a vulnerable build of this same 3.11.15.
+        # Pin the supported Python build instead of reusing an older catalog.
         catalog = ROOT / MACOS_PYTHON_CATALOG
         digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
         if digest != MACOS_PYTHON_CATALOG_SHA256:
@@ -233,31 +235,59 @@ def prepare_posix_dependencies(output: Path, profile_home: Path) -> dict:
         env["UV_PYTHON_DOWNLOADS_JSON_URL"] = catalog.resolve().as_uri()
         catalog_proof = {"path": MACOS_PYTHON_CATALOG, "sha256": digest}
     env["HOME"] = str(isolated_user_home)
+    if os.name == "nt":
+        env["USERPROFILE"] = str(isolated_user_home)
     env["HERMES_HOME"] = str(profile_home)
-    run(
-        [
-            "bash",
-            str(output / "scripts" / "install.sh"),
-            "--skip-setup",
-            "--skip-browser",
-            "--dir",
-            str(output),
-            "--hermes-home",
-            str(profile_home),
-            "--commit",
-            str(RELEASE["canonical_upstream_sha"]),
-            "--force-commit",
-        ],
+    if os.name == "nt":
+        bootstrap = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                     str(output / "scripts" / "install.ps1"), "-Stage", "venv",
+                     "-SkipSetup", "-SkipBrowser", "-InstallDir", str(output),
+                     "-HermesHome", str(profile_home)]
+    else:
+        bootstrap = ["bash", str(output / "scripts" / "install.sh"), "--stage", "venv",
+                     "--skip-setup", "--skip-browser", "--dir", str(output),
+                     "--hermes-home", str(profile_home), "--commit",
+                     str(RELEASE["canonical_upstream_sha"])]
+    run(bootstrap, env=env, timeout=1800)
+    uv_paths = list(tools.glob("uv-*/uv.exe" if os.name == "nt" else "uv-*/uv"))
+    if len(uv_paths) != 1 or not uv_paths[0].is_file():
+        raise RuntimeError("candidate uv bootstrap is missing or ambiguous")
+    uv = str(uv_paths[0])
+    request = (output / ".python-version").read_text().strip()
+    run([uv, "python", "install", "--no-config", request], env=env)
+    selected = Path(run(
+        [uv, "python", "find", "--no-config", "--no-project", "--managed-python", request],
         env=env,
-        timeout=1800,
-    )
+    ).stdout.strip()).resolve(strict=True)
+    if not selected.is_relative_to((output / ".hermes-runtime" / "python").resolve()):
+        raise RuntimeError("candidate Python escaped its private managed store")
+    run([str(selected), "-I", "-m", "venv", str(output / "venv")], env=env)
+    python = output / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    build_flags = []
+    lock = output / "uv.lock"
+    lock_digest = hashlib.sha256(lock.read_bytes()).hexdigest()
+    env["UV_PROJECT_ENVIRONMENT"] = str(output / "venv")
+    if os.name == "nt":
+        metadata = tomllib.loads((output / "pyproject.toml").read_text(encoding="utf-8"))
+        requirements = metadata["build-system"]["requires"]
+        run([str(python), "-m", "pip", "install", *requirements], env=env, timeout=1800)
+        build_flags = ["--no-build-isolation", "--no-cache"]
+    run([uv, "sync", "--project", str(output), "--python", str(python),
+         "--frozen", "--no-default-groups", "--extra", "mcp", "--extra", "messaging",
+         "--inexact", *build_flags], env=env, timeout=1800)
+    run([uv, "pip", "install", "--python", str(python), "--no-deps", "PyYAML==6.0.3"],
+        env=env, timeout=1800)
+    if hashlib.sha256(lock.read_bytes()).hexdigest() != lock_digest:
+        raise RuntimeError("candidate dependency lock changed during preparation")
     proof = candidate_python_proof(output, env)
+    proof["dependency_lock_sha256"] = lock_digest
     if catalog_proof is not None:
         proof["download_catalog"] = catalog_proof
     return proof
 
 
 def main() -> int:
+    os.umask(0o022)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -273,8 +303,8 @@ def main() -> int:
         "--prepare-home",
         type=Path,
         help=(
-            "POSIX only: use upstream's installer in an isolated HOME to create "
-            "the candidate venv and profile scaffolding before applying Golden"
+            "Bootstrap private Python with the pinned installer, "
+            "then install the assembled candidate dependencies in an isolated HOME"
         ),
     )
     parser.add_argument(
@@ -313,8 +343,7 @@ def main() -> int:
             args.upstream_url,
             str(RELEASE["canonical_upstream_sha"]),
         )
-        if args.prepare_home:
-            python_proof = prepare_posix_dependencies(output, args.prepare_home)
+    run(["git", "-C", str(output), "config", "core.quotePath", "false"])
     env = os.environ.copy()
     env["HERMES_APPLY_SKIP_SNAPSHOT"] = "1"
     env["HERMES_EXACT_SOURCE_MANIFEST"] = str(ROOT / "runtime-payload-source-manifest.json")
@@ -327,6 +356,9 @@ def main() -> int:
         ],
         env=env,
     )
+    if args.prepare_home:
+        python_proof = prepare_dependencies(output, args.prepare_home)
+
     verified = run(
         [
             sys.executable,

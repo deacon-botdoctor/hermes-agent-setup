@@ -699,6 +699,22 @@ def test_verifier_rejects_native_continuity_package_drift(monkeypatch):
     assert errors == ["release native_agent_continuity contract digest mismatch"]
 
 
+
+@pytest.mark.parametrize("drift", [False, True])
+def test_windows_native_continuity_uses_tracked_modes(monkeypatch, drift):
+    verifier = load_script("public_windows_continuity", "verify-release.py")
+    release = json.loads((ROOT / "release.json").read_text(encoding="utf-8"))
+    contract = json.loads((ROOT / "contracts/native-agent-continuity-release-v1.json").read_text())
+    modes = {row["path"]: "100755" if int(row["mode"], 8) & 0o111 else "100644"
+             for row in contract["files"]}
+    monkeypatch.setattr(verifier, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(verifier, "_tracked_mode", lambda item: "120000" if drift else modes[item])
+    errors = []
+    verifier.verify_native_agent_continuity_contract(release, errors)
+    assert bool(errors) is drift
+    if drift:
+        assert any("file drifted" in error for error in errors)
+
 def test_profile_defaults_and_router_binding_are_reconciled(tmp_path):
     installer = load_script("public_install_config", "install-profile.py")
     config_path = tmp_path / "config.yaml"
@@ -1807,11 +1823,12 @@ def test_prepare_home_rejects_reused_staging(tmp_path):
     (staging / ".env").write_text("LIVE=1\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="unique empty"):
-        assembler.prepare_posix_dependencies(tmp_path / "runtime", staging)
+        assembler.prepare_dependencies(tmp_path / "runtime", staging)
 
 
-def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
-    tmp_path, monkeypatch
+@pytest.mark.parametrize("windows", [False, True])
+def test_prepare_home_bootstraps_private_python_without_resetting_the_assembly(
+    tmp_path, monkeypatch, windows
 ):
     assembler = load_script("public_pinned_staging", "assemble-runtime.py")
     runtime = tmp_path / "runtime"
@@ -1820,14 +1837,26 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
     (runtime / "scripts" / "install.sh").write_text(
         "#!/bin/bash\n", encoding="utf-8"
     )
+    (runtime / ".python-version").write_text("3.14\n")
+    (runtime / "uv.lock").write_text("version = 1\n")
+    if windows:
+        monkeypatch.setattr(assembler, "os", SimpleNamespace(name="nt", environ=assembler.os.environ))
+    tools = staging / ".bootstrap-tools" if windows else runtime / ".hermes-runtime/python/.bootstrap-tools"
+    uv = tools / ("uv-1-win32/uv.exe" if windows else "uv-1-linux-arm64/uv")
+    selected = runtime / ".hermes-runtime/python/cpython/bin/python"
+    selected.parent.mkdir(parents=True)
+    selected.write_text("fixture")
+    (runtime / "pyproject.toml").write_text('[build-system]\nrequires = ["setuptools==83.0.0", "wheel"]\n')
     calls = []
 
     def fake_run(argv, **kwargs):
+        uv.parent.mkdir(parents=True, exist_ok=True)
+        uv.write_text("fixture")
         calls.append((argv, kwargs))
         (runtime / ".hermes-bootstrap-complete").write_text(
             "installer-state\n", encoding="utf-8"
         )
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return SimpleNamespace(returncode=0, stdout=str(selected) if argv[1:3] == ["python", "find"] else "", stderr="")
 
     monkeypatch.setattr(assembler, "run", fake_run)
     monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 51, 3]})
@@ -1836,26 +1865,43 @@ def test_prepare_home_forces_the_existing_candidate_back_to_the_release_pin(
     monkeypatch.setenv("PYTHONPATH", "/unsafe/modules")
     monkeypatch.setenv("VIRTUAL_ENV", "/unsafe/venv")
 
-    proof = assembler.prepare_posix_dependencies(runtime, staging)
+    proof = assembler.prepare_dependencies(runtime, staging)
     assert proof["sqlite_version"] == [3, 51, 3]
     if assembler.sys.platform == "darwin" and assembler.platform.machine() == "arm64":
         assert proof["download_catalog"]["sha256"] == assembler.MACOS_PYTHON_CATALOG_SHA256
         assert calls[0][1]["env"]["UV_PYTHON_DOWNLOADS_JSON_URL"] == (ROOT / assembler.MACOS_PYTHON_CATALOG).as_uri()
 
     command, kwargs = calls[0]
-    assert command == [
-        "bash",
-        str(runtime / "scripts" / "install.sh"),
-        "--skip-setup",
-        "--skip-browser",
-        "--dir",
-        str(runtime),
-        "--hermes-home",
-        str(staging),
-        "--commit",
-        assembler.RELEASE["canonical_upstream_sha"],
-        "--force-commit",
-    ]
+    if windows:
+        assert command == ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                           str(runtime / "scripts/install.ps1"), "-Stage", "venv",
+                           "-SkipSetup", "-SkipBrowser", "-InstallDir", str(runtime),
+                           "-HermesHome", str(staging)]
+        assert calls[-3][0][-2:] == ["setuptools==83.0.0", "wheel"]
+        assert "--no-build-isolation" in calls[-2][0]
+        assert kwargs["env"]["USERPROFILE"] == str(staging / ".installer-user")
+    else:
+        assert command == [
+            "bash",
+            str(runtime / "scripts" / "install.sh"),
+            "--stage",
+            "venv",
+            "--skip-setup",
+            "--skip-browser",
+            "--dir",
+            str(runtime),
+            "--hermes-home",
+            str(staging),
+            "--commit",
+            assembler.RELEASE["canonical_upstream_sha"],
+        ]
+    python = runtime / ("venv/Scripts/python.exe" if windows else "venv/bin/python")
+    flags = ["--no-build-isolation", "--no-cache"] if windows else []
+    assert calls[-2][0] == [str(uv), "sync", "--project", str(runtime), "--python", str(python),
+                           "--frozen", "--no-default-groups", "--extra", "mcp", "--extra", "messaging", "--inexact", *flags]
+    assert calls[-1][0] == [str(uv), "pip", "install", "--python", str(python), "--no-deps", "PyYAML==6.0.3"]
+    assert proof["dependency_lock_sha256"] == hashlib.sha256((runtime / "uv.lock").read_bytes()).hexdigest()
+    assert kwargs["env"]["HERMES_RUNTIME_DIR"] == str(tools)
     assert kwargs["env"]["HOME"] == str(staging / ".installer-user")
     assert kwargs["env"]["HERMES_HOME"] == str(staging)
     assert kwargs["env"]["UV_MANAGED_PYTHON"] == "1"
@@ -2139,15 +2185,8 @@ def test_gbrain_is_opt_in_and_telegram_continuity_stays_enabled(monkeypatch):
 
 def test_windows_installer_is_pinned_and_paths_are_split():
     instructions = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert (
-        "raw.githubusercontent.com/NousResearch/hermes-agent/"
-        "9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb/scripts/install.ps1"
-        in instructions
-    )
-    assert (
-        "522941b9d678898392d31fc239cc229f6852a0f1bac8f266f7b81f8991f239d1"
-        in instructions
-    )
+    assert "Python 3.11 or newer and Git for Windows" in instructions
+    assert "--prepare-home $StagingHome" in instructions
     assert "-m hermes_cli.main setup" in instructions
     assert "gateway install" in instructions
     assert "gateway status" in instructions
@@ -2158,7 +2197,7 @@ def test_windows_installer_is_pinned_and_paths_are_split():
     assert "$ProvenServiceOwner" in instructions
     assert "$ExistingInstall" not in instructions
     assert (
-        '& "$Candidate\\venv\\Scripts\\python.exe" .\\bin\\assemble-runtime.py'
+        'python .\\bin\\assemble-runtime.py'
         in instructions
     )
     assert "core.autocrlf=false" in instructions
@@ -2330,10 +2369,22 @@ def test_candidate_python_catalog_is_platform_scoped(tmp_path, monkeypatch, syst
     monkeypatch.setattr(assembler.sys, "platform", system)
     monkeypatch.setattr(assembler.platform, "machine", lambda: arch)
     monkeypatch.setenv("UV_PYTHON_DOWNLOADS_JSON_URL", "https://untrusted.invalid/catalog")
+    runtime = tmp_path / "candidate"
+    uv = runtime / ".hermes-runtime/python/.bootstrap-tools/uv-1-platform/uv"
+    uv.parent.mkdir(parents=True)
+    uv.write_text("fixture")
+    selected = runtime / ".hermes-runtime/python/cpython/bin/python"
+    selected.parent.mkdir(parents=True)
+    selected.write_text("fixture")
+    (runtime / ".python-version").write_text("3.14\n")
+    (runtime / "uv.lock").write_text("version = 1\n")
     calls = []
-    monkeypatch.setattr(assembler, "run", lambda argv, **kw: calls.append(kw))
+    def fake_run(argv, **kw):
+        calls.append(kw)
+        return SimpleNamespace(stdout=str(selected) if argv[1:3] == ["python", "find"] else "")
+    monkeypatch.setattr(assembler, "run", fake_run)
     monkeypatch.setattr(assembler, "candidate_python_proof", lambda *args: {"sqlite_version": [3, 53, 1]})
-    proof = assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
+    proof = assembler.prepare_dependencies(tmp_path / "candidate", tmp_path / "staging")
     assert ("download_catalog" in proof) is expected
     assert ("UV_PYTHON_DOWNLOADS_JSON_URL" in calls[0]["env"]) is expected
     if expected:
@@ -2352,7 +2403,7 @@ def test_candidate_python_catalog_tamper_blocks_installer(tmp_path, monkeypatch)
     catalog.write_text("{}")
     monkeypatch.setattr(assembler, "run", lambda *args, **kw: pytest.fail("must not install with changed catalog"))
     with pytest.raises(RuntimeError, match="catalog digest mismatch"):
-        assembler.prepare_posix_dependencies(tmp_path / "candidate", tmp_path / "staging")
+        assembler.prepare_dependencies(tmp_path / "candidate", tmp_path / "staging")
 
 
 def test_coherence_cli_resolves_current_binding_each_invocation(tmp_path, monkeypatch):
