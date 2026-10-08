@@ -298,6 +298,9 @@ def rollback_runtime_root(hermes_home: Path) -> tuple[Path, list[Path]]:
     pointer_root = runtime_root(payload.get("runtime_root"))
     if source_root is None or pointer_root != source_root:
         raise ValueError(f"invalid current rollback pointer: {pointer}")
+    if (source_root == hermes_home / "hermes-agent"
+            and source.name != "unmanaged-predecessor.json"):
+        raise ValueError(f"invalid unmanaged rollback source: {source}")
     superseded_pending: list[Path] = []
     try:
         pointer_mtime = pointer.stat().st_mtime
@@ -495,7 +498,13 @@ def protected_runtime_roots(hermes_home: Path) -> tuple[set[Path], dict[str, lis
     active_root, stale_receipts = active_runtime_root(hermes_home)
     rollback_root, superseded_pending = rollback_runtime_root(hermes_home)
     active = validate_generation(active_root, allowed, "active")
-    rollback = validate_generation(rollback_root, allowed, "rollback")
+    if rollback_root == hermes_home / "hermes-agent":
+        # The digest-bound adoption record owns this original, non-generation root.
+        if rollback_root.is_symlink() or not rollback_root.is_dir():
+            raise ValueError(f"unsafe rollback runtime root: {rollback_root}")
+        rollback = rollback_root.resolve(strict=True)
+    else:
+        rollback = validate_generation(rollback_root, allowed, "rollback")
     if active == rollback:
         raise ValueError("active and rollback runtime evidence are not distinct")
     configured_references = nominal_runtime_references(hermes_home)
@@ -830,7 +839,7 @@ def current_rollback_generation(hermes_home: Path) -> Path | None:
     if not isinstance(source, str) or not source.strip():
         return None
     path = Path(source)
-    if path.name not in {"receipt.before", "runtime-binding.before"}:
+    if path.name not in {"receipt.before", "runtime-binding.before", "unmanaged-predecessor.json"}:
         return None
     generation = path.parent
     if generation.parent.name != "fleet-rollouts":

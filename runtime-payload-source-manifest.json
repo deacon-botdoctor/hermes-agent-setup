@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "5fe0de5b93b0b29cfb8f0d82aaac5bd8039143696eaedbdedaf3fb62612e3d06",
+      "digest": "6fd1b2d8a0a85d6e8f63f9ab3f2ed6448b4052a99bf3e9431185190b0155526f",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -38,7 +38,7 @@
           "type": "blob"
         },
         {
-          "blob": "e743d27f96fdc1ad4fd637467565c7a51a8e39c3",
+          "blob": "a5ca8fd17e32b186094c0d7823f49f6b326b2c37",
           "mode": "100644",
           "path": "bin/hermes-disk-retention.py",
           "type": "blob"
@@ -140,7 +140,7 @@
           "type": "blob"
         },
         {
-          "blob": "5bc1ce967c2360024542e5dcd95a9ba19be07de0",
+          "blob": "24af2070585e7d185e38885c0af15bbf203db8f3",
           "mode": "100644",
           "path": "kit/bin/ensure-browser-use-cli.py",
           "type": "blob"
@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "0d2fa16a0537c2afa3aa4f9800feaf8c77f196e83b2b3b897aa5f504b271d101",
+      "digest": "5ed9e258612e415d176e8d31733ce44e883b78e4531aa862b1b0d0b66dc31c4a",
       "excluded_paths": [],
       "file_count": 762,
       "files": [
@@ -540,7 +540,7 @@
           "type": "blob"
         },
         {
-          "blob": "5bc1ce967c2360024542e5dcd95a9ba19be07de0",
+          "blob": "24af2070585e7d185e38885c0af15bbf203db8f3",
           "mode": "100644",
           "path": "kit/bin/ensure-browser-use-cli.py",
           "type": "blob"
@@ -5175,8 +5175,8 @@
       ]
     }
   },
-  "deployment_digest": "d612908f7d04aeeced024a425cc2bd7fb42c02c168d78b3d1203acb7c8592c21",
-  "golden_sha": "2d455456b8d21767d3f35e95488dd248ef4fe493",
+  "deployment_digest": "4b6bf89ee5cd27526b01350404b72da45555b721f50ac86c5edc8f34a01d92ea",
+  "golden_sha": "fde888118b07320b743e76e13a075f109dd7fe8d",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "5b78261cd1fdd0c163095aacd64794bb61aa85308ed1b5ee3faa7a7a2f9b7d52",
@@ -6836,7 +6836,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "2d455456b8d21767d3f35e95488dd248ef4fe493",
+    "golden_sha": "fde888118b07320b743e76e13a075f109dd7fe8d",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
