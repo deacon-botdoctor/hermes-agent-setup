@@ -7381,7 +7381,7 @@ index 22a8b7345c3f698c5741ca09293551cf619c0f7d..92ff107365409ade0d63c3565fed1e66
              _finish_response_delivery(trace=_runtime_delivery_trace)
              processing_ok = delivery_succeeded if delivery_attempted else not bool(response)
 diff --git a/gateway/run_shutdown.py b/gateway/run_shutdown.py
-index da27a285c6ded44ae6a296e00bc7b4cdfd967813..de95671afb72cb7bdeb2b0dc7b3387f6eb33ee89 100644
+index 0b829009b5b92fdab04461929f1346b39215262f..1584a36855e3f5cd1519a7a1cee1f340726fe8a8 100644
 --- a/gateway/run_shutdown.py
 +++ b/gateway/run_shutdown.py
 @@ -2221,6 +2221,9 @@ class GatewayShutdownMixin:
