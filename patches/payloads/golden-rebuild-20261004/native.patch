@@ -19,7 +19,7 @@ index a384a412eecb8e2f0aa2378af4cb62c5a494e0ff..e9376f3dedb92915e361a918bee8fd3d
              summary_model_override=None, quiet_mode=agent.quiet_mode, base_url=agent.base_url,
              api_key=getattr(agent, "api_key", ""), config_context_length=_effective_context_length,
 diff --git a/agent/agent_runtime_helpers.py b/agent/agent_runtime_helpers.py
-index 41b03cd1b7d39ca816874b56c56b509a760022d6..c5f3e116411f4dced6ab2af3f29f6474c789e819 100644
+index 41b03cd1b7d39ca816874b56c56b509a760022d6..bd235eadcd6a4b05e0ba8546549e2c0e9b7b5f7a 100644
 --- a/agent/agent_runtime_helpers.py
 +++ b/agent/agent_runtime_helpers.py
 @@ -1002,10 +1002,200 @@ def _recover_rate_limit(pool, *, has_retried_429, error_context, api_key_hint, c
@@ -186,7 +186,7 @@ index 41b03cd1b7d39ca816874b56c56b509a760022d6..c5f3e116411f4dced6ab2af3f29f6474
 +        if (entry.id in tried or entry.refresh_token != 'dummy_broker_managed'
 +                or not entry.access_token or entry.extra.get('broker_codex_failover') != 1
 +                or _codex_access_token_is_expiring(entry.access_token, 120)
-+                or entry.base_url != agent.base_url):
++                or entry.base_url.rstrip('/') != agent.base_url.rstrip('/')):
 +            continue
 +        tried.add(entry.id)
 +        remaining = agent._codex_broker_deadline - time.monotonic()

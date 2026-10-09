@@ -379,9 +379,9 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "1d97f0471f189ee8225731208bc2b931058cd32eb42689a0efb6f11971c141f3",
+      "digest": "a901df98caf53aa952630fc02ac0eb278027266bd8dfaaa41ae882c33f7be671",
       "excluded_paths": [],
-      "file_count": 762,
+      "file_count": 766,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -864,6 +864,12 @@
           "type": "blob"
         },
         {
+          "blob": "588896aa05d3df75b9ddc6d80fa7a38998d1536f",
+          "mode": "100644",
+          "path": "patches/modules/cron_progress_job_guard_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "fa05f3748cee42edd4ac26670db91007acf62042",
           "mode": "100644",
           "path": "patches/modules/cron_silent_mutation_footer_v1.py",
@@ -891,6 +897,12 @@
           "blob": "1edeb9c91e4d0b19209324396c2230b7f3c637a6",
           "mode": "100644",
           "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "e9fbd8862c44956414a86be472348e9a4b7e4ab0",
+          "mode": "100644",
+          "path": "patches/modules/fallback_chain_restart_bound_v1.py",
           "type": "blob"
         },
         {
@@ -1029,6 +1041,12 @@
           "blob": "0bf6480115ed6e70195751f7f652ba999d10d69e",
           "mode": "100644",
           "path": "patches/modules/platform_delivery_drain_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c21fffc04ef6acaa9c6113e56e55b39081a0b466",
+          "mode": "100644",
+          "path": "patches/modules/pm_read_only_install_state_v1.py",
           "type": "blob"
         },
         {
@@ -1218,13 +1236,13 @@
           "type": "blob"
         },
         {
-          "blob": "205b0729620ad996b20178dbbd1106e79def598a",
+          "blob": "b8e431974ed009f7626616861044c537b2f0a8f9",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "059b9c4fc746802794417f0da06e36ff1552f599",
+          "blob": "80dbdb8b3dd553759c9716fe9b2860ca8423b708",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1314,7 +1332,7 @@
           "type": "blob"
         },
         {
-          "blob": "4eb6c3a7bd7451114fbe0baf66d27827ddb059ff",
+          "blob": "56058939b95ced1215d764d779c44da2a3d690e8",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -1500,7 +1518,7 @@
           "type": "blob"
         },
         {
-          "blob": "a4d5c409bd943c3e66c56bbdf23862b1aad8d432",
+          "blob": "7817fd78116d038d659baf7172533ceb5e02dbba",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
@@ -1545,6 +1563,12 @@
           "blob": "dbbdfa4ce4b4736d01ebc4d9bc869ec2e41ff4b3",
           "mode": "100644",
           "path": "shared-defaults/config-native-tool-search.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "f9f0b6a54470b78245a4b8f216e52adc3303b651",
+          "mode": "100644",
+          "path": "shared-defaults/config-subscription-failover.yaml",
           "type": "blob"
         },
         {
@@ -5098,6 +5122,9 @@
         "patches/modules/gpt6_reasoning_efforts_v1.py",
         "patches/modules/grok47_reasoning_v1.py",
         "patches/modules/cron_silent_mutation_footer_v1.py",
+        "patches/modules/cron_progress_job_guard_v1.py",
+        "patches/modules/fallback_chain_restart_bound_v1.py",
+        "patches/modules/pm_read_only_install_state_v1.py",
         "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
         "patches/modules/xai_oauth_pricing_v1.py",
         "patches/payloads/cron-operator-delivery-d363-v1",
@@ -5175,15 +5202,15 @@
       ]
     }
   },
-  "deployment_digest": "e8c8869efbdb7790ad125dab3e13f95ce0ae26f1d8bdb7979112a9058846b3cb",
-  "golden_sha": "3960d3ad99f0b5c11b830cef0380449eba55e658",
+  "deployment_digest": "52deee1be0e1ec10fdba07a64490301dc08aacfdefb2aa7d8db0ee16f42e0179",
+  "golden_sha": "7bbeac6dbe689b6a29e2ba233881d234ac70ac6b",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "79d9bd18e523ab97bbac34586544c0c387cca65b98f31e62e9cda516ba752a62",
+    "digest": "dedacc201395224e04525c6229de5ad3c8b777b26348c61f4d8a01713aad2ba2",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 330,
+    "file_count": 334,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5192,7 +5219,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "012baf33494ff801cf7383e76f47f8c51d34ff12b1fe98137394541f05806ea0",
+        "sha256": "be0b13907bddcdb9cd0f1f090ca1da6dd8f474def0bc828e2523fea8cc37de17",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5212,7 +5239,7 @@
       },
       "agent/agent_runtime_helpers.py": {
         "mode": "100644",
-        "sha256": "cddf1e9fb4041c02ef907f8dcf2aeddc5be203d295c840e2e19423cc24204504",
+        "sha256": "ff49ede811a731d68235926839af5a81f859dbdc7e2b34ff27261502d85ccc1d",
         "type": "blob"
       },
       "agent/auxiliary_client.py": {
@@ -5448,6 +5475,11 @@
       "agent/turn_finalizer.py": {
         "mode": "100644",
         "sha256": "94e09b71f388ec615e50de793b54c27fb696dfdf9c6f09c5a01f60651c4a44d9",
+        "type": "blob"
+      },
+      "agent/turn_iteration_prep.py": {
+        "mode": "100644",
+        "sha256": "979845a514ea0a0fb8323f5888a9999ec5108a77ea80fa60d61c5b35c2f1b541",
         "type": "blob"
       },
       "agent/turn_recovery.py": {
@@ -5720,6 +5752,11 @@
         "sha256": "92edf74a0b356764e4b34a22c83d7938211fc1e6fc2b311a4c0bcb661da5deb2",
         "type": "blob"
       },
+      "hermes_cli/_early_recovery.py": {
+        "mode": "100644",
+        "sha256": "e1aab07e1118a01cd23bca71c9f8dfce0175f9be2684e0cb07826e7146f6ce6b",
+        "type": "blob"
+      },
       "hermes_cli/auth_codex.py": {
         "mode": "100644",
         "sha256": "1b307eb61b5fb608e777cd5170f0e9abc4be5d6c3b2ce995c979b5d2f4b234c7",
@@ -5778,6 +5815,11 @@
       "hermes_cli/oneshot.py": {
         "mode": "100644",
         "sha256": "6c660bbfedb76832c69a42d62026e34a9b65d6d6e58f9d4d3c7c5ce2a99ed8d4",
+        "type": "blob"
+      },
+      "hermes_cli/runtime_state.py": {
+        "mode": "100644",
+        "sha256": "193b7ae3185b5de0b05caff2a8f7b683a2d1dadac76c4ee25ae57b68b1cf400a",
         "type": "blob"
       },
       "hermes_state.py": {
@@ -6605,6 +6647,11 @@
         "sha256": "c97dd130ca75180a411bcb38bd5c545d6fcd27afb138329094e2e92230ea18f0",
         "type": "blob"
       },
+      "tools/cronjob_tools.py": {
+        "mode": "100644",
+        "sha256": "27b7fcfa42fba5e62223318d3fdb37c88e3a4e05aea566de8a72f2e07c1468bf",
+        "type": "blob"
+      },
       "tools/delegate_tool_child_run.py": {
         "mode": "100644",
         "sha256": "4beec9a83c2ecb8a4f0e71968f0a6c6cda71f477df7b98c4e28674b526e3d908",
@@ -6836,7 +6883,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "3960d3ad99f0b5c11b830cef0380449eba55e658",
+    "golden_sha": "7bbeac6dbe689b6a29e2ba233881d234ac70ac6b",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

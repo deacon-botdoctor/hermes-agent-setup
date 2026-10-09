@@ -1,9 +1,8 @@
 {
   "schema_version": 1,
   "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-  "patch_sha256": "f1151bf417c853116a0fa617bd00f9354583ef50ce90f0777eccebd5f8e17bd4",
+  "patch_sha256": "bdb7694274adb22623750a2b1e300b8594c1f3f6532c83e18d9787610fbbdd48",
   "baseline_tree": "c5401b54705b406e4fe14b16bde6c5825961440e",
-  "result_tree": "bdfb888c12258086a6edca2327ed1610d716a1f4",
   "files": {
     "agent/agent_init.py": {
       "before": {
@@ -24,7 +23,7 @@
         "git_mode": "100644"
       },
       "after": {
-        "sha256": "cddf1e9fb4041c02ef907f8dcf2aeddc5be203d295c840e2e19423cc24204504",
+        "sha256": "ff49ede811a731d68235926839af5a81f859dbdc7e2b34ff27261502d85ccc1d",
         "mode": 420,
         "git_mode": "100644"
       }
@@ -1913,5 +1912,6 @@
         "git_mode": "100644"
       }
     }
-  }
+  },
+  "original_result_tree": "bdfb888c12258086a6edca2327ed1610d716a1f4"
 }

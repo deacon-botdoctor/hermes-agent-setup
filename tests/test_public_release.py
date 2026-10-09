@@ -63,18 +63,18 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 762
+    assert manifest["components"]["runtime_payload"]["file_count"] == 766
     assert manifest["components"]["baseline_wiring"]["file_count"] == 52
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "79d9bd18e523ab97bbac34586544c0c387cca65b98f31e62e9cda516ba752a62",
-        "file_count": 330,
+        "digest": "dedacc201395224e04525c6229de5ad3c8b777b26348c61f4d8a01713aad2ba2",
+        "file_count": 334,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 330
+    assert manifest["runtime_fingerprint"]["file_count"] == 334
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -84,7 +84,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 330
+    assert len(manifest["runtime_fingerprint"]["files"]) == 334
     assert set(release) == {
         "schema_version",
         "release",
@@ -624,7 +624,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 57
+    assert len(patches) == 60
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()

@@ -901,3 +901,48 @@ patches:
     reason: Preserve reviewed shared lifecycle and tool behavior on the new upstream pin without operator implementations.
     upstream_issue: none
     retirement_condition: upstream provides the same shared lifecycle and tool contracts
+  - name: pm_read_only_install_state_v1
+    module: modules/pm_read_only_install_state_v1.py
+    function: patch_pm_read_only_install_state_v1
+    target: hermes_cli/runtime_state.py + hermes_cli/_early_recovery.py
+    owner: engineering-lead
+    idempotency: HERMES_PM_READ_ONLY_INSTALL_STATE_v1
+    test: python3 -m pytest -q bin/test/test_enoch_fixes_20261007_modules.py bin/test/test_pm_read_only_install_state_v1.py
+    rollback: rebind the prior immutable runtime through the operator executor
+    client_impact: restart_required
+    tags: [pm, systemd, read-only, boot]
+    status: extracted
+    route: irreducible
+    reason: A hardened unit (ProtectSystem=strict / ProtectHome=read-only) makes the PM install state read-only; boot-time readers opened .install.lock / lease / recovery lock files O_CREAT and exited with EROFS ("run hermes pm repair"). Readers now proceed lock-free like a lost lock race and never write; writers still fail.
+    upstream_issue: none
+    retirement_condition: upstream PM readers tolerate a read-only install-state directory
+  - name: fallback_chain_restart_bound_v1
+    module: modules/fallback_chain_restart_bound_v1.py
+    function: patch_fallback_chain_restart_bound_v1
+    target: agent/turn_iteration_prep.py
+    owner: engineering-lead
+    idempotency: HERMES_FALLBACK_CHAIN_RESTART_BOUND_v1
+    test: python3 -m pytest -q bin/test/test_enoch_fixes_20261007_modules.py bin/test/test_fallback_chain_restart_bound_v1.py
+    rollback: rebind the prior immutable runtime through the operator executor
+    client_impact: restart_required
+    tags: [fallback, failover, retries]
+    status: extracted
+    route: irreducible
+    reason: rebuilt-message restarts were bounded by api_max_retries alone, so api_max_retries=1 cut a 2-hop fallback chain after the first hop (rebuilt_restart_limit_exceeded, empty reply). Bound is now max(api_max_retries, len(fallback chain)).
+    upstream_issue: none
+    retirement_condition: upstream bounds fallback restarts by chain length
+  - name: cron_progress_job_guard_v1
+    module: modules/cron_progress_job_guard_v1.py
+    function: patch_cron_progress_job_guard_v1
+    target: tools/cronjob_tools.py
+    owner: engineering-lead
+    idempotency: HERMES_CRON_PROGRESS_JOB_GUARD_v1
+    test: python3 -m pytest -q bin/test/test_enoch_fixes_20261007_modules.py bin/test/test_cron_progress_job_guard_v1.py
+    rollback: rebind the prior immutable runtime; or set HERMES_CRON_ALLOW_PROGRESS_JOBS=1
+    client_impact: restart_required
+    tags: [cron, progress, fleet-cron-model-gate]
+    status: extracted
+    route: irreducible
+    reason: Models answer "keep me posted" by creating <=15-minute inference cron jobs that know nothing about the in-flight work, spam the chat, and fail the fleet cron model gate (BOT-37 native039 stop, job enoch/7ef0d1a9922d). The create action now refuses agent-mode short-interval progress jobs.
+    upstream_issue: none
+    retirement_condition: upstream ships a progress channel for in-flight work and a create-time guard
