@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "6fd1b2d8a0a85d6e8f63f9ab3f2ed6448b4052a99bf3e9431185190b0155526f",
+      "digest": "5f1e7956761edd7535e73d4eb87f2faebb7ab3906aa47d46c92652f8cc3e4d83",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -38,7 +38,7 @@
           "type": "blob"
         },
         {
-          "blob": "a5ca8fd17e32b186094c0d7823f49f6b326b2c37",
+          "blob": "bb0a7e1a08e3b26f18fe386ae3948c3299a30420",
           "mode": "100644",
           "path": "bin/hermes-disk-retention.py",
           "type": "blob"
@@ -5175,8 +5175,8 @@
       ]
     }
   },
-  "deployment_digest": "3309e15e0c93bc3dfa134fa6856d4b96e281a1e7891650b71e2bceed560abce0",
-  "golden_sha": "e0a524aba4e8ed530310c0d1e95969724604f78f",
+  "deployment_digest": "e8c8869efbdb7790ad125dab3e13f95ce0ae26f1d8bdb7979112a9058846b3cb",
+  "golden_sha": "3960d3ad99f0b5c11b830cef0380449eba55e658",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "79d9bd18e523ab97bbac34586544c0c387cca65b98f31e62e9cda516ba752a62",
@@ -6836,7 +6836,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "e0a524aba4e8ed530310c0d1e95969724604f78f",
+    "golden_sha": "3960d3ad99f0b5c11b830cef0380449eba55e658",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

@@ -1033,7 +1033,11 @@ def collect_plan(
         snapshot_root = hermes_home / "state" / rel
         items = generations(snapshot_root, "snapshot", f"generation under {snapshot_root}")
         for index, candidate in enumerate(items):
-            action = "keep" if index < keep_snapshots else "prune"
+            if (rel == "fleet-stage" and candidate.path.is_dir()
+                    and re.fullmatch(r"golden-[0-9a-f]{40}", candidate.path.name)):
+                action = "keep_protected"
+            else:
+                action = "keep" if index < keep_snapshots else "prune"
             inventory.append(record(candidate, action))
             if action == "prune":
                 candidates.append(candidate)

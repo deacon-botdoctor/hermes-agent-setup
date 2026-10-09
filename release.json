@@ -3,7 +3,7 @@
     "digest": "79d9bd18e523ab97bbac34586544c0c387cca65b98f31e62e9cda516ba752a62",
     "file_count": 330
   },
-  "baseline_wiring_digest": "6fd1b2d8a0a85d6e8f63f9ab3f2ed6448b4052a99bf3e9431185190b0155526f",
+  "baseline_wiring_digest": "5f1e7956761edd7535e73d4eb87f2faebb7ab3906aa47d46c92652f8cc3e4d83",
   "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "3309e15e0c93bc3dfa134fa6856d4b96e281a1e7891650b71e2bceed560abce0",
-  "golden_sha": "e0a524aba4e8ed530310c0d1e95969724604f78f",
+  "deployment_digest": "e8c8869efbdb7790ad125dab3e13f95ce0ae26f1d8bdb7979112a9058846b3cb",
+  "golden_sha": "3960d3ad99f0b5c11b830cef0380449eba55e658",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-e0a524ab",
+  "release": "botdoctor-hermes-2026.10.05-golden-3960d3ad",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -64,6 +64,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced 79d9bd18e523ab97bbac34586544c0c387cca65b98f31e62e9cda516ba752a62 across 330 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: e0a524aba4e8ed530310c0d1e95969724604f78f"
+    "golden_suite": "Exact reviewed Golden source: 3960d3ad99f0b5c11b830cef0380449eba55e658"
   }
 }
