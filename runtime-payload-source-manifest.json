@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "5f1e7956761edd7535e73d4eb87f2faebb7ab3906aa47d46c92652f8cc3e4d83",
+      "digest": "494d2a9ce64abad806b6e5a2cc6e89d6dfdee491eb08d5c03248c54d41d9d6e8",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -158,7 +158,7 @@
           "type": "blob"
         },
         {
-          "blob": "3928e6bd9834effce979a6a30eaab1b24724b5f2",
+          "blob": "e3a7af98d33ca7f022969bfba9e7654d66ba62a9",
           "mode": "100644",
           "path": "kit/bin/gateway-health-probe.ps1",
           "type": "blob"
@@ -266,7 +266,7 @@
           "type": "blob"
         },
         {
-          "blob": "ce80907799cf7c88c1d8d7481dfa0a4683b5c61d",
+          "blob": "c1543ff74aee8ba20d6e4ca666cf463a3406df0e",
           "mode": "100644",
           "path": "kit/bin/telegram-watchdog-depth-probe.ps1",
           "type": "blob"
@@ -379,9 +379,9 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "a901df98caf53aa952630fc02ac0eb278027266bd8dfaaa41ae882c33f7be671",
+      "digest": "e9aae0294726ba2623ef7438211be7d79dbccc02387048bd1b672b1cd2cfc7cb",
       "excluded_paths": [],
-      "file_count": 766,
+      "file_count": 767,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -1044,6 +1044,12 @@
           "type": "blob"
         },
         {
+          "blob": "0ac810c223c5ad40c4af320b5a6a33c8254bf502",
+          "mode": "100644",
+          "path": "patches/modules/pm_first_selection_preserve_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "c21fffc04ef6acaa9c6113e56e55b39081a0b466",
           "mode": "100644",
           "path": "patches/modules/pm_read_only_install_state_v1.py",
@@ -1332,7 +1338,7 @@
           "type": "blob"
         },
         {
-          "blob": "56058939b95ced1215d764d779c44da2a3d690e8",
+          "blob": "527aa28fb867f552b3f2c83edd8ef60d4b071a3f",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -1530,7 +1536,7 @@
           "type": "blob"
         },
         {
-          "blob": "3d49aa5296ae3ba44f17a06c3b62c9d443479ed0",
+          "blob": "02cc54f5f8a5597d6426529b820f83d0dcb02a80",
           "mode": "100644",
           "path": "shared-defaults/config-client-quiet-display.yaml",
           "type": "blob"
@@ -5127,6 +5133,7 @@
         "patches/modules/pm_read_only_install_state_v1.py",
         "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
         "patches/modules/xai_oauth_pricing_v1.py",
+        "patches/modules/pm_first_selection_preserve_v1.py",
         "patches/payloads/cron-operator-delivery-d363-v1",
         "patches/payloads/durable-drain-inbox-d363-v1",
         "patches/payloads/host-steward-runtime-ownership-d363-v1",
@@ -5202,15 +5209,15 @@
       ]
     }
   },
-  "deployment_digest": "52deee1be0e1ec10fdba07a64490301dc08aacfdefb2aa7d8db0ee16f42e0179",
-  "golden_sha": "7bbeac6dbe689b6a29e2ba233881d234ac70ac6b",
+  "deployment_digest": "378d8c5028306d29fa2d41f043137f3a7c61f5dce3faaa85d0b206aa167a4cfb",
+  "golden_sha": "deb7145d2c9b8a9347907ff4ca93e1e617d99ffb",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "dedacc201395224e04525c6229de5ad3c8b777b26348c61f4d8a01713aad2ba2",
+    "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 334,
+    "file_count": 335,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5890,6 +5897,11 @@
       "plugins/platforms/telegram/adapter.py": {
         "mode": "100644",
         "sha256": "0124057ad6e16caaf2512034d9552276c64fe4f0bc5f18a3662ee5fbca75f07b",
+        "type": "blob"
+      },
+      "pm/install.py": {
+        "mode": "100644",
+        "sha256": "df3eeffa2fb1c79de999e2be736439b99544c296f3d953ea090518692c381188",
         "type": "blob"
       },
       "pm/lock.json": {
@@ -6883,7 +6895,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "7bbeac6dbe689b6a29e2ba233881d234ac70ac6b",
+    "golden_sha": "deb7145d2c9b8a9347907ff4ca93e1e617d99ffb",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

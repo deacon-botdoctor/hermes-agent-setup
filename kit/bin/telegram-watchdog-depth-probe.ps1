@@ -22,6 +22,11 @@ function Resolve-ProfileDir {
   param($hermesRoot, $profile)
   if ($profile -and $profile -ne "root" -and $profile -ne "enoch") {
     if ($profile -notmatch '^[A-Za-z0-9_-]+$') { throw "invalid_profile" }
+    $resolvedRoot = [System.IO.Path]::GetFullPath($hermesRoot).TrimEnd([char[]]"\/")
+    if ((Split-Path -Leaf $resolvedRoot) -eq $profile -and
+        (Split-Path -Leaf (Split-Path -Parent $resolvedRoot)) -eq "profiles") {
+      return $resolvedRoot
+    }
     # A named profile must never borrow another profile's healthy state.
     return (Join-Path $hermesRoot ("profiles\" + $profile))
   }

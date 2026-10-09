@@ -1,9 +1,9 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "dedacc201395224e04525c6229de5ad3c8b777b26348c61f4d8a01713aad2ba2",
-    "file_count": 334
+    "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
+    "file_count": 335
   },
-  "baseline_wiring_digest": "5f1e7956761edd7535e73d4eb87f2faebb7ab3906aa47d46c92652f8cc3e4d83",
+  "baseline_wiring_digest": "494d2a9ce64abad806b6e5a2cc6e89d6dfdee491eb08d5c03248c54d41d9d6e8",
   "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "52deee1be0e1ec10fdba07a64490301dc08aacfdefb2aa7d8db0ee16f42e0179",
-  "golden_sha": "7bbeac6dbe689b6a29e2ba233881d234ac70ac6b",
+  "deployment_digest": "378d8c5028306d29fa2d41f043137f3a7c61f5dce3faaa85d0b206aa167a4cfb",
+  "golden_sha": "deb7145d2c9b8a9347907ff4ca93e1e617d99ffb",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-7bbeac6d",
+  "release": "botdoctor-hermes-2026.10.05-golden-deb7145d",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "a901df98caf53aa952630fc02ac0eb278027266bd8dfaaa41ae882c33f7be671",
+  "runtime_payload_digest": "e9aae0294726ba2623ef7438211be7d79dbccc02387048bd1b672b1cd2cfc7cb",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced dedacc201395224e04525c6229de5ad3c8b777b26348c61f4d8a01713aad2ba2 across 334 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: 7bbeac6dbe689b6a29e2ba233881d234ac70ac6b"
+    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826 across 335 changed runtime files.",
+    "golden_suite": "Exact reviewed Golden source: deb7145d2c9b8a9347907ff4ca93e1e617d99ffb"
   }
 }

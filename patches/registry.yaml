@@ -1,5 +1,22 @@
 schema_version: 1
 patches:
+  - name: pm_first_selection_preserve_v1
+    module: modules/pm_first_selection_preserve_v1.py
+    function: patch_pm_first_selection_preserve_v1
+    target: pm/install.py
+    owner: engineering-lead
+    idempotency: HERMES_PM_FIRST_SELECTION_PRESERVE_v1
+    # Packaging checks are in this repo; CLI behavior is verified in the assembled runtime.
+    test: python3 -m pytest -q bin/test/test_patch_packaging_audit.py bin/test/test_runtime_payload_manifest.py
+    smoke: python3 -m py_compile pm/install.py
+    rollback: rebind the prior immutable runtime through the operator executor; preserve dependency generations
+    client_impact: restart_required
+    tags: [dependencies, lifecycle, mcp]
+    status: extracted
+    route: irreducible
+    reason: The first source-runtime dependency rebuild otherwise drops previously installed features when no managed selection exists.
+    upstream_issue: none
+    retirement_condition: upstream carries source-installed extras into the first managed dependency selection
   - name: session_url_storage_redaction_v1
     module: modules/session_url_storage_redaction_v1.py
     function: patch_session_url_storage_redaction_v1
