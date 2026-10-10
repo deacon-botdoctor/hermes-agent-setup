@@ -1,0 +1,27 @@
+{
+  "mailboxes": [
+    {
+      "id": "business",
+      "name": "Business inbox",
+      "account": "owner@example.invalid",
+      "connection": {
+        "kind": "composio_api",
+        "toolkit": "GMAIL",
+        "user_id": "tenant-owned-existing-entity",
+        "api_key_env": "COMPOSIO_API_KEY",
+        "version": "20260915_00"
+      }
+    }
+  ],
+  "delivery": {
+    "cards": {"chat_id": "-1000000000000", "thread_id": 2},
+    "alerts": {"chat_id": "1000000000"}
+  },
+  "privacy": {
+    "no_links": true,
+    "no_addresses": true,
+    "no_phone_numbers": true,
+    "instructions": "Omit unnecessary personal data. Do not produce unsolicited drafts."
+  },
+  "review_model": {"provider": "xai-oauth", "model": "grok-4.7"}
+}

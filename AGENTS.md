@@ -85,10 +85,12 @@ python3 bin/assemble-runtime.py \
   --prepare-home "$staging_home"
 ```
 
-`--prepare-home` runs the pinned upstream dependency installer with a separate
-installer `HOME`, creates the candidate venv and native profile scaffolding,
-then applies and verifies the public Golden payload. It does not install or
-restart a gateway.
+`--prepare-home` applies the public Golden payload, then uses the pinned upstream
+installer's Python bootstrap stage with a separate installer `HOME`. It creates a
+private candidate venv, installs MCP and messaging dependencies from the
+source-pinned uv lock plus PyYAML, and verifies the final runtime. Native setup below
+creates the profile configuration. This preparation does not install or restart
+a gateway.
 
 Run native setup with the candidate:
 
@@ -173,8 +175,9 @@ the user has not supplied.
 
 ## Fresh or staged Windows installation
 
-Use the pinned upstream PowerShell installer to create an isolated clean
-candidate first. Preserve the prior User and process `PATH`, `HERMES_HOME`, and
+Use Python 3.11 or newer and Git for Windows to run the verified public
+assembler. It uses the pinned upstream PowerShell installer only to bootstrap
+private Python, then installs the candidate dependencies from its pinned uv lock. Preserve the prior User and process `PATH`, `HERMES_HOME`, and
 `HERMES_GIT_BASH_PATH` when this is an upgrade. Use a clean release checkout
 created with `git -c core.autocrlf=false clone <release-repository-url>` so
 payload files retain their canonical LF bytes. Verification accepts a normal
@@ -216,9 +219,6 @@ if ($InstallMode -eq "fresh" -and (Test-Path (Join-Path $LiveHome "config.yaml")
 if ($InstallMode -eq "existing" -and -not (Test-Path (Join-Path $LiveHome "config.yaml"))) {
   throw "Existing classification conflicts with the proven profile"
 }
-$Installer = Join-Path $env:TEMP "hermes-install.ps1"
-$InstallerUrl = "https://raw.githubusercontent.com/NousResearch/hermes-agent/9da6d455c9e1f2bf74bb9f47766ee9fc52e17bfb/scripts/install.ps1"
-$ExpectedInstallerSha256 = "522941b9d678898392d31fc239cc229f6852a0f1bac8f266f7b81f8991f239d1"
 $PriorProcessPath = $env:PATH
 $PriorProcessHermesHome = $env:HERMES_HOME
 $PriorProcessGitBashPath = $env:HERMES_GIT_BASH_PATH
@@ -230,31 +230,8 @@ $PriorUserGitBashPath = [Environment]::GetEnvironmentVariable("HERMES_GIT_BASH_P
 if ((Test-Path $Candidate) -or (Test-Path $StagingHome)) {
   throw "Candidate and staging paths must be unique and absent"
 }
-New-Item -ItemType Directory -Path $StagingHome | Out-Null
-if ((Get-ChildItem -Force $StagingHome | Select-Object -First 1) -or
-    (Test-Path (Join-Path $StagingHome ".env")) -or
-    (Test-Path (Join-Path $StagingHome "state")) -or
-    (Test-Path (Join-Path $StagingHome "gateway-service"))) {
-  throw "Staging home must be empty before the pinned installer"
-}
-Invoke-WebRequest $InstallerUrl -OutFile $Installer
-$ActualInstallerSha256 = (Get-FileHash -Algorithm SHA256 $Installer).Hash.ToLowerInvariant()
-if ($ActualInstallerSha256 -ne $ExpectedInstallerSha256) {
-  throw "Pinned installer digest mismatch: $ActualInstallerSha256"
-}
-try {
-  & $Installer -SkipSetup -Commit $Release.canonical_upstream_sha `
-    -HermesHome $ProfileHome -InstallDir $Candidate
-} finally {
-  $env:PATH = $PriorProcessPath
-  $env:HERMES_HOME = $PriorProcessHermesHome
-  $env:HERMES_GIT_BASH_PATH = $PriorProcessGitBashPath
-  [Environment]::SetEnvironmentVariable("PATH", $PriorUserPath, "User")
-  [Environment]::SetEnvironmentVariable("HERMES_HOME", $PriorUserHermesHome, "User")
-  [Environment]::SetEnvironmentVariable("HERMES_GIT_BASH_PATH", $PriorUserGitBashPath, "User")
-}
-& "$Candidate\venv\Scripts\python.exe" .\bin\assemble-runtime.py `
-  --output $Candidate --use-existing-clean-runtime
+python .\bin\assemble-runtime.py --output $Candidate --prepare-home $StagingHome
+if ($LASTEXITCODE -ne 0) { throw "Candidate assembly or dependency preparation failed" }
 ```
 
 For a fresh machine, finish native setup and activate the native gateway:

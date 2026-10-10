@@ -228,7 +228,9 @@ KNOWN_PROVIDER_ENVS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "xai": "XAI_API_KEY",
 }
-PROVIDER_MANAGED_AUTH = {"openai-codex"}
+# These providers resolve credentials through Hermes OAuth, not API-key envs.
+# This is route classification only; native auth checks prove login health.
+PROVIDER_MANAGED_AUTH = {"openai-codex", "xai-oauth"}
 
 
 def provider_credential_available(section: dict, env: dict, provider: str) -> bool:
@@ -308,7 +310,7 @@ asyncio.run(main())
                 env=runtime_env,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             probe = None
@@ -411,6 +413,8 @@ import os
 try:
     import json
     from tools import browser_tool
+    cdp = getattr(browser_tool, "_cdp", browser_tool)
+    cloud = getattr(browser_tool, "_cloud", browser_tool)
     try:
         from tools import browser_use_cli
         browser_use_mode = browser_use_cli.is_browser_use_cli_mode()
@@ -424,12 +428,12 @@ try:
         runtime = "camofox"
         backend = "camofox"
         ready = bool(browser_tool.check_browser_requirements())
-    elif browser_tool._get_cdp_override():
+    elif cdp._get_cdp_override():
         runtime = "cdp_override"
         backend = "cdp_override"
         ready = bool(browser_tool.check_browser_requirements())
     else:
-        provider = browser_tool._get_cloud_provider()
+        provider = cloud._get_cloud_provider()
         runtime = "cloud_browser" if provider is not None else "native_agent_browser"
         backend = provider.provider_name() if provider is not None else "agent_browser"
         ready = bool(browser_tool.check_browser_requirements())
@@ -571,15 +575,12 @@ def check_auxiliary_task(cfg: dict, env: dict, task: str) -> dict:
     model = section.get("model", "")
     base_url = section.get("base_url", "")
     api_key = section.get("api_key", "")
-    api_key_env = section.get("api_key_env", "")
 
     issues = []
 
-    # Anti-pattern: base_url without any resolvable key source.
-    # auxiliary_client resolves api_key_env from process env or HERMES_HOME/.env
-    # before deciding whether a base_url route is usable.
-    if base_url and not api_key and not (api_key_env and env.get(api_key_env)):
-        issues.append("base_url set without api_key or resolvable api_key_env")
+    # Use the same credential-source classification as legacy compression.
+    if base_url and not provider_credential_available(section, env, provider):
+        issues.append("base_url set without an accountable credential source")
         result["plumbing"] = "auth_gap"
         result["status"] = "broken"
         result["fix_hint"] = (
@@ -924,6 +925,10 @@ def _mcp_launch_readiness(cmd: str, server_cfg: dict) -> dict | None:
         if isinstance(v, str):
             server_env[k] = os.path.expandvars(v)
     base = os.path.basename(cmd).lower()
+    if base in {"ssh", "ssh.exe"}:
+        # Arguments after the destination belong to the remote filesystem.
+        # The caller already checked the local transport command's availability.
+        return {"status": "ok", "detail": "SSH transport available; remote entrypoint not checked locally"}
     is_python = base.startswith("python")
     cwd = server_cfg.get("cwd") or None
 
@@ -1037,18 +1042,17 @@ def _mcp_launch_readiness(cmd: str, server_cfg: dict) -> dict | None:
 def scan_anti_patterns(cfg: dict, env: dict) -> list[dict]:
     patterns = []
 
-    # Check all auxiliary sections for base_url + api_key_env (no api_key)
+    # Check auxiliary routes using the same provider-aware credential rule.
     aux = cfg.get("auxiliary", {})
     for task, section in aux.items():
         if not isinstance(section, dict):
             continue
-        api_key_env = str(section.get("api_key_env", "")).strip()
-        if section.get("base_url") and not section.get("api_key") and not (api_key_env and env.get(api_key_env)):
+        if section.get("base_url") and not provider_credential_available(section, env, str(section.get("provider", ""))):
             patterns.append(
                 {
                     "pattern": "base_url_without_key_source",
                     "location": f"auxiliary.{task}",
-                    "detail": "base_url is set but no api_key or resolvable api_key_env is available",
+                    "detail": "base_url is set but no accountable credential source is available",
                     "fix": f"Set api_key/api_key_env for auxiliary.{task}, or remove base_url",
                 }
             )
@@ -1110,9 +1114,55 @@ def scan_anti_patterns(cfg: dict, env: dict) -> list[dict]:
     return patterns
 
 
+def openrouter_may_be_used(cfg: dict) -> bool:
+    """Conservatively identify configured OpenRouter consumers, including fallbacks.
+
+    Native auxiliary auto routing follows the selected main provider and its
+    configured fallbacks. An unselected main provider can still discover keys.
+    This is configuration evidence, not proof of a session's temporary override.
+    """
+    model = cfg.get("model", {})
+    if not isinstance(model, dict) or str(model.get("provider") or "auto").strip().lower() in {"auto", "moa"}:
+        return True
+
+    def has_route(value):
+        if isinstance(value, list):
+            return any(has_route(item) for item in value)
+        if not isinstance(value, dict):
+            return False
+        for key, item in value.items():
+            if key in {"provider", "summary_provider"} and str(item).strip().lower() == "openrouter":
+                return True
+            if key in {"base_url", "summary_base_url"}:
+                from urllib.parse import urlparse
+                try:
+                    hostname = urlparse(str(item)).hostname
+                except ValueError:
+                    return True  # An invalid route cannot prove this key is unused.
+                if hostname == "openrouter.ai":
+                    return True
+            if key in {"api_key_env", "summary_api_key_env"} and item == "OPENROUTER_API_KEY":
+                return True
+            if key in {"api_key", "summary_api_key"} and item == "${OPENROUTER_API_KEY}":
+                return True
+            if isinstance(item, (dict, list)) and has_route(item):
+                return True
+        return False
+
+    return any(has_route(cfg.get(name)) for name in (
+        "model", "fallback_providers", "auxiliary", "compression", "delegation",
+        "custom_providers", "smart_model_routing", "image_gen", "vision",
+    ))
+
+
 def check_api_key_validity(cfg: dict, env: dict, smoke: bool) -> dict:
-    """Verify the primary OpenRouter API key is actually valid."""
+    """Check the environment OpenRouter key only when a route can consume it."""
     result = {"status": "ok", "config": "ok", "plumbing": "ok", "smoke": "skip"}
+
+    if not openrouter_may_be_used(cfg):
+        result["config"] = "not_configured"
+        result["detail"] = "No configured OpenRouter route; environment key not checked"
+        return result
 
     key = env.get("OPENROUTER_API_KEY", "")
     if not key:
@@ -1126,7 +1176,7 @@ def check_api_key_validity(cfg: dict, env: dict, smoke: bool) -> dict:
     if key.startswith("REUSE") or key.startswith("REPLACE") or len(key) < 20:
         result["status"] = "broken"
         result["plumbing"] = "placeholder_key"
-        result["detail"] = f"OPENROUTER_API_KEY is a placeholder: {key[:20]}"
+        result["detail"] = "OPENROUTER_API_KEY is a placeholder"
         return result
 
     if smoke:

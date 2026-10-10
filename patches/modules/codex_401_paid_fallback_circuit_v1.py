@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 MARKER = "HERMES_CODEX_401_PAID_FALLBACK_CIRCUIT_v1"
@@ -585,6 +586,14 @@ def _patch_native_codex401(hermes_dir: Path) -> bool:
         guarded = _patch_client_safe_result(" " * 16 + summary)
         guarded = textwrap.dedent(guarded).replace("_provider", "provider")
         recovery = _replace_once(recovery, summary, textwrap.indent(guarded, "    "), "native safe summary")
+    # Current Hermes builds the client reply separately from the diagnostic summary.
+    # Keep the circuit's existing safe auth reply at that final presentation seam.
+    final_anchor = "    result = _failed_turn_result(_final_response, messages, api_call_count, _nonretryable_summary)\n"
+    final_guard = ("    # HERMES_CODEX401_CLIENT_FINAL_v1\n"
+                   "    if provider == 'openai-codex' and classified.is_auth:\n"
+                   "        _final_response = _nonretryable_summary\n")
+    if final_anchor in recovery and final_guard not in recovery:
+        recovery = _replace_once(recovery, final_anchor, final_guard + final_anchor, "native safe final reply")
     if "original_user_message: Any = ''" not in error:
         error = _replace_once(error,
             "    api_request_id: Any, api_start_time: Any, effective_task_id: Any, turn_id: Any,\n",
@@ -595,14 +604,7 @@ def _patch_native_codex401(hermes_dir: Path) -> bool:
             "        effective_task_id=effective_task_id, turn_id=turn_id, api_request_id=api_request_id,\n"
             "        original_user_message=original_user_message,\n    )\n    status_code = _ce.status_code",
             "native recovery request identity caller")
-    if "paid_fallback_allowed" not in selector:
-        seed = ('    fb_provider = (fb.get("provider") or "").strip().lower()\n'
-                '    fb_model = (fb.get("model") or "").strip()\n'
-                '    if not fb_provider or not fb_model:\n')
-        residual = _patch_selector(seed).split('    fb_model = (fb.get("model") or "").strip()\n', 1)[1]
-        residual = residual.removesuffix('    if not fb_provider or not fb_model:\n')
-        native = '    if _should_skip_fallback_candidate(agent, fb, fb_key, fb_provider, fb_model, unavailable):\n'
-        selector = _replace_once(selector, native, residual + native, "native candidate admission")
+    selector = _patch_native_selector(selector, textwrap)
     proposed = {recovery_path: recovery, error_path: error, selector_path: selector,
                 hermes_dir / HELPER_PATH: HELPER_SOURCE.strip() + "\n"}
     for path, source in proposed.items():
@@ -613,6 +615,29 @@ def _patch_native_codex401(hermes_dir: Path) -> bool:
             path.write_text(source, encoding="utf-8")
             changed = True
     return changed
+
+
+def _patch_native_selector(selector: str, textwrap) -> str:
+    """Add the paid-fallback policy at the split helper's exact loop depth."""
+    if "paid_fallback_allowed" in selector:
+        return selector
+    seed = ('    fb_provider = (fb.get("provider") or "").strip().lower()\n'
+            '    fb_model = (fb.get("model") or "").strip()\n'
+            '    if not fb_provider or not fb_model:\n')
+    residual = _patch_selector(seed).split('    fb_model = (fb.get("model") or "").strip()\n', 1)[1]
+    residual = residual.removesuffix('    if not fb_provider or not fb_model:\n')
+    native_anchor = re.compile(
+        r"^(?P<indent>[ \t]+)if _should_skip_fallback_candidate\(agent, fb, fb_key, fb_provider, fb_model, unavailable\):$",
+        re.MULTILINE,
+    )
+    match = native_anchor.search(selector)
+    if match is None or native_anchor.search(selector, match.end()) is not None:
+        raise PatchError("required unique anchor missing: native candidate admission")
+    # The split helper lives inside a nested fallback loop.  Preserve that
+    # loop's indentation rather than replacing the four-space substring
+    # embedded within it (which emits a syntactically invalid dedent).
+    insertion = textwrap.indent(textwrap.dedent(residual), match.group("indent"))
+    return selector[:match.start()] + insertion + selector[match.start():]
 
 
 def patch_codex_401_paid_fallback_circuit_v1(hermes_dir: Path) -> bool:

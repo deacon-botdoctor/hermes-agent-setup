@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -26,6 +27,23 @@ def patch_source(content: str) -> str:
     match = matches[0]
     indent = match.group("indent")
     argindent = match.group("argindent")
+    tree = ast.parse(content)
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+             and isinstance(node.func, ast.Name) and node.func.id == "AIAgent"]
+    if len(calls) != 1:
+        raise PatchError("required unique anchor missing: oneshot AIAgent call")
+    native = [kw for kw in calls[0].keywords if kw.arg == "session_id"]
+    fallback = "None"
+    if native:
+        if len(native) != 1 or not isinstance(native[0].value, ast.Name) or native[0].value.id != "resume_sid":
+            raise PatchError("unknown native oneshot session_id owner")
+        lines = content.splitlines(keepends=True)
+        kw = native[0]
+        if kw.lineno != kw.end_lineno or lines[kw.lineno - 1].strip() != "session_id=resume_sid,":
+            raise PatchError("unknown native oneshot session_id layout")
+        del lines[kw.lineno - 1]
+        content = "".join(lines)
+        fallback = "resume_sid"
     replacement = (
         f"{indent}agent = AIAgent(\n"
         f"{argindent}# {MARKER}: the owning scheduler and caller validate the exact\n"
@@ -34,7 +52,7 @@ def patch_source(content: str) -> str:
         f"{argindent}session_id=(\n"
         f'{argindent}    os.getenv("HERMES_ONESHOT_SESSION_ID", "").strip()\n'
         f'{argindent}    if os.getenv("HERMES_ONESHOT_SESSION_ID", "").strip().startswith("cron_")\n'
-        f"{argindent}    else None\n"
+        f"{argindent}    else {fallback}\n"
         f"{argindent}),\n"
         f'{argindent}api_key=runtime.get("api_key"),\n'
     )

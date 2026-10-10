@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import shutil
-import hashlib
-import subprocess
 from pathlib import Path
 
-LEGACY_MARKER = "HERMES_PLATFORM_DELIVERY_DRAIN_v1"
 MARKER = "HERMES_PLATFORM_DELIVERY_DRAIN_v2"
 
 
-_COUNTER_OLD = '                tasks = getattr(adapter, "_background_tasks", None)\n                if tasks is None:\n                    session_tasks = getattr(adapter, "_session_tasks", None)\n                    if isinstance(session_tasks, dict):\n                        tasks = session_tasks.values()\n                    elif session_tasks is not None:\n                        tasks = session_tasks\n                if tasks is not None:\n                    active += sum(not task.done() for task in tasks)\n                else:\n                    active += len(getattr(adapter, "_active_sessions", {}))\n'
-_COUNTER_NEW = '                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                if any(collection is not None for collection in collections):\n                    active += sum(not task.done() for task in tasks.values())\n                else:\n                    active += len(getattr(adapter, "_active_sessions", {}))\n'
+_NATIVE_COUNTER_OLD = '                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                count += sum(not task.done() for task in tasks.values())\n'
+_NATIVE_COUNTER_PREVIOUS = '                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                # The API orphan sweeper is maintenance, not an in-flight response.\n                sweep = getattr(adapter, "_sweep_orphaned_runs", None)\n                sweep_code = getattr(getattr(sweep, "__func__", None), "__code__", None)\n                if sweep_code is not None:\n                    for key, task in list(tasks.items()):\n                        coro = getattr(task, "get_coro", lambda: None)()\n                        frame = getattr(coro, "cr_frame", None)\n                        if (getattr(coro, "cr_code", None) is sweep_code and frame is not None\n                                and frame.f_locals.get("self") is adapter):\n                            tasks.pop(key)\n                count += sum(not task.done() for task in tasks.values())\n'
+_NATIVE_COUNTER_NEW = '                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                maintenance_codes = {\n                    getattr(getattr(getattr(adapter, name, None), "__func__", None), "__code__", None)\n                    for name in ("_sweep_orphaned_runs", "_heartbeat_loop")\n                } - {None}\n                for key, task in list(tasks.items()):\n                    coro = getattr(task, "get_coro", lambda: None)()\n                    frame = getattr(coro, "cr_frame", None)\n                    if (getattr(coro, "cr_code", None) in maintenance_codes and frame is not None\n                            and frame.f_locals.get("self") is adapter):\n                        tasks.pop(key)\n                count += sum(not task.done() for task in tasks.values())\n'
+
 
 def _once(text: str, old: str, new: str, label: str) -> str:
     if old not in text:
@@ -21,19 +20,10 @@ def _once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
-def _once_any(text: str, replacements: tuple[tuple[str, str], ...], label: str) -> str:
-    for old, new in replacements:
-        if old in text:
-            return text.replace(old, new, 1)
-    raise RuntimeError(f"{label}: anchor drift")
-
-
 def _write_with_backup(run_py: Path, original: str, patched: str) -> None:
     backup = Path(str(run_py) + ".bak-pre-platform-delivery-drain-v2")
-    legacy_backup = Path(str(run_py) + ".bak-pre-platform-delivery-drain-v1")
-    backup_source = legacy_backup if LEGACY_MARKER in original and legacy_backup.is_file() else run_py
     try:
-        shutil.copy2(backup_source, backup)
+        shutil.copy2(run_py, backup)
         run_py.write_text(patched, encoding="utf-8")
     except Exception:
         run_py.write_text(original, encoding="utf-8")
@@ -41,147 +31,90 @@ def _write_with_backup(run_py: Path, original: str, patched: str) -> None:
         raise
 
 
-def _upgrade_legacy_counter(text: str) -> str:
-    old = f"""        # {LEGACY_MARKER}
-        seen_adapters: set[int] = set()
-        active = 0
-"""
-    new = f"""        # {MARKER}
-        seen_adapters: set[int] = set()
-        active = 0
-"""
-    legacy_counter = """                sessions = getattr(adapter, "_active_sessions", None)
-                if sessions:
-                    active += len(sessions)
-"""
-    task_counter = """                collections = (getattr(adapter, "_background_tasks", None),
-                               getattr(adapter, "_session_tasks", None))
-                tasks = {id(task): task for collection in collections
-                         if collection is not None
-                         for task in (collection.values() if isinstance(collection, dict) else collection)}
-                if any(collection is not None for collection in collections):
-                    active += sum(not task.done() for task in tasks.values())
-                else:
-                    active += len(getattr(adapter, "_active_sessions", {}))
-"""
-    patched = _once(text, old, new, "legacy marker")
-    return _once_any(
-        patched,
-        ((legacy_counter, task_counter), (_COUNTER_OLD, task_counter), (task_counter, task_counter)),
-        "legacy delivery counter",
-    )
+_NATIVE_REPLACEMENTS = [('    # Active-work accounting\n', '    # Active-work accounting\n    def _active_platform_delivery_count(self) -> int:\n        """Live adapter delivery tasks across all profiles; stale guards do not count."""\n        seen = set()\n        count = 0\n        maps = [getattr(self, "adapters", {})]\n        maps.extend(getattr(self, "_profile_adapters", {}).values())\n        for adapters in maps:\n            for adapter in adapters.values():\n                if id(adapter) in seen:\n                    continue\n                seen.add(id(adapter))\n                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                maintenance_codes = {\n                    getattr(getattr(getattr(adapter, name, None), "__func__", None), "__code__", None)\n                    for name in ("_sweep_orphaned_runs", "_heartbeat_loop")\n                } - {None}\n                for key, task in list(tasks.items()):\n                    coro = getattr(task, "get_coro", lambda: None)()\n                    frame = getattr(coro, "cr_frame", None)\n                    if (getattr(coro, "cr_code", None) in maintenance_codes and frame is not None\n                            and frame.f_locals.get("self") is adapter):\n                        tasks.pop(key)\n                count += sum(not task.done() for task in tasks.values())\n        return count\n\n'), ('            + self._active_deferred_agent_worker_count()\n', '            + self._active_deferred_agent_worker_count()\n            + self._active_platform_delivery_count()\n'), ('"""``(agents, cron, api, deferred)`` — the four sources the drain waits on."""', '"""``(agents, cron, api, deferred, delivery)`` work awaited before teardown."""'), ('            self._active_api_run_count(), self._active_deferred_agent_worker_count(),\n', '            self._active_api_run_count(), self._active_deferred_agent_worker_count(),\n            self._active_platform_delivery_count(),\n'), ('        _cron0, _api0, _deferred0 = last_counts[1:]', '        _cron0, _api0, _deferred0, _delivery0 = last_counts[1:]'), ('not (_cron0 or _api0 or _deferred0):', 'not (_cron0 or _api0 or _deferred0 or _delivery0):'), ('agents, cron, api, deferred = self._drain_work_counts()', 'agents, cron, api, deferred, delivery = self._drain_work_counts()'), ('((agents or api or deferred) and now < deadline)', '((agents or api or deferred or delivery) and now < deadline)')]
 
 
-def _patch_agent_only_drain(text: str) -> str:
-    patched = _once(
-        text,
-        "    async def _drain_active_agents(self, timeout: float) -> tuple[Dict[str, Any], bool]:\n",
-        f'''    def _active_platform_delivery_count(self) -> int:
-        """Return active platform message/delivery sessions across profiles."""
-        # {MARKER}
-        seen_adapters: set[int] = set()
-        active = 0
-        adapter_maps = [getattr(self, "adapters", {{}})]
-        adapter_maps.extend(getattr(self, "_profile_adapters", {{}}).values())
-        for adapter_map in adapter_maps:
-            for adapter in adapter_map.values():
-                adapter_id = id(adapter)
-                if adapter_id in seen_adapters:
-                    continue
-                seen_adapters.add(adapter_id)
-                collections = (getattr(adapter, "_background_tasks", None),
-                               getattr(adapter, "_session_tasks", None))
-                tasks = {{id(task): task for collection in collections
-                         if collection is not None
-                         for task in (collection.values() if isinstance(collection, dict) else collection)}}
-                if any(collection is not None for collection in collections):
-                    active += sum(not task.done() for task in tasks.values())
-                else:
-                    active += len(getattr(adapter, "_active_sessions", {{}}))
-        return active
+_PERSIST_BODY = '        _write_runtime_status_quiet(active_agents=self._active_work_count())\n'
+_PERSIST_REFRESH = _PERSIST_BODY + r'''
+        # Delivery outlives the model turn. Refresh when each tracked task finishes,
+        # without counting stale guards or reporting idle before transport completes.
+        watched = getattr(self, "_delivery_status_watchers", None)
+        if watched is None:
+            watched = self._delivery_status_watchers = set()
+        maps = [getattr(self, "adapters", {})]
+        maps.extend(getattr(self, "_profile_adapters", {}).values())
+        for adapters in maps:
+            for adapter in adapters.values():
+                for collection in (getattr(adapter, "_background_tasks", None),
+                                   getattr(adapter, "_session_tasks", None)):
+                    if collection is None:
+                        continue
+                    tasks = collection.values() if isinstance(collection, dict) else collection
+                    for task in tasks:
+                        if not task.done() and task not in watched:
+                            watched.add(task)
+                            task.add_done_callback(self._delivery_task_finished)
 
-    async def _drain_active_agents(self, timeout: float) -> tuple[Dict[str, Any], bool]:
-''',
-        "delivery-count helper",
-    )
-    patched = _once(
-        patched,
-        "        last_active_count = self._running_agent_count()\n        last_status_at = 0.0\n",
-        "        last_active_count = self._running_agent_count()\n"
-        "        last_delivery_count = self._active_platform_delivery_count()\n"
-        "        last_status_at = 0.0\n",
-        "initial delivery count",
-    )
-    patched = _once(
-        patched,
-        "            nonlocal last_active_count, last_status_at\n",
-        "            nonlocal last_active_count, last_delivery_count, last_status_at\n",
-        "status nonlocal",
-    )
-    patched = _once(
-        patched,
-        "            active_count = self._running_agent_count()\n"
-        "            if force or active_count != last_active_count or (now - last_status_at) >= 1.0:\n",
-        "            active_count = self._running_agent_count()\n"
-        "            delivery_count = self._active_platform_delivery_count()\n"
-        "            if (\n"
-        "                force\n"
-        "                or active_count != last_active_count\n"
-        "                or delivery_count != last_delivery_count\n"
-        "                or (now - last_status_at) >= 1.0\n"
-        "            ):\n",
-        "status delivery count",
-    )
-    patched = _once(
-        patched,
-        "                last_active_count = active_count\n                last_status_at = now\n",
-        "                last_active_count = active_count\n"
-        "                last_delivery_count = delivery_count\n"
-        "                last_status_at = now\n",
-        "status delivery assignment",
-    )
-    patched = _once(
-        patched,
-        "        if not self._running_agents:\n",
-        "        if not self._running_agents and last_delivery_count == 0:\n",
-        "initial delivery gate",
-    )
-    patched = _once(
-        patched,
-        "        while self._running_agents and asyncio.get_running_loop().time() < deadline:\n",
-        "        while (\n"
-        "            self._running_agents or self._active_platform_delivery_count()\n"
-        "        ) and asyncio.get_running_loop().time() < deadline:\n",
-        "drain loop delivery gate",
-    )
-    return _once(
-        patched,
-        "        timed_out = bool(self._running_agents)\n",
-        "        timed_out = bool(self._running_agents) or bool(self._active_platform_delivery_count())\n",
-        "timeout delivery gate",
-    )
+    def _delivery_task_finished(self, task) -> None:
+        self._delivery_status_watchers.discard(task)
+        self._persist_active_agents()
+'''
 
 
-NATIVE_BASE = "d3630f853239e8c41ce7201e09fbdf39bcbc5431"
-# Exact whole-file pre/post identities: pristine native and durable-carrier composition.
-_NATIVE_IMAGES = {'c280164863bc33e99c0dd24a030222b618d9533a1ef8c3f1ca1fd73c008b808f': '1685ac84071919f885263c83296fe3825cb6d455c13134da69cd3fa5f320484d', '1db9c7e2985260a4da985ffee6708e8af42e8ecc7abe6f40aff7ca19effab34c': 'ea35a793b415282f4d63f269ab2f892ec7c0c1bc85b0b9b2a524a47a2ddcf8c9'}
-_NATIVE_REPLACEMENTS = [('    # Active-work accounting\n', '    # Active-work accounting\n    def _active_platform_delivery_count(self) -> int:\n        """Live adapter delivery tasks across all profiles; stale guards do not count."""\n        seen = set()\n        count = 0\n        maps = [getattr(self, "adapters", {})]\n        maps.extend(getattr(self, "_profile_adapters", {}).values())\n        for adapters in maps:\n            for adapter in adapters.values():\n                if id(adapter) in seen:\n                    continue\n                seen.add(id(adapter))\n                collections = (getattr(adapter, "_background_tasks", None),\n                               getattr(adapter, "_session_tasks", None))\n                tasks = {id(task): task for collection in collections\n                         if collection is not None\n                         for task in (collection.values() if isinstance(collection, dict) else collection)}\n                count += sum(not task.done() for task in tasks.values())\n        return count\n\n'), ('            + self._active_deferred_agent_worker_count()\n', '            + self._active_deferred_agent_worker_count()\n            + self._active_platform_delivery_count()\n'), ('"""``(agents, cron, api, deferred)`` — the four sources the drain waits on."""', '"""``(agents, cron, api, deferred, delivery)`` work awaited before teardown."""'), ('            self._active_api_run_count(), self._active_deferred_agent_worker_count(),\n', '            self._active_api_run_count(), self._active_deferred_agent_worker_count(),\n            self._active_platform_delivery_count(),\n'), ('        _cron0, _api0, _deferred0 = last_counts[1:]', '        _cron0, _api0, _deferred0, _delivery0 = last_counts[1:]'), ('not (_cron0 or _api0 or _deferred0):', 'not (_cron0 or _api0 or _deferred0 or _delivery0):'), ('agents, cron, api, deferred = self._drain_work_counts()', 'agents, cron, api, deferred, delivery = self._drain_work_counts()'), ('((agents or api or deferred) and now < deadline)', '((agents or api or deferred or delivery) and now < deadline)')]
+def _refresh_delivery_status(source: str) -> str:
+    start = source.index("    def _persist_active_agents(self) -> None:\n")
+    end = source.index("    def _running_agent_ids(self)", start)
+    body = source[start:end]
+    if _PERSIST_REFRESH in body:
+        return source
+    if "_delivery_status_watchers" in source or body.count(_PERSIST_BODY) != 1:
+        raise RuntimeError("delivery status persistence source mismatch")
+    return source[:start] + body.replace(_PERSIST_BODY, _PERSIST_REFRESH, 1) + source[end:]
 
 
-def _patch_native_delivery(root: Path) -> bool:
+def _patch_current_split_delivery(root: Path) -> bool:
+    """Apply the reviewed drain accounting to the post-split shutdown owner."""
     target = Path(root) / "gateway/run_shutdown.py"
-    source = target.read_text()
-    digest = hashlib.sha256(source.encode()).hexdigest()
-    if digest in _NATIVE_IMAGES.values():
+    source = target.read_text(encoding="utf-8")
+    for previous in (_NATIVE_COUNTER_OLD, _NATIVE_COUNTER_PREVIOUS):
+        if previous in source:
+            prior_fragments = [new.replace(_NATIVE_COUNTER_NEW, previous) for _old, new in _NATIVE_REPLACEMENTS]
+            if MARKER not in source and not all(fragment in source for fragment in prior_fragments):
+                raise RuntimeError("split platform delivery source mismatch")
+            if source.count(previous) != 1:
+                raise RuntimeError("split platform delivery counter drift")
+            upgraded = _once(source, previous, _NATIVE_COUNTER_NEW, "split maintenance counter")
+            compile(upgraded, str(target), "exec")
+            _write_with_backup(target, source, upgraded)
+            return True
+    if MARKER in source:
+        if source.count(_NATIVE_COUNTER_NEW) != 1:
+            raise RuntimeError("split platform delivery counter drift")
         return False
-    if digest not in _NATIVE_IMAGES:
-        raise RuntimeError("native platform delivery drain source mismatch")
+    if all(new in source for _old, new in _NATIVE_REPLACEMENTS):
+        upgraded = source.replace(
+            _NATIVE_REPLACEMENTS[0][1],
+            _NATIVE_REPLACEMENTS[0][1].replace(
+                "    def _active_platform_delivery_count",
+                f"    # {MARKER}\n    def _active_platform_delivery_count",
+                1,
+            ),
+            1,
+        )
+        compile(upgraded, str(target), "exec")
+        _write_with_backup(target, source, upgraded)
+        return True
     patched = source
-    for old, new in _NATIVE_REPLACEMENTS:
-        patched = _once(patched, old, new, "native delivery owner")
-    if hashlib.sha256(patched.encode()).hexdigest() != _NATIVE_IMAGES[digest]:
-        raise RuntimeError("native platform delivery drain postimage mismatch")
-    target.write_text(patched)
+    for index, (old, new) in enumerate(_NATIVE_REPLACEMENTS):
+        if index == 0:
+            new = new.replace(
+                "    def _active_platform_delivery_count",
+                f"    # {MARKER}\n    def _active_platform_delivery_count",
+                1,
+            )
+        patched = _once(patched, old, new, "current split delivery owner")
+    compile(patched, str(target), "exec")
+    _write_with_backup(target, source, patched)
     return True
 
 
@@ -194,180 +127,17 @@ def patch_platform_delivery_drain_v1(root: Path) -> bool:
     letting stale session guards hold every restart to the timeout.
     """
 
-    head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True)
-    if head.returncode == 0 and head.stdout.strip() == NATIVE_BASE:
-        return _patch_native_delivery(root)
+    if not (Path(root) / "gateway/run_shutdown.py").is_file():
+        raise RuntimeError("platform delivery drain requires the native split shutdown owner")
     run_py = Path(root) / "gateway/run.py"
     original = run_py.read_text(encoding="utf-8")
-    if MARKER in original:
-        if original.count(_COUNTER_NEW) == 1:
-            return False
-        if original.count(_COUNTER_OLD) != 1:
-            raise RuntimeError("platform delivery task counter drift")
-        _write_with_backup(run_py, original, original.replace(_COUNTER_OLD, _COUNTER_NEW, 1))
-        return True
-    if LEGACY_MARKER in original:
-        patched = _upgrade_legacy_counter(original)
+    patched = _refresh_delivery_status(original)
+    compile(patched, str(run_py), "exec")
+    changed = _patch_current_split_delivery(root)
+    if patched != original:
         _write_with_backup(run_py, original, patched)
-        return True
-
-    if "        last_api_count = self._active_api_run_count()\n" not in original:
-        patched = _patch_agent_only_drain(original)
-        _write_with_backup(run_py, original, patched)
-        return True
-
-    delivery_helper = f'''    def _active_platform_delivery_count(self) -> int:
-        """Return active platform message/delivery sessions across profiles."""
-        # {MARKER}
-        seen_adapters: set[int] = set()
-        active = 0
-        adapter_maps = [getattr(self, "adapters", {{}})]
-        adapter_maps.extend(
-            getattr(self, "_profile_adapters", {{}}).values()
-        )
-        for adapter_map in adapter_maps:
-            for adapter in adapter_map.values():
-                adapter_id = id(adapter)
-                if adapter_id in seen_adapters:
-                    continue
-                seen_adapters.add(adapter_id)
-                collections = (getattr(adapter, "_background_tasks", None),
-                               getattr(adapter, "_session_tasks", None))
-                tasks = {{id(task): task for collection in collections
-                         if collection is not None
-                         for task in (collection.values() if isinstance(collection, dict) else collection)}}
-                if any(collection is not None for collection in collections):
-                    active += sum(not task.done() for task in tasks.values())
-                else:
-                    active += len(getattr(adapter, "_active_sessions", {{}}))
-        return active
-
-'''
-    patched = _once_any(
-        original,
-        (
-            (
-                "    async def _drain_active_agents(self, timeout: float) -> tuple[Dict[str, Any], bool]:\n",
-                delivery_helper
-                + "    async def _drain_active_agents(self, timeout: float) -> tuple[Dict[str, Any], bool]:\n",
-            ),
-            (
-                "    async def _drain_active_agents(\n"
-                "        self, timeout: float, cron_timeout: Optional[float] = None\n"
-                "    ) -> tuple[Dict[str, Any], bool]:\n",
-                delivery_helper + "    async def _drain_active_agents(\n"
-                "        self, timeout: float, cron_timeout: Optional[float] = None\n"
-                "    ) -> tuple[Dict[str, Any], bool]:\n",
-            ),
-        ),
-        "delivery-count helper",
-    )
-    patched = _once(
-        patched,
-        "        last_api_count = self._active_api_run_count()\n        last_status_at = 0.0\n",
-        "        last_api_count = self._active_api_run_count()\n"
-        "        last_delivery_count = self._active_platform_delivery_count()\n"
-        "        last_status_at = 0.0\n",
-        "initial delivery count",
-    )
-    patched = _once(
-        patched,
-        "            nonlocal last_active_count, last_cron_count, last_api_count, last_status_at\n",
-        "            nonlocal last_active_count, last_cron_count, last_api_count, "
-        "last_delivery_count, last_status_at\n",
-        "status nonlocal",
-    )
-    patched = _once(
-        patched,
-        "            api_count = self._active_api_run_count()\n            if (\n",
-        "            api_count = self._active_api_run_count()\n"
-        "            delivery_count = self._active_platform_delivery_count()\n"
-        "            if (\n",
-        "status delivery count",
-    )
-    patched = _once(
-        patched,
-        "                or api_count != last_api_count\n                or (now - last_status_at) >= 1.0\n",
-        "                or api_count != last_api_count\n"
-        "                or delivery_count != last_delivery_count\n"
-        "                or (now - last_status_at) >= 1.0\n",
-        "status delivery change",
-    )
-    patched = _once(
-        patched,
-        "                last_api_count = api_count\n                last_status_at = now\n",
-        "                last_api_count = api_count\n"
-        "                last_delivery_count = delivery_count\n"
-        "                last_status_at = now\n",
-        "status delivery assignment",
-    )
-    patched = _once(
-        patched,
-        "        # API-server / desk sessions have the same structural gap (#63529).\n"
-        "        if not self._running_agents and last_cron_count == 0 and last_api_count == 0:\n",
-        "        # API-server / desk sessions have the same structural gap (#63529).\n"
-        "        # Platform message tasks outlive _running_agents while the response is\n"
-        "        # being sent and transport acceptance is recorded.  Disconnecting an\n"
-        "        # adapter in that window drops a completed response during restart.\n"
-        "        if (\n"
-        "            not self._running_agents\n"
-        "            and last_cron_count == 0\n"
-        "            and last_api_count == 0\n"
-        "            and last_delivery_count == 0\n"
-        "        ):\n",
-        "initial delivery gate",
-    )
-    patched = _once_any(
-        patched,
-        (
-            (
-                "                or self._active_api_run_count()\n            )\n",
-                "                or self._active_api_run_count()\n"
-                "                or self._active_platform_delivery_count()\n"
-                "            )\n",
-            ),
-            (
-                "            self._running_agents or self._active_cron_job_count() or self._active_api_run_count()\n",
-                "            self._running_agents\n"
-                "            or self._active_cron_job_count()\n"
-                "            or self._active_api_run_count()\n"
-                "            or self._active_platform_delivery_count()\n",
-            ),
-            (
-                "                len(self._running_agents) or self._active_api_run_count()\n"
-                "            ) and now < deadline:\n",
-                "                len(self._running_agents)\n"
-                "                or self._active_api_run_count()\n"
-                "                or self._active_platform_delivery_count()\n"
-                "            ) and now < deadline:\n",
-            ),
-        ),
-        "drain loop delivery gate",
-    )
-    patched = _once_any(
-        patched,
-        (
-            (
-                "            or bool(self._active_api_run_count())\n        )\n",
-                "            or bool(self._active_api_run_count())\n"
-                "            or bool(self._active_platform_delivery_count())\n"
-                "        )\n",
-            ),
-            (
-                "            bool(self._running_agents) or "
-                "bool(self._active_cron_job_count()) or "
-                "bool(self._active_api_run_count())\n",
-                "            bool(self._running_agents)\n"
-                "            or bool(self._active_cron_job_count())\n"
-                "            or bool(self._active_api_run_count())\n"
-                "            or bool(self._active_platform_delivery_count())\n",
-            ),
-        ),
-        "timeout delivery gate",
-    )
-
-    _write_with_backup(run_py, original, patched)
-    return True
+        changed = True
+    return changed
 
 
 def main() -> int:

@@ -46,6 +46,8 @@ Hello,
 - Single newlines between labeled fields. No blank line between To/Cc/From/Subject.
 - One blank line between header block and body, and between paragraphs.
 - No trailing spaces. No `<email@domain>`. No tables. No `###`.
+- From is required on every To/Subject send card. Missing From cannot be auto-fixed.
+- Reply-to-thread is a send. The send tool must be the mailbox named on From.
 
 ## Adversarial pass
 

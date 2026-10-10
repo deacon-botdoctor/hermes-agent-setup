@@ -1,1263 +1,27 @@
-#!/usr/bin/env python3
 """Bind native Browser Use to Golden's managed, privacy-safe CLI install."""
+
 
 from __future__ import annotations
 
+
 import ast
+import hashlib
+import json
+
+
 import shutil
+
+
 from pathlib import Path
 
-MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1"
-PRIOR_REVISION_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_r4"
-REVISION_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_r5"
+
 TARGET = Path("tools/browser_use_cli.py")
+
+
 TEST_TARGET = Path("tests/tools/test_browser_use_cli.py")
-MODEL_TOOLS_TARGET = Path("model_tools.py")
-INSTALL_SH_TARGET = Path("scripts/install.sh")
-INSTALL_PS1_TARGET = Path("scripts/install.ps1")
-TOOLS_CONFIG_TARGET = Path("hermes_cli/tools_config.py")
+
+
 BACKUP_SUFFIX = ".bak-pre-native-browser-use-safety-v1"
-
-IMPORT_ANCHOR = "import json\n"
-IMPORT_REPLACEMENT = "import hashlib\nimport json\nimport stat\nimport threading\n"
-TYPING_IMPORT_ANCHOR = "from typing import Any, Dict, List, Optional\n"
-TYPING_IMPORT_REPLACEMENT = "from pathlib import Path\nfrom typing import Any, Dict, List, Optional\n"
-SHUTIL_IMPORT_ANCHOR = "import shutil\n"
-SHUTIL_IMPORT_REPLACEMENT = "import shutil\nimport tempfile\n"
-
-CONSTANT_ANCHOR = """_BACKEND_KEY = "browser-use"
-BACKEND_DISABLED = "off"
-"""
-CONSTANT_REPLACEMENT = f"""_BACKEND_KEY = "browser-use"
-BACKEND_DISABLED = "off"
-
-# {MARKER}: Golden receipt-binds the complete environment, entry point, and interpreter.
-# {REVISION_MARKER}
-_PINNED_BROWSER_USE_VERSION = "0.13.7"
-_PINNED_BROWSER_HARNESS_VERSION = "0.1.8"
-_MANAGED_RECEIPT = "browser-use-cli-install-v1.json"
-_MAX_RECEIPT_BYTES = 65536
-_MAX_CLI_BYTES = 1048576
-_MAX_INTERPRETER_BYTES = 268435456
-_MAX_ENVIRONMENT_BYTES = 4294967296
-_MAX_ENVIRONMENT_ENTRIES = 10000
-_MAX_ENVIRONMENT_PATH_BYTES = 67108864
-_ENVIRONMENT_HASH_TIMEOUT_SECONDS = 300
-# The full environment fingerprint walks the managed browser environment. Keep
-# definition lookup cheap during normal turns while still revalidating it on a
-# bounded cadence and immediately after any integrity-check failure.
-_STATE_FINGERPRINT_TTL_SECONDS = 300.0
-_PINNED_LOCK_SHA256 = "baafc493e5b7e104c4417dede1dd722bd14fc31ac6188f13fe2ad124d573bdec"
-_PINNED_ARTIFACT_SHA256 = {{
-    "browser-use": "2264439e45cc7dd7fe480ca37e9eabd040c31a4e4d5e20c069ad2f60c07e3ba8",
-    "browser-harness": "4bbc414007750683408a6cf4e5c87dd62c85b8628e478d5020413814fde8ae50",
-}}
-_EPHEMERAL_PROFILE_NAME = hashlib.sha256(os.urandom(32)).hexdigest()[:32]
-_PRIVACY_ENV = {{
-    "BH_TELEMETRY": "0",
-    "BROWSER_HARNESS_TELEMETRY": "0",
-    "ANONYMIZED_TELEMETRY": "false",
-    "BROWSER_USE_CLOUD_SYNC": "false",
-}}
-_INHERITED_ENV_NAMES = {{
-    "ALL_PROXY",
-    "APPDATA",
-    "BROWSER_USE_API_KEY",
-    "COMSPEC",
-    "CURL_CA_BUNDLE",
-    "DBUS_SESSION_BUS_ADDRESS",
-    "DISPLAY",
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "LANG",
-    "LOCALAPPDATA",
-    "LOGNAME",
-    "NO_PROXY",
-    "PATH",
-    "PATHEXT",
-    "PROGRAMDATA",
-    "PROGRAMFILES",
-    "PROGRAMFILES(X86)",
-    "REQUESTS_CA_BUNDLE",
-    "SECURITYSESSIONID",
-    "SSL_CERT_DIR",
-    "SSL_CERT_FILE",
-    "SYSTEMDRIVE",
-    "SYSTEMROOT",
-    "TEMP",
-    "TMP",
-    "TMPDIR",
-    "TZ",
-    "USER",
-    "USERNAME",
-    "WAYLAND_DISPLAY",
-    "WINDIR",
-    "XAUTHORITY",
-    "__CF_USER_TEXT_ENCODING",
-}}
-"""
-
-MODE_ANCHOR = """    backend = get_browser_backend()
-    if backend:
-        return backend == _BACKEND_KEY
-    if is_legacy_browser_use_cloud_config(_read_browser_cfg()):
-        return True
-    # Default (backend unset): Browser Use mode when the CLI can run at all;
-    # otherwise keep the built-in tools so browsing never silently breaks.
-    return _find_cli() is not None
-"""
-MODE_REPLACEMENT = """    backend = get_browser_backend()
-    if backend and backend != _BACKEND_KEY:
-        return False
-    return _find_cli() is not None
-"""
-
-ENV_ANCHOR = """def _base_subprocess_env() -> dict:
-    from tools.browser_tool import _build_browser_env
-
-    return _build_browser_env()
-"""
-ENV_REPLACEMENT = """def _base_subprocess_env() -> dict:
-    from hermes_constants import get_hermes_home
-    from tools.browser_tool import _build_browser_env
-
-    source_env = _build_browser_env()
-    env = {
-        key: value
-        for key, value in source_env.items()
-        if key.upper() in _INHERITED_ENV_NAMES or key.upper().startswith("LC_")
-    }
-    # Preserve upstream's profile-worker PATH floor after applying Golden's
-    # stricter environment allowlist.  Browser Use's POSIX trampoline needs
-    # coreutils such as dirname and realpath even when cron inherits only a
-    # version-manager PATH.
-    env["PATH"] = _floor_subprocess_path(env.get("PATH", ""))
-    env.update(_PRIVACY_ENV)
-    env.pop("BU_CDP_URL", None)
-    env.pop("BU_CDP_WS", None)
-    state_root = Path(get_hermes_home()) / "state" / "browser-use"
-    profile_root = state_root / "browser-profile"
-    profile_name = _profile_name()
-    env.update({
-        "BH_HOME": str(state_root),
-        "BH_CONFIG_DIR": str(state_root / "config"),
-        "BH_RUNTIME_DIR": str(state_root / "runtime"),
-        "BH_TMP_DIR": str(state_root / "tmp"),
-        "BH_AGENT_WORKSPACE": str(state_root / "agent-workspace"),
-        "BU_NAME": f"hermes_{profile_name}",
-        "HOME": str(profile_root),
-        "USERPROFILE": str(profile_root),
-        "APPDATA": str(profile_root / "AppData" / "Roaming"),
-        "LOCALAPPDATA": str(profile_root / "AppData" / "Local"),
-        "XDG_CONFIG_HOME": str(profile_root / ".config"),
-        "XDG_CACHE_HOME": str(profile_root / ".cache"),
-        "BROWSER_USE_CONFIG_DIR": str(profile_root / ".config" / "browseruse"),
-        "BROWSER_USE_CONFIG_PATH": str(profile_root / ".config" / "browseruse" / "config.json"),
-    })
-    return env
-
-
-def _profile_name() -> str:
-    from hermes_constants import get_hermes_home
-
-    receipt_path = Path(get_hermes_home()) / "state" / _MANAGED_RECEIPT
-    receipt_bytes = _read_regular_file(receipt_path, _MAX_RECEIPT_BYTES)
-    if receipt_bytes is not None:
-        try:
-            receipt = json.loads(receipt_bytes.decode("utf-8"))
-            profile_id = receipt.get("profile_id") if isinstance(receipt, dict) else None
-            if isinstance(profile_id, str) and re.fullmatch(r"[0-9a-f]{32}", profile_id):
-                return profile_id
-        except (UnicodeError, ValueError, TypeError, json.JSONDecodeError):
-            pass
-    return _EPHEMERAL_PROFILE_NAME
-
-
-def _profile_session_name(session: str) -> str:
-    prefix = f"hermes_{_profile_name()}_"
-    if len(prefix) + len(session) <= 64:
-        return prefix + session
-    digest = hashlib.sha256(session.encode()).hexdigest()[:16]
-    available = 64 - len(prefix) - len(digest) - 1
-    return f"{prefix}{session[:available]}_{digest}"
-
-
-def _run_managed_cli(*args, env: dict, **kwargs):
-    with tempfile.TemporaryDirectory(prefix="hermes-browser-use-pycache-") as pycache:
-        isolated_env = env.copy()
-        isolated_env["PYTHONDONTWRITEBYTECODE"] = "1"
-        isolated_env["PYTHONNOUSERSITE"] = "1"
-        isolated_env["PYTHONPYCACHEPREFIX"] = pycache
-        return subprocess.run(*args, env=isolated_env, **kwargs)
-"""
-
-FIND_ANCHOR = '''def _find_cli() -> Optional[List[str]]:
-    """Locate the browser-use CLI, or None when it can't be run.
-
-    Prefers an installed browser-use binary; falls back to running it
-    through uvx
-    """
-    direct = shutil.which("browser-use")
-    if direct:
-        return [direct]
-    uvx = shutil.which("uvx")
-    if uvx:
-        return [uvx, "browser-use"]
-    return None
-'''
-FIND_REPLACEMENT = '''def _file_identity(info):
-    fields = ("st_dev", "st_ino", "st_mode", "st_size", "st_mtime_ns", "st_ctime_ns")
-    return tuple(getattr(info, field, None) for field in fields)
-
-
-def _consume_regular_file(
-    path: Path,
-    max_bytes: int,
-    consume,
-    deadline_seconds: float = 30,
-    monotonic=None,
-    deadline=None,
-) -> Optional[int]:
-    monotonic = monotonic or time.monotonic
-    if deadline is None:
-        deadline = monotonic() + deadline_seconds
-    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NONBLOCK", 0)
-    flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = None
-    try:
-        descriptor = os.open(path, flags)
-        before = os.fstat(descriptor)
-        if not stat.S_ISREG(before.st_mode) or before.st_size > max_bytes:
-            return None
-        total_bytes = 0
-        while True:
-            if monotonic() >= deadline:
-                return None
-            chunk = os.read(descriptor, min(1024 * 1024, max_bytes - total_bytes + 1))
-            if monotonic() >= deadline:
-                return None
-            if not chunk:
-                break
-            total_bytes += len(chunk)
-            if total_bytes > max_bytes:
-                return None
-            consume(chunk)
-        after = os.fstat(descriptor)
-        current = os.stat(path, follow_symlinks=False)
-        if _file_identity(before) != _file_identity(after):
-            return None
-        if _file_identity(before) != _file_identity(current):
-            return None
-        return total_bytes
-    except (OSError, ValueError):
-        return None
-    finally:
-        if descriptor is not None:
-            os.close(descriptor)
-
-
-def _sha256_file(
-    path: Path,
-    max_bytes: int,
-    deadline_seconds: float = 30,
-    monotonic=None,
-    deadline=None,
-    include_size: bool = False,
-):
-    digest = hashlib.sha256()
-    consumed = _consume_regular_file(
-        path,
-        max_bytes,
-        digest.update,
-        deadline_seconds,
-        monotonic,
-        deadline,
-    )
-    if consumed is None:
-        return None
-    result = digest.hexdigest()
-    return (result, consumed) if include_size else result
-
-
-def _read_regular_file(path: Path, max_bytes: int) -> Optional[bytes]:
-    payload = bytearray()
-    if _consume_regular_file(path, max_bytes, payload.extend) is None:
-        return None
-    return bytes(payload)
-
-
-def _interpreter_integrity(root: Path) -> Optional[dict]:
-    python = root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    try:
-        resolved = python.resolve(strict=True)
-        root_resolved = root.resolve(strict=True)
-        target_stat = resolved.stat()
-        if not resolved.is_file() or target_stat.st_size > _MAX_INTERPRETER_BYTES:
-            return None
-        try:
-            target_path = resolved.relative_to(root_resolved).as_posix()
-            target_scope = "managed"
-        except ValueError:
-            try:
-                target_path = resolved.relative_to(root.parent.parent.resolve(strict=True)).as_posix()
-                target_scope = "profile"
-            except ValueError:
-                target_path = str(resolved)
-                target_scope = "external"
-        target_digest = _sha256_file(resolved, _MAX_INTERPRETER_BYTES)
-        if target_digest is None:
-            return None
-        return {
-            "path": python.relative_to(root).as_posix(),
-            "target_scope": target_scope,
-            "target_path": target_path,
-            "executable": os.name == "nt" or os.access(resolved, os.X_OK),
-            "mode": target_stat.st_mode,
-            "size": target_stat.st_size,
-            "mtime_ns": target_stat.st_mtime_ns,
-            "sha256": target_digest,
-        }
-    except (OSError, RuntimeError, ValueError):
-        return None
-
-
-def _sha256_environment(
-    root: Path,
-    deadline_seconds: float = _ENVIRONMENT_HASH_TIMEOUT_SECONDS,
-    monotonic=None,
-) -> Optional[str]:
-    if not root.is_dir() or root.is_symlink():
-        return None
-    monotonic = monotonic or time.monotonic
-    deadline = monotonic() + deadline_seconds
-    digest = hashlib.sha256()
-    file_count = 0
-    total_bytes = 0
-    total_path_bytes = 0
-    paths = []
-    try:
-        for path in root.rglob("*"):
-            if monotonic() >= deadline:
-                return None
-            if len(paths) >= _MAX_ENVIRONMENT_ENTRIES:
-                return None
-            relative_path = path.relative_to(root)
-            relative = os.fsencode(relative_path.as_posix())
-            total_path_bytes += len(relative)
-            if total_path_bytes > _MAX_ENVIRONMENT_PATH_BYTES:
-                return None
-            paths.append((path, relative_path, relative))
-    except (OSError, UnicodeError):
-        return None
-    for path, relative_path, relative in sorted(paths, key=lambda item: item[0]):
-        if monotonic() >= deadline:
-            return None
-        if path.suffix == ".pyc" or "__pycache__" in relative_path.parts:
-            return None
-        if path.is_dir() and not path.is_symlink():
-            directory_stat = path.lstat()
-            digest.update(len(relative).to_bytes(4, "big"))
-            digest.update(relative)
-            digest.update(b"D")
-            digest.update(directory_stat.st_mode.to_bytes(8, "big"))
-            digest.update(directory_stat.st_mtime_ns.to_bytes(16, "big", signed=True))
-            file_count += 1
-            continue
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        if path.is_symlink():
-            target = os.fsencode(os.readlink(path))
-            total_bytes += len(target)
-            if total_bytes > _MAX_ENVIRONMENT_BYTES:
-                return None
-            digest.update(b"L")
-            digest.update(len(target).to_bytes(4, "big"))
-            digest.update(target)
-        elif path.is_file():
-            file_result = _sha256_file(
-                path,
-                _MAX_ENVIRONMENT_BYTES - total_bytes,
-                monotonic=monotonic,
-                deadline=deadline,
-                include_size=True,
-            )
-            if file_result is None:
-                return None
-            file_digest, consumed = file_result
-            total_bytes += consumed
-            digest.update(b"F")
-            digest.update(bytes.fromhex(file_digest))
-        else:
-            return None
-        file_count += 1
-    return digest.hexdigest() if file_count else None
-
-
-def _metadata_platform_name() -> str:
-    return os.name
-
-
-def _windows_change_time(path: Path) -> Optional[int]:
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        class FileBasicInfo(ctypes.Structure):
-            _fields_ = [
-                ("CreationTime", ctypes.c_longlong),
-                ("LastAccessTime", ctypes.c_longlong),
-                ("LastWriteTime", ctypes.c_longlong),
-                ("ChangeTime", ctypes.c_longlong),
-                ("FileAttributes", wintypes.DWORD),
-            ]
-
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        create_file = kernel32.CreateFileW
-        create_file.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            ctypes.c_void_p,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        ]
-        create_file.restype = wintypes.HANDLE
-        get_file_info = kernel32.GetFileInformationByHandleEx
-        get_file_info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
-        get_file_info.restype = wintypes.BOOL
-        close_handle = kernel32.CloseHandle
-        close_handle.argtypes = [wintypes.HANDLE]
-        close_handle.restype = wintypes.BOOL
-        handle = create_file(
-            str(path),
-            0x80,
-            0x7,
-            None,
-            3,
-            0x02200000,
-            None,
-        )
-        if handle == ctypes.c_void_p(-1).value:
-            return None
-        try:
-            info = FileBasicInfo()
-            if not get_file_info(handle, 0, ctypes.byref(info), ctypes.sizeof(info)):
-                return None
-            token = int(info.ChangeTime)
-            return token if token > 0 else None
-        finally:
-            close_handle(handle)
-    except (AttributeError, OSError, TypeError, ValueError):
-        return None
-
-
-def _entry_change_token(path: Path, stat) -> Optional[int]:
-    if _metadata_platform_name() == "nt":
-        return _windows_change_time(path)
-    return stat.st_ctime_ns
-
-
-def _interpreter_state_fingerprint(root: Path):
-    integrity = _interpreter_integrity(root)
-    if integrity is None:
-        return None
-    python = root / integrity["path"]
-    try:
-        resolved = python.resolve(strict=True)
-        target_stat = resolved.stat()
-        change_token = _entry_change_token(resolved, target_stat)
-        if change_token is None:
-            return None
-        return (
-            integrity["path"],
-            integrity["target_scope"],
-            integrity["target_path"],
-            integrity["executable"],
-            integrity["mode"],
-            integrity["size"],
-            integrity["mtime_ns"],
-            integrity["sha256"],
-            change_token,
-        )
-    except (OSError, RuntimeError, ValueError):
-        return None
-
-
-def _environment_state_fingerprint(root: Path) -> Optional[str]:
-    if not root.is_dir() or root.is_symlink():
-        return None
-    records = []
-    pending = []
-    visited = 0
-    total_bytes = 0
-    total_path_bytes = 0
-    try:
-        pending.append(os.scandir(root))
-        while pending:
-            try:
-                entry = next(pending[-1])
-            except StopIteration:
-                pending.pop().close()
-                continue
-            visited += 1
-            if visited > _MAX_ENVIRONMENT_ENTRIES:
-                return None
-            path = Path(entry.path)
-            relative_path = path.relative_to(root)
-            relative = os.fsencode(relative_path.as_posix())
-            total_path_bytes += len(relative)
-            if total_path_bytes > _MAX_ENVIRONMENT_PATH_BYTES:
-                return None
-            if path.suffix == ".pyc" or "__pycache__" in relative_path.parts:
-                return None
-            stat = entry.stat(follow_symlinks=False)
-            change_token = _entry_change_token(path, stat)
-            if change_token is None:
-                return None
-            target = os.fsencode(os.readlink(path)) if entry.is_symlink() else None
-            if target is not None:
-                total_bytes += len(target)
-            elif not entry.is_dir(follow_symlinks=False):
-                total_bytes += stat.st_size
-            if total_bytes > _MAX_ENVIRONMENT_BYTES:
-                return None
-            records.append((relative_path.as_posix(), relative, stat, target, change_token))
-            if entry.is_dir(follow_symlinks=False):
-                pending.append(os.scandir(path))
-    except (OSError, UnicodeError):
-        return None
-    finally:
-        for iterator in pending:
-            iterator.close()
-    digest = hashlib.sha256()
-    for _, relative, stat, target, change_token in sorted(records, key=lambda record: record[0]):
-        digest.update(len(relative).to_bytes(4, "big"))
-        digest.update(relative)
-        digest.update(stat.st_mode.to_bytes(8, "big"))
-        digest.update(stat.st_size.to_bytes(8, "big"))
-        digest.update(stat.st_mtime_ns.to_bytes(16, "big", signed=True))
-        digest.update(change_token.to_bytes(16, "big", signed=True))
-        if target is not None:
-            digest.update(len(target).to_bytes(4, "big"))
-            digest.update(target)
-    return digest.hexdigest() if records else None
-
-
-_verified_environment_sha256_cache = {}
-_integrity_retry_generation = 0
-_browser_use_state_fingerprint_candidate = None
-_browser_use_state_fingerprint_cache = None
-_browser_use_state_fingerprint_cache_deadline = 0.0
-_browser_use_state_fingerprint_cache_generation = None
-_browser_use_integrity_rejection_state = None
-_browser_use_integrity_cache_lock = threading.RLock()
-
-
-def _invalidate_browser_use_integrity_caches(
-    force_generation: bool = False,
-    rejection_state=None,
-) -> None:
-    global _integrity_retry_generation
-    global _browser_use_state_fingerprint_candidate
-    global _browser_use_state_fingerprint_cache
-    global _browser_use_state_fingerprint_cache_deadline
-    global _browser_use_state_fingerprint_cache_generation
-    global _browser_use_integrity_rejection_state
-
-    with _browser_use_integrity_cache_lock:
-        stable_rejection = (
-            rejection_state is not None
-            and rejection_state == _browser_use_integrity_rejection_state
-        )
-        _browser_use_integrity_rejection_state = rejection_state
-        if stable_rejection and not force_generation:
-            return
-
-        cached_state = (
-            _browser_use_state_fingerprint_candidate is not None
-            or _browser_use_state_fingerprint_cache is not None
-        )
-        if force_generation or cached_state:
-            _integrity_retry_generation += 1
-        _browser_use_state_fingerprint_candidate = None
-        _browser_use_state_fingerprint_cache = None
-        _browser_use_state_fingerprint_cache_deadline = 0.0
-        _browser_use_state_fingerprint_cache_generation = None
-
-
-def _verified_environment_sha256(root: str, state_fingerprint: str) -> Optional[str]:
-    key = (root, state_fingerprint)
-    with _browser_use_integrity_cache_lock:
-        cached = _verified_environment_sha256_cache.get(key)
-    if cached is not None:
-        return cached
-    try:
-        digest = _sha256_environment(Path(root))
-    except OSError:
-        _invalidate_browser_use_integrity_caches(force_generation=True)
-        return None
-    if digest is None:
-        _invalidate_browser_use_integrity_caches(force_generation=True)
-        return None
-    if _environment_state_fingerprint(Path(root)) != state_fingerprint:
-        _invalidate_browser_use_integrity_caches(force_generation=True)
-        return None
-    with _browser_use_integrity_cache_lock:
-        cached = _verified_environment_sha256_cache.get(key)
-        if cached is not None:
-            return cached
-        if len(_verified_environment_sha256_cache) >= 8:
-            oldest = next(iter(_verified_environment_sha256_cache))
-            _verified_environment_sha256_cache.pop(oldest)
-        _verified_environment_sha256_cache[key] = digest
-        return digest
-
-
-def _clear_verified_environment_sha256_cache() -> None:
-    with _browser_use_integrity_cache_lock:
-        _verified_environment_sha256_cache.clear()
-
-
-_verified_environment_sha256.cache_clear = _clear_verified_environment_sha256_cache
-
-
-def _browser_use_file_identity(path: Path, max_bytes: int):
-    try:
-        file_stat = path.stat()
-    except OSError:
-        return None
-    digest = _sha256_file(path, max_bytes)
-    return (
-        file_stat.st_mode,
-        file_stat.st_mtime_ns,
-        file_stat.st_size,
-        digest if file_stat.st_size <= max_bytes else None,
-    )
-
-
-def browser_use_cli_state_fingerprint():
-    global _browser_use_state_fingerprint_candidate
-    global _browser_use_state_fingerprint_cache
-    global _browser_use_state_fingerprint_cache_deadline
-    global _browser_use_state_fingerprint_cache_generation
-
-    from hermes_constants import get_hermes_home
-
-    home = Path(get_hermes_home())
-    receipt = home / "state" / _MANAGED_RECEIPT
-    cli = home / "tools" / f"browser-use-{_PINNED_BROWSER_USE_VERSION}" / (
-        "Scripts/browser-use.exe" if os.name == "nt" else "bin/browser-use"
-    )
-    managed_root = cli.parent.parent
-    cheap_identity = (
-        _browser_use_file_identity(receipt, _MAX_RECEIPT_BYTES),
-        _browser_use_file_identity(cli, _MAX_CLI_BYTES),
-    )
-    with _browser_use_integrity_cache_lock:
-        generation = _integrity_retry_generation
-        cached_fingerprint = _browser_use_state_fingerprint_cache
-        if (
-            cached_fingerprint is not None
-            and tuple(cached_fingerprint[:2]) == cheap_identity
-            and _browser_use_state_fingerprint_cache_generation == generation
-            and time.monotonic() < _browser_use_state_fingerprint_cache_deadline
-        ):
-            return cached_fingerprint
-
-    values = list(cheap_identity)
-    values.append(_interpreter_state_fingerprint(managed_root))
-    values.append(_environment_state_fingerprint(managed_root))
-    values.append(generation)
-    fingerprint = tuple(values)
-    with _browser_use_integrity_cache_lock:
-        if generation != _integrity_retry_generation:
-            return fingerprint
-        cacheable = (
-            all(value is not None for value in fingerprint[:4])
-            or _browser_use_integrity_rejection_state is not None
-        )
-        if cacheable and _browser_use_state_fingerprint_candidate == fingerprint:
-            _browser_use_state_fingerprint_cache = fingerprint
-            _browser_use_state_fingerprint_cache_deadline = (
-                time.monotonic() + _STATE_FINGERPRINT_TTL_SECONDS
-            )
-            _browser_use_state_fingerprint_cache_generation = generation
-        else:
-            _browser_use_state_fingerprint_cache = None
-            _browser_use_state_fingerprint_cache_deadline = 0.0
-            _browser_use_state_fingerprint_cache_generation = None
-        _browser_use_state_fingerprint_candidate = fingerprint if cacheable else None
-    return fingerprint
-
-
-def _find_cli() -> Optional[List[str]]:
-    """Resolve only Golden's exact, receipt-bound Browser Use executable."""
-    global _browser_use_integrity_rejection_state
-
-    try:
-        from hermes_constants import get_hermes_home
-
-        home = Path(get_hermes_home())
-        receipt_path = home / "state" / _MANAGED_RECEIPT
-        receipt_bytes = _read_regular_file(receipt_path, _MAX_RECEIPT_BYTES)
-        if receipt_bytes is None:
-            receipt_identity = _browser_use_file_identity(
-                receipt_path, _MAX_RECEIPT_BYTES
-            )
-            if receipt_identity is not None and receipt_identity[-1] is not None:
-                _invalidate_browser_use_integrity_caches(force_generation=True)
-            else:
-                _invalidate_browser_use_integrity_caches(
-                    rejection_state=("unreadable-receipt", receipt_identity)
-                )
-            return None
-        try:
-            receipt = json.loads(receipt_bytes.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            _invalidate_browser_use_integrity_caches(
-                rejection_state=(
-                    "invalid-receipt-json",
-                    hashlib.sha256(receipt_bytes).hexdigest(),
-                )
-            )
-            return None
-        if not isinstance(receipt, dict):
-            _invalidate_browser_use_integrity_caches(
-                rejection_state=(
-                    "invalid-receipt-type",
-                    hashlib.sha256(receipt_bytes).hexdigest(),
-                )
-            )
-            return None
-        release = receipt.get("release")
-        cli_relative = str(receipt.get("cli_path") or "")
-        profile_root = "state/browser-use/browser-profile"
-        managed_root = home / "tools" / f"browser-use-{_PINNED_BROWSER_USE_VERSION}"
-        managed_cli = managed_root / ("Scripts/browser-use.exe" if os.name == "nt" else "bin/browser-use")
-        managed_python = managed_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        cli = home / cli_relative
-        interpreter = _interpreter_integrity(managed_root)
-        environment_state = _environment_state_fingerprint(managed_root)
-        cli_sha256 = _sha256_file(cli, _MAX_CLI_BYTES)
-        if (
-            receipt.get("schema_version") != 2
-            or receipt.get("kind") != "browser_use_cli_install_receipt"
-            or not isinstance(release, dict)
-            or release.get("version") != _PINNED_BROWSER_USE_VERSION
-            or release.get("harness_version") != _PINNED_BROWSER_HARNESS_VERSION
-            or receipt.get("artifact_sha256") != _PINNED_ARTIFACT_SHA256
-            or receipt.get("lock_sha256") != _PINNED_LOCK_SHA256
-            or receipt.get("profile_root") != profile_root
-            or not re.fullmatch(r"[0-9a-f]{32}", str(receipt.get("profile_id") or ""))
-            or cli_relative != managed_cli.relative_to(home).as_posix()
-            or cli != managed_cli
-            or not cli.is_file()
-            or cli.stat().st_size > _MAX_CLI_BYTES
-            or not managed_python.is_file()
-            or (os.name != "nt" and not os.access(cli, os.X_OK))
-            or (os.name != "nt" and not os.access(managed_python, os.X_OK))
-            or cli_sha256 != receipt.get("cli_sha256")
-            or interpreter is None
-            or interpreter != receipt.get("interpreter")
-            or environment_state is None
-            or _verified_environment_sha256(str(managed_root), environment_state)
-            != receipt.get("environment_sha256")
-        ):
-            _invalidate_browser_use_integrity_caches(
-                rejection_state=(
-                    "invalid-managed-environment",
-                    hashlib.sha256(receipt_bytes).hexdigest(),
-                    cli_sha256,
-                    json.dumps(interpreter, sort_keys=True, default=str),
-                    environment_state,
-                )
-            )
-            return None
-        with _browser_use_integrity_cache_lock:
-            _browser_use_integrity_rejection_state = None
-        if os.name == "nt":
-            return [str(cli)]
-        return [str(managed_python), "-I", "-B", str(cli)]
-    except (OSError, ValueError, TypeError):
-        _invalidate_browser_use_integrity_caches(force_generation=True)
-    return None
-'''
-
-INSTALL_REPLACEMENT = '''def install_cli(timeout_s: int = 600):
-    """Accept only Golden's receipt-bound Browser Use installation.
-
-    Upstream's interactive installer intentionally tracks the newest package.
-    Golden fleet runtimes instead install an exact, hash-pinned release through
-    the host-artifact transaction, so this runtime entry point must not create
-    an unreceipted environment.
-    """
-    del timeout_s
-    managed = _find_cli()
-    if managed:
-        return True, f"Golden managed browser-use CLI is ready ({managed[-1]})"
-    return False, (
-        "Golden's managed Browser Use CLI is unavailable. Run the Golden host "
-        "artifact installer so the pinned release and receipt are installed."
-    )
-'''
-
-INSTALL_SH_MARKER = "Golden's exact host-artifact installer"
-INSTALL_SH_ANCHOR = """install_browser_use_cli() {
-    # The Browser Use CLI is the default browser backend when it is runnable
-    # (tools/browser_use_cli.py). Provision it here so fresh installs don't
-    # silently fall back to the built-in browser tools. Best-effort: any
-    # failure is non-fatal because browser_exec can still run via uvx and
-    # `hermes tools` can install it later.
-    if [ "$SKIP_BROWSER" = true ]; then
-        log_info "Skipping Browser Use CLI install (--skip-browser)"
-        return 0
-    fi
-    if [ "$DISTRO" = "termux" ]; then
-        return 0
-    fi
-    if [ -z "$UV_CMD" ]; then
-        log_info "Skipping Browser Use CLI install (uv unavailable)"
-        return 0
-    fi
-    if command -v browser-use >/dev/null 2>&1 || [ -x "$HERMES_HOME/bin/browser-use" ]; then
-        log_success "Browser Use CLI already installed"
-        return 0
-    fi
-
-    log_info "Installing Browser Use CLI (default browser backend)..."
-    # UV_TOOL_BIN_DIR keeps the binary inside Hermes' managed bin dir, where
-    # the browser tool resolves it — no reliance on the user's PATH.
-    if run_with_timeout 600 env UV_NO_CONFIG=1 UV_TOOL_BIN_DIR="$HERMES_HOME/bin" \\
-        "$UV_CMD" tool install browser-use >/dev/null 2>&1; then
-        log_success "Browser Use CLI installed"
-    else
-        log_warn "Browser Use CLI install failed — browser automation falls back to built-in tools."
-        log_info "Install later with: $UV_CMD tool install browser-use  (or via 'hermes tools')"
-    fi
-}
-"""
-INSTALL_SH_REPLACEMENT = """install_browser_use_cli() {
-    if [ "$SKIP_BROWSER" = true ]; then
-        log_info "Skipping Browser Use CLI install (--skip-browser)"
-        return 0
-    fi
-    if [ "$DISTRO" = "termux" ]; then
-        return 0
-    fi
-    log_info "Browser Use CLI provisioning is owned by Golden's exact host-artifact installer."
-}
-"""
-
-INSTALL_PS1_MARKER = "Golden's exact host-artifact installer"
-INSTALL_PS1_ANCHOR = """# The Browser Use CLI is the default browser backend when it is runnable
-# (tools/browser_use_cli.py). Provision it at install time so fresh installs
-# don't silently fall back to the built-in browser tools. Best-effort: any
-# failure is non-fatal (browser_exec can still run via uvx, and `hermes tools`
-# can install it later).
-function Install-BrowserUseCli {
-    if (-not $script:UvCmd) { Resolve-UvCmd }
-    if (-not $script:UvCmd) {
-        Write-Info "Skipping Browser Use CLI install (uv unavailable)"
-        return
-    }
-    $managedBin = Join-Path $HermesHome "bin"
-    $managedBu = Join-Path $managedBin "browser-use.exe"
-    if ((Get-Command browser-use -ErrorAction SilentlyContinue) -or (Test-Path $managedBu)) {
-        Write-Success "Browser Use CLI already installed"
-        return
-    }
-
-    Write-Info "Installing Browser Use CLI (default browser backend)..."
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        # UV_TOOL_BIN_DIR keeps the binary inside Hermes' managed bin dir,
-        # where the browser tool resolves it -- no reliance on the user PATH.
-        $env:UV_TOOL_BIN_DIR = $managedBin
-        $env:UV_NO_CONFIG = "1"
-        & $script:UvCmd tool install browser-use 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "Browser Use CLI installed"
-        } else {
-            Write-Warn "Browser Use CLI install failed (exit $LASTEXITCODE) -- browser automation falls back to built-in tools."
-            Write-Info "Install later with: uv tool install browser-use  (or via 'hermes tools')"
-        }
-    } catch {
-        Write-Warn "Browser Use CLI install failed: $_"
-    } finally {
-        $ErrorActionPreference = $prevEAP
-        Remove-Item Env:\\UV_TOOL_BIN_DIR -ErrorAction SilentlyContinue
-        Remove-Item Env:\\UV_NO_CONFIG -ErrorAction SilentlyContinue
-    }
-}
-"""  # noqa: E501
-INSTALL_PS1_REPLACEMENT = """function Install-BrowserUseCli {
-    Write-Info "Browser Use CLI provisioning is owned by Golden's exact host-artifact installer."
-}
-"""
-
-TOOLS_CONFIG_MARKER = "Golden's managed Browser Use host artifact installer"
-TOOLS_CONFIG_ANCHOR = """    elif post_setup_key == "browser_use_cli":
-        if shutil.which("browser-use"):
-            _print_success("    browser-use CLI found on PATH")
-        else:
-            _print_info("    Installing browser-use CLI (uv tool install browser-use)...")
-            try:
-                from tools.browser_use_cli import install_cli
-
-                ok, message = install_cli()
-            except Exception as exc:  # pragma: no cover — defensive
-                ok, message = False, f"install failed: {exc}"
-            if ok:
-                _print_success(f"    {message}")
-            else:
-                for line in str(message).splitlines():
-                    _print_warning(f"    {line[:200]}")
-                if shutil.which("uvx"):
-                    _print_info("    Falling back to zero-install runs via `uvx browser-use`")
-                else:
-                    _print_info("    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")
-        _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
-        _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
-"""
-TOOLS_CONFIG_REPLACEMENT = """    elif post_setup_key == "browser_use_cli":
-        try:
-            from tools.browser_use_cli import install_cli
-
-            ok, message = install_cli()
-        except Exception as exc:  # pragma: no cover — defensive
-            ok, message = False, f"managed Browser Use check failed: {exc}"
-        if ok:
-            _print_success(f"    {message}")
-        else:
-            for line in str(message).splitlines():
-                _print_warning(f"    {line[:200]}")
-            _print_info("    Golden's managed Browser Use host artifact installer owns provisioning.")
-        _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
-        _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
-"""
-TOOLS_CONFIG_FUNCTION_REPLACEMENT = '''def _ensure_browser_use_cli(*, verbose_hints: bool = False) -> None:
-    """Verify Golden's receipt-bound Browser Use host artifact."""
-    try:
-        from tools.browser_use_cli import install_cli
-
-        ok, message = install_cli()
-    except Exception as exc:  # pragma: no cover — defensive
-        ok, message = False, f"managed Browser Use check failed: {exc}"
-    if ok:
-        _print_success(f"    {message}")
-    else:
-        for line in str(message).splitlines():
-            _print_warning(f"    {line[:200]}")
-        _print_info("    Golden's managed Browser Use host artifact installer owns provisioning.")
-    if verbose_hints:
-        _print_info("    Local Chrome needs remote debugging: chrome://inspect/#remote-debugging")
-        _print_info("    Cloud browsers: browser-use auth login  (or set BROWSER_USE_API_KEY)")
-'''
-
-MODEL_CACHE_ANCHOR = """    cache_key = None
-    if quiet_mode:
-        try:
-            from hermes_cli.config import get_config_path
-            cfg_path = get_config_path()
-            cfg_stat = cfg_path.stat()
-            cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
-        except (FileNotFoundError, OSError, ImportError):
-            cfg_fp = None
-        profile_scope = check_fn_cache_scope()
-        if profile_scope != CHECK_FN_CACHE_BYPASS:
-            cache_key = (
-"""
-MODEL_CACHE_REPLACEMENT = """    try:
-        from tools.browser_use_cli import browser_use_cli_state_fingerprint
-        browser_use_state = browser_use_cli_state_fingerprint()
-    except (ImportError, OSError):
-        browser_use_state = None
-    previous_browser_use_state = getattr(
-        get_tool_definitions, "_browser_use_state", object()
-    )
-    if previous_browser_use_state != browser_use_state:
-        from tools.registry import invalidate_check_fn_cache
-        invalidate_check_fn_cache()
-        _clear_tool_defs_cache()
-        get_tool_definitions._browser_use_state = browser_use_state
-    cache_key = None
-    if quiet_mode:
-        try:
-            from hermes_cli.config import get_config_path
-            cfg_path = get_config_path()
-            cfg_stat = cfg_path.stat()
-            cfg_fp = (cfg_stat.st_mtime_ns, cfg_stat.st_size)
-        except (FileNotFoundError, OSError, ImportError):
-            cfg_fp = None
-        profile_scope = check_fn_cache_scope()
-        if profile_scope != CHECK_FN_CACHE_BYPASS:
-            cache_key = (
-                browser_use_state,
-"""
-
-EXEC_ANCHOR = """        proc = subprocess.run(
-            cmd,
-"""
-EXEC_REPLACEMENT = """        proc = _run_managed_cli(
-            cmd,
-"""
-
-SESSION_ANCHOR = """        env["BU_NAME"] = session
-"""
-SESSION_REPLACEMENT = """        env["BU_NAME"] = _profile_session_name(session)
-"""
-
-LEGACY_WORKSPACE_REPLACEMENT = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
-    """Stable collision-resistant task workspace beneath Hermes state."""
-    try:
-        from hermes_constants import get_hermes_home
-    
-        identity = str(task_id or "default")
-        safe_prefix = _TASK_ID_SAFE_RE.sub("_", identity)[:63] or "default"
-        workspace_name = f"{safe_prefix}_{hashlib.sha256(identity.encode('utf-8', 'surrogatepass')).hexdigest()[:16]}"
-        path = Path(get_hermes_home()) / "cache" / "browser-use" / "workspace" / workspace_name
-        path.mkdir(parents=True, exist_ok=True)
-        return str(path)
-    except Exception as e:
-        logger.debug("browser_exec workspace unavailable: %s", e)
-        return None
-'''
-
-MISSING_ANCHOR = """        return tool_error(
-            "browser-use CLI not found on PATH, and uvx is unavailable for a "
-            "zero-install run. Install it with `uv tool install browser-use` "
-            "(or `pipx install browser-use`), then run `browser-use --doctor` "
-            "to verify the setup."
-        )
-"""
-MISSING_REPLACEMENT = """        return tool_error(
-            "Golden's managed browser-use CLI 0.13.7 is unavailable or its "
-            "receipt does not match the executable. Run the Browser Use host "
-            "artifact installer before enabling browser.backend=browser-use."
-        )
-"""
-
-SCHEMA_ANCHOR = """    # Static fallback, used only when the CLI (and uvx) is unavailable
-    "description": (
-        _HEADER_BASE
-        + _HELPERS_DIGEST
-        + "\\n\\n(The browser-use CLI is not installed yet. Install it with "
-        "`uv tool install browser-use`.)"
-    ),
-"""
-SCHEMA_REPLACEMENT = """    # Static fallback when the managed CLI receipt is unavailable.
-    "description": (
-        _HEADER_BASE
-        + _HELPERS_DIGEST
-        + "\\n\\n(Golden's managed browser-use CLI 0.13.7 is not installed "
-        "or its receipt is invalid.)"
-    ),
-"""
-
-FIND_TESTS_ANCHOR = '''class TestFindCli:
-    """The tests/tools conftest pins _find_cli to None (host isolation);
-    exercise the real function via the preserved _find_cli_unpatched."""
-
-    def test_prefers_installed_binary(self, monkeypatch):
-        monkeypatch.setattr(
-            bu_cli.shutil, "which",
-            lambda name: "/usr/local/bin/browser-use" if name == "browser-use" else "/usr/local/bin/uvx",
-        )
-        assert bu_cli._find_cli_unpatched() == ["/usr/local/bin/browser-use"]
-
-    def test_falls_back_to_uvx(self, monkeypatch):
-        monkeypatch.setattr(
-            bu_cli.shutil, "which",
-            lambda name: "/usr/local/bin/uvx" if name == "uvx" else None,
-        )
-        assert bu_cli._find_cli_unpatched() == ["/usr/local/bin/uvx", "browser-use"]
-
-    def test_none_when_neither_available(self, monkeypatch):
-        monkeypatch.setattr(bu_cli.shutil, "which", lambda name: None)
-        assert bu_cli._find_cli_unpatched() is None
-'''
-FIND_TESTS_REPLACEMENT = """class TestFindCli:
-    @staticmethod
-    def _receipt(tmp_path, *, version="0.13.7", digest=None, environment_digest=None):
-        managed = tmp_path / "tools" / "browser-use-0.13.7"
-        cli = managed / ("Scripts/browser-use.exe" if os.name == "nt" else "bin/browser-use")
-        cli.parent.mkdir(parents=True)
-        cli.write_text("#!/bin/sh\\n", encoding="utf-8")
-        python = managed / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        python.write_text("#!/bin/sh\\n", encoding="utf-8")
-        if os.name != "nt":
-            cli.chmod(0o755)
-            python.chmod(0o755)
-        site = cli.parent.parent / ("Lib/site-packages" if os.name == "nt" else "lib/python3.12/site-packages")
-        for package in ("browser_use", "browser_harness"):
-            package_dir = site / package
-            package_dir.mkdir(parents=True)
-            (package_dir / "__init__.py").write_text(f"{package}\\n")
-            dist_info = site / f"{package}-1.dist-info"
-            dist_info.mkdir()
-            (dist_info / "METADATA").write_text(package)
-        receipt = {
-            "schema_version": 2,
-            "kind": "browser_use_cli_install_receipt",
-            "release": {"version": version, "harness_version": "0.1.8"},
-            "artifact_sha256": bu_cli._PINNED_ARTIFACT_SHA256,
-            "lock_sha256": bu_cli._PINNED_LOCK_SHA256,
-            "profile_id": "1" * 32,
-            "cli_path": cli.relative_to(tmp_path).as_posix(),
-            "cli_sha256": digest or bu_cli._sha256_file(cli, bu_cli._MAX_CLI_BYTES),
-            "environment_sha256": environment_digest or bu_cli._sha256_environment(managed),
-            "interpreter": bu_cli._interpreter_integrity(managed),
-            "profile_root": "state/browser-use/browser-profile",
-        }
-        state = tmp_path / "state"
-        state.mkdir()
-        (state / bu_cli._MANAGED_RECEIPT).write_text(json.dumps(receipt))
-        return cli
-
-    def test_accepts_exact_receipt_bound_binary(self, tmp_path, monkeypatch):
-        cli = self._receipt(tmp_path)
-        monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
-        expected = (
-            [str(cli)]
-            if os.name == "nt"
-            else [str(cli.parent / "python"), "-I", "-B", str(cli)]
-        )
-        assert bu_cli._find_cli_unpatched() == expected
-
-    def test_rejects_wrong_version(self, tmp_path, monkeypatch):
-        self._receipt(tmp_path, version="0.13.6")
-        monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
-        assert bu_cli._find_cli_unpatched() is None
-
-    def test_rejects_executable_digest_drift(self, tmp_path, monkeypatch):
-        self._receipt(tmp_path, digest="0" * 64)
-        monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
-        assert bu_cli._find_cli_unpatched() is None
-
-    def test_rejects_installed_payload_drift(self, tmp_path, monkeypatch):
-        self._receipt(tmp_path, environment_digest="0" * 64)
-        monkeypatch.setattr("hermes_constants.get_hermes_home", lambda: tmp_path)
-        assert bu_cli._find_cli_unpatched() is None
-"""
-
-FIND_MANAGED_BIN_TESTS_REPLACEMENT = """class TestFindCliManagedBin:
-    def test_unreceipted_managed_binary_is_rejected(self, tmp_path, monkeypatch):
-        bin_dir = tmp_path / "home" / "bin"
-        bin_dir.mkdir(parents=True)
-        binary = bin_dir / "browser-use"
-        binary.write_text("#!/bin/sh\\n", encoding="utf-8")
-        binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-        assert bu_cli._find_cli_unpatched() is None
-"""
-
-INSTALL_TESTS_REPLACEMENT = """class TestInstallCli:
-    def test_accepts_receipt_bound_install(self, monkeypatch):
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/managed/python", "/managed/browser-use"])
-        ok, message = bu_cli.install_cli()
-        assert ok is True
-        assert "Golden managed" in message
-
-    def test_refuses_unpinned_runtime_install(self, monkeypatch):
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
-        ok, message = bu_cli.install_cli()
-        assert ok is False
-        assert "host artifact installer" in message
-"""
-
-NOTICE_HINT_ANCHOR = """            "Run `hermes tools` (Browser Automation → Browser Use) to install it, "
-            "or `browser.backend: off` in config.yaml to silence this."
-"""
-NOTICE_HINT_REPLACEMENT = """            "Run Golden's managed Browser Use host artifact installer, or set "
-            "`browser.backend: off` in config.yaml to silence this."
-"""
-
-NOTICE_TEST_ANCHOR = '        assert "hermes tools" in notice\n'
-NOTICE_TEST_REPLACEMENT = '        assert "managed Browser Use" in notice\n'
-SESSION_TEST_ANCHOR = '        assert "bu:r7k2" in result["output"]\n'
-SESSION_TEST_REPLACEMENT = '        assert "bu:hermes_" in result["output"] and "_r7k2" in result["output"]\n'
-
-UNRELATED_ENV_TEST_ANCHOR = '        assert env["KEEP_ME"] == "yes"\n'
-UNRELATED_ENV_TEST_REPLACEMENT = '        assert "KEEP_ME" not in env\n'
-
-STATIC_HINT_TEST_ANCHOR = """        assert "uv tool install browser-use" in desc
-"""
-STATIC_HINT_TEST_REPLACEMENT = """        assert "managed browser-use CLI 0.13.7" in desc
-"""
-
-MODE_TEST_ANCHOR = """    def test_config_opt_in(self, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
-            lambda: {"browser": {"backend": "browser-use"}},
-        )
-        assert bu_cli.is_browser_use_cli_mode() is True
-"""
-MODE_TEST_REPLACEMENT = """    def test_config_opt_in(self, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
-            lambda: {"browser": {"backend": "browser-use"}},
-        )
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: ["/managed/browser-use"])
-        assert bu_cli.is_browser_use_cli_mode() is True
-
-    def test_config_opt_in_falls_back_without_managed_cli(self, monkeypatch):
-        monkeypatch.setattr(
-            "hermes_cli.config.read_raw_config",
-            lambda: {"browser": {"backend": "browser-use"}},
-        )
-        monkeypatch.setattr(bu_cli, "_find_cli", lambda: None)
-        assert bu_cli.is_browser_use_cli_mode() is False
-"""
-
-LEGACY_DIRECT_TEST_ANCHOR = """    def test_direct_api_config_migrates(self, monkeypatch):
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: self._LEGACY)
-        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
-        assert bu_cli.is_browser_use_cli_mode() is True
-"""
-LEGACY_DIRECT_TEST_REPLACEMENT = """    def test_direct_api_config_waits_for_managed_cli(self, monkeypatch):
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: self._LEGACY)
-        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
-        assert bu_cli.is_browser_use_cli_mode() is False
-"""
-
-LEGACY_AUTO_TEST_ANCHOR = '''    def test_auto_detect_with_key_migrates(self, monkeypatch):
-        """No cloud_provider configured + BROWSER_USE_API_KEY set: credential
-        auto-detection prefers Browser Use (even when Browserbase creds are
-        also present), which now means Browser Use mode."""
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
-        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
-        monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
-        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_browser_use_cli_mode() is True
-'''
-LEGACY_AUTO_TEST_REPLACEMENT = '''    def test_auto_detect_with_key_waits_for_managed_cli(self, monkeypatch):
-        """Ambient cloud credentials cannot bypass the managed CLI gate."""
-        monkeypatch.setattr("hermes_cli.config.read_raw_config", lambda: {})
-        monkeypatch.setenv("BROWSER_USE_API_KEY", "bu-key")
-        monkeypatch.setenv("BROWSERBASE_API_KEY", "bb-key")
-        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_browser_use_cli_mode() is False
-'''
-
-MISSING_HINT_TEST_ANCHOR = """        assert "uv tool install browser-use" in result["error"]
-"""
-MISSING_HINT_TEST_REPLACEMENT = """        assert "managed browser-use CLI 0.13.7" in result["error"]
-"""
-
-TIMEOUT_DECORATOR_ANCHOR = """    def test_timeout_returns_actionable_error(self, tmp_path, monkeypatch):
-"""
-TIMEOUT_DECORATOR_REPLACEMENT = """    @pytest.mark.live_system_guard_bypass
-    def test_timeout_returns_actionable_error(self, tmp_path, monkeypatch):
-"""
-
-TIMEOUT_TEST_ANCHOR = """        cli = _fake_cli(tmp_path, "cat > /dev/null\\nsleep 30\\n")
-"""
-TIMEOUT_TEST_REPLACEMENT = """        # HERMES_NATIVE_BROWSER_USE_SAFETY_v1: replace the shell with the
-        # sleeper so subprocess.run owns and terminates the exact timeout PID.
-        cli = _fake_cli(tmp_path, "cat > /dev/null\\nexec sleep 30\\n")
-"""
 
 
 def _replace_once(source: str, old: str, new: str, label: str) -> str:
@@ -1296,290 +60,70 @@ def _replace_named_node(
     return "".join(lines[:start]) + replacement_text + "".join(lines[end:])
 
 
-def _replace_braced_function(source: str, signature: str, replacement: str, label: str) -> str:
-    """Replace one Bash/PowerShell function while tolerating body drift."""
-    start = source.find(signature)
-    if start < 0 or source.find(signature, start + 1) >= 0:
-        raise RuntimeError(f"native Browser Use {label} anchor drift")
-    brace = source.find("{", start, start + len(signature) + 4)
-    if brace < 0:
-        raise RuntimeError(f"native Browser Use {label} opening brace drift")
-    depth = 0
-    end = None
-    for index in range(brace, len(source)):
-        char = source[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                end = index + 1
-                break
-    if end is None:
-        raise RuntimeError(f"native Browser Use {label} closing brace drift")
-    while end < len(source) and source[end] in "\r\n":
-        end += 1
-    return source[:start] + replacement.rstrip() + "\n\n" + source[end:]
-
-
 def patch_native_browser_use_safety_v1(root: Path) -> bool:
     root = Path(root)
-    target = root / TARGET
-    test_target = root / TEST_TARGET
-    model_tools_target = root / MODEL_TOOLS_TARGET
-    install_sh_target = root / INSTALL_SH_TARGET
-    install_ps1_target = root / INSTALL_PS1_TARGET
-    tools_config_target = root / TOOLS_CONFIG_TARGET
-    source = target.read_text(encoding="utf-8")
-    if D363_MARKER in source or _is_d363_browser_use_source(source):
-        return _patch_d363_browser_use(root, source)
-    test_source = test_target.read_text(encoding="utf-8")
-    model_tools_source = model_tools_target.read_text(encoding="utf-8")
-    install_sh_source = install_sh_target.read_text(encoding="utf-8")
-    install_ps1_source = install_ps1_target.read_text(encoding="utf-8")
-    tools_config_source = tools_config_target.read_text(encoding="utf-8")
-    if MARKER in source and REVISION_MARKER not in source:
-        if PRIOR_REVISION_MARKER not in source:
-            raise RuntimeError("native Browser Use stale patch revision requires a clean candidate rebuild")
-        patched = _replace_named_node(
-            source,
-            "_workspace_dir",
-            LEGACY_WORKSPACE_REPLACEMENT,
-            "collision-resistant workspace upgrade",
-        ).replace(PRIOR_REVISION_MARKER, REVISION_MARKER, 1)
-        ast.parse(patched)
-        target.write_text(patched, encoding="utf-8")
-        return True
-    if (
-        REVISION_MARKER in source
-        and MARKER in test_source
-        and "browser_use_state" in model_tools_source
-        and INSTALL_SH_MARKER in install_sh_source
-        and INSTALL_PS1_MARKER in install_ps1_source
-        and TOOLS_CONFIG_MARKER in tools_config_source
-    ):
-        return False
+    source = (root / TARGET).read_text(encoding="utf-8")
+    if '[sys.executable, "-m", "browser_harness.run"]' in source:
+        return _patch_native_harness(root)
+    return _patch_d363_browser_use(root, source)
 
-    patched = source
-    if MARKER not in patched:
-        patched = _replace_once(patched, IMPORT_ANCHOR, IMPORT_REPLACEMENT, "import")
-        if "from pathlib import Path\n" not in patched:
-            patched = _replace_once(
-                patched,
-                TYPING_IMPORT_ANCHOR,
-                TYPING_IMPORT_REPLACEMENT,
-                "Path import",
-            )
-        patched = _replace_once(
-            patched,
-            SHUTIL_IMPORT_ANCHOR,
-            SHUTIL_IMPORT_REPLACEMENT,
-            "managed subprocess import",
-        )
-        patched = _replace_once(patched, CONSTANT_ANCHOR, CONSTANT_REPLACEMENT, "constants")
-        patched = _replace_once(patched, MODE_ANCHOR, MODE_REPLACEMENT, "mode gating")
-        patched = _replace_named_node(
-            patched,
-            "_base_subprocess_env",
-            ENV_REPLACEMENT,
-            "environment",
-        )
-        patched = _replace_once(patched, SESSION_ANCHOR, SESSION_REPLACEMENT, "session namespace")
-        patched = _replace_named_node(patched, "_find_cli", FIND_REPLACEMENT, "CLI resolver")
-        patched = _replace_named_node(
-            patched,
-            "install_cli",
-            INSTALL_REPLACEMENT,
-            "unpinned installer",
-            required=False,
-        )
-        patched = _replace_named_node(
-            patched,
-            "_workspace_dir",
-            LEGACY_WORKSPACE_REPLACEMENT,
-            "collision-resistant workspace",
-        )
-        patched = _replace_once(patched, MISSING_ANCHOR, MISSING_REPLACEMENT, "missing-CLI response")
-        patched = _replace_once(patched, SCHEMA_ANCHOR, SCHEMA_REPLACEMENT, "static schema hint")
-        patched = _replace_once(patched, EXEC_ANCHOR, EXEC_REPLACEMENT, "managed subprocess")
-        if NOTICE_HINT_ANCHOR in patched:
-            patched = _replace_once(
-                patched,
-                NOTICE_HINT_ANCHOR,
-                NOTICE_HINT_REPLACEMENT,
-                "downgrade notice",
-            )
-    patched_test = test_source
-    patched_model_tools = model_tools_source
-    patched_install_sh = install_sh_source
-    patched_install_ps1 = install_ps1_source
-    patched_tools_config = tools_config_source
-    if "browser_use_state" not in patched_model_tools:
-        patched_model_tools = _replace_once(
-            patched_model_tools,
-            MODEL_CACHE_ANCHOR,
-            MODEL_CACHE_REPLACEMENT,
-            "tool-definition cache state",
-        )
-    if MARKER not in patched_test:
-        patched_test = _replace_named_node(
-            patched_test,
-            "TestFindCli",
-            FIND_TESTS_REPLACEMENT,
-            "managed receipt tests",
-        )
-        patched_test = _replace_named_node(
-            patched_test,
-            "TestFindCliManagedBin",
-            FIND_MANAGED_BIN_TESTS_REPLACEMENT,
-            "managed-bin tests",
-            required=False,
-        )
-        patched_test = _replace_named_node(
-            patched_test,
-            "TestInstallCli",
-            INSTALL_TESTS_REPLACEMENT,
-            "unpinned installer tests",
-            required=False,
-        )
-        patched_test = _replace_once(
-            patched_test,
-            STATIC_HINT_TEST_ANCHOR,
-            STATIC_HINT_TEST_REPLACEMENT,
-            "static schema hint test",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            MODE_TEST_ANCHOR,
-            MODE_TEST_REPLACEMENT,
-            "managed mode test",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            LEGACY_DIRECT_TEST_ANCHOR,
-            LEGACY_DIRECT_TEST_REPLACEMENT,
-            "legacy direct API managed gate test",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            LEGACY_AUTO_TEST_ANCHOR,
-            LEGACY_AUTO_TEST_REPLACEMENT,
-            "legacy auto-detection managed gate test",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            MISSING_HINT_TEST_ANCHOR,
-            MISSING_HINT_TEST_REPLACEMENT,
-            "missing-CLI hint test",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            TIMEOUT_DECORATOR_ANCHOR,
-            TIMEOUT_DECORATOR_REPLACEMENT,
-            "timeout guard marker",
-        )
-        patched_test = _replace_once(
-            patched_test,
-            TIMEOUT_TEST_ANCHOR,
-            TIMEOUT_TEST_REPLACEMENT,
-            "timeout fixture",
-        )
-        if NOTICE_TEST_ANCHOR in patched_test:
-            patched_test = _replace_once(
-                patched_test,
-                NOTICE_TEST_ANCHOR,
-                NOTICE_TEST_REPLACEMENT,
-                "downgrade notice test",
-            )
-        if SESSION_TEST_ANCHOR in patched_test:
-            patched_test = patched_test.replace(
-                SESSION_TEST_ANCHOR,
-                SESSION_TEST_REPLACEMENT,
-            )
-        if UNRELATED_ENV_TEST_ANCHOR in patched_test:
-            patched_test = _replace_once(
-                patched_test,
-                UNRELATED_ENV_TEST_ANCHOR,
-                UNRELATED_ENV_TEST_REPLACEMENT,
-                "environment allowlist test",
-            )
-
-    if INSTALL_SH_MARKER not in patched_install_sh:
-        if INSTALL_SH_ANCHOR in patched_install_sh:
-            patched_install_sh = _replace_once(
-                patched_install_sh,
-                INSTALL_SH_ANCHOR,
-                INSTALL_SH_REPLACEMENT,
-                "POSIX installer ownership",
-            )
-        else:
-            patched_install_sh = _replace_braced_function(
-                patched_install_sh,
-                "install_browser_use_cli() {",
-                INSTALL_SH_REPLACEMENT,
-                "POSIX installer ownership",
-            )
-    if INSTALL_PS1_MARKER not in patched_install_ps1:
-        if INSTALL_PS1_ANCHOR in patched_install_ps1:
-            patched_install_ps1 = _replace_once(
-                patched_install_ps1,
-                INSTALL_PS1_ANCHOR,
-                INSTALL_PS1_REPLACEMENT,
-                "PowerShell installer ownership",
-            )
-        else:
-            patched_install_ps1 = _replace_braced_function(
-                patched_install_ps1,
-                "function Install-BrowserUseCli {",
-                INSTALL_PS1_REPLACEMENT,
-                "PowerShell installer ownership",
-            )
-    if TOOLS_CONFIG_MARKER not in patched_tools_config:
-        if TOOLS_CONFIG_ANCHOR in patched_tools_config:
-            patched_tools_config = _replace_once(
-                patched_tools_config,
-                TOOLS_CONFIG_ANCHOR,
-                TOOLS_CONFIG_REPLACEMENT,
-                "tools installer ownership",
-            )
-        else:
-            patched_tools_config = _replace_named_node(
-                patched_tools_config,
-                "_ensure_browser_use_cli",
-                TOOLS_CONFIG_FUNCTION_REPLACEMENT,
-                "tools installer ownership",
-            )
-
-    ast.parse(patched)
-    ast.parse(patched_test)
-    ast.parse(patched_model_tools)
-    ast.parse(patched_tools_config)
-    for path, content in (
-        (target, patched),
-        (test_target, patched_test),
-        (model_tools_target, patched_model_tools),
-        (install_sh_target, patched_install_sh),
-        (install_ps1_target, patched_install_ps1),
-        (tools_config_target, patched_tools_config),
-    ):
-        if path.read_text(encoding="utf-8") == content:
-            continue
-        shutil.copy2(path, Path(str(path) + BACKUP_SUFFIX))
-        path.write_text(content, encoding="utf-8")
-    return True
 
 D363_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363"
+
+
 D363_POST_SETUP_TARGET = Path("hermes_cli/tools_config_post_setup.py")
+
+
 D363_IMPORT_ANCHOR = "import contextlib\n"
+
+
 D363_IMPORT_REPLACEMENT = "import contextlib\nimport hashlib\nimport tempfile\n"
+
+
 D363_CONSTANT_ANCHOR = '_BACKEND_KEY = "browser-use"\nBACKEND_DISABLED = "off"\n'
+
+
+RECEIPT_V2_MARKER = "HERMES_BROWSER_USE_RECEIPT_v2"
+
+
+def _receipt_verifier_source() -> str:
+    """Emit the installer's read-only verifier; do not maintain a second integrity policy."""
+    repo = Path(__file__).resolve().parents[2]
+    source = (repo / "kit/bin/ensure-browser-use-cli.py").read_text(encoding="utf-8")
+    names = {
+        "RECEIPT_NAME", "HASH_CHUNK_BYTES", "RECEIPT_MAX_BYTES", "CLI_MAX_BYTES",
+        "INTERPRETER_MAX_BYTES", "FILE_HASH_MAX_BYTES", "FILE_HASH_TIMEOUT_SECONDS",
+        "ENVIRONMENT_HASH_MAX_BYTES", "ENVIRONMENT_HASH_MAX_ENTRIES",
+        "ENVIRONMENT_HASH_MAX_PATH_BYTES", "ENVIRONMENT_HASH_TIMEOUT_SECONDS",
+        "IntegrityHashLimitError", "IntegrityReadError", "_venv_python", "_venv_cli",
+        "_check_hash_deadline", "_file_identity", "_consume_regular_file", "_sha256",
+        "_environment_sha256", "_interpreter_integrity", "_interpreter_receipt_is_valid",
+        "_artifact_sha256", "_read_receipt", "_receipt_profile_id", "_receipt_matches_install",
+        "verified_command",
+    }
+    fragments = []
+    found = set()
+    for node in ast.parse(source).body:
+        name = node.name if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else (
+            node.targets[0].id if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) else None
+        )
+        if name in names:
+            found.add(name)
+            fragments.append(ast.get_source_segment(source, node))
+    if found != names:
+        raise RuntimeError("Browser Use installer verifier source drift")
+    contract = json.loads((repo / "kit/config/browser-use-cli-release-v1.json").read_text(encoding="utf-8"))
+    return ("\n# " + RECEIPT_V2_MARKER + "\nimport platform\nimport stat\nimport time\n"
+            "from typing import Any, Callable\n_MANAGED_CONTRACT = " + repr(contract) + "\n\n"
+            + "\n\n".join(fragments) + "\n")
+
+
 D363_CONSTANT_REPLACEMENT = '''_BACKEND_KEY = "browser-use"
 BACKEND_DISABLED = "off"
 
 # HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363: receipt-bound binary and private state.
 _MANAGED_RECEIPT = "browser-use-cli-install-v1.json"
 _MANAGED_PACKAGE = "browser-use==0.13.7"
-_MAX_MANAGED_CLI_BYTES = 8 * 1024 * 1024
 _PRIVACY_ENV = {"ANONYMIZED_TELEMETRY": "false", "BH_TELEMETRY": "0",
                 "BROWSER_HARNESS_TELEMETRY": "0", "BROWSER_USE_CLOUD_SYNC": "false"}
 
@@ -1589,32 +133,8 @@ def _browser_use_state_root() -> Path:
 def _managed_receipt_path() -> Path:
     return Path(get_hermes_home()) / "state" / _MANAGED_RECEIPT
 
-def _sha256_file(path: Path) -> Optional[str]:
-    try:
-        if not path.is_file() or path.stat().st_size > _MAX_MANAGED_CLI_BYTES:
-            return None
-        digest = hashlib.sha256()
-        with path.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-    except OSError:
-        return None
-
-def _verified_managed_cli() -> Optional[str]:
-    try:
-        cli = Path(_managed_bin_dir()) / ("browser-use.exe" if os.name == "nt" else "browser-use")
-        receipt = json.loads(_managed_receipt_path().read_text(encoding="utf-8"))
-        digest = _sha256_file(cli)
-        if (not digest or not isinstance(receipt, dict) or receipt.get("schema") != 1
-                or receipt.get("package") != _MANAGED_PACKAGE or receipt.get("path") != str(cli)
-                or receipt.get("sha256") != digest):
-            return None
-        if os.name != "nt" and not os.access(cli, os.X_OK):
-            return None
-        return str(cli)
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return None
+def _verified_managed_cli() -> Optional[List[str]]:
+    return verified_command(Path(get_hermes_home()), _MANAGED_CONTRACT)
 
 def _profile_session_name(session: str) -> str:
     try:
@@ -1631,6 +151,11 @@ def _run_isolated_cli(*args, env: dict, **kwargs):
         isolated.update({"PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1", "PYTHONPYCACHEPREFIX": pycache})
         return subprocess.run(*args, env=isolated, **kwargs)
 '''
+
+
+D363_CONSTANT_REPLACEMENT += _receipt_verifier_source()
+
+
 D363_ENV_REPLACEMENT = '''def _base_subprocess_env() -> dict:
     from tools.browser_tool import _build_browser_env
     env = _build_browser_env()
@@ -1647,47 +172,24 @@ D363_ENV_REPLACEMENT = '''def _base_subprocess_env() -> dict:
                 "XDG_CACHE_HOME": str(profile / ".cache"),
                 "BROWSER_USE_CONFIG_DIR": str(profile / ".config" / "browser-use")})
     return env'''
+
+
 D363_FIND_REPLACEMENT = '''def _find_cli() -> Optional[List[str]]:
     """Resolve only the receipt-bound Hermes-managed Browser Use executable."""
-    managed = _verified_managed_cli()
-    return [managed] if managed else None'''
+    return _verified_managed_cli()'''
+
+
 D363_INSTALL_REPLACEMENT = '''def install_cli(timeout_s: int = 600) -> Tuple[bool, str]:
-    """Install the pinned managed CLI and atomically receipt-bind its executable."""
-    managed = _verified_managed_cli()
-    if managed:
-        return True, f"browser-use CLI already installed ({managed})"
-    def _managed_uv() -> Optional[str]:
-        from hermes_cli.managed_uv import ensure_uv
-        return str(ensure_uv() or "") or None
-    uv_bin = _quiet(_managed_uv, None, "Managed uv bootstrap unavailable") or shutil.which("uv")
-    if not uv_bin:
-        return False, "managed uv is unavailable; Browser Use remains disabled"
-    bin_dir = _managed_bin_dir()
-    env = {**os.environ, "UV_NO_CONFIG": "1", "UV_TOOL_BIN_DIR": bin_dir}
-    try:
-        Path(bin_dir).mkdir(parents=True, exist_ok=True)
-        result = subprocess.run([uv_bin, "tool", "install", _MANAGED_PACKAGE], capture_output=True,
-                                text=True, encoding="utf-8", errors="replace", env=env,
-                                timeout=timeout_s, stdin=subprocess.DEVNULL)
-        if result.returncode != 0:
-            return False, "managed Browser Use install failed"
-        cli = Path(bin_dir) / ("browser-use.exe" if os.name == "nt" else "browser-use")
-        digest = _sha256_file(cli)
-        if not digest:
-            return False, "managed Browser Use install did not produce a readable executable"
-        receipt_path = _managed_receipt_path()
-        receipt_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = receipt_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps({"schema": 1, "package": _MANAGED_PACKAGE,
-                                         "path": str(cli), "sha256": digest}, sort_keys=True), encoding="utf-8")
-        temporary.replace(receipt_path)
-    except subprocess.TimeoutExpired:
-        return False, f"managed Browser Use install timed out after {timeout_s}s"
-    except OSError as exc:
-        return False, f"managed Browser Use install failed: {exc}"
-    found = _verified_managed_cli()
-    return (True, f"browser-use CLI installed ({found})") if found else (False, "managed Browser Use receipt verification failed")'''
+    """Only the Golden host artifact installer owns the managed environment."""
+    if _verified_managed_cli():
+        return True, "managed Browser Use CLI is verified"
+    return False, "Run Golden's managed Browser Use host artifact installer; Browser Use remains disabled."'''
+
+
+
 D363_WORKSPACE_MARKER = "HERMES_NATIVE_BROWSER_USE_SAFETY_v1_workspace_r1"
+
+
 D363_WORKSPACE_OLD = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
     """Stable per-task workspace beneath the private Browser Use state root."""
     try:
@@ -1698,6 +200,8 @@ D363_WORKSPACE_OLD = '''def _workspace_dir(task_id: Optional[str]) -> Optional[s
     except OSError as e:
         logger.debug("browser_exec workspace unavailable: %s", e)
         return None'''
+
+
 D363_WORKSPACE_REPLACEMENT = '''def _workspace_dir(task_id: Optional[str]) -> Optional[str]:
     """Stable collision-resistant task workspace beneath private Browser Use state."""
     try:
@@ -1711,19 +215,27 @@ D363_WORKSPACE_REPLACEMENT = '''def _workspace_dir(task_id: Optional[str]) -> Op
     except OSError as e:
         logger.debug("browser_exec workspace unavailable: %s", e)
         return None'''
+
+
 D363_EXEC_ERROR_OLD = '''return tool_error("browser-use CLI not found on PATH, and uvx is unavailable for a zero-install run. "
                           "Install it with `uv tool install browser-use` (or `pipx install browser-use`), "
                           "then run `browser-use --doctor` to verify the setup.")'''
+
+
 D363_EXEC_ERROR_NEW = '''return tool_error("managed Browser Use CLI is unavailable or failed receipt verification. "
-                          "Run `hermes tools` to install the managed Browser Use CLI.")'''
+                          "Run Golden's managed Browser Use host artifact installer.")'''
+
+
 D363_POST_SETUP_OLD = '''        _print_info("    Falling back to zero-install runs via `uvx browser-use`" if shutil.which("uvx")
                     else "    Install manually: uv tool install browser-use  (https://docs.astral.sh/uv/)")'''
+
+
 D363_POST_SETUP_NEW = '''        _print_info("    Browser Use stays disabled until its managed install completes and verifies.")
         # HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363'''
 
-def _is_d363_browser_use_source(source: str) -> bool:
-    return ("Camofox always falls back" in source and "return backend == _BACKEND_KEY if backend else" in source
-            and "UV_TOOL_BIN_DIR" in source)
+
+LEGACY_RECEIPT_FUNCTIONS = {'_verified_managed_cli': '90320527e588118a0abede595ed77402cd3e5f9bcf6b3a5365a87871c288953a', '_find_cli': '88af0606ad1166d002d35218075e01e55f06b8bc427b34d554d30de676df6494', 'install_cli': 'e95c5e781727ddc32f79140cffea79ea6053aad03f6fa9af1d04c4dc15ac6731'}
+
 
 def _patch_d363_browser_use(root: Path, source: str) -> bool:
     target = root / TARGET
@@ -1731,6 +243,38 @@ def _patch_d363_browser_use(root: Path, source: str) -> bool:
     post_source = post_target.read_text(encoding="utf-8")
     test_target = root / TEST_TARGET
     test_source = test_target.read_text(encoding="utf-8")
+    if D363_MARKER in source and RECEIPT_V2_MARKER not in source:
+        if D363_MARKER not in post_source or D363_MARKER not in test_source:
+            raise RuntimeError("native Browser Use d363 split patch is incomplete")
+        nodes = {n.name: n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)}
+        for name, digest in LEGACY_RECEIPT_FUNCTIONS.items():
+            if name not in nodes or hashlib.sha256(ast.get_source_segment(source, nodes[name]).encode()).hexdigest() != digest:
+                raise RuntimeError("native Browser Use d363 executable verification drift")
+        replacements = {
+            "_verified_managed_cli": next(ast.get_source_segment(D363_CONSTANT_REPLACEMENT, n)
+                for n in ast.parse(D363_CONSTANT_REPLACEMENT).body
+                if isinstance(n, ast.FunctionDef) and n.name == "_verified_managed_cli"),
+            "_find_cli": D363_FIND_REPLACEMENT,
+            "install_cli": D363_INSTALL_REPLACEMENT,
+        }
+        patched = source.replace("Run `hermes tools` to install the managed Browser Use CLI.",
+                                 "Run Golden's managed Browser Use host artifact installer.")
+        patched = patched.replace("Run `hermes tools` to install it.",
+                                  "Run Golden's managed Browser Use host artifact installer.")
+        for name, replacement in replacements.items():
+            patched = _replace_named_node(patched, name, replacement, "receipt v2 upgrade")
+        patched = _replace_named_node(patched, "_sha256_file", "", "remove launcher-only verifier")
+        patched = patched.replace("_MAX_MANAGED_CLI_BYTES = 8 * 1024 * 1024\n", "")
+        patched += _receipt_verifier_source()
+        patched_test = _replace_named_node(test_source, "TestFindCliManagedBin", D363_TEST_MANAGED_REPLACEMENT, "receipt v2 tests")
+        patched_test = _replace_named_node(patched_test, "TestInstallCli", D363_TEST_INSTALL_REPLACEMENT, "single installer tests")
+        ast.parse(patched)
+        ast.parse(patched_test)
+        for path in (target, test_target):
+            shutil.copy2(path, Path(str(path) + BACKUP_SUFFIX))
+        target.write_text(patched, encoding="utf-8")
+        test_target.write_text(patched_test, encoding="utf-8")
+        return True
     if D363_MARKER in source:
         if D363_MARKER not in post_source or D363_MARKER not in test_source:
             raise RuntimeError("native Browser Use d363 split patch is incomplete")
@@ -1740,6 +284,18 @@ def _patch_d363_browser_use(root: Path, source: str) -> bool:
                             if isinstance(node, ast.FunctionDef) and node.name == "_verified_managed_cli"]
         if len(actual_verifiers) != 1 or ast.dump(actual_verifiers[0]) != ast.dump(expected_verifier):
             raise RuntimeError("native Browser Use d363 executable verification drift")
+        expected_nodes = ast.parse(_receipt_verifier_source()).body
+        actual_nodes = ast.parse(source).body
+        for expected in expected_nodes:
+            if isinstance(expected, (ast.FunctionDef, ast.ClassDef)):
+                matches = [n for n in actual_nodes if type(n) is type(expected) and n.name == expected.name]
+            elif isinstance(expected, ast.Assign):
+                matches = [n for n in actual_nodes if isinstance(n, ast.Assign)
+                           and ast.dump(n.targets[0]) == ast.dump(expected.targets[0])]
+            else:
+                continue
+            if len(matches) != 1 or ast.dump(matches[0]) != ast.dump(expected):
+                raise RuntimeError("native Browser Use receipt verifier drift")
         old_session = '    return ("hermes_" + hashlib.sha256(receipt).hexdigest()[:16] + "_" + session)[:64]'
         new_session = '    prefix = "hermes_" + hashlib.sha256(receipt).hexdigest()[:16] + "_"\n    suffix = session if len(session) <= 40 else session[:23] + "_" + hashlib.sha256(session.encode("utf-8")).hexdigest()[:16]\n    return prefix + suffix'
         patched = source
@@ -1771,7 +327,17 @@ def _patch_d363_browser_use(root: Path, source: str) -> bool:
     patched = _replace_once(patched, D363_EXEC_ERROR_OLD, D363_EXEC_ERROR_NEW, "d363 missing CLI error")
     patched = _replace_once(patched, D363_SCHEMA_OLD, D363_SCHEMA_NEW, "d363 schema hint")
     patched = _replace_once(patched, 'env["BU_NAME"] = session', 'env["BU_NAME"] = _profile_session_name(session)', "d363 session namespace")
-    patched = _replace_once(patched, '''proc = subprocess.run(
+    call_anchor = ('return {"proc": _run_cli_killing_process_group(cmd, code, env, timeout)}'
+                   if 'return {"proc": _run_cli_killing_process_group(cmd, code, env, timeout)}' in patched
+                   else "proc = _run_cli_killing_process_group(cmd, code, env, timeout)")
+    if call_anchor in patched:
+        # The released runtime dispatches through a browser lease closure. Keep that fence.
+        patched = _replace_once(patched, call_anchor,
+                                call_anchor.replace("_run_cli_killing_process_group(cmd, code, env, timeout)", "_run_isolated_cli(cmd, code, env=env, timeout=timeout)"), "native isolated process group")
+        patched = _replace_once(patched, "return subprocess.run(*args, env=isolated, **kwargs)",
+                                "return _run_cli_killing_process_group(args[0], args[1], isolated, kwargs['timeout'])", "native process group isolation")
+    else:
+        patched = _replace_once(patched, '''proc = subprocess.run(
             cmd, input=code, capture_output=True, text=True, timeout=timeout, env=env,''', '''proc = _run_isolated_cli(
             cmd, input=code, capture_output=True, text=True, timeout=timeout, env=env,''', "d363 isolated subprocess")
     patched_post = _replace_once(post_source, D363_POST_SETUP_OLD, D363_POST_SETUP_NEW, "d363 post setup")
@@ -1784,6 +350,7 @@ def _patch_d363_browser_use(root: Path, source: str) -> bool:
         path.write_text(content, encoding="utf-8")
     return True
 
+
 D363_MODE_REPLACEMENT = '''def is_browser_use_cli_mode() -> bool:
     """Enable Browser Use only when the receipt-bound managed CLI is runnable."""
     if _camofox_active():
@@ -1792,12 +359,18 @@ D363_MODE_REPLACEMENT = '''def is_browser_use_cli_mode() -> bool:
     if backend and backend != _BACKEND_KEY:
         return False
     return _find_cli() is not None'''
+
+
 D363_SCHEMA_OLD = '''# Static fallback description, used only when the CLI (and uvx) is unavailable
     "description": (_HEADER_BASE + _HELPERS_DIGEST
                     + "\\n\\n(The browser-use CLI is not installed yet. Install it with `uv tool install browser-use`.)"),'''
+
+
 D363_SCHEMA_NEW = '''# Static fallback description when the managed receipt-bound CLI is unavailable.
     "description": (_HEADER_BASE + _HELPERS_DIGEST
-                    + "\\n\\n(The managed Browser Use CLI is unavailable. Run `hermes tools` to install it.)"),'''
+                    + "\\n\\n(The managed Browser Use CLI is unavailable. Run Golden's managed Browser Use host artifact installer.)"),'''
+
+
 D363_TEST_FIND_REPLACEMENT = '''class TestFindCli:
     """Only receipt-bound $HERMES_HOME/bin/browser-use may execute."""
     def test_rejects_path_and_uvx(self, monkeypatch):
@@ -1808,45 +381,34 @@ D363_TEST_FIND_REPLACEMENT = '''class TestFindCli:
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
         assert bu_cli._find_cli_unpatched() is None
 '''
-D363_TEST_MANAGED_REPLACEMENT = '''class TestFindCliManagedBin:
-    @pytest.fixture(autouse=True)
-    def _hermetic_home(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
 
-    def test_receipt_binds_managed_binary(self, tmp_path):
-        cli = tmp_path / "home" / "bin" / "browser-use"
-        cli.parent.mkdir(parents=True)
-        cli.write_text("#!/bin/sh\\n")
-        cli.chmod(cli.stat().st_mode | stat.S_IXUSR)
-        receipt = tmp_path / "home" / "state" / bu_cli._MANAGED_RECEIPT
-        receipt.parent.mkdir(parents=True)
-        receipt.write_text(json.dumps({"schema": 1, "package": bu_cli._MANAGED_PACKAGE,
-                                       "path": str(cli), "sha256": bu_cli._sha256_file(cli)}))
-        assert bu_cli._find_cli_unpatched() == [str(cli)]
-        cli.write_text("changed")
-        assert bu_cli._find_cli_unpatched() is None
-'''
-D363_TEST_INSTALL_REPLACEMENT = '''class TestInstallCli:
-    def test_successful_managed_install_writes_receipt(self, tmp_path, monkeypatch):
+
+D363_TEST_MANAGED_REPLACEMENT = '''class TestFindCliManagedBin:
+    def test_rejects_legacy_launcher_receipt(self, tmp_path, monkeypatch):
         home = tmp_path / "home"
         monkeypatch.setenv("HERMES_HOME", str(home))
-        monkeypatch.setenv("PATH", str(tmp_path / "empty"))
-        uv = tmp_path / "uv"
-        uv.write_text("#!/bin/sh\\n"
-                      'printf "#!/bin/sh\\\\n" > "$UV_TOOL_BIN_DIR/browser-use"\\n'
-                      '/bin/chmod +x "$UV_TOOL_BIN_DIR/browser-use"\\n')
-        uv.chmod(uv.stat().st_mode | stat.S_IXUSR)
-        import sys as _sys
-        import types as _types
-        fake = _types.ModuleType("hermes_cli.managed_uv")
-        fake.ensure_uv = lambda **kw: str(uv)
-        monkeypatch.setitem(_sys.modules, "hermes_cli.managed_uv", fake)
-        ok, msg = bu_cli.install_cli()
-        assert ok, msg
-        assert (home / "state" / bu_cli._MANAGED_RECEIPT).is_file()
-        assert bu_cli._find_cli_unpatched() == [str(home / "bin" / "browser-use")]
+        cli = home / "bin" / "browser-use"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("#!/bin/sh\\n")
+        cli.chmod(0o700)
+        receipt = home / "state" / bu_cli._MANAGED_RECEIPT
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(json.dumps({"schema": 1, "package": bu_cli._MANAGED_PACKAGE,
+                                       "path": str(cli), "sha256": "0" * 64}))
+        assert bu_cli._find_cli_unpatched() is None
 '''
+
+
+D363_TEST_INSTALL_REPLACEMENT = '''class TestInstallCli:
+    def test_missing_install_requires_host_artifact_owner(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+        monkeypatch.setattr(bu_cli.subprocess, "run", lambda *a, **kw: pytest.fail("unexpected install"))
+        ok, message = bu_cli.install_cli()
+        assert not ok
+        assert "host artifact installer" in message
+'''
+
+
 
 def _patch_d363_tests(source: str) -> str:
     patched = "# HERMES_NATIVE_BROWSER_USE_SAFETY_v1_d363\n" + _replace_named_node(source, "TestFindCli", D363_TEST_FIND_REPLACEMENT, "d363 resolver tests")
@@ -1868,16 +430,65 @@ def _patch_d363_tests(source: str) -> str:
         assert bu_cli.is_browser_use_cli_mode() is False
 
     def test_gateway_config_stays_on_legacy_path""", 1)
-    patched = patched.replace("""        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_browser_use_cli_mode() is True
-
-    def test_auto_detect_without_key_does_not_migrate""", """        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")
-        assert bu_cli.is_browser_use_cli_mode() is False
-
-    def test_auto_detect_without_key_does_not_migrate""", 1)
+    # The native migration test now stands next to a different test. Bind to
+    # its credential fixture, not the following function's name.
+    patched = patched.replace('        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")\n        assert bu_cli.is_browser_use_cli_mode() is True',
+                              '        monkeypatch.setenv("BROWSERBASE_PROJECT_ID", "bb-project")\n        assert bu_cli.is_browser_use_cli_mode() is False', 1)
     patched = patched.replace('''        assert bu_cli.is_browser_use_cli_mode() is True
 
     def test_gateway_config_stays_on_legacy_path''', '''        assert bu_cli.is_browser_use_cli_mode() is False
 
     def test_gateway_config_stays_on_legacy_path''', 1)
     return patched
+
+
+def _patch_native_harness(root: Path) -> bool:
+    target = Path(root) / "tools/browser_use_cli.py"
+    source = target.read_text()
+    if "HERMES_NATIVE_BROWSER_USE_SAFETY_v1" in source:
+        return False
+    old = '    env.setdefault("ANONYMIZED_TELEMETRY", "false")\n    return env\n'
+    new = '''    # HERMES_NATIVE_BROWSER_USE_SAFETY_v1: force privacy; isolate harness state by profile.
+    state = Path(get_hermes_home()) / "state" / "browser-use"
+    profile = state / "browser-profile"
+    env.update({"ANONYMIZED_TELEMETRY": "false", "BH_TELEMETRY": "0",
+                "BROWSER_HARNESS_TELEMETRY": "0", "BROWSER_USE_CLOUD_SYNC": "false",
+                "BH_HOME": str(state), "BH_CONFIG_DIR": str(state / "config"),
+                "BH_RUNTIME_DIR": str(state / "runtime"), "BH_TMP_DIR": str(state / "tmp"),
+                "BH_RUNTIME_DIR_SHARED": "1", "BH_TMP_DIR_SHARED": "1", "BU_NAME": "default",
+                "BH_AGENT_WORKSPACE": str(state / "workspace"), "HOME": str(profile),
+                "USERPROFILE": str(profile), "XDG_CONFIG_HOME": str(profile / ".config"),
+                "XDG_CACHE_HOME": str(profile / ".cache"),
+                "BROWSER_USE_CONFIG_DIR": str(profile / ".config" / "browser-use"),
+                "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+    return env
+'''
+    if source.count(old) != 1:
+        raise RuntimeError("native harness environment owner drift")
+    # Preserve the native PYTHONPATH bridge: Desktop bundles need it to import
+    # the same exact-pinned package in the spawned interpreter and daemon.
+    updated = source.replace(old, new, 1)
+    # Preserve Golden's collision-resistant task directories. The native command
+    # runner and daemon shutdown continue to own process lifetime.
+    old_workspace = ('    if os.environ.get("BH_AGENT_WORKSPACE"):\n'
+                     '        return os.environ["BH_AGENT_WORKSPACE"]\n')
+    if updated.count(old_workspace) != 1:
+        raise RuntimeError("native harness workspace override drift")
+    updated = updated.replace(old_workspace, "", 1)
+    old_path = ('        safe = _TASK_ID_SAFE_RE.sub("_", str(task_id or "default"))[:80] or "default"\n'
+                '        path = Path(get_hermes_home()) / "cache" / "browser-use" / "workspace" / safe\n')
+    new_path = ('        import hashlib\n'
+                '        identity = str(task_id or "default")\n'
+                '        safe = (_TASK_ID_SAFE_RE.sub("_", identity)[:63] or "default") + "_" + hashlib.sha256(identity.encode("utf-8", "surrogatepass")).hexdigest()[:16]\n'
+                '        path = Path(get_hermes_home()) / "state" / "browser-use" / "workspace" / safe\n')
+    if updated.count(old_path) != 1:
+        raise RuntimeError("native harness task directory drift")
+    updated = updated.replace(old_path, new_path, 1)
+    old_name = '        env["BU_NAME"] = session'
+    if updated.count(old_name) != 1:
+        raise RuntimeError("native harness session namespace drift")
+    updated = updated.replace(old_name,
+        '        import hashlib\n        env["BU_NAME"] = "s_" + hashlib.sha256(session.encode()).hexdigest()[:16]', 1)
+    compile(updated, str(target), "exec")
+    target.write_text(updated)
+    return True

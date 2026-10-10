@@ -82,6 +82,25 @@ def _set_dotted(target: dict, dotted: str, value: Any) -> bool:
 _SENTINEL = object()
 
 
+# A shared MCP default must never turn an explicit CLI allowlist into MCP-only
+# toolsets.  The platform-native operator baseline is required whenever this
+# merge creates or updates platform_toolsets.cli.
+CLI_NATIVE_BASELINE = (
+    "terminal", "file", "code_execution", "todo", "delegation", "cronjob",
+    "session_search", "skills", "task-ledger",
+)
+
+
+def _merge_cli_toolsets(existing: Any, shared: Any) -> list[str]:
+    current = existing if isinstance(existing, list) else []
+    incoming = shared if isinstance(shared, list) else []
+    merged: list[str] = []
+    for item in [*current, *CLI_NATIVE_BASELINE, *incoming]:
+        if isinstance(item, str) and item not in merged:
+            merged.append(item)
+    return merged
+
+
 # Primary client model-routing keys are owned by the client config, never by shared
 # defaults. merge-sd must NEVER overwrite these even if a (possibly stale)
 # defaults file declares them. Hard floor against the 2026-06-07 Codex->openrouter
@@ -116,6 +135,45 @@ def _is_protected(dotted: str) -> bool:
     return False
 
 
+def reconcile_subscription_failover(client_config: dict, defaults: dict, exemptions: Iterable[str]):
+    """Keep the primary route; exhaust subscriptions before the tenant API route."""
+    merged = _deep_copy(client_config)
+    model = merged.get("model") or {}
+    if not isinstance(model, dict):
+        raise ValueError("model must be a provider mapping")
+    primary = model.get("provider")
+    if primary not in ("openai-codex", "xai-oauth"):
+        return merged, [], ["fallback_providers"]
+    exempt = set(exemptions)
+    applied, skipped = [], []
+    if "fallback_providers" in exempt:
+        return merged, [], ["fallback_providers", "agent.api_max_retries"]
+    existing = merged.get("fallback_providers", [])
+    if not isinstance(existing, list) or any(not isinstance(route, dict) for route in existing):
+        raise ValueError("fallback_providers must be a list of provider mappings")
+    opposite = "xai-oauth" if primary == "openai-codex" else "openai-codex"
+    routes = defaults["routes"]
+    alternate = [route for route in existing if route.get("provider") == opposite]
+    api = [route for route in existing if route.get("provider") == "xai"]
+    custom = [route for route in existing if route.get("provider") not in (primary, opposite, "xai")]
+    fallbacks = (alternate or [routes[opposite]]) + custom + (api or [routes["xai"]])
+    if _set_dotted(merged, "fallback_providers", fallbacks):
+        applied.append("fallback_providers")
+    retry_path = "agent.api_max_retries"
+    if "agent" in exempt or retry_path in exempt:
+        skipped.append(retry_path)
+    else:
+        agent = merged.get("agent") or {}
+        if not isinstance(agent, dict):
+            raise ValueError("agent must be a mapping")
+        retries = agent.get("api_max_retries", 0)
+        if isinstance(retries, bool) or not isinstance(retries, int) or retries < 0:
+            raise ValueError("agent.api_max_retries must be a nonnegative integer")
+        if _set_dotted(merged, retry_path, max(retries, len(fallbacks) + 1)):
+            applied.append(retry_path)
+    return merged, applied, skipped
+
+
 def merge(
     client_config: dict,
     defaults: dict,
@@ -136,6 +194,16 @@ def merge(
         if dotted in IMAGE_GEN_LEAVES and preserve_image_block:
             skipped.append(dotted)
             continue
+        search = client_config.get("x_search")
+        if (dotted == "x_search.model" and isinstance(search, dict)
+                and str(search.get("model") or "").strip()):
+            # A native default never replaced an explicit tenant search model.
+            skipped.append(dotted)
+            continue
+        if dotted == "platform_toolsets.cli":
+            platforms = merged.get("platform_toolsets")
+            current = platforms.get("cli") if isinstance(platforms, dict) else None
+            value = _merge_cli_toolsets(current, value)
         if _set_dotted(merged, dotted, value):
             applied.append(dotted)
     return merged, applied, skipped
@@ -288,6 +356,23 @@ def _load_yaml(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top-level must be a mapping")
     return data
+
+
+def reconcile_client_warnings(client_config: dict, defaults_dir: Path, exemptions=()):
+    """Apply the native warning policy and retire only the obsolete local provider."""
+    quiet = _load_yaml(defaults_dir / "config-client-quiet-display.yaml")
+    suppress = quiet["display"]["platforms"]["telegram"]["suppress_warning_notifications"]
+    if suppress is not True:
+        raise ValueError("client warning policy does not match the reviewed repair")
+    merged, removed, skipped = retire_matching_defaults(
+        client_config, {"memory": {"provider": "local"}}, list(exemptions)
+    )
+    merged, applied, display_skipped = merge(
+        merged,
+        {"display": {"platforms": {"telegram": {"suppress_warning_notifications": suppress}}}},
+        exemptions,
+    )
+    return merged, removed + applied, skipped + display_skipped
 
 
 def _discover_defaults_files(defaults_dir: Path) -> list[Path]:
@@ -795,8 +880,9 @@ def _run_refero_scope(args) -> int:
             config, registry, source_rows[0], hermes_home=str(home),
             hermes_python=python, package_home=str(package), registry_home=str(registry_home), exemptions=exemptions,
         )
-        schema_two = (
-            registry.get("schema_version") == 2
+        synced_registry = (
+            (registry.get("schema_version") == 2 or
+             registry.get("schema_version") == 1 and isinstance(registry.get("_sync_meta"), dict))
             and receipt["status"] not in {"preserved_opt_out", "preserved_exemption"}
         )
         expected_row = next(
@@ -804,7 +890,7 @@ def _run_refero_scope(args) -> int:
             None,
         )
         merged_extras = None
-        if schema_two:
+        if synced_registry:
             sync_meta = registry.get("_sync_meta")
             canonical = registry_home / REFERO_CANONICAL
             extras = registry_home / REFERO_EXTRAS
@@ -850,6 +936,16 @@ def _run_refero_scope(args) -> int:
                 ]
                 receipt["changed_paths"].append(f"{REFERO_EXTRAS}#{REFERO_ID}")
                 receipt["status"] = "changed"
+            if registry.get("schema_version") == 1:
+                category = next(row for row in merged_registry["categories"]
+                                if row["id"] == expected_row["category"])
+                canonical_doc = _refero_json(canonical.read_bytes())
+                available = {row["id"] for row in canonical_doc["categories"]}
+                available.update(row["id"] for row in merged_extras["categories"])
+                if category["id"] not in available:
+                    merged_extras["categories"].append(category)
+                    receipt["changed_paths"].append(f"{REFERO_EXTRAS}#category:{category['id']}")
+                    receipt["status"] = "changed"
         updated = {
             "config.yaml": (
                 yaml.safe_dump(merged, sort_keys=False, allow_unicode=True).encode()
@@ -857,15 +953,15 @@ def _run_refero_scope(args) -> int:
             ),
             REFERO_REGISTRY: (
                 (json.dumps(merged_registry, indent=2, ensure_ascii=False) + "\n").encode()
-                if merged_registry != registry and not schema_two else original[REFERO_REGISTRY]
+                if merged_registry != registry and not synced_registry else original[REFERO_REGISTRY]
             ),
         }
-        if schema_two:
+        if synced_registry:
             updated[REFERO_EXTRAS] = (
                 json.dumps(merged_extras, indent=2, ensure_ascii=False) + "\n"
             ).encode() if merged_extras != extras_doc else original[REFERO_EXTRAS]
 
-        def stage_schema_two(directory: Path) -> bytes:
+        def stage_synced_registry(directory: Path) -> bytes:
             staged_config = directory / "config.after.staged"
             staged_extras = directory / "extras.after.staged"
             staged_registry = directory / "registry.after.staged"
@@ -900,7 +996,8 @@ def _run_refero_scope(args) -> int:
                 or marker.get("tool_name") is not None
                 or marker.get("category") != "runtime-mcp"
                 or marker.get("source") != "auto:mcp-config"
-                or generated_registry.get("categories") != registry.get("categories")
+                or {row["id"]: row for row in generated_registry.get("categories", [])}
+                != {row["id"]: row for row in registry.get("categories", [])}
             ):
                 raise ValueError("Refero registry sync could not prove the owned registration")
             # registry-sync also reconciles unrelated runtime MCP markers. Refero owns
@@ -928,9 +1025,9 @@ def _run_refero_scope(args) -> int:
                 )
             return (json.dumps(post_registry, indent=2, ensure_ascii=False) + "\n").encode()
 
-        if schema_two and receipt["changed_paths"]:
+        if synced_registry and receipt["changed_paths"]:
             with tempfile.TemporaryDirectory(prefix=".refero-stage-", dir=rollback) as temporary:
-                updated[REFERO_REGISTRY] = stage_schema_two(Path(temporary))
+                updated[REFERO_REGISTRY] = stage_synced_registry(Path(temporary))
         files = {
             relative: {
                 "before_sha256": hashlib.sha256(original[relative]).hexdigest(),
@@ -1042,7 +1139,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--scope",
-        choices=("all", "native-image", "refero-styles"),
+        choices=("all", "native-image", "refero-styles", "subscription-failover", "client-warnings"),
         default="all",
         help="Apply all defaults, native-image routing, or exact Refero-only cold registration",
     )
@@ -1066,6 +1163,10 @@ def main(argv: list[str]) -> int:
         return 1
 
     defaults_files = _discover_defaults_files(args.defaults_dir)
+    if args.scope == "client-warnings":
+        defaults_files = [path for path in defaults_files if path.name == "config-client-quiet-display.yaml"]
+    if args.scope == "subscription-failover":
+        defaults_files = [path for path in defaults_files if path.name == "config-subscription-failover.yaml"]
     if args.scope == "native-image":
         defaults_files = [path for path in defaults_files if path.name in NATIVE_IMAGE_DEFAULT_NAMES]
         found = {path.name for path in defaults_files}
@@ -1130,7 +1231,23 @@ def main(argv: list[str]) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        if defaults_path.name == "config-mcp-on-demand-control.yaml":
+        if defaults_path.name == "config-client-quiet-display.yaml":
+            try:
+                merged, applied, skipped = reconcile_client_warnings(merged, args.defaults_dir, exemptions)
+                if args.scope != "client-warnings":
+                    merged, quiet_applied, quiet_skipped = merge(merged, defaults, exemptions)
+                    applied.extend(quiet_applied)
+                    skipped.extend(quiet_skipped)
+            except (KeyError, TypeError, ValueError) as exc:
+                print(f"error: client warning reconciliation: {exc}", file=sys.stderr)
+                return 1
+        elif defaults_path.name == "config-subscription-failover.yaml":
+            try:
+                merged, applied, skipped = reconcile_subscription_failover(merged, defaults, exemptions)
+            except (KeyError, TypeError, ValueError) as exc:
+                print(f"error: {defaults_path}: {exc}", file=sys.stderr)
+                return 1
+        elif defaults_path.name == "config-mcp-on-demand-control.yaml":
             if args.scope == "native-image":
                 try:
                     merged, applied, skipped = _reconcile_native_image_exposure(merged, defaults, exemptions)
@@ -1147,6 +1264,9 @@ def main(argv: list[str]) -> int:
             all_skipped.append((defaults_path.name, k))
 
     receipt = None
+    if args.scope in {"subscription-failover", "client-warnings"}:
+        receipt = {"scope": args.scope, "changed_paths": [key for _, key in all_applied],
+                   "skipped_paths": [key for _, key in all_skipped]}
     if args.scope == "native-image":
         try:
             receipt = _native_image_receipt(merged, exemptions, all_applied, all_skipped)

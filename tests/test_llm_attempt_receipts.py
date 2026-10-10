@@ -146,10 +146,10 @@ def test_openrouter_empty_usage_is_not_priced_as_spend(tmp_path, monkeypatch):
         openrouter_generation_id="id_unavailable",
     )
 
-    assert payload["usage_status"] == "provider_reported"
-    assert payload["total_tokens"] == 0
-    assert payload["cost_usd"] == 0.0
-    assert payload["cost_status"] == "estimated"
+    assert payload["usage_status"] == "unavailable"
+    assert payload["total_tokens"] is None
+    assert payload["cost_usd"] is None
+    assert payload["cost_status"] == "unknown"
 
 
 def test_openrouter_zero_usage_retains_actual_provider_cost(tmp_path, monkeypatch):

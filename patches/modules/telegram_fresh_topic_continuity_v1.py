@@ -139,9 +139,12 @@ def patch_run_text(source: str) -> str:
 def patch_native_run_text(source: str) -> str:
     if MARKER in source:
         return source
+    field_anchor = ("        persistence_owner: Optional[str] = None\n"
+                    if "        persistence_owner: Optional[str] = None\n" in source
+                    else "        persist_user_display_kind: Optional[str]\n")
     source = _replace_once(
-        source, "        persist_user_display_kind: Optional[str]\n",
-        "        persist_user_display_kind: Optional[str]\n        fresh_telegram_rehydrate: bool = False\n",
+        source, field_anchor,
+        field_anchor + "        fresh_telegram_rehydrate: bool = False\n",
         "native prepared continuity state",
     )
     open_line = "        _was_auto_reset, _is_new_session = await self._hmwa_open_session(session_entry, session_key, source)\n"
@@ -153,9 +156,11 @@ def patch_native_run_text(source: str) -> str:
     source = _replace_once(source, open_line, RESET_CAPTURE + open_line
         + "        fresh_telegram_rehydrate = " + condition.replace("\n", "\n        ") + "\n",
         "native continuity decision")
-    ret = "            persist_user_display_kind,\n        ), _session_env_tokens"
+    ret = "            title_user_message=title_user_message,\n        ), _session_env_tokens"
+    if ret not in source:
+        ret = "            persist_user_display_kind, session_entry.session_id, owner,\n        ), _session_env_tokens"
     source = _replace_once(source, ret,
-        "            persist_user_display_kind, fresh_telegram_rehydrate,\n        ), _session_env_tokens",
+        ret.replace("\n        ),", " fresh_telegram_rehydrate=fresh_telegram_rehydrate,\n        ),"),
         "native continuity propagation")
     source = _replace_once(source, HOOK_MESSAGE_ANCHOR, HOOK_MESSAGE_ANCHOR
         + '                "full_message": message_text,\n'

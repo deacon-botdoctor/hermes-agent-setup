@@ -6,7 +6,7 @@ The external interface is deliberately small:
 * launch-process / register-process / create-browser-tab create resources with exact local ownership.
 * finish releases resources owned by one completed task.
 * reconcile repairs expired leases after repeated observations.
-* snapshot reports bounded ownership and storage health without private content.
+* snapshot reports bounded ownership, capacity and storage health without private content.
 
 Unknown and interactive resources are inventory only.  They are never mutated.
 Storage observes the existing retention receipt; it does not add deletion authority.
@@ -375,7 +375,7 @@ def _windows_open_process_anchor(pid: int, access: int = 0x1000) -> tuple[Any | 
         import ctypes
         from ctypes import wintypes
 
-        kernel32 = ctypes.windll.kernel32
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         kernel32.OpenProcess.restype = wintypes.HANDLE
         filetime_pointer = ctypes.POINTER(wintypes.FILETIME)
@@ -546,9 +546,10 @@ def _windows_duplicate_remote_job_guard(
         kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
         kernel32.CloseHandle.restype = wintypes.BOOL
         owner, current_birth_id = _windows_open_process_anchor(owner_pid, 0x1040)
-        if owner is None or current_birth_id != owner_birth_id:
-            if owner is not None:
-                _windows_close_process_anchor(owner)
+        if owner is None:
+            return None, "gone" if not _pid_exists(owner_pid) else "failed"
+        if current_birth_id != owner_birth_id:
+            _windows_close_process_anchor(owner)
             return None, "gone"
         local = wintypes.HANDLE()
         try:
@@ -891,6 +892,7 @@ def _register_launched_process(
     provenance: object,
     captured_identity: dict[str, Any] | None = None,
     registry_locked: bool = False,
+    parent_lifetime: bool = False,
 ) -> dict[str, Any]:
     if provenance is not _LAUNCH_PROVENANCE:
         raise ValueError("process registration requires steward launch provenance")
@@ -914,6 +916,18 @@ def _register_launched_process(
                 continue
             if existing.get("task_id") != task_id:
                 raise ValueError("process already has a different active owner")
+            if bool(existing.get("parent_lifetime", False)) != parent_lifetime:
+                raise ValueError("process lease parent-lifetime mode cannot change")
+            if parent_lifetime:
+                owner, owner_birth_id = _windows_open_process_anchor(os.getppid(), 0x1040)
+                if owner is not None:
+                    _windows_close_process_anchor(owner)
+                resource = existing.get("resource") or {}
+                if (
+                    owner_birth_id != resource.get("guard_owner_birth_id")
+                    or os.getppid() != resource.get("guard_owner_pid")
+                ):
+                    raise ValueError("process lease guard owner changed")
             existing["expires_epoch"] = epoch_now() + ttl
             existing["ttl_seconds"] = ttl
             existing["stale_observations"] = 0
@@ -921,6 +935,7 @@ def _register_launched_process(
             _atomic_json(path, existing)
             return _public_lease(existing)
         lease = _base_lease(task_id, "process", ttl, protected)
+        lease["parent_lifetime"] = parent_lifetime
         lease["resource"] = identity
         if os.name == "nt":
             job_guard = _windows_assign_process_job(
@@ -969,6 +984,7 @@ def register_process(
     ttl: int,
     protected: bool,
     systemd_unit: str = "",
+    parent_lifetime: bool = False,
 ) -> dict[str, Any]:
     """Claim one newly spawned, isolated background process.
 
@@ -996,6 +1012,10 @@ def register_process(
         raise ValueError("Windows process requires a birth identifier")
     if os.name == "nt" and protected:
         raise ValueError("protected Windows process ownership is unsupported")
+    if parent_lifetime and os.name != "nt":
+        raise ValueError("parent-lifetime process ownership is Windows-only")
+    if parent_lifetime and protected:
+        raise ValueError("parent-lifetime process ownership cannot be protected")
     if os.name != "nt" and any(
         int(current.get(key) or 0) != pid for key in ("pgid", "sid")
     ):
@@ -1008,6 +1028,7 @@ def register_process(
         protected=protected,
         provenance=_LAUNCH_PROVENANCE,
         captured_identity=current,
+        parent_lifetime=parent_lifetime,
     )
 
 
@@ -1402,6 +1423,12 @@ def _valid_lease(path: Path, lease: dict[str, Any]) -> bool:
         lease.get("last_observation_epoch"), minimum=1
     ):
         return False
+    if "parent_lifetime" in lease and not isinstance(lease.get("parent_lifetime"), bool):
+        return False
+    if lease.get("parent_lifetime") and (
+        kind != "process" or os.name != "nt" or lease.get("protected")
+    ):
+        return False
     resource = lease["resource"]
     if kind == "browser_tab":
         endpoint = resource.get("endpoint")
@@ -1431,7 +1458,7 @@ def _valid_lease(path: Path, lease: dict[str, Any]) -> bool:
         return False
     guard_fields = ("guard_owner_pid", "guard_owner_birth_id", "guard_handle")
     if not any(key in resource for key in guard_fields):
-        return True  # pre-upgrade Windows process lease; audit-only drain
+        return not lease.get("parent_lifetime", False)  # pre-upgrade Windows process lease; audit-only drain
     return (
         _plain_int(resource.get("guard_owner_pid"), minimum=2)
         and isinstance(resource.get("guard_owner_birth_id"), str)
@@ -1597,9 +1624,30 @@ def _session_group_ids(members: list[dict[str, Any]]) -> list[int]:
     )
 
 
+def _windows_pid_exists(pid: int) -> bool:
+    """Query only. Windows ``os.kill(pid, 0)`` can terminate the target."""
+    try:
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION only
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        return ctypes.get_last_error() not in {87, 1168}  # invalid PID / not found
+    except (AttributeError, OSError, ValueError):
+        return True
+
+
 def _pid_exists(pid: int) -> bool:
     if pid <= 1:
         return False
+    if os.name == "nt":
+        return _windows_pid_exists(pid)
     try:
         os.kill(pid, 0)
         return True
@@ -1840,6 +1888,8 @@ def _process_census() -> dict[str, int]:
     tty_shells = 0
     idle_tty_shells = 0
     debug_browser_roots = 0
+    browser_roots = 0
+    browser_renderers = 0
     for pid, _ppid, uid, tty, command in rows:
         if uid != os.getuid():
             continue
@@ -1849,6 +1899,11 @@ def _process_census() -> dict[str, int]:
             if pid not in children:
                 idle_tty_shells += 1
         lowered = command.lower()
+        browser = any(name in lowered for name in ("brave", "chrome", "chromium"))
+        if browser and "--type=renderer" in lowered:
+            browser_renderers += 1
+        elif browser and "--type=" not in lowered and ".app/contents/macos/" in lowered:
+            browser_roots += 1
         if (
             "--remote-debugging-port=" in lowered
             and "--type=" not in lowered
@@ -1861,6 +1916,8 @@ def _process_census() -> dict[str, int]:
         "tty_shells": tty_shells,
         "idle_tty_shells": idle_tty_shells,
         "debug_browser_roots": debug_browser_roots,
+        "browser_roots": browser_roots,
+        "browser_renderers": browser_renderers,
     }
 
 
@@ -2125,6 +2182,60 @@ def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict
     return storage
 
 
+def _capacity_snapshot(home: Path) -> dict[str, Any]:
+    """Surface the existing host check; an empty ownership registry is not headroom.
+
+    Keep the observation time so consumers cannot call an old sample recovery.
+    Capacity evidence grants no authority to stop an interactive application.
+    """
+    result: dict[str, Any] = {"status": "unknown", "measured_at": None,
+        "source": "local_selfcheck", "cleanup_scope": "registered_resources_only"}
+    path = home / "state/local-selfcheck-latest.json"
+    try:
+        if path.is_symlink() or not path.is_file():
+            return result
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_STORAGE_RECEIPT_BYTES + 1)
+        if len(raw) > MAX_STORAGE_RECEIPT_BYTES:
+            return result
+        payload = json.loads(raw)
+        measured_at = payload.get("checked_at")
+        stamp = datetime.fromisoformat(str(measured_at).replace("Z", "+00:00"))
+        if stamp.tzinfo is None or not -300 <= epoch_now() - stamp.timestamp() <= 1800:
+            return result
+        check = next(row for row in payload.get("checks", [])
+                     if isinstance(row, dict) and row.get("name") == "host_capacity")
+        if check.get("status") not in {"pass", "warn", "fail"}:
+            return result
+        result.update(status=check["status"], measured_at=measured_at)
+        for key in ("virtual_free_pct", "swap_used_bytes", "swap_total_bytes",
+                    "swap_used_pct", "swap_out_bytes_per_minute", "swap_activity_window_seconds"):
+            value = check.get(key)
+            if type(value) in (int, float) and math.isfinite(value) and value >= 0:
+                result[key] = value
+        # Do not persist source argv, cwd, file names, or arbitrary evidence fields.
+        for key in ("top_memory_processes", "top_memory_families"):
+            rows = check.get(key)
+            if not isinstance(rows, list):
+                continue
+            clean = []
+            for row in rows[:5]:
+                if not isinstance(row, dict):
+                    continue
+                item = {name: row[name] for name in (
+                    "pid", "ppid", "start_abstime", "rss_bytes", "footprint_bytes",
+                    "process_count", "footprint_process_count")
+                    if type(row.get(name)) is int and row[name] >= 0}
+                name = row.get("command")
+                if isinstance(name, str) and re.fullmatch(r"[\w .()+-]{1,80}", name):
+                    item["command"] = name
+                clean.append(item)
+            result[key] = clean
+    except (OSError, ValueError, TypeError, AttributeError, StopIteration, OverflowError):
+        return {**result, "status": "unknown"}
+    return result
+
+
 def _snapshot_payload(home: Path, *, retention_home: Path | None = None) -> dict[str, Any]:
     leases, invalid = load_leases(home)
     intents, invalid_intents = load_intents(home)
@@ -2167,6 +2278,11 @@ def _snapshot_payload(home: Path, *, retention_home: Path | None = None) -> dict
     elif coverage["status"] == "gap":
         snapshot_status = "fail"
     storage = _storage_snapshot(home, retention_home=retention_home)
+    capacity = _capacity_snapshot(home if retention_home is None else retention_home)
+    if capacity["status"] in {"warn", "fail"}:
+        failure_causes.append("host_capacity_pressure")
+    elif capacity["status"] == "unknown":
+        failure_causes.append("host_capacity_evidence_unknown")
     if storage["pressure_status"] in {"warn", "fail"}:
         failure_causes.append("storage_pressure")
     if storage["retention"]["status"] in {"warn", "block", "error"}:
@@ -2178,19 +2294,25 @@ def _snapshot_payload(home: Path, *, retention_home: Path | None = None) -> dict
         snapshot_status = "fail" if storage["status"] == "fail" else (
             "pass" if storage["status"] == "pass" else "warn"
         )
+    if snapshot_status != "invalid":
+        if capacity["status"] == "fail":
+            snapshot_status = "fail"
+        elif snapshot_status == "pass" and capacity["status"] != "pass":
+            snapshot_status = "warn"
     return {
         "schema": SCHEMA,
         "generated_at": utc_now(),
         "status": snapshot_status,
         "failure_causes": failure_causes,
         "storage": storage,
+        "capacity": capacity,
         "counts": counts,
         "census": _process_census(),
         "managed": {
             "processes": len(managed_processes),
             "browser_endpoints": len(managed_endpoints),
         },
-        "coverage": {"process_registry": coverage},
+        "coverage": {"process_registry": coverage, "scope": "registered_resources_only"},
         "safety": {
             "unowned_resources_audit_only": True,
             "interactive_ttys_protected": True,
@@ -2392,6 +2514,36 @@ def _reconcile(home: Path, *, apply: bool, retention_home: Path | None = None) -
         )
         selected = expired[:MAX_RECONCILE_LEASES]
         for path, lease in selected:
+            if lease.get("parent_lifetime"):
+                present = _resource_present(lease)
+                if present is False:
+                    if apply:
+                        path.unlink(missing_ok=True)
+                    results.append({
+                        "lease_id": lease["lease_id"], "kind": lease["kind"],
+                        "stale_observations": 0, "observation_advanced": False,
+                        "outcome": "already_gone",
+                    })
+                    continue
+                if present is None:
+                    results.append({
+                        "lease_id": lease["lease_id"], "kind": lease["kind"],
+                        "stale_observations": int(lease.get("stale_observations") or 0),
+                        "observation_advanced": False, "outcome": "blocked",
+                        "reason": "parent_lifetime_guard_unavailable",
+                    })
+                    continue
+                if apply:
+                    lease["expires_epoch"] = now + int(lease["ttl_seconds"])
+                    lease["stale_observations"] = 0
+                    lease["last_reconciled_epoch"] = now
+                    _atomic_json(path, lease)
+                results.append({
+                    "lease_id": lease["lease_id"], "kind": lease["kind"],
+                    "stale_observations": 0, "observation_advanced": False,
+                    "outcome": "renewed_parent_lifetime" if apply else "would_renew_parent_lifetime",
+                })
+                continue
             if lease.get("protected"):
                 present = _resource_present(lease)
                 if present is False:
@@ -2511,6 +2663,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--hermes-home")
     sub = parser.add_subparsers(dest="operation", required=True)
 
+    sub.add_parser("installation-check", help="Verify the installed CLI without collecting host health")
+
     launch_process_parser = sub.add_parser("launch-process")
     launch_process_parser.add_argument("--task-id")
     launch_process_parser.add_argument("--ttl", type=int, default=DEFAULT_TTL_SECONDS)
@@ -2523,6 +2677,7 @@ def _parser() -> argparse.ArgumentParser:
     register_process_parser.add_argument("--ttl", type=int, default=DEFAULT_TTL_SECONDS)
     register_process_parser.add_argument("--protected", action="store_true")
     register_process_parser.add_argument("--systemd-unit", default="")
+    register_process_parser.add_argument("--parent-lifetime", action="store_true")
 
     create_tab_parser = sub.add_parser("create-browser-tab")
     create_tab_parser.add_argument("--task-id")
@@ -2564,7 +2719,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(raw_argv)
     home = _home(args.hermes_home)
     try:
-        if args.operation == "launch-process":
+        if getattr(args, "retention_home", None) is not None and not args.retention_home.is_absolute():
+            raise ValueError("retention home must be absolute")
+        if args.operation == "installation-check":
+            payload = {"schema": "hermes-host-steward-installation/v1", "status": "pass"}
+        elif args.operation == "launch-process":
             payload = launch_process(
                 home,
                 task_id=_task_id(args.task_id),
@@ -2580,6 +2739,7 @@ def main(argv: list[str] | None = None) -> int:
                 ttl=args.ttl,
                 protected=args.protected,
                 systemd_unit=args.systemd_unit,
+                parent_lifetime=args.parent_lifetime,
             )
         elif args.operation == "create-browser-tab":
             payload = create_browser_tab(

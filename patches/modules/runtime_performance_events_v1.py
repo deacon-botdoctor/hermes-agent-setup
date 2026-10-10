@@ -235,14 +235,22 @@ def patch_base(source: str) -> str:
 def patch_turn_context(source: str) -> str:
     source = source.replace(V1_MARKER, MARKER)
     old = '''    source: Any = None
+    reply_expected: Optional[bool] = None
+    # Scheduled heartbeats are proactive work, not replies to the source message that
+    # registered the watch.  Their routine delivery surfaces stay quiet.
+    scheduled_heartbeat: bool = False
     _run_still_current: Callable[[], bool] = None  # type: ignore[assignment]
 '''
     new = f'''    source: Any = None
+    reply_expected: Optional[bool] = None
     # [{MARKER}] Explicit per-turn carrier; never serialized or shared across
     # concurrent chats. The executor worker adopts it before model execution.
     runtime_performance_trace: Any = None
     runtime_performance_turn_id: str = ""
     runtime_performance_platform: str = ""
+    # Scheduled heartbeats are proactive work, not replies to the source message that
+    # registered the watch.  Their routine delivery surfaces stay quiet.
+    scheduled_heartbeat: bool = False
     _run_still_current: Callable[[], bool] = None  # type: ignore[assignment]
 '''
     return _replace_once(source, old, new, "TurnContext performance carrier")
@@ -262,7 +270,7 @@ def {marker}(monkeypatch, tmp_path):
     runner = _make_runner()
     monkeypatch.setattr(
         gateway_run.GatewayRunner,
-        "_adapter_for_source",
+        "_delivery_adapter_for",
         lambda self, source: None,
     )
 
@@ -786,6 +794,13 @@ def patch_complete_response_delivery(source: str, *, native: bool) -> str:
         lines = source.splitlines(keepends=True)
         lines.insert(position, " " * (node.col_offset + 4) + imports + ("        _component_delivery_trace = current_gateway_trace()\n" if owner != "_process_message_background" else ""))
         source = "".join(lines)
+    if native:
+        redundant = ('                if getattr(result, "success", False):\n'
+                     '                    from agent.runtime_performance_events import record_turn_event\n'
+                     '                    record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n'
+                     '                    record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n')
+        # The captured response owner records these acknowledgements below.
+        source = source.replace(redundant, "")
     begin = "        delivery_attempted = delivery_succeeded = False" if native else "        delivery_attempted = False"
     edit("_process_message_background", [
         (begin, "        from agent.runtime_performance_events import _begin_response_delivery, _finish_response_delivery, current_gateway_trace\n        _runtime_delivery_trace = _begin_response_delivery()\n" + begin),
@@ -833,11 +848,18 @@ def patch_complete_response_delivery(source: str, *, native: bool) -> str:
             edit("_play_tts_file", [
                 ("        except Exception:\n", "        except Exception:\n            _record_response_delivery(None, trace=_component_delivery_trace)\n"),
             ])
-        edit("_send_image_batch", [
-            ("        try:\n            await self.send_multiple_images(\n", "        try:\n            _image_ack_start = _response_delivery_acks(trace=_component_delivery_trace)\n            await self.send_multiple_images(\n"),
-            ("images=images, metadata=metadata, human_delay=human_delay)\n", "images=images, metadata=metadata, human_delay=human_delay)\n            if _response_delivery_acks(trace=_component_delivery_trace) - _image_ack_start < len(images):\n                _record_response_delivery(None, trace=_component_delivery_trace)\n"),
-            ("        except Exception as batch_err:\n", "        except Exception as batch_err:\n            _record_response_delivery(None, trace=_component_delivery_trace)\n"),
-        ])
+        if "            result = await self.send_multiple_images(" in source:
+            edit("_send_image_batch", [
+                ("        try:\n            result = await self.send_multiple_images(\n", "        try:\n            _image_ack_start = _response_delivery_acks(trace=_component_delivery_trace)\n            result = await self.send_multiple_images(\n"),
+                ("        record_delivery(result)\n", "        if _response_delivery_acks(trace=_component_delivery_trace) - _image_ack_start < len(images):\n            _record_response_delivery(None, trace=_component_delivery_trace)\n        record_delivery(result)\n"),
+                ("        except Exception as batch_err:\n", "        except Exception as batch_err:\n            _record_response_delivery(None, trace=_component_delivery_trace)\n"),
+            ])
+        else:
+            edit("_send_image_batch", [
+                ("        try:\n            await self.send_multiple_images(\n", "        try:\n            _image_ack_start = _response_delivery_acks(trace=_component_delivery_trace)\n            await self.send_multiple_images(\n"),
+                ("images=images, metadata=metadata, human_delay=human_delay)\n", "images=images, metadata=metadata, human_delay=human_delay)\n            if _response_delivery_acks(trace=_component_delivery_trace) - _image_ack_start < len(images):\n                _record_response_delivery(None, trace=_component_delivery_trace)\n"),
+                ("        except Exception as batch_err:\n", "        except Exception as batch_err:\n            _record_response_delivery(None, trace=_component_delivery_trace)\n"),
+            ])
         edit("_deliver_media_attachments", [
             ("            if not result.success:\n", "            _record_response_delivery(result, trace=_component_delivery_trace)\n            if not result.success:\n"),
             ("            except Exception as err:\n", "            except Exception as err:\n                _record_response_delivery(None, trace=_component_delivery_trace)\n"),
@@ -954,6 +976,15 @@ def patch_queued_response_delivery(source: str, *, native: bool) -> str:
         position = first.end_lineno if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) else first.lineno - 1
         lines.insert(position, "        from agent.runtime_performance_events import _record_response_delivery, current_gateway_trace\n        _queued_delivery_trace = current_gateway_trace()\n")
         source = "".join(lines)
+    if native and "    async def _send_queued_final_text(" in source:
+        source = _patch_method(source, "_send_queued_final_text", [
+            ('        if getattr(result, "success", False):\n',
+             '        from agent.runtime_performance_events import _record_response_delivery, current_gateway_trace\n'
+             '        _record_response_delivery(result, trace=current_gateway_trace())\n'
+             '        if getattr(result, "success", False):\n')])
+        return _patch_method(source, owner, [
+            ('                        if getattr(_edit_res, "success", False):\n',
+             '                        if getattr(_edit_res, "success", False):\n                            _record_response_delivery(_edit_res, trace=_queued_delivery_trace)\n')])
     result = "sent" if native else "_queued_send"
     source = _patch_method(source, owner, [
         ('                    if getattr(' + result + ', "success", False):\n',
@@ -967,12 +998,31 @@ def patch_queued_response_delivery(source: str, *, native: bool) -> str:
 def patch_queued_response_failure(source: str, *, native: bool) -> str:
     owner = "_run_agent_deliver_first_response" if native else "_run_agent_inner"
     indent = "                " if native else "                            "
-    call = indent + "await self._deliver_queued_first_response(\n"
+    call = indent + ("_text_delivered = " if native else "") + "await self._deliver_queued_first_response(\n"
     replacement = (indent + "from agent.runtime_performance_events import _record_response_delivery, current_gateway_trace\n"
                    + indent + "_prior_delivery_trace = current_gateway_trace()\n" + call)
     log = indent + 'logger.warning("Failed to send first response before queued message: %s", e)'
     return _patch_method(source, owner, [(call, replacement),
         (log, indent + "_record_response_delivery(None, trace=_prior_delivery_trace)\n" + log)])
+
+
+def patch_background_review_trace(source: str) -> str:
+    old = """        _run_review_in_thread(
+            agent, messages_snapshot, prompt, task_cfg=task_cfg, review_run=review_run,
+            review_memory=review_memory, explicit=explicit)
+"""
+    new = """        # HERMES_BACKGROUND_REVIEW_TRACE_v1: retain tenant context, not foreground latency.
+        from agent.runtime_performance_events import current_gateway_trace, adopt_gateway_trace
+        parent_trace = current_gateway_trace()
+        adopt_gateway_trace(None)
+        try:
+            _run_review_in_thread(
+                agent, messages_snapshot, prompt, task_cfg=task_cfg, review_run=review_run,
+                review_memory=review_memory, explicit=explicit)
+        finally:
+            adopt_gateway_trace(parent_trace)
+"""
+    return _replace_once(source, old, new, "background review performance isolation")
 
 
 def _patch_native_performance(root: Path) -> bool:
@@ -1001,7 +1051,7 @@ def _patch_native_performance(root: Path) -> bool:
     def replace(name, old, new, label):
         sources[name] = _replace_once(sources[name], old, new, label)
     method('platforms/base.py', 'handle_message', [
-        ('        if not self._message_handler:\n            return\n', '        if not self._message_handler:\n            _retire_gateway_event(event, discard=True)\n            return\n'),
+        ('        if not self._message_handler:\n', '        if not self._message_handler:\n            _retire_gateway_event(event, discard=True)\n'),
         ('            return\n        # On-entry self-heal:', '            _retire_gateway_event(event, discard=True)\n            return\n        # On-entry self-heal:')])
     method('platforms/base.py', '_handle_message_while_active', [
         ("                # /stop, /new, /reset: cancel + response + drain; other bypasses don't cancel.\n", "                _retire_gateway_event(event, discard=True)\n                # /stop, /new, /reset: cancel + response + drain; other bypasses don't cancel.\n"),
@@ -1026,9 +1076,12 @@ def _patch_native_performance(root: Path) -> bool:
     cleanup_anchor = '        finally:\n            # Stop typing BEFORE'
     if '        finally:\n            try:\n                # Stop typing BEFORE' in sources['platforms/base.py']:
         cleanup_anchor = '        finally:\n            try:\n                # Stop typing BEFORE'
+    if '        finally:\n            await self._release_turn_marker(event)' in sources['platforms/base.py']:
+        cleanup_anchor = '        finally:\n            await self._release_turn_marker(event)'
+    if '        finally:\n            try:\n                await self._release_turn_marker(event)' in sources['platforms/base.py']:
+        cleanup_anchor = '        finally:\n            try:\n                await self._release_turn_marker(event)'
     method('platforms/base.py','_process_message_background',[
         ('        delivery_attempted = delivery_succeeded = False',ingress+'        delivery_attempted = delivery_succeeded = False'),
-        ('                delivery_succeeded = delivery_succeeded or bool(getattr(result, "success", False))\n','                delivery_succeeded = delivery_succeeded or bool(getattr(result, "success", False))\n                if getattr(result, "success", False):\n                    from agent.runtime_performance_events import record_turn_event\n                    record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n                    record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n'),
         (cleanup_anchor, cleanup_anchor.replace('        finally:\n', '        finally:\n            _retire_gateway_event(event)\n', 1))])
     method('platforms/base.py','_keep_typing',[
         ('                        await asyncio.wait_for(self.send_typing(chat_id, metadata=metadata),\n                                               timeout=_send_typing_timeout)\n',
@@ -1043,21 +1096,21 @@ def _patch_native_performance(root: Path) -> bool:
         ('        if not _steer.steered and not redirected:\n','        if _steer.steered or redirected:\n            _retire_gateway_event(event, discard=True)\n        if not _steer.steered and not redirected:\n')])
     method('run_busy.py','_send_busy_drain_notice',[
         ('        if not adapter:\n            return\n','        if not adapter:\n            _retire_gateway_event(event, discard=True)\n            return\n'),
-        ('        else:\n            message = f"⏳ Gateway is','        else:\n            _retire_gateway_event(event, discard=True)\n            message = f"⏳ Gateway is')])
+        ('        else:\n            message = t("gateway.busy.drain_rejected",','        else:\n            _retire_gateway_event(event, discard=True)\n            message = t("gateway.busy.drain_rejected",')])
     method('run_busy.py','_route_plaintext_approval_while_busy',[
         ('                    _reply = await _approval_handler(event)\n','                    _retire_gateway_event(event, discard=True)\n                    _reply = await _approval_handler(event)\n')])
     method('run_agent_cache.py','_clear_conversation_scope',[
         ('        if state is not None:\n            state.conversation.clear()\n','        if state is not None:\n            for queued_event in state.conversation.queued_events:\n                _retire_gateway_event(queued_event, discard=True)\n            state.conversation.clear()\n')])
     method('run_agent_cache.py','_interrupt_and_clear_session',[
-        ('            adapter.get_pending_message(session_key)  # consume and discard\n','            _retire_gateway_event(adapter.get_pending_message(session_key), discard=True)\n')])
+        ('            parked = adapter.get_pending_message(session_key)\n', '            parked = adapter.get_pending_message(session_key)\n            if parked is not None and not getattr(parked, "internal", False):\n                _retire_gateway_event(parked, discard=True)\n')])
     sources['turn_context.py'] = patch_turn_context(sources['turn_context.py'])
     method('run_turn_runner.py','run_sync',[
         ('        ctx = self._ctx\n','        ctx = self._ctx\n        from agent.runtime_performance_events import adopt_gateway_trace\n        adopt_gateway_trace(ctx.runtime_performance_trace)\n')])
     replace('run_turn.py','        turn_ctx = TurnContext(\n',
         '        from agent.runtime_performance_events import current_gateway_trace, current_turn_id\n        turn_ctx = TurnContext(\n            runtime_performance_trace=current_gateway_trace(),\n            runtime_performance_turn_id=current_turn_id(),\n            runtime_performance_platform=str(getattr(source.platform, "value", source.platform)),\n','native turn context capture')
     # Record completion before a queued continuation switches ambient trace.
-    replace('run_turn.py','            result = turn_ctx.result_holder[0]\n            adapter = self._adapter_for_source(source)\n',
-        '            result = turn_ctx.result_holder[0]\n            if isinstance(response, dict) and not response.get("failed") and not response.get("interrupted") and response.get("completed") is not False:\n                from agent.runtime_performance_events import record_turn_event\n                record_turn_event("response_complete", timing_semantics="gateway_response_complete_exact")\n            adapter = self._adapter_for_source(source)\n','native model completion')
+    replace('run_turn.py','            result = turn_ctx.result_holder[0]\n            adapter = self._delivery_adapter_for(source)\n',
+        '            result = turn_ctx.result_holder[0]\n            if isinstance(response, dict) and not response.get("failed") and not response.get("interrupted") and response.get("completed") is not False:\n                from agent.runtime_performance_events import record_turn_event\n                record_turn_event("response_complete", timing_semantics="gateway_response_complete_exact")\n            adapter = self._delivery_adapter_for(source)\n','native model completion')
     method('run_turn.py','_run_agent_drain_pending',[
         ('                        pending_event = None\n','                        _retire_gateway_event(pending_event, discard=True)\n                        pending_event = None\n'),
         ('            pending_event = None\n            pending = None\n        return pending_event, pending\n','            _retire_gateway_event(pending_event, discard=True)\n            pending_event = None\n            pending = None\n        return pending_event, pending\n')])
@@ -1065,7 +1118,7 @@ def _patch_native_performance(root: Path) -> bool:
         method('run_turn.py','_run_agent_queued_followup',[
             ('                merge_pending_message_event(adapter._pending_messages, session_key, pending_event)\n','                merge_pending_message_event(adapter._pending_messages, session_key, pending_event)\n                _performance_requeued = True\n'),
             ('        if _clear_adapter:\n            with suppress(Exception):\n                await _clear_adapter.send_typing(source.chat_id, metadata=_status_thread_metadata)\n',
-             '        from agent.runtime_performance_events import adopt_gateway_trace, record_turn_event\n        adopt_gateway_trace(getattr(pending_event, "_hermes_runtime_performance_trace", None))\n        _followup_adapter = self._adapter_for_source(next_source)\n        if _followup_adapter:\n            with suppress(Exception):\n                if await _followup_adapter.send_typing(next_source.chat_id, metadata=_status_thread_metadata) is True:\n                    record_turn_event("typing_indicator_started", timing_semantics="platform_typing_call_returned")\n')])
+             '        from agent.runtime_performance_events import adopt_gateway_trace, record_turn_event\n        adopt_gateway_trace(getattr(pending_event, "_hermes_runtime_performance_trace", None))\n        _followup_adapter = self._delivery_adapter_for(next_source)\n        if _followup_adapter:\n            with suppress(Exception):\n                if await _followup_adapter.send_typing(next_source.chat_id, metadata=_status_thread_metadata) is True:\n                    record_turn_event("typing_indicator_started", timing_semantics="platform_typing_call_returned")\n')])
     # A finally around the native owner handles every early return/exception,
     # except its explicit recursion-cap requeue, whose event must remain live.
     source=sources['run_turn.py']
@@ -1094,17 +1147,31 @@ def _patch_native_performance(root: Path) -> bool:
         ('        if message_id and message_id != "__no_edit__":\n','        if message_id and message_id != "__no_edit__":\n            from agent.runtime_performance_events import record_turn_event\n            record_turn_event("first_visible_response_chunk", timing_semantics="platform_stream_ack_exact")\n')])
     method('stream_consumer.py','_record_turn_final_payload',[
         ('        self._delivered_final_text = self._display_payload(text)\n','        self._delivered_final_text = self._display_payload(text)\n        from agent.runtime_performance_events import record_turn_event\n        record_turn_event("first_visible_response_chunk", timing_semantics="platform_stream_final_upper_bound")\n        record_turn_event("response_sent", timing_semantics="platform_stream_final_ack_exact")\n')])
-    method('run_notifications.py','_deliver_queued_first_response',[
+    if '    async def _send_queued_final_text(' in sources['run_notifications.py']:
+        method('run_notifications.py', '_deliver_queued_first_response', [
         ('                            _reconciled = True\n','                            _reconciled = True\n                            from agent.runtime_performance_events import record_turn_event\n                            record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n                            record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n'),
-        ('                    await adapter.send(source.chat_id, text_content, metadata=metadata)\n','                    sent = await adapter.send(source.chat_id, text_content, metadata=metadata)\n                    if getattr(sent, "success", False):\n                        from agent.runtime_performance_events import record_turn_event\n                        record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n                        record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n')])
+        ])
+        method('run_notifications.py', '_send_queued_final_text', [
+            ('        if not getattr(result, "success", False):\n',
+             '        if getattr(result, "success", False):\n'
+             '            from agent.runtime_performance_events import record_turn_event\n'
+             '            record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n'
+             '            record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n'
+             '        if not getattr(result, "success", False):\n')])
+    else:
+        method('run_notifications.py','_deliver_queued_first_response',[
+            ('                            _reconciled = True\n','                            _reconciled = True\n                            from agent.runtime_performance_events import record_turn_event\n                            record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n                            record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n'),
+            ('                    await adapter.send(source.chat_id, text_content, metadata=metadata)\n','                    sent = await adapter.send(source.chat_id, text_content, metadata=metadata)\n                    if getattr(sent, "success", False):\n                        from agent.runtime_performance_events import record_turn_event\n                        record_turn_event("first_visible_response_chunk", timing_semantics="platform_delivery_ack_exact")\n                        record_turn_event("response_sent", timing_semantics="platform_delivery_ack_exact")\n')])
     sources["run_notifications.py"] = patch_queued_response_delivery(patch_poststream_delivery(sources["run_notifications.py"], native=True), native=True)
     sources["run_turn.py"] = patch_queued_response_failure(sources["run_turn.py"], native=True)
     sources["run_turn.py"] = patch_fifo_response_delivery(sources["run_turn.py"], native=True)
     sources["platforms/base.py"] = patch_complete_response_delivery(sources["platforms/base.py"], native=True)
     proposed={paths[name]:source for name,source in sources.items()}
     proposed[root/'agent/runtime_performance_events.py']=PAYLOAD.read_text()
+    background = root / 'agent/background_review.py'
+    proposed[background] = patch_background_review_trace(background.read_text())
     regression = root/'tests/gateway/test_streaming_tts_gateway_regression.py'
-    proposed[regression] = patch_gateway_fifo_regression_test(patch_gateway_regression_test(regression.read_text()))
+    proposed[regression] = patch_gateway_fifo_regression_test(patch_gateway_regression_test(regression.read_text())).replace("persist_user_timestamp=None):", "persist_user_timestamp=None, turn_author=None):")
     for path,source in proposed.items():compile(source,str(path),'exec')
     changed=False
     for path,source in proposed.items():

@@ -245,8 +245,6 @@ def _native_carrier_postimage_verified(hermes_dir: Path, patches_dir: Path, name
     import subprocess
 
     modules = {
-        "tool_guardrail_answer_carrier_v1": "tool_guardrail_answer_carrier_v1",
-        "durable_drain_runtime_v1": "durable_drain_inbox_carrier_v1",
         "platform_delivery_drain_v1": "platform_delivery_drain_v1",
     }
     if name not in modules:
@@ -260,45 +258,10 @@ def _native_carrier_postimage_verified(hermes_dir: Path, patches_dir: Path, name
         spec = importlib.util.spec_from_file_location("_native_postverify_" + name, path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        if name == "tool_guardrail_answer_carrier_v1":
-            manifest = mod._load_d363_manifest()  # validates payload checksum and provenance
-            marker = hermes_dir / mod.D363_MARKER_RELATIVE
-            return (not marker.is_symlink() and marker.is_file()
-                    and mod._d363_marker_is_valid(json.loads(marker.read_text()), manifest)
-                    and mod._d363_postimage_variant(hermes_dir, manifest) is not None)
         if name == "platform_delivery_drain_v1":
             target = hermes_dir / "gateway/run_shutdown.py"
             return (not target.is_symlink() and target.is_file()
                     and hashlib.sha256(target.read_bytes()).hexdigest() in mod._NATIVE_IMAGES.values())
-        manifest = json.loads((mod.NATIVE_PAYLOAD_DIR / "manifest.json").read_text())
-        if manifest.get("schema_version") != 1 or manifest.get("base_commit") != mod.NATIVE_BASE_COMMIT:
-            return False
-        patch = manifest.get("patch")
-        if not isinstance(patch, str) or Path(patch).name != patch:
-            return False
-        if mod._sha256(mod.NATIVE_PAYLOAD_DIR / patch) != manifest.get("patch_sha256"):
-            return False
-        post = manifest.get("postimage_sha256")
-        variants = manifest.get("postimage_sha256_variants", [])
-        if not isinstance(post, dict) or not post or not isinstance(variants, list):
-            return False
-        if any(not isinstance(v, dict) or set(v) != set(post) for v in variants):
-            return False
-        def matches(images):
-            for relative, expected in images.items():
-                rel = Path(relative)
-                if rel.is_absolute() or ".." in rel.parts:
-                    return False
-                target = hermes_dir / rel
-                if target.is_symlink():
-                    return False
-                if expected is None:
-                    if target.exists():
-                        return False
-                elif not target.is_file() or mod._sha256(target) != expected:
-                    return False
-            return True
-        return any(matches(images) for images in [post, *variants])
     except Exception:
         return False
 

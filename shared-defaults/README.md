@@ -10,25 +10,36 @@ in favor of pinned-upstream defaults and client-local configuration.
 
 ## Files
 
+- `config-x-search.yaml` supplies `grok-4.6` only when the tenant has no nonempty
+  `x_search.model`. Explicit models and manifest exemptions remain unchanged.
+
 - `config-mcp-on-demand-control.yaml` enables the policy-gated MCP activation
   tools while the cold-backend compatibility path remains necessary, additively
   exposes `image_gen` on CLI, Telegram, and cron surfaces, and additively
   enables `telegram-email-card-qa` so Gmail send/draft and assembled
   email cards cannot keep dirty spacing.
-- `config-native-tool-search.yaml` turns on native tool-search deferral.
+- `config-native-tool-search.yaml` enables native tool discovery and defers
+  infrequent browser, media and skill-management tools. Common browser actions,
+  research, file work and delegation remain direct. The explicit list retains
+  the pinned native deferrals because Hermes replaces, rather than extends,
+  its default list. Exempt `tools.tool_search.defer` to preserve a tenant list.
+  This changes initial schema exposure, not tool authorization. Deferred tools
+  remain subject to native scope, argument validation and approval checks.
 - `config-native-image-generation.yaml` configures Hermes' native
   `image_generate` provider and model at the top-level schema Hermes reads.
   A nonempty client-owned top-level `image_gen` mapping is preserved as a
   unit.
 - `config-model-autonomy.yaml` enables Hermes' bounded intent-continuation
-  seam for every provider while disabling only automatic post-turn review
-  forks that can overlap the live session.
+  seam for every provider and restores the native automatic review cadence.
+  It keeps native derived titles and disables their optional model upgrade.
+  Explicit title provider/model values remain intact. A tenant can exempt
+  `auxiliary.title_generation.model_upgrade_enabled` to retain model titling.
 - Tool-use enforcement is not a shared default. The
   [lean client seed](../README.md#lean-client-seed) owns its new-client default,
   while shared-default reconciliation leaves existing explicit modes unchanged.
 - `config-telegram-surface.yaml` sets Telegram reply-to off.
 - `config-telegram-organic-checkpoints.yaml` enables Telegram-only factual
-  long-turn checkpoints at a ten-minute cadence. Short turns stay silent;
+  long-turn checkpoints at a five-minute cadence (300 s floor, 60 s edit floor). Short turns stay silent;
   later checkpoints edit the same message and fail closed when no safe,
   model-authored narration exists. The card is deleted only after the primary
   final response is accepted and the turn completes successfully; missing
@@ -36,6 +47,10 @@ in favor of pinned-upstream defaults and client-local configuration.
   retain it. A failed voice attempt followed by successful primary text uses
   the native fallback and permits cleanup; supplemental voice success does not
   hide a primary delivery failure. Tool telemetry never writes client copy.
+- `config-cron-wrap-response.yaml` delivers cron output without the
+  `Cronjob Response` header, job id, or stop-job footer. Kit template and
+  the lean seed match it for new installs; merge overwrites an inherited
+  `true` on existing clients.
 - `config-client-quiet-display.yaml` is the fleet client quiet surface:
   `busy_input_mode: steer`, supported busy/steer acks off, no interim or
   long-running status nags, and no timestamps. It intentionally omits retired

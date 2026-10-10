@@ -117,18 +117,11 @@ def test_exact_driver_is_idempotent_and_doctor_green(monkeypatch, tmp_path):
     assert receipt["doctor_ready"] is True
     assert receipt["install_attempted"] is False
     assert len(commands) == 1
-    assert commands[0][-2:] == ["doctor", "--json"]
+    assert commands[0][1:] == ["-c", helper.DOCTOR_CODE]
 
 
-def test_missing_driver_installs_pinned_version_and_copies_windows_package(monkeypatch, tmp_path):
+def test_missing_driver_installs_pinned_version_through_native_pm(monkeypatch, tmp_path):
     helper = load_helper()
-    login_home = tmp_path / "login"
-    monkeypatch.setattr(Path, "home", lambda: login_home)
-    package = login_home / ".cua-driver/packages/releases" / f"{CURRENT_VERSION}-x86_64-pc-windows-msvc"
-    package.mkdir(parents=True)
-    binaries = ("cua-driver.exe", "cua-driver-uia.exe", "cua-cursor-theme.exe")
-    for binary in binaries:
-        (package / binary).write_bytes(binary.encode())
     probes = iter(
         [
             {"installed": False, "path": None, "version": None},
@@ -142,7 +135,7 @@ def test_missing_driver_installs_pinned_version_and_copies_windows_package(monke
         commands.append(command)
         if command[-1] == "--version":
             return completed(command, 0, f"cua-driver {CURRENT_VERSION}")
-        if command[-1] == "--json":
+        if command[-1] == helper.DOCTOR_CODE:
             return completed(command, 0, json.dumps({"ok": True, "overall": "ok"}))
         return completed(command, 0)
 
@@ -159,10 +152,9 @@ def test_missing_driver_installs_pinned_version_and_copies_windows_package(monke
     assert receipt["status"] == "installed"
     assert receipt["install_attempted"] is True
     assert commands[0][0] == sys.executable
-    assert commands[0][-1] == CURRENT_VERSION
+    assert commands[0][-2] == CURRENT_VERSION
     assert receipt["asset"]["key"] == "windows-x86_64"
-    for binary in binaries:
-        assert (tmp_path / "bin" / binary).read_bytes() == (package / binary).read_bytes()
+    assert json.loads(commands[0][-1])["sha256"] == helper.load_contract(CONTRACT)["assets"]["windows-x86_64"]["sha256"]
 
 
 def test_version_mismatch_after_install_fails_closed(monkeypatch, tmp_path):
@@ -297,3 +289,33 @@ def test_dry_run_never_invokes_installer(monkeypatch, tmp_path):
     assert code == 0
     assert receipt["status"] == "would_install"
     assert receipt["install_attempted"] is False
+
+
+@pytest.mark.parametrize("drift", [None, "version", "archive"])
+def test_native_install_checks_pin_before_installing(tmp_path, drift):
+    helper = load_helper()
+    package = tmp_path / "pm"
+    package.mkdir()
+    called = tmp_path / "called"
+    (package / "__init__.py").write_text(
+        "from pathlib import Path\n"
+        f"def ensure(name, explicit):\n    Path({str(called)!r}).write_text(name + str(explicit))\n"
+    )
+    expected = {"url": "https://example.invalid/cua", "sha256": "a" * 64}
+    actual = dict(expected, sha256="b" * 64) if drift == "archive" else expected
+    version = "0.21.0" if drift == "version" else "0.22.0"
+    (package / "lock.py").write_text(
+        "class Lockfile:\n    def __init__(self, path): pass\n"
+        f"    def version(self, name): return {version!r}\n"
+        f"    def artifacts(self, name, target): return {[actual]!r}\n"
+    )
+    (package / "paths.py").write_text("def lockfile_path(): return 'lock.json'\n")
+    (package / "store.py").write_text("def current_target(): return 'linux-x64'\n")
+    result = subprocess.run(
+        [sys.executable, "-c", helper.PINNED_INSTALL_CODE, "0.22.0", json.dumps(expected)],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert (result.returncode == 0) is (drift is None), result.stderr
+    assert called.exists() is (drift is None)
+    if drift is None:
+        assert called.read_text() == "cua-driverTrue"

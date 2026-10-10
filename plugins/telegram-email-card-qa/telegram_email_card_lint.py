@@ -18,6 +18,8 @@ Exit 0 = pass. Exit 1 = fail. Prints one violation per line.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -137,6 +139,17 @@ def lint(text: str, *, mime: bool = False) -> list[str]:
         if mime and "=\n" in text and re.search(r"=\n[a-z]", text):
             pass  # checked once below
 
+    if not mime:
+        labels_seen: set[str] = set()
+        for lineno, line, in_fence in rows:
+            if in_fence:
+                continue
+            m = LABEL_RE.match(line.rstrip())
+            if m:
+                labels_seen.add(m.group(1).lower())
+        if "to" in labels_seen and "subject" in labels_seen and "from" not in labels_seen:
+            violations.append("missing From on send/draft card")
+
     if mime:
         if re.search(r"=\r?\n[a-z]", text):
             violations.append("quoted-printable mid-word wrap is visible in source")
@@ -220,6 +233,8 @@ def gate_response(text: str) -> str | None:
         return None
     if not lint(text):
         return None
+    if any("missing From" in v for v in lint(text)):
+        return "Email card missing From. Not sent."
     fixed = fix(text)
     if fixed != text and not lint(fixed):
         return fixed
@@ -237,14 +252,17 @@ SEND_TOOL_MARKERS = (
     "SEND_EMAIL",
     "SEND_DRAFT",
     "CREATE_EMAIL_DRAFT",
+    "REPLY_TO_THREAD",
     "GMAIL_SEND",
     "send_email",
     "send_draft",
     "create_email_draft",
     "create_draft",
+    "reply_to_thread",
 )
+DEFAULT_POLICY_PATH = Path.home() / ".hermes" / "email-send-policy.json"
 TERMINAL_SEND_RE = re.compile(
-    r"(?:gog|gogcli)\b.*\b(?:send|drafts?)\b|\bgmail[_-]?(?:send|drafts?)\b|GOOGLESUPER_(?:SEND|CREATE)",
+    r"(?:gog|gogcli)\b.*\b(?:send|drafts?)\b|\bgmail[_-]?(?:send|drafts?)\b|GOOGLESUPER_(?:SEND|CREATE|REPLY)|composio-node-call.*GOOGLESUPER_(?:SEND|CREATE|REPLY)",
     re.IGNORECASE,
 )
 BODY_FLAG_RE = re.compile(
@@ -330,6 +348,51 @@ def _block_send(shown: str, reasons: str) -> dict:
     }
 
 
+def _policy_path() -> Path:
+    override = os.environ.get("HERMES_EMAIL_SEND_POLICY", "").strip()
+    return Path(override).expanduser() if override else DEFAULT_POLICY_PATH
+
+
+def forbidden_send_markers() -> tuple[str, ...]:
+    path = _policy_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        if not os.environ.get("HERMES_EMAIL_SEND_POLICY", "").strip():
+            return ()
+        raise ValueError("configured email send policy is missing") from None
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("email send policy is unreadable or invalid") from None
+    markers = raw.get("forbidden_send_markers") if isinstance(raw, dict) else None
+    if not isinstance(markers, list) or any(
+        not isinstance(marker, str) or not marker.strip() for marker in markers
+    ):
+        raise ValueError("email send policy requires a list of nonempty mailbox markers")
+    return tuple(marker.strip().lower() for marker in markers)
+
+
+def _blob(*parts: object) -> str:
+    bits: list[str] = []
+    for part in parts:
+        if part is None:
+            continue
+        bits.append(str(part))
+    return " ".join(bits).lower()
+
+
+def sender_account_block(tool_name: str, args: dict | None, command: str = "") -> str | None:
+    try:
+        markers = forbidden_send_markers()
+    except ValueError as exc:
+        return f"{exc}; repair the mailbox policy before retrying"
+    if not markers:
+        return None
+    blob = _blob(tool_name, command, args)
+    if any(m in blob for m in markers):
+        return "cannot send from blocked mailbox"
+    return None
+
+
 def gate_send_tool(tool_name: str, args: dict | None) -> dict | None:
     """pre_tool_call directive, or None to allow."""
     name = tool_name or ""
@@ -338,6 +401,13 @@ def gate_send_tool(tool_name: str, args: dict | None) -> dict | None:
         name = str(call_args.get("name") or "")
         inner_args = call_args.get("arguments")
         call_args = inner_args if isinstance(inner_args, dict) else call_args
+
+    command = _command_from_args(call_args) if name in {"terminal", "execute_code"} else ""
+    send_like = is_email_send_tool(name) or bool(TERMINAL_SEND_RE.search(command))
+    if send_like:
+        blocked = sender_account_block(name, call_args, command)
+        if blocked:
+            return _block_send(name, blocked)
 
     if name in {"terminal", "execute_code"}:
         command = _command_from_args(call_args)

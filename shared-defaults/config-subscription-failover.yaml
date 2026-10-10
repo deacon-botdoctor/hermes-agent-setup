@@ -1,0 +1,15 @@
+# Consumed only by the dedicated subscription reconciliation path.
+# Primary routing and tenant credentials remain client-owned.
+routes:
+  openai-codex:
+    provider: openai-codex
+    model: gpt-6-astra
+    base_url: https://chatgpt.com/backend-api/codex
+  xai-oauth:
+    provider: xai-oauth
+    model: grok-4.7
+    base_url: https://api.x.ai/v1
+  xai:
+    provider: xai
+    model: grok-4.6
+    base_url: https://api.x.ai/v1

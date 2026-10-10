@@ -44,6 +44,39 @@ Common issues:
   blocker is identified, BEFORE any optional fallback work: a later session failure must
   not erase the report of work already done.
 
+## Linux Snap Chromium: audio effects cannot open their temporary host
+
+If an audio-effect render fails with `audio_processing_failed` and the underlying
+error is `net::ERR_FILE_NOT_FOUND` for `file:///tmp/hf-fx-host-.../audio-fx.html`,
+check whether the selected Chromium is a Snap package. Its private `/tmp` can hide
+HyperFrames' host-created file. Ordinary audio may still render successfully.
+
+For this specific failure, use a fresh, nonhidden temporary directory directly under
+the calling tenant's home, scoped to the render command. A hidden `~/.cache` directory
+can also be inaccessible. Preserve the project's pinned CLI version or wrapper.
+The example below was verified with HyperFrames 0.7.108 and Snap Chromium on Linux:
+
+```python
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+
+# Set project and output to this render's paths before running.
+with tempfile.TemporaryDirectory(prefix="hyperframes-render-", dir=Path.home()) as render_tmp:
+    subprocess.run(
+        ["npx", "--yes", "hyperframes@0.7.108", "render", project,
+         "--strict", "--quality", "draft", "--output", output],
+        env={**os.environ, "TMPDIR": render_tmp},
+        check=True,
+    )
+```
+
+`TemporaryDirectory` creates a private directory and removes only that directory after
+the renderer exits. Keep the output outside it. Verify the resulting video and audio
+with ffprobe and inspect a rendered frame. Do not globally change `TMPDIR`, disable
+browser confinement, or change browser lanes to recover this error.
+
 ## browser
 
 ```bash

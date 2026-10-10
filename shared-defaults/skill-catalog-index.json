@@ -1,5 +1,5 @@
 {
-  "catalog_version": "2026-08-28",
+  "catalog_version": "2026-09-23",
   "entries": [
     {
       "bundles": [
@@ -18,7 +18,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "bdaf93c0881ebc1ea01ea75816f6d00c741fb4ffdf44893d059eac2a2eb1f677",
+      "source_sha256": "e1ab09a6ed68cec9bc63b089c048fe5b86ff348466bc3610b06f3f8ad4396e48",
       "stage": "baseline",
       "summary": "Find and inspect installed skills, approved catalog candidates, tools, and integrations before accepting a weak workaround."
     },
@@ -81,8 +81,8 @@
       "bundles": [
         "core-baseline"
       ],
-      "id": "focused-specialist-coordinator",
-      "install_path": "skills/fleet/focused-specialist-coordinator",
+      "id": "email-triage",
+      "install_path": "skills/fleet/email-triage",
       "invokable": true,
       "kind": "skill",
       "permission_class": "local_write",
@@ -91,9 +91,9 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "3ddc7290258595e44e9e2e4b1c703a7fd082b01108d23a1cac0bd1dfb6caf584",
+      "source_sha256": "163f5e4168f32fa32504ff25188003ef032143430ce6bb87f1265f99d4f3a695",
       "stage": "baseline",
-      "summary": "Coordinate one bounded specialist under a root manager with typed ownership, artifact review, five-minute progress, manager-safe delivery, and credentialless idle."
+      "summary": "Apply provider-neutral email triage, full-card escalation, bounded routine receipts, and explicit correction memory without owning mailbox access or effects."
     },
     {
       "bundles": [
@@ -128,7 +128,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "5bb4f40f1add9f44a0a00b5b949c6b600caca16390d5edcbd69e2a2756ed59ac",
+      "source_sha256": "497da45a32611788734f68268a80e370ebbf332f191d4097ca2c61b23d205c44",
       "stage": "endorsed",
       "summary": "Perform read-only, citation-aware X research through the calling runtime's brokered xai-oauth capability."
     },
@@ -254,7 +254,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "34466aae014d7aa025e02855ff7f63616bc2090aaac552c5ec1d1c3ab7e06f35",
+      "source_sha256": "52430146fc30010af3e26ed790e46eaa8bb0692b5a039f5fc09a58c332acd9a1",
       "stage": "endorsed",
       "summary": "Operate the HyperFrames development, inspection, preview, comparison, and rendering loop."
     },
@@ -344,7 +344,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "77f0cabec0bbe95144277e245c0b4ac6e4f98e1488572eb30889a8e694da2607",
+      "source_sha256": "82c17cd0f2d16ce3e31fb49f1a5e84ebca25258d5acf945712bbb31343228f79",
       "stage": "endorsed",
       "summary": "Apply a comprehensive frontend craft, UX, accessibility, responsive, and visual-polish workflow."
     },
@@ -380,7 +380,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "abe379612147b8e4cb4576c2bfc31ff21640375b1a1231ce1abb421095eecaca",
+      "source_sha256": "c1a2fa5984092472bbaf593711debd2b4d2a55153755560211b789a0840a6f7f",
       "stage": "baseline",
       "summary": "Run the default bounded client-agent day review and skill-candidate reflection workflow."
     },
@@ -398,7 +398,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "be457fc0f2075825892b6317bff971f185afac71277aeeefeb27b77a2f58236b",
+      "source_sha256": "cb85bcd83b23837401af18a8d90426c3158edae96694eb8e8dc18ba3b06a545c",
       "stage": "baseline",
       "summary": "Capture small routing, update, tool, authentication, and dependency friction after bounded recovery."
     },

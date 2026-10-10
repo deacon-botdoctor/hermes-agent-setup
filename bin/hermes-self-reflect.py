@@ -354,8 +354,7 @@ def find_python(home: Path):
     for c in _venv_pythons(home):
         if c.exists():
             return str(c)
-    if not IS_WIN and Path("/usr/bin/python3").exists():
-        return "/usr/bin/python3"
+    # The running interpreter already has the runner dependencies installed.
     return sys.executable
 
 

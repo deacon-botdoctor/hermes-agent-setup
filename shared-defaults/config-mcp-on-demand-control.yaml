@@ -3,6 +3,7 @@ plugins:
     - botdoctor-immersion
     - composio-onboarding
     - mcp-on-demand-control
+    - skill-category-recovery
     - telegram-email-card-qa
 platform_toolsets:
   cli:
