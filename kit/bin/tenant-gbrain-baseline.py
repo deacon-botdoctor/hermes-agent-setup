@@ -12,6 +12,7 @@ import platform
 import re
 import secrets
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -161,17 +162,22 @@ def load_manifest(path: Path) -> dict[str, Any]:
         raise RuntimeError("native-agent continuity principal home does not match process owner")
     principal_home = value["_paths"]["home"].resolve()
     hermes_home = value["_paths"]["hermes_home"].resolve()
+    storage_mode = value.get("storage_mode", "managed_local")
+    if storage_mode not in {"managed_local", "existing_remote"}:
+        raise RuntimeError("native-agent continuity storage_mode is invalid")
     try:
         hermes_home.relative_to(principal_home)
         value["_paths"]["vault"].resolve().relative_to(principal_home)
         for name in (
-            "gbrain_home",
             "gbrain",
             "mcp_server",
             "lock_file",
             "baseline_receipt",
         ):
             value["_paths"][name].resolve().relative_to(hermes_home)
+        value["_paths"]["gbrain_home"].resolve().relative_to(
+            principal_home if storage_mode == "existing_remote" else hermes_home
+        )
     except ValueError as exc:
         raise RuntimeError("native-agent continuity managed paths escape the principal home") from exc
     vault = value["_paths"]["vault"]
@@ -221,6 +227,7 @@ def gbrain_env(manifest: dict[str, Any]) -> dict[str, str]:
     env = os.environ.copy()
     env["GBRAIN_HOME"] = str(manifest["_paths"]["gbrain_home"])
     env["GBRAIN_VAULT"] = str(manifest["_paths"]["vault"])
+    env["GBRAIN_STORAGE_MODE"] = manifest.get("storage_mode", "managed_local")
     env["NO_COLOR"] = "1"
     return env
 
@@ -558,6 +565,71 @@ def initialize_brain(manifest: dict[str, Any], contract: dict[str, Any]) -> dict
     }
 
 
+def remote_identity(manifest: dict[str, Any]) -> dict[str, str]:
+    paths = manifest["_paths"]
+    home = paths["gbrain_home"]
+    config_path = home / ".gbrain/config.json"
+    if os.name != "posix" or home != home.resolve():
+        raise RuntimeError("existing remote GBrain requires a canonical tenant-owned POSIX home")
+    home.relative_to(paths["home"].resolve())
+    for path, directory in ((home, True), (config_path.parent, True), (config_path, False)):
+        info = path.lstat()
+        kind_ok = stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)
+        if not kind_ok or info.st_uid != os.getuid() or info.st_mode & (0o022 if directory else 0o077):
+            raise RuntimeError("existing remote GBrain configuration ownership or permissions are unsafe")
+    config = json.loads(regular(config_path))
+    remote = config.get("remote_mcp") or {}
+    identity = {key: remote.get(key) for key in ("issuer_url", "mcp_url", "oauth_client_id")}
+    if config.get("engine") != "postgres" or not all(isinstance(v, str) and v for v in identity.values()):
+        raise RuntimeError("existing remote GBrain connection is incomplete")
+    result = run([str(paths["gbrain"]), "engine", "status", "--json"],
+                 env=gbrain_env(manifest), timeout=30)
+    try:
+        engine = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("existing remote GBrain engine proof is unavailable") from exc
+    if result.returncode or engine.get("effective_engine") != "postgres" or engine.get("thin_client") is not True:
+        raise RuntimeError("existing remote GBrain must use its established PostgreSQL thin connection")
+    return {
+        "connection_sha256": sha256_bytes(json.dumps(identity, sort_keys=True).encode()),
+        "launcher_sha256": sha256_bytes(regular(paths["gbrain"])),
+        "gbrain_home": str(home),
+    }
+
+
+def adopt_remote(manifest: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
+    paths = manifest["_paths"]
+    identity = remote_identity(manifest)
+    version = version_proof(paths["gbrain"], "", gbrain_env(manifest))
+    paths["vault"].mkdir(parents=True, exist_ok=True)
+    tools = ((facade_call(manifest, "tools/list").get("result") or {}).get("tools") or [])
+    if [row.get("name") for row in tools if isinstance(row, dict)] != contract["mcp_tools"]:
+        raise RuntimeError("existing remote GBrain MCP tool contract drifted")
+    token = f"TENANT_GBRAIN_BASELINE_{secrets.token_hex(8).upper()}"
+    slug = f"proofs/native-agent-continuity/{manifest['principal_id']}/baseline"
+    result = facade_call(manifest, "tools/call", {
+        "name": "put_page", "arguments": {"slug": slug, "content": f"# Native continuity proof\n\n{token}\n"}
+    }).get("result") or {}
+    if result.get("isError") is not False:
+        raise RuntimeError("existing remote GBrain MCP write proof failed")
+    readback = run([str(paths["gbrain"]), "get", slug], env=gbrain_env(manifest), timeout=90)
+    if readback.returncode or token not in readback.stdout or remote_identity(manifest) != identity:
+        raise RuntimeError("existing remote GBrain durable readback failed")
+    owners = persistent_owners(paths["gbrain"])
+    if owners:
+        raise RuntimeError("a persistent owner of the tenant GBrain launcher remains")
+    receipt = {
+        "schema": SCHEMA, "status": "verified", "principal_id": manifest["principal_id"],
+        "verified_at": iso(), "persistent_gbrain_owners": 0, "remote_identity": identity,
+        "release": {"method": "existing_remote", "version": version},
+        "baseline": {"engine": "remote-postgres", "proof_slug": slug,
+                     "readback_sha256": sha256_bytes(readback.stdout.encode()),
+                     "mcp_tools": contract["mcp_tools"]},
+    }
+    atomic_json(paths["baseline_receipt"], receipt)
+    return receipt
+
+
 def _apply(manifest: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]:
     paths = manifest["_paths"]
     receipt_path = paths["baseline_receipt"]
@@ -567,6 +639,8 @@ def _apply(manifest: dict[str, Any], contract: dict[str, Any]) -> dict[str, Any]
             return verify(manifest, contract, existing)
         if existing.get("schema") != SCHEMA or existing.get("status") != "rollback_verified":
             raise RuntimeError("unverified tenant GBrain baseline receipt already exists")
+    if manifest.get("storage_mode") == "existing_remote":
+        return adopt_remote(manifest, contract)
     if paths["gbrain_home"].exists():
         raise RuntimeError("unreceipted tenant GBrain home already exists")
     rollout = receipt_path.parent / "receipts" / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}-{os.getpid()}"
@@ -628,6 +702,16 @@ def verify(manifest: dict[str, Any], contract: dict[str, Any], receipt: dict[str
     receipt = receipt or json.loads(regular(paths["baseline_receipt"]).decode("utf-8"))
     if receipt.get("schema") != SCHEMA or receipt.get("status") != "verified":
         raise RuntimeError("tenant GBrain baseline receipt is not verified")
+    if manifest.get("storage_mode") == "existing_remote":
+        proof = receipt.get("baseline") or {}
+        if (proof.get("engine") != "remote-postgres"
+                or remote_identity(manifest) != receipt.get("remote_identity")):
+            raise RuntimeError("existing remote GBrain identity changed")
+        readback = run([str(paths["gbrain"]), "get", str(proof.get("proof_slug") or "")],
+                       env=gbrain_env(manifest), timeout=90)
+        if readback.returncode or sha256_bytes(readback.stdout.encode()) != proof.get("readback_sha256"):
+            raise RuntimeError("existing remote GBrain durable proof changed or is unavailable")
+        return {**receipt, "verification": "pass"}
     version_proof(paths["gbrain"], contract["gbrain_release"]["version"], gbrain_env(manifest))
     if persistent_owners(paths["gbrain"]):
         raise RuntimeError("tenant GBrain has a persistent owner")
@@ -647,6 +731,12 @@ def rollback(manifest: dict[str, Any], contract: dict[str, Any]) -> dict[str, An
         receipt = json.loads(regular(receipt_path).decode("utf-8"))
         if receipt.get("schema") != SCHEMA or receipt.get("status") != "verified":
             raise RuntimeError("tenant GBrain baseline receipt is not rollback-eligible")
+        if manifest.get("storage_mode") == "existing_remote":
+            verify(manifest, contract, receipt)
+            receipt.update(status="rollback_verified", rolled_back_at=iso(),
+                           rollback_status="existing_remote_connection_and_data_preserved")
+            atomic_json(receipt_path, receipt)
+            return receipt
         if persistent_owners(paths["gbrain"]):
             raise RuntimeError("tenant GBrain rollback refuses a persistent owner")
         baseline = receipt.get("baseline") or {}

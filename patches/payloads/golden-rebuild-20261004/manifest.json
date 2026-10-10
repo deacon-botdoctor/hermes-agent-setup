@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-  "patch_sha256": "bdb7694274adb22623750a2b1e300b8594c1f3f6532c83e18d9787610fbbdd48",
+  "patch_sha256": "6771981267133dd6b44b487c06a6987c7a07d81f4930098729716b8b78411522",
   "baseline_tree": "c5401b54705b406e4fe14b16bde6c5825961440e",
   "files": {
     "agent/agent_init.py": {
@@ -436,6 +436,18 @@
       },
       "after": {
         "sha256": "1b307eb61b5fb608e777cd5170f0e9abc4be5d6c3b2ce995c979b5d2f4b234c7",
+        "mode": 420,
+        "git_mode": "100644"
+      }
+    },
+    "hermes_cli/auth_oauth_grants.py": {
+      "before": {
+        "sha256": "7100477ebe886e6a833168373f77092c7dec10eeec90b3befb88965a268a65c0",
+        "mode": 420,
+        "git_mode": "100644"
+      },
+      "after": {
+        "sha256": "1a2f7b7ed2f3a8dd1e3f13186c8da66becdbf51c6691c93ed514a5380bb5db8c",
         "mode": 420,
         "git_mode": "100644"
       }

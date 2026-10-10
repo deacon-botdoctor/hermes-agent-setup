@@ -68,13 +68,13 @@ def test_release_identity_matches_source_manifest():
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
     assert release["source_scope"] == "sanitized_deployable_components"
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
-        "file_count": 335,
+        "digest": "38a30c045c5bc185dbff68ab4f3d3ac2bdc0c572df11c7e179a7ab0dd109a1a8",
+        "file_count": 336,
     }
     assert manifest["runtime_fingerprint"]["digest"] == (
         release["assembled_runtime_fingerprint"]["digest"]
     )
-    assert manifest["runtime_fingerprint"]["file_count"] == 335
+    assert manifest["runtime_fingerprint"]["file_count"] == 336
     assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
     assert (
         manifest["runtime_fingerprint"]["upstream_sha"]
@@ -84,7 +84,7 @@ def test_release_identity_matches_source_manifest():
         manifest["runtime_fingerprint"]["expected_upstream_sha"]
         == release["canonical_upstream_sha"]
     )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 335
+    assert len(manifest["runtime_fingerprint"]["files"]) == 336
     assert set(release) == {
         "schema_version",
         "release",

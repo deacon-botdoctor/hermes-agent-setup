@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import runpy
 import secrets
 import shutil
 import subprocess
@@ -262,6 +263,9 @@ def baseline_health(manifest: dict[str, Any]) -> dict[str, Any]:
     receipt = json.loads(regular(paths["baseline_receipt"]).decode("utf-8"))
     if receipt.get("status") != "verified":
         raise RuntimeError("tenant brain baseline receipt is not verified")
+    if manifest.get("storage_mode") == "existing_remote":
+        baseline = runpy.run_path(str(Path(__file__).with_name("tenant-gbrain-baseline.py")))
+        baseline["verify"](manifest, {}, receipt)
     owners = receipt.get("persistent_gbrain_owners")
     if owners not in (0, []):
         raise RuntimeError("tenant brain baseline permits a persistent GBrain owner")
@@ -432,15 +436,22 @@ def codex_config_body(manifest: dict[str, Any]) -> str:
             f"GBRAIN_HOME = {json.dumps(str(paths['gbrain_home']))}",
             f"GBRAIN_PRINCIPAL_NAME = {json.dumps(str(manifest['principal_name']))}",
             f"GBRAIN_VAULT = {json.dumps(str(paths['vault']))}",
+            *(['GBRAIN_STORAGE_MODE = "existing_remote"']
+              if manifest.get("storage_mode") == "existing_remote" else []),
         ]
     )
 
 
 def codex_instruction_body(manifest: dict[str, Any]) -> str:
+    storage = (
+        "The existing remote tenant brain is the source of truth; do not create another brain or treat local files as its database. "
+        if manifest.get("storage_mode") == "existing_remote" else
+        "The tenant vault is the sole client-facing source of truth; local GBrain is its indexed, bounded write-through layer. "
+    )
     return (
         "## Tenant brain continuity\n\n"
         f"Use the local `gbrain` MCP before guessing about {manifest['principal_name']}'s durable context, prior decisions, or indexed work. "
-        "The tenant vault is the sole client-facing source of truth; local GBrain is its indexed, bounded write-through layer. "
+        + storage +
         "Write durable client facts, decisions, and handoffs through GBrain when relevant. "
         "Raw transcripts, reasoning, tool payloads, credentials, URLs, and absolute paths remain local and must never be copied into an operator-wide brain."
     )

@@ -7665,6 +7665,73 @@ index 6dcc84585b73de1a4ecbb7f790c884c05700e0b0..fa8c2e1f6cccf5ebe0c8c94b4e76a4c2
          return None
      cache_key = _codex_quota_probe_cache_key(token)
      now = time.monotonic()
+diff --git a/hermes_cli/auth_oauth_grants.py b/hermes_cli/auth_oauth_grants.py
+index 60c66abd2da23f9d396ddb0eb5cc79bc52780a4b..f2b9cb560aa6026bba4d3df5310d92ae12b47dce 100644
+--- a/hermes_cli/auth_oauth_grants.py
++++ b/hermes_cli/auth_oauth_grants.py
+@@ -40,6 +40,12 @@
+     # Codex/xAI nest the pair under ``tokens``; Nous stores it flat on the block.
+     tokens = block.get("tokens")
+     return tokens if isinstance(tokens, dict) else block
++
++
++def _is_broker_token_copy(entry: Any) -> bool:
++    # The broker owns refresh authority; its shared placeholder is not a grant.
++    return (isinstance(entry, dict)
++            and _block_tokens(entry).get("refresh_token") == "dummy_broker_managed")
+ 
+ 
+ def _is_forkable_pool_row(provider_id: str, entry: Any) -> bool:
+@@ -258,7 +264,8 @@
+             if (provider_id not in SINGLE_USE_REFRESH_POOL_PROVIDERS
+                     or not isinstance(entries, list)):
+                 continue
+-            kept = [e for e in entries if not _is_forkable_pool_row(provider_id, e)]
++            kept = [e for e in entries
++                    if _is_broker_token_copy(e) or not _is_forkable_pool_row(provider_id, e)]
+             if len(kept) != len(entries):
+                 changed = True
+                 stripped["pool"].append(provider_id)
+@@ -273,7 +280,8 @@
+         # profile working while removing the fork.
+         for provider_id in _DEVICE_CODE_BLOCK_PROVIDERS:
+             block = providers.get(provider_id)
+-            if isinstance(block, dict) and _block_tokens(block).get("refresh_token"):
++            if (isinstance(block, dict) and _block_tokens(block).get("refresh_token")
++                    and not _is_broker_token_copy(block)):
+                 del providers[provider_id]
+                 stripped["providers"].append(provider_id)
+                 changed = True
+@@ -437,7 +445,10 @@
+     account/client can issue multiple independent grants; identity is not proof.
+     """
+     from hermes_cli.auth import _nonempty_str
+-    candidates = [i for i, r in enumerate(root_rows) if _is_oauth_pool_payload(r)]
++    if _is_broker_token_copy(profile_row):
++        return None
++    candidates = [i for i, r in enumerate(root_rows)
++                  if _is_oauth_pool_payload(r) and not _is_broker_token_copy(r)]
+     if not candidates:
+         return None
+     pid = profile_row.get("id")
+@@ -528,6 +539,8 @@
+     def _flat(block: Dict[str, Any]) -> Dict[str, Any]:
+         return {**_block_tokens(block), "last_refresh": block.get("last_refresh")}
+ 
++    if _is_broker_token_copy(p_block) or _is_broker_token_copy(r_block):
++        return None
+     p_flat, r_flat = _flat(p_block), _flat(r_block)
+     # Provider blocks have no stable pool-row ID. Without a shared token pair
+     # component (or lineage proven by the pool rows), a common account is
+@@ -601,7 +614,7 @@
+     def heal_pool_rows(self) -> None:
+         kept_rows: List[Any] = []
+         for row in self.p_rows:
+-            if not _is_forkable_pool_row(self.provider_id, row):
++            if _is_broker_token_copy(row) or not _is_forkable_pool_row(self.provider_id, row):
+                 # API keys (and agent_key-only nous rows) are safe to duplicate
+                 kept_rows.append(row)
+                 continue
 diff --git a/hermes_cli/auth_xai.py b/hermes_cli/auth_xai.py
 index 34bb7cb1771aacf8c01d5312cd565937994f62fa..24ea0f04cdec026d95138f61aba83bb4e5402cb3 100644
 --- a/hermes_cli/auth_xai.py

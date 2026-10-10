@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "af8e7eff70ccb74495c1546b70e7d79cdb85cf250e700da7d9f4ae13be529b0c",
+      "digest": "ad109a15bf614c2e1a4e9573ec0341c77ff394fa965df5448d7046bda7dd69a0",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -164,7 +164,7 @@
           "type": "blob"
         },
         {
-          "blob": "05bbf1c7bdcb7643f80012f24a92aecbe0c3b24f",
+          "blob": "7cf581c10750b8ebd9d44efd8b4c8e750a80c087",
           "mode": "100755",
           "path": "kit/bin/gbrain-mcp.py",
           "type": "blob"
@@ -188,7 +188,7 @@
           "type": "blob"
         },
         {
-          "blob": "3b45c505bb7dad7f272eecfbcc498b69f9f31bac",
+          "blob": "a2ad8f211e37fa79422354074f81975e0d9d4d3c",
           "mode": "100755",
           "path": "kit/bin/native-agent-continuity.py",
           "type": "blob"
@@ -284,7 +284,7 @@
           "type": "blob"
         },
         {
-          "blob": "319a1e34d1cd7d2a44c0a229bf541cfa40727a60",
+          "blob": "781ece77ff828f7cbc37f614d614999c328d2695",
           "mode": "100755",
           "path": "kit/bin/tenant-gbrain-baseline.py",
           "type": "blob"
@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "19ade6791e13a17545eddc8712f11f0fe502e1d44905f3b6c16f30077fdcaf9c",
+      "digest": "4a73126b9e0e79ee1093ba7d97173c5a36b5020bf231ed7327464800d7419227",
       "excluded_paths": [],
       "file_count": 767,
       "files": [
@@ -1242,13 +1242,13 @@
           "type": "blob"
         },
         {
-          "blob": "b8e431974ed009f7626616861044c537b2f0a8f9",
+          "blob": "365d4b58f21880b052c1b02d1c4757dae1e61e71",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "80dbdb8b3dd553759c9716fe9b2860ca8423b708",
+          "blob": "475f4bad8ac7c51769596a7c9539e5ad630944fa",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1524,7 +1524,7 @@
           "type": "blob"
         },
         {
-          "blob": "7817fd78116d038d659baf7172533ceb5e02dbba",
+          "blob": "399522e688d824da27b8d5f99e6f26aa2c132c0c",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
@@ -5209,15 +5209,15 @@
       ]
     }
   },
-  "deployment_digest": "2e750d2cfa80eb55f96bf9a4da21851e59a695fd863408e1e008ad77874643cc",
-  "golden_sha": "d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83",
+  "deployment_digest": "2730463f48c48a236c7a67e45e7206b4e82561555703cd5f9b8f38ea11ca5b16",
+  "golden_sha": "c0075a0555c950633ea938bee61ca062643cf9cb",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
+    "digest": "38a30c045c5bc185dbff68ab4f3d3ac2bdc0c572df11c7e179a7ab0dd109a1a8",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 335,
+    "file_count": 336,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5226,7 +5226,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "be0b13907bddcdb9cd0f1f090ca1da6dd8f474def0bc828e2523fea8cc37de17",
+        "sha256": "ce40ce8ae70098a1411f605ed43249f24ad29d883ffb0e66452f6de4e6b198da",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5767,6 +5767,11 @@
       "hermes_cli/auth_codex.py": {
         "mode": "100644",
         "sha256": "1b307eb61b5fb608e777cd5170f0e9abc4be5d6c3b2ce995c979b5d2f4b234c7",
+        "type": "blob"
+      },
+      "hermes_cli/auth_oauth_grants.py": {
+        "mode": "100644",
+        "sha256": "1a2f7b7ed2f3a8dd1e3f13186c8da66becdbf51c6691c93ed514a5380bb5db8c",
         "type": "blob"
       },
       "hermes_cli/auth_xai.py": {
@@ -6895,7 +6900,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83",
+    "golden_sha": "c0075a0555c950633ea938bee61ca062643cf9cb",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

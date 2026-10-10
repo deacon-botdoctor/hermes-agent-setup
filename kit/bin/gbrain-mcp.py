@@ -519,14 +519,23 @@ def call_tool(
         with serialized_gbrain(lock_file):
             backend = None
             if name in WRITE_TOOLS:
+                remote = environment.get("GBRAIN_STORAGE_MODE") == "existing_remote"
                 engine = subprocess.run(
-                    [str(gbrain), "config", "show"],
+                    [str(gbrain), *(["engine", "status", "--json"] if remote else ["config", "show"])],
                     capture_output=True, text=True, encoding="utf-8",
                     errors="replace", timeout=30, check=False, env=environment,
                 )
                 # `config get` reads the DB key table, not effective file/env config.
                 # Never return or log the rest of config show's output.
-                engines = re.findall(r"^  engine: (postgres|pglite)$", engine.stdout, re.M)
+                if remote:
+                    try:
+                        status = json.loads(engine.stdout)
+                    except json.JSONDecodeError:
+                        status = {}
+                    engines = ["postgres"] if (status.get("effective_engine") == "postgres"
+                                                 and status.get("thin_client") is True) else []
+                else:
+                    engines = re.findall(r"^  engine: (postgres|pglite)$", engine.stdout, re.M)
                 if engine.returncode or len(engines) != 1:
                     raise RuntimeError("GBrain storage backend is unverified; write not attempted")
                 backend = engines[0]

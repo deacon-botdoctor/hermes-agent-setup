@@ -358,6 +358,23 @@ def _load_yaml(path: Path) -> dict:
     return data
 
 
+def reconcile_client_warnings(client_config: dict, defaults_dir: Path, exemptions=()):
+    """Apply the native warning policy and retire only the obsolete local provider."""
+    quiet = _load_yaml(defaults_dir / "config-client-quiet-display.yaml")
+    suppress = quiet["display"]["platforms"]["telegram"]["suppress_warning_notifications"]
+    if suppress is not True:
+        raise ValueError("client warning policy does not match the reviewed repair")
+    merged, removed, skipped = retire_matching_defaults(
+        client_config, {"memory": {"provider": "local"}}, list(exemptions)
+    )
+    merged, applied, display_skipped = merge(
+        merged,
+        {"display": {"platforms": {"telegram": {"suppress_warning_notifications": suppress}}}},
+        exemptions,
+    )
+    return merged, removed + applied, skipped + display_skipped
+
+
 def _discover_defaults_files(defaults_dir: Path) -> list[Path]:
     if not defaults_dir.exists():
         return []
@@ -1122,7 +1139,7 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--scope",
-        choices=("all", "native-image", "refero-styles", "subscription-failover"),
+        choices=("all", "native-image", "refero-styles", "subscription-failover", "client-warnings"),
         default="all",
         help="Apply all defaults, native-image routing, or exact Refero-only cold registration",
     )
@@ -1146,6 +1163,8 @@ def main(argv: list[str]) -> int:
         return 1
 
     defaults_files = _discover_defaults_files(args.defaults_dir)
+    if args.scope == "client-warnings":
+        defaults_files = [path for path in defaults_files if path.name == "config-client-quiet-display.yaml"]
     if args.scope == "subscription-failover":
         defaults_files = [path for path in defaults_files if path.name == "config-subscription-failover.yaml"]
     if args.scope == "native-image":
@@ -1212,7 +1231,17 @@ def main(argv: list[str]) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        if defaults_path.name == "config-subscription-failover.yaml":
+        if defaults_path.name == "config-client-quiet-display.yaml":
+            try:
+                merged, applied, skipped = reconcile_client_warnings(merged, args.defaults_dir, exemptions)
+                if args.scope != "client-warnings":
+                    merged, quiet_applied, quiet_skipped = merge(merged, defaults, exemptions)
+                    applied.extend(quiet_applied)
+                    skipped.extend(quiet_skipped)
+            except (KeyError, TypeError, ValueError) as exc:
+                print(f"error: client warning reconciliation: {exc}", file=sys.stderr)
+                return 1
+        elif defaults_path.name == "config-subscription-failover.yaml":
             try:
                 merged, applied, skipped = reconcile_subscription_failover(merged, defaults, exemptions)
             except (KeyError, TypeError, ValueError) as exc:
@@ -1235,7 +1264,7 @@ def main(argv: list[str]) -> int:
             all_skipped.append((defaults_path.name, k))
 
     receipt = None
-    if args.scope == "subscription-failover":
+    if args.scope in {"subscription-failover", "client-warnings"}:
         receipt = {"scope": args.scope, "changed_paths": [key for _, key in all_applied],
                    "skipped_paths": [key for _, key in all_skipped]}
     if args.scope == "native-image":
