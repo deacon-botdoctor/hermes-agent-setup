@@ -251,7 +251,8 @@ def install_macos(
     }
     if not dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(plistlib.dumps(payload, sort_keys=False))
+        atomic_write_text(plistlib.dumps(payload, sort_keys=False).decode("utf-8"),
+                          destination, dry_run=False)
     if not dry_run:
         subprocess.run(
             ["/bin/launchctl", "bootout", domain, str(destination)],
@@ -383,7 +384,7 @@ def discover_equivalent_windows_watchdogs(hermes_home: Path) -> list[str]:
     return equivalent
 
 
-def existing_macos_system_watchdog(hermes_home: Path, script: Path) -> dict[str, Any] | None:
+def macos_system_gateway_unit(hermes_home: Path) -> str | None:
     binding_path = hermes_home / "state" / "runtime-binding.json"
     if not binding_path.is_file():
         return None
@@ -405,8 +406,21 @@ def existing_macos_system_watchdog(hermes_home: Path, script: Path) -> dict[str,
     gateway = plistlib.loads(gateway_path.read_bytes())
     unit = gateway_path.stem
     if (gateway.get("Label") != unit or gateway.get("UserName") != owner
-            or gateway.get("KeepAlive") is not True):
+            or gateway.get("RunAtLoad") is not True
+            or not (gateway.get("KeepAlive") is True
+                    or gateway.get("KeepAlive") == {"SuccessfulExit": False})):
         raise ValueError("system gateway owner or KeepAlive contract changed")
+    run_checked(["/bin/launchctl", "print", "system/" + unit], dry_run=False)
+    return unit
+
+
+def existing_macos_system_watchdog(
+    hermes_home: Path, script: Path, unit: str
+) -> dict[str, Any] | None:
+    import pwd
+
+    owner = pwd.getpwuid(os.getuid()).pw_name
+    directory = Path("/Library/LaunchDaemons")
     expected = watchdog_argv(Path("python"), script, hermes_home, "launchd-system-observe", unit)[1:]
     matches = []
     for path in directory.glob("*.plist"):
@@ -429,10 +443,26 @@ def existing_macos_system_watchdog(hermes_home: Path, script: Path) -> dict[str,
                 or not isinstance(argv[0], str) or not Path(argv[0]).is_file()):
             raise ValueError("existing system watchdog contract changed")
         matches.append(label)
-    if len(matches) != 1:
-        raise ValueError("system gateway requires exactly one existing observer watchdog")
-    for label in (unit, matches[0]):
-        run_checked(["/bin/launchctl", "print", "system/" + label], dry_run=False)
+    if len(matches) > 1:
+        raise ValueError("system gateway has multiple existing observer watchdogs")
+    if not matches:
+        path = Path.home() / "Library" / "LaunchAgents" / f"{MAC_LABEL}.plist"
+        if (path.is_symlink() or not path.is_file()
+                or path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o022):
+            raise ValueError("system gateway requires an existing owned watchdog")
+        document = plistlib.loads(path.read_bytes())
+        argv = document.get("ProgramArguments") or []
+        legacy = watchdog_argv(Path("python"), script, hermes_home, "launchd",
+                               detect_gateway_unit(hermes_home, "macos"))[1:]
+        if (document.get("Label") != MAC_LABEL
+                or document.get("RunAtLoad") is not True
+                or document.get("StartInterval") != 300
+                or not isinstance(argv, list) or len(argv) != len(expected) + 1
+                or argv[1:] not in (legacy, expected)
+                or not isinstance(argv[0], str) or not Path(argv[0]).is_file()):
+            raise ValueError("existing user watchdog contract changed")
+        return None
+    run_checked(["/bin/launchctl", "print", "system/" + matches[0]], dry_run=False)
     return {"kind": "launchd-daemon", "unit": matches[0],
             "gateway_supervisor_unit": unit, "files": [], "commands": [],
             "preserved_existing": True}
@@ -448,10 +478,11 @@ def install(
 ) -> dict[str, Any]:
     current_platform = platform_key()
     destination = hermes_home / "bin" / source.name
-    existing_system = (existing_macos_system_watchdog(hermes_home, destination)
-                       if current_platform == "macos" else None)
-    unit = (existing_system["gateway_supervisor_unit"] if existing_system
-            else supervisor_unit or detect_gateway_unit(hermes_home, current_platform))
+    system_unit = (macos_system_gateway_unit(hermes_home)
+                   if current_platform == "macos" else None)
+    existing_system = (existing_macos_system_watchdog(hermes_home, destination, system_unit)
+                       if system_unit else None)
+    unit = system_unit or supervisor_unit or detect_gateway_unit(hermes_home, current_platform)
     if supervisor_unit and supervisor_unit != unit:
         raise ValueError("requested gateway differs from the existing system watchdog")
     if not SAFE_UNIT.fullmatch(unit):
@@ -470,7 +501,7 @@ def install(
     file_result = atomic_copy(source, destination, dry_run=dry_run)
     kind = {
         "linux": "systemd-user",
-        "macos": "launchd",
+        "macos": "launchd-system-observe" if system_unit else "launchd",
         "windows": "windows-scheduled-task",
     }[current_platform]
     argv = watchdog_argv(hermes_python, destination, hermes_home, kind, unit)
