@@ -21,7 +21,7 @@
     "version": "0.22.0"
   },
   "deployment_digest": "2730463f48c48a236c7a67e45e7206b4e82561555703cd5f9b8f38ea11ca5b16",
-  "golden_sha": "c0075a0555c950633ea938bee61ca062643cf9cb",
+  "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-c0075a05",
+  "release": "botdoctor-hermes-2026.10.05-golden-1dd08d96",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -64,6 +64,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced 38a30c045c5bc185dbff68ab4f3d3ac2bdc0c572df11c7e179a7ab0dd109a1a8 across 336 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: c0075a0555c950633ea938bee61ca062643cf9cb"
+    "golden_suite": "Exact reviewed Golden source: 1dd08d966c49a277d810097571ab10b77eb1a488"
   }
 }

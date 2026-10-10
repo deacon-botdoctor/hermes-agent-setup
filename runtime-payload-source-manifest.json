@@ -5210,7 +5210,7 @@
     }
   },
   "deployment_digest": "2730463f48c48a236c7a67e45e7206b4e82561555703cd5f9b8f38ea11ca5b16",
-  "golden_sha": "c0075a0555c950633ea938bee61ca062643cf9cb",
+  "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "38a30c045c5bc185dbff68ab4f3d3ac2bdc0c572df11c7e179a7ab0dd109a1a8",
@@ -6900,7 +6900,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "c0075a0555c950633ea938bee61ca062643cf9cb",
+    "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
