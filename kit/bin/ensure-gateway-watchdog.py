@@ -15,6 +15,7 @@ import shlex
 import shutil
 import subprocess
 import xml.etree.ElementTree as ET
+from xml.parsers.expat import ExpatError
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -382,6 +383,61 @@ def discover_equivalent_windows_watchdogs(hermes_home: Path) -> list[str]:
     return equivalent
 
 
+def existing_macos_system_watchdog(hermes_home: Path, script: Path) -> dict[str, Any] | None:
+    binding_path = hermes_home / "state" / "runtime-binding.json"
+    if not binding_path.is_file():
+        return None
+    binding = json.loads(binding_path.read_text())
+    service = binding.get("service") or {}
+    if service.get("kind") != "launchd-daemon":
+        return None
+    import pwd
+
+    owner = pwd.getpwuid(os.getuid()).pw_name
+    directory = Path("/Library/LaunchDaemons")
+    gateway_path = Path(str(service.get("definition_path") or ""))
+    if (gateway_path.parent != directory or gateway_path.suffix != ".plist"
+            or not SAFE_UNIT.fullmatch(gateway_path.stem)
+            or gateway_path.is_symlink() or gateway_path.stat().st_uid != 0
+            or gateway_path.stat().st_mode & 0o022
+            or sha256(gateway_path) != service.get("definition_sha256")):
+        raise ValueError("system gateway definition does not match the runtime binding")
+    gateway = plistlib.loads(gateway_path.read_bytes())
+    unit = gateway_path.stem
+    if (gateway.get("Label") != unit or gateway.get("UserName") != owner
+            or gateway.get("KeepAlive") is not True):
+        raise ValueError("system gateway owner or KeepAlive contract changed")
+    expected = watchdog_argv(Path("python"), script, hermes_home, "launchd-system-observe", unit)[1:]
+    matches = []
+    for path in directory.glob("*.plist"):
+        try:
+            if path.is_symlink() or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
+                continue
+            document = plistlib.loads(path.read_bytes())
+        except (OSError, ValueError, plistlib.InvalidFileException, ExpatError):
+            continue
+        if not isinstance(document, dict):
+            continue
+        argv = document.get("ProgramArguments") or []
+        if (not isinstance(argv, list) or len(argv) != len(expected) + 1
+                or argv[1:] != expected):
+            continue
+        label = str(document.get("Label") or "")
+        if (label != path.stem or not SAFE_UNIT.fullmatch(label)
+                or document.get("UserName") != owner
+                or document.get("StartInterval") != 300
+                or not isinstance(argv[0], str) or not Path(argv[0]).is_file()):
+            raise ValueError("existing system watchdog contract changed")
+        matches.append(label)
+    if len(matches) != 1:
+        raise ValueError("system gateway requires exactly one existing observer watchdog")
+    for label in (unit, matches[0]):
+        run_checked(["/bin/launchctl", "print", "system/" + label], dry_run=False)
+    return {"kind": "launchd-daemon", "unit": matches[0],
+            "gateway_supervisor_unit": unit, "files": [], "commands": [],
+            "preserved_existing": True}
+
+
 def install(
     *,
     source: Path,
@@ -391,10 +447,15 @@ def install(
     dry_run: bool,
 ) -> dict[str, Any]:
     current_platform = platform_key()
-    unit = supervisor_unit or detect_gateway_unit(hermes_home, current_platform)
+    destination = hermes_home / "bin" / source.name
+    existing_system = (existing_macos_system_watchdog(hermes_home, destination)
+                       if current_platform == "macos" else None)
+    unit = (existing_system["gateway_supervisor_unit"] if existing_system
+            else supervisor_unit or detect_gateway_unit(hermes_home, current_platform))
+    if supervisor_unit and supervisor_unit != unit:
+        raise ValueError("requested gateway differs from the existing system watchdog")
     if not SAFE_UNIT.fullmatch(unit):
         raise ValueError(f"unsafe gateway supervisor unit: {unit!r}")
-    destination = hermes_home / "bin" / source.name
     dependencies = []
     if "client-medic.json" in source.read_text():
         names = ["client_medic.py", "client-medic-run.py"]
@@ -416,7 +477,7 @@ def install(
     if current_platform == "linux":
         service = install_linux(argv, hermes_home, unit, dry_run=dry_run)
     elif current_platform == "macos":
-        service = install_macos(argv, unit, dry_run=dry_run)
+        service = existing_system or install_macos(argv, unit, dry_run=dry_run)
     else:
         service = install_windows(argv, hermes_home, unit, dry_run=dry_run)
     wrapper_status = (service.get("wrapper") or {}).get("status")

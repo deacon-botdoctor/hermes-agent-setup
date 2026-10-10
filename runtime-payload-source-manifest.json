@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "494d2a9ce64abad806b6e5a2cc6e89d6dfdee491eb08d5c03248c54d41d9d6e8",
+      "digest": "f6853b5c12168e6877dedc5000a727d77df438ddd8d49ee738eeef4280324e52",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -62,7 +62,7 @@
           "type": "blob"
         },
         {
-          "blob": "82f433e9916d46316e83e34312e948f3b580f981",
+          "blob": "eb1c070898e410d9522e4f74f4b817dd0ac4eb56",
           "mode": "100755",
           "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
@@ -152,7 +152,7 @@
           "type": "blob"
         },
         {
-          "blob": "2ff199cb1bd70aa518f10d5bad45c07271e810c2",
+          "blob": "0b93ada2b6c4973b4ed7201700e0fb280747cc90",
           "mode": "100644",
           "path": "kit/bin/ensure-gateway-watchdog.py",
           "type": "blob"
@@ -170,7 +170,7 @@
           "type": "blob"
         },
         {
-          "blob": "48ec2abc251c792728afb40acb18c412aac50ddd",
+          "blob": "85331b830067c124184ca6d3f661410f243b89b2",
           "mode": "100644",
           "path": "kit/bin/hermes-gateway-watchdog-client.py",
           "type": "blob"
@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "e9aae0294726ba2623ef7438211be7d79dbccc02387048bd1b672b1cd2cfc7cb",
+      "digest": "db0ac293af744c898a95024a8d3c881af6890cde0d7f0290787b73352be35d58",
       "excluded_paths": [],
       "file_count": 767,
       "files": [
@@ -1686,7 +1686,7 @@
           "type": "blob"
         },
         {
-          "blob": "196c01a9440e7863dbdce31bf8a86c116650e729",
+          "blob": "36b66da34eae1e264ecbecaf1be39424ca89bc29",
           "mode": "100644",
           "path": "shared-rules/operator-duty.md",
           "type": "blob"
@@ -1704,7 +1704,7 @@
           "type": "blob"
         },
         {
-          "blob": "902e750ec43ace99027f2acf6ec40dfa14396067",
+          "blob": "594ed935fa4d2cc1dc2f6a7e08eb9d28e113edf5",
           "mode": "100644",
           "path": "shared-rules/response-formatting.md",
           "type": "blob"
@@ -5209,8 +5209,8 @@
       ]
     }
   },
-  "deployment_digest": "378d8c5028306d29fa2d41f043137f3a7c61f5dce3faaa85d0b206aa167a4cfb",
-  "golden_sha": "deb7145d2c9b8a9347907ff4ca93e1e617d99ffb",
+  "deployment_digest": "4e2e3c4c63799a5f243d6ff9b67b71c85b5d1a5cb8659fb47df6106e0e44c82c",
+  "golden_sha": "9b2d5f68c3f286b687d874e92665c4492ad6579f",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
@@ -6895,7 +6895,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "deb7145d2c9b8a9347907ff4ca93e1e617d99ffb",
+    "golden_sha": "9b2d5f68c3f286b687d874e92665c4492ad6579f",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

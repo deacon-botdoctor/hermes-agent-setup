@@ -281,6 +281,24 @@ def run_watchdog(
         transaction_health=transaction_health,
         telegram_required=telegram_transport_expected(hermes_home),
     )
+    if supervisor_kind == "launchd-system-observe":
+        if not SAFE_UNIT.fullmatch(supervisor_unit):
+            raise ValueError("unsafe system supervisor unit")
+        result = command_runner(["/bin/launchctl", "print", "system/" + supervisor_unit],
+                                capture_output=True, text=True, timeout=10, check=False)
+        pids = re.findall(r"^\s*pid = (\d+)$", result.stdout, re.MULTILINE)
+        supervised = (result.returncode == 0 and len(pids) == 1
+                      and str(gateway.get("pid")) == pids[0])
+        if not supervised:
+            observation.update(health="outage", reason="system_supervisor_missing_or_pid_mismatch")
+        receipt = {"schema": "hermes-gateway-watchdog-client/v1",
+                   "observed_at": observed_at.isoformat(), "hermes_home": str(hermes_home),
+                   "supervisor": {"kind": supervisor_kind, "unit": supervisor_unit},
+                   "observation": observation,
+                   "restart": {"eligible": False, "attempted": False, "succeeded": None,
+                               "detail": "system_supervisor_observer"}}
+        atomic_json(receipt_path, receipt)
+        return receipt
     if ((hermes_home / "config/client-medic.json").exists()
             or (hermes_home / "config/client-medic.json").is_symlink()):
         import importlib.util

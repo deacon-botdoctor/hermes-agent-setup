@@ -620,9 +620,9 @@ INJECTED_RULE_HASHES = {'campaign-and-viewpoint-work.md': '75e2a35f2a78ac7bf5c76
  'content-policy.md': '6ae5876a446e65a519b886b29a300e152af6dd88b248e2c3a96bffcff56704bd',
  'knowledge-routing.md': 'f7ced0d2417f8e7355473f0a7bff2e3f85beb6b9f5a8a6d69a99560cd9793023',
  'machine-capability.md': 'd6a91c7b62d88baa8e418f5159c4b524c9c1b3c8bc6ff590848bacbc27a8d5a0',
- 'operator-duty.md': '7cc6fec49ed7c3ede5ad414f5a1462ac295f7f67c5c3f811bd32c2b07c00cda5',
+ 'operator-duty.md': '25658e047b1257342134ca81e8ce75656ab223ab85b4e293f954aec15100cd8c',
  'operator-privacy-judgment.md': 'cf54d0ebc191f694d554bc9b7d86d56a12afc8c3451da8d8e2539c08c56f0b16',
- 'response-formatting.md': 'fcbdafb7098e98e824705566831c942cfc32d8f231332567455ef98c0cae01c2',
+ 'response-formatting.md': '1b8f35361c4a981ebb827301a4dbe395485c614898da07b83164c245746125bd',
  'truth-over-comfort.md': '90c68d38b19d74c9fef17d76edc6a286c53dbcb112d499aa8af2eb60babc4899',
  'westminster-marque.md': 'fd64de827034ff50a47188f8702ed9f5d1987b6ad8932a38a4b763278202394a'}
 INJECTED_FLOOR_MARKERS = ('HERMES_OPERATING_FLOOR_v1',
