@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "6128e88171bed7ca21f092611764582bef2b81b28a48a77c9d3057df4d9d277c",
-  "golden_sha": "0b19a7f81a6ebbd677189fa0906b341053fd845e",
+  "deployment_digest": "2e750d2cfa80eb55f96bf9a4da21851e59a695fd863408e1e008ad77874643cc",
+  "golden_sha": "d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-0b19a7f8",
+  "release": "botdoctor-hermes-2026.10.05-golden-d12a89ab",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,7 +56,7 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "db0ac293af744c898a95024a8d3c881af6890cde0d7f0290787b73352be35d58",
+  "runtime_payload_digest": "19ade6791e13a17545eddc8712f11f0fe502e1d44905f3b6c16f30077fdcaf9c",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
@@ -64,6 +64,6 @@
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
     "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826 across 335 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: 0b19a7f81a6ebbd677189fa0906b341053fd845e"
+    "golden_suite": "Exact reviewed Golden source: d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83"
   }
 }

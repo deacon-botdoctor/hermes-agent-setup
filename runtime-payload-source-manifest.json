@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "db0ac293af744c898a95024a8d3c881af6890cde0d7f0290787b73352be35d58",
+      "digest": "19ade6791e13a17545eddc8712f11f0fe502e1d44905f3b6c16f30077fdcaf9c",
       "excluded_paths": [],
       "file_count": 767,
       "files": [
@@ -468,7 +468,7 @@
           "type": "blob"
         },
         {
-          "blob": "616a116ce2d506e7a21b329432a771cbb0c3409c",
+          "blob": "de34493f7e62c76afd7645c45401b5b4d5b64e12",
           "mode": "100755",
           "path": "bin/registry-sync.py",
           "type": "blob"
@@ -5209,8 +5209,8 @@
       ]
     }
   },
-  "deployment_digest": "6128e88171bed7ca21f092611764582bef2b81b28a48a77c9d3057df4d9d277c",
-  "golden_sha": "0b19a7f81a6ebbd677189fa0906b341053fd845e",
+  "deployment_digest": "2e750d2cfa80eb55f96bf9a4da21851e59a695fd863408e1e008ad77874643cc",
+  "golden_sha": "d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "ff7222de6e43b9c6fd767b1d91be7358b44a876155a35006e0bdd99b3e257826",
@@ -6895,7 +6895,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "0b19a7f81a6ebbd677189fa0906b341053fd845e",
+    "golden_sha": "d12a89ab8fbfc157fbe1b3a4fd320ac6959f7c83",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

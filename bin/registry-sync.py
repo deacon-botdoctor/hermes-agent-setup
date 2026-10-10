@@ -417,11 +417,13 @@ def _native_skill_capabilities() -> tuple[list[dict], str]:
 
     A missing native scanner is explicit degraded discovery, not an empty
     successful inventory. Never borrow a different tenant's runtime or PATH CLI.
+    HERMES_NATIVE_SKILL_HOME selects a contained profile without changing the
+    registry's account-wide configuration scope.
     """
-    binding_path = HERMES_HOME / "state/runtime-binding.json"
     try:
-        binding = json.loads(binding_path.read_text())
-        home = HERMES_HOME.resolve()
+        home = Path(os.environ.get("HERMES_NATIVE_SKILL_HOME", HERMES_HOME)).resolve()
+        home.relative_to(HERMES_HOME.resolve())
+        binding = json.loads((home / "state/runtime-binding.json").read_text())
         if Path(binding["hermes_home"]).resolve() != home:
             return [], "tenant_mismatch"
         runtime = Path(binding["runtime_root"]).resolve()
