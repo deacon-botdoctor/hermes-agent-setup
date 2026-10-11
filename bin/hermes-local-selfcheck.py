@@ -1695,10 +1695,18 @@ def check_credential_friction_recent():
     try:
         health = _gateway_state_transaction()
         count = health["credential_tool_errors"]
-        if not isinstance(count, int) or count < 0:
+        if type(count) is not int or count < 0:
             raise ValueError("invalid credential friction evidence")
-        return {"name": "credential_friction_recent", "status": "fail" if count else "pass",
-                "detail": f"backend=gateway_api explicit_tool_errors={count}"}
+        if "credential_tool_errors_current_gateway" not in health:
+            return {"name": "credential_friction_recent", "status": "fail" if count else "pass",
+                    "detail": f"backend=gateway_api explicit_tool_errors={count}"}
+        current = health["credential_tool_errors_current_gateway"]
+        if type(current) is not int or not 0 <= current <= count:
+            raise ValueError("invalid current gateway credential friction evidence")
+        status = "fail" if current else ("warn" if count else "pass")
+        return {"name": "credential_friction_recent", "status": status,
+                "detail": (f"backend=gateway_api explicit_tool_errors={current} "
+                           f"historical_tool_errors={count} scope=current_gateway")}
     except Exception as error:
         return {"name": "credential_friction_recent", "status": "fail",
                 "detail": f"{type(error).__name__}: gateway transaction evidence unavailable"}

@@ -151,6 +151,12 @@ def probe(owner, *, diagnostics=False) -> dict:
                         "SELECT count(*) FROM sessions WHERE source='telegram' AND thread_id IS NOT NULL"
                     ).fetchone()[0]
                 result["credential_tool_errors"] = _credential_tool_errors(connection)
+                runtime_status = sys.modules.get("gateway.status")
+                if runtime_status is not None and runtime_status.owns_gateway_runtime_lock():
+                    result["credential_tool_errors_current_gateway"] = (
+                        _credential_tool_errors(connection, since=_started_at)
+                        if result["credential_tool_errors"] else 0
+                    )
                 result["activity"] = _activity_counts(connection)
         result["counts"] = counts
         result["database_status"] = "fail" if _failure else "pass"
@@ -222,7 +228,7 @@ def _activity_counts(connection):
             for key, value in ((f"msgs_{days}d", totals[i]), (f"human_msgs_{days}d", human[i]))}
 
 
-def _credential_tool_errors(connection, *, budget_seconds=3):
+def _credential_tool_errors(connection, *, budget_seconds=3, since=None):
     # Sort narrow metadata through the existing covering index before touching
     # large message bodies. Preserve the original latest-12 *matching* rows,
     # including non-tool matches and exclusions; never substitute a sample zero.
@@ -231,8 +237,14 @@ def _credential_tool_errors(connection, *, budget_seconds=3):
                 "authentication required", "no connected account", "credentials")
     indexes = {row[1] for row in connection.execute("PRAGMA index_list(messages)")}
     index = " INDEXED BY idx_messages_session" if "idx_messages_session" in indexes else ""
+    # Historical diagnostics remain available; current health uses this gateway's
+    # observation period, as the Telegram transaction check does.
+    where = " WHERE timestamp >= ? OR timestamp IS NULL" if since is not None else ""
     cursor = connection.execute(
-        "SELECT rowid FROM messages" + index + " ORDER BY coalesce(timestamp,0) DESC, rowid DESC")
+        "SELECT rowid FROM messages" + index + where
+        + " ORDER BY coalesce(timestamp,0) DESC, rowid DESC",
+        (since,) if since is not None else (),
+    )
     matches = []
     try:
         while True:

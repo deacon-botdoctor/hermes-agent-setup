@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "69bd83f5a8b8945449976353fb629540a0ab3be6b4b8250c117cca809dd1e2d4",
+      "digest": "3d4f8f12b001d1a917301af5d6c988b80548a3394f9d2d1800842ce9f637179a",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -62,7 +62,7 @@
           "type": "blob"
         },
         {
-          "blob": "eb1c070898e410d9522e4f74f4b817dd0ac4eb56",
+          "blob": "7d5218f76144a072c0ccb93b8b110141e1322a8b",
           "mode": "100755",
           "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
@@ -379,7 +379,7 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "409e4ac7942b0a26ceac75fe316c36632d30463e83b30c2d13212c0623aef9a6",
+      "digest": "c8a4694a789076b747b939973acc4ebf2301d89d934a7de80f163b738acef83f",
       "excluded_paths": [],
       "file_count": 769,
       "files": [
@@ -1254,13 +1254,13 @@
           "type": "blob"
         },
         {
-          "blob": "c1765a6a4d0881b8b211c00f0bad9e308a7c57c6",
+          "blob": "67e14c53c72b22478685a1683fe86a6c347f18da",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "afe46f07798b81ccf55a8bc4a078095402fc3a73",
+          "blob": "ac98026781eb885374fc0bcabd033c05083c1193",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1332,7 +1332,7 @@
           "type": "blob"
         },
         {
-          "blob": "259ad4b825219a5846efb75642e5f63ff9c6a81c",
+          "blob": "c1c353e6b324b7acb19a528ee86079e40982b2ab",
           "mode": "100644",
           "path": "patches/payloads/state-transaction-health/gateway/state_transaction_health.py",
           "type": "blob"
@@ -5223,11 +5223,11 @@
       ]
     }
   },
-  "deployment_digest": "8534ba5a24dbed532d9ecec1c4596561fad1c0fcb92372228fa7c2b6b513a029",
-  "golden_sha": "08c36e30cd44d57c360a3f3ee9d1c2dc02ebe0ca",
+  "deployment_digest": "2e7ac6f471c0b9f6903eeb7b1a05819450bcf84d0fdee82f75bbd424bf953a53",
+  "golden_sha": "e41d3836a4d5f73538a2482b3e12722af87ea7d1",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "e2431dceabb12163b3b5e54dbc4d245b893a8a2d5a51b0e47dc32bfc8d81cdbb",
+    "digest": "c8d72c09007963490efe0f3442e7f5ec3eded564eb60314a005b78cc3029528d",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
@@ -5240,7 +5240,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "a942fffd620ea71bf166153bcd793ebef21e3f4a24a4807b5861d21dfcaf7bd0",
+        "sha256": "059e94804fe0264e441e7a926520c0cfc1a75429ce0a753194e89a63facdf719",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5745,7 +5745,7 @@
       },
       "gateway/state_transaction_health.py": {
         "mode": "100644",
-        "sha256": "2e5302028dcb3e3f2ae7f37287b21ba6901f24729dda3a765cdf978c6da99ec1",
+        "sha256": "72454f951dfbee4f469c7b909d92e0ed61a53d9a3248d45a53806953d1198197",
         "type": "blob"
       },
       "gateway/status.py": {
@@ -6924,7 +6924,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "08c36e30cd44d57c360a3f3ee9d1c2dc02ebe0ca",
+    "golden_sha": "e41d3836a4d5f73538a2482b3e12722af87ea7d1",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
