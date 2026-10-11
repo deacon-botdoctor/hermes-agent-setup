@@ -153,7 +153,7 @@ function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMi
 }
 
 function PythonArguments($Python, $Script, $ExtraArgs) {
-  $command = '$env:HERMES_HOME=' + (PsLiteral $Hermes) + '; & ' + (PsLiteral $Python) + ' ' + (PsLiteral $Script)
+  $command = '$env:HERMES_HOME=' + (PsLiteral $Hermes) + '; $env:PYTHONUTF8=1; & ' + (PsLiteral $Python) + ' ' + (PsLiteral $Script)
   if ($ExtraArgs) { $command += ' ' + $ExtraArgs }
   '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + $command.Replace('"','`"') + '"'
 }

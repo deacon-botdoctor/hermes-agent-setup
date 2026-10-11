@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "ad109a15bf614c2e1a4e9573ec0341c77ff394fa965df5448d7046bda7dd69a0",
+      "digest": "a322d740730ef188775fd2acccba0b6ec4d546f43ceaf28e3576c70c3da3f76d",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -20,7 +20,7 @@
           "type": "blob"
         },
         {
-          "blob": "82227787350ba0f4e693146df9fa4c271cc23994",
+          "blob": "9a6185729295274cb28aacc6eeff9ffd05559615",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.ps1",
           "type": "blob"
@@ -80,7 +80,7 @@
           "type": "blob"
         },
         {
-          "blob": "1fb74ee68201dd74e676abc18e6cd4e0b6a86d0f",
+          "blob": "91e3c709d5cf95f82c8c1a679de06975b1cc6b5a",
           "mode": "100644",
           "path": "installers.yaml",
           "type": "blob"
@@ -375,6 +375,24 @@
         "kit/config/agent-browser-release-v1.json",
         "kit/config/pylock.browser-use-cli-v1.toml",
         "kit/config/native-agent-continuity-v1.json"
+      ],
+      "source_overrides": [
+        {
+          "blob": "9a6185729295274cb28aacc6eeff9ffd05559615",
+          "original_blob": "82227787350ba0f4e693146df9fa4c271cc23994",
+          "path": "bin/hermes-canary-reconciler.ps1",
+          "reason": "Run Windows scheduled Python diagnostics with UTF-8.",
+          "source_commit": "58489c1a84b732484f65baf349852cbd4545bf63",
+          "source_repository": "https://github.com/Bot-Doctor-LLC/hermes-golden"
+        },
+        {
+          "blob": "91e3c709d5cf95f82c8c1a679de06975b1cc6b5a",
+          "original_blob": "1fb74ee68201dd74e676abc18e6cd4e0b6a86d0f",
+          "path": "installers.yaml",
+          "reason": "Refresh existing profile copies of managed diagnostic helpers.",
+          "source_commit": "6933bb6e036861507b6a940e817813e67f3c9b4e",
+          "source_repository": "https://github.com/Bot-Doctor-LLC/hermes-golden"
+        }
       ]
     },
     "runtime_payload": {
@@ -5209,7 +5227,7 @@
       ]
     }
   },
-  "deployment_digest": "2730463f48c48a236c7a67e45e7206b4e82561555703cd5f9b8f38ea11ca5b16",
+  "deployment_digest": "2a0d3d7c0fbb81cd8faec471962ec10b24672eebaf90711d6b230a30da7b71a2",
   "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {

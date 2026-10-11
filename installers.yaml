@@ -192,15 +192,21 @@ installers:
       - source: kit/bin/telegram-watchdog-depth-probe.ps1
         destination: "{hermes_home}/bin/telegram-watchdog-depth-probe.ps1"
         existing_profile_overlays: true
-      - bin/hermes-local-selfcheck.py
+      - source: bin/hermes-local-selfcheck.py
+        destination: "{hermes_home}/bin/hermes-local-selfcheck.py"
+        existing_profile_overlays: true
       - bin/agent-probe-mac.py
       - bin/hermes-cron-toolset-preflight.py
       - bin/hermes-canary-reconciler.py
-      - bin/hermes-canary-reconciler.ps1
+      - source: bin/hermes-canary-reconciler.ps1
+        destination: "{hermes_home}/bin/hermes-canary-reconciler.ps1"
+        existing_profile_overlays: true
       - bin/hermes-disk-retention.py
       - bin/hermes-fileprovider-online-only.swift
       - bin/hermes-windows-capacity-containment.ps1
-      - bin/tool-readiness-probe.py
+      - source: bin/tool-readiness-probe.py
+        destination: "{hermes_home}/bin/tool-readiness-probe.py"
+        existing_profile_overlays: true
       - bin/composio-remote-mcp-verify.py
       - bin/composio-remote-mcp-with-env.sh
       - kit/bin/operator-status.py
