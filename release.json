@@ -1,9 +1,9 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "c8d72c09007963490efe0f3442e7f5ec3eded564eb60314a005b78cc3029528d",
+    "digest": "0e50ffe0b4e6a0496114936159969d159a27dbf437073ae8a27dfdfeaf076134",
     "file_count": 338
   },
-  "baseline_wiring_digest": "3d4f8f12b001d1a917301af5d6c988b80548a3394f9d2d1800842ce9f637179a",
+  "baseline_wiring_digest": "0ac01101ffc9340cae16989fe451dd28fcf1698d032a9a2107256a34bcd9ec0c",
   "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,8 +20,8 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "2e7ac6f471c0b9f6903eeb7b1a05819450bcf84d0fdee82f75bbd424bf953a53",
-  "golden_sha": "e41d3836a4d5f73538a2482b3e12722af87ea7d1",
+  "deployment_digest": "f7c9e7b3866948cfe3c72bc9b5c10e3b8cda776cfd1a8113e2da5701324891bc",
+  "golden_sha": "0f8a76407d89edb4debfdc3fdb081f6e9e03b8fe",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-e41d3836",
+  "release": "botdoctor-hermes-2026.10.05-golden-0f8a7640",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "c8a4694a789076b747b939973acc4ebf2301d89d934a7de80f163b738acef83f",
+  "runtime_payload_digest": "ce595eb56476d062f23bc270794c0c61f96dfff0cace93e3765d8401554ea6f1",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced c8d72c09007963490efe0f3442e7f5ec3eded564eb60314a005b78cc3029528d across 338 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: e41d3836a4d5f73538a2482b3e12722af87ea7d1"
+    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced 0e50ffe0b4e6a0496114936159969d159a27dbf437073ae8a27dfdfeaf076134 across 338 changed runtime files.",
+    "golden_suite": "Exact reviewed Golden source: 0f8a76407d89edb4debfdc3fdb081f6e9e03b8fe"
   }
 }

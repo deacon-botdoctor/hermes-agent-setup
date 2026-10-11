@@ -7504,7 +7504,7 @@ index 87fb52908afa7343584bf074272c88f136f8d42d..61f3941c8880179a3e33a6a6b2a5b89d
          if not db:
              return True
 diff --git a/gateway/state_transaction_health.py b/gateway/state_transaction_health.py
-index c1c353e6b324b7acb19a528ee86079e40982b2ab..700a39854a63ae5188e49d98defd7700fba2d553 100644
+index 943954ef280b7a1c7d5930987c1b779809d9268f..e33962fbab4881dca5ba039e9f07eefeeea57574 100644
 --- a/gateway/state_transaction_health.py
 +++ b/gateway/state_transaction_health.py
 @@ -25,7 +25,7 @@ def _protected_home(db_path: Path) -> Path | None:

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-  "patch_sha256": "cc8917417d411c8bdd38c63ad903ea54949bb817ed44740ce0d6175fd6060116",
+  "patch_sha256": "1e25168605263d436b860b737b02d5e359d42b51491e76e8afd7051495db6f74",
   "baseline_tree": "c5401b54705b406e4fe14b16bde6c5825961440e",
   "files": {
     "agent/agent_init.py": {
@@ -402,12 +402,12 @@
     },
     "gateway/state_transaction_health.py": {
       "before": {
-        "sha256": "cd5baec7ceb6bdcd7ef6dcc1742630c7d9c71c15bcf00fb7e1ffd0fc2a4675ad",
+        "sha256": "7b9fa57e6bba18cb369dfaceeccdacd9dfca6cfb0cdaf322072f85a88f86859f",
         "mode": 420,
         "git_mode": "100644"
       },
       "after": {
-        "sha256": "72454f951dfbee4f469c7b909d92e0ed61a53d9a3248d45a53806953d1198197",
+        "sha256": "9c3feccd78afa72c448564c92a609e287ea41555dee005213717039f7bcdd3b2",
         "mode": 420,
         "git_mode": "100644"
       }
