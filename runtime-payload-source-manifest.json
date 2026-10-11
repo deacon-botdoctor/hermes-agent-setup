@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "a322d740730ef188775fd2acccba0b6ec4d546f43ceaf28e3576c70c3da3f76d",
+      "digest": "69bd83f5a8b8945449976353fb629540a0ab3be6b4b8250c117cca809dd1e2d4",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -74,7 +74,7 @@
           "type": "blob"
         },
         {
-          "blob": "764954659a58f6fb43e9126e975e738631ac3b4f",
+          "blob": "5a57c8af3bb67ec97b758bb92d8491504bcca623",
           "mode": "100755",
           "path": "bin/tool-readiness-probe.py",
           "type": "blob"
@@ -5223,8 +5223,8 @@
       ]
     }
   },
-  "deployment_digest": "7a44055e2afe18518951645198a49348026ce7f68ec448c21442c157d4806000",
-  "golden_sha": "543488d48bcb9d4fabc1d816f55af5fca950ba66",
+  "deployment_digest": "8534ba5a24dbed532d9ecec1c4596561fad1c0fcb92372228fa7c2b6b513a029",
+  "golden_sha": "08c36e30cd44d57c360a3f3ee9d1c2dc02ebe0ca",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
     "digest": "e2431dceabb12163b3b5e54dbc4d245b893a8a2d5a51b0e47dc32bfc8d81cdbb",
@@ -6924,7 +6924,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "543488d48bcb9d4fabc1d816f55af5fca950ba66",
+    "golden_sha": "08c36e30cd44d57c360a3f3ee9d1c2dc02ebe0ca",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },

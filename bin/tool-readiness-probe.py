@@ -415,6 +415,7 @@ try:
     from tools import browser_tool
     cdp = getattr(browser_tool, "_cdp", browser_tool)
     cloud = getattr(browser_tool, "_cloud", browser_tool)
+    install = getattr(browser_tool, "_install", browser_tool)
     try:
         from tools import browser_use_cli
         browser_use_mode = browser_use_cli.is_browser_use_cli_mode()
@@ -427,16 +428,16 @@ try:
     elif browser_tool._is_camofox_mode():
         runtime = "camofox"
         backend = "camofox"
-        ready = bool(browser_tool.check_browser_requirements())
+        ready = bool(install.check_browser_requirements())
     elif cdp._get_cdp_override():
         runtime = "cdp_override"
         backend = "cdp_override"
-        ready = bool(browser_tool.check_browser_requirements())
+        ready = bool(install.check_browser_requirements())
     else:
         provider = cloud._get_cloud_provider()
         runtime = "cloud_browser" if provider is not None else "native_agent_browser"
         backend = provider.provider_name() if provider is not None else "agent_browser"
-        ready = bool(browser_tool.check_browser_requirements())
+        ready = bool(install.check_browser_requirements())
     payload = json.dumps({
         "ready": ready,
         "runtime": runtime,
