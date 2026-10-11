@@ -187,6 +187,21 @@ patches:
     reason: Shared configuration owns the Grok 4.6 default; the shared grok-x-research CLI still requires a validated explicit model argument that the pin does not expose.
     upstream_issue: none
     retirement_condition: Remove when the pinned native X Search tool accepts and validates the explicit model argument used by the shared CLI.
+  - name: cua_service_session_mode_v1
+    module: modules/cua_service_session_mode_v1.py
+    function: patch_cua_service_session_mode_v1
+    target: tools/computer_use/tool.py
+    owner: engineering-lead
+    idempotency: HERMES_CUA_SERVICE_SESSION_MODE_v1
+    test: python3 -m compileall -q patches/modules/cua_service_session_mode_v1.py
+    rollback: rebind the prior immutable candidate
+    client_impact: restart_required
+    tags: [computer-use, cua, approvals, windows]
+    status: extracted
+    route: upstream-pr
+    reason: Windows Session 0 cannot start an interactive private daemon; service gateways must retain their configured desktop bridge
+    upstream_issue: none
+    retirement_condition: remove when native CUA preserves configured mode in Windows service sessions
   - name: cua_gateway_shutdown_v1
     module: modules/cua_gateway_shutdown_v1.py
     function: patch_cua_gateway_shutdown_v1
@@ -963,3 +978,19 @@ patches:
     reason: Models answer "keep me posted" by creating <=15-minute inference cron jobs that know nothing about the in-flight work, spam the chat, and fail the fleet cron model gate (BOT-37 native039 stop, job enoch/7ef0d1a9922d). The create action now refuses agent-mode short-interval progress jobs.
     upstream_issue: none
     retirement_condition: upstream ships a progress channel for in-flight work and a create-time guard
+
+  - name: cron_completion_reporter_v1
+    module: modules/cron_completion_reporter_v1.py
+    function: patch_cron_completion_reporter_v1
+    target: cron/scheduler.py, cron/executions.py, cron/completion_reporter.py
+    owner: engineering-lead
+    idempotency: HERMES_CRON_COMPLETION_REPORTER_v1
+    test: python3 -m pytest -q bin/test/test_cron_operator_delivery_v1.py tests/test_cron_operator_delivery_patch.py
+    rollback: rebind the prior immutable runtime through the operator executor
+    client_impact: restart_required
+    tags: [cron, completion, delivery]
+    status: extracted
+    route: irreducible
+    reason: An explicitly configured completion reporter must retain each native run before notification and record its terminal execution and delivery outcome separately. Unconfigured runtimes preserve their existing behavior.
+    upstream_issue: none
+    retirement_condition: upstream provides a pre-delivery completion publication boundary and terminal execution callback

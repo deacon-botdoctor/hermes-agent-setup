@@ -4502,7 +4502,7 @@ index 0000000000000000000000000000000000000000..3acc810a86ea2a54a122db9df9eaa69e
 +    _thread_s = str(thread_id or '')
 +    _session_s = str(session_id or '')
 +    if (
-+        str(getattr(agent, 'platform', '') or '').lower() == 'cron'
++        str(getattr(agent, 'platform', '') or '').lower() in {'cron', 'cli'}
 +        or _thread_s.startswith('cron_')
 +        or _session_s.startswith('cron_')
 +        or _thread_s == _session_s

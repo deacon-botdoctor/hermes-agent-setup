@@ -228,24 +228,11 @@ def fix(text: str) -> str:
 
 
 def gate_response(text: str) -> str | None:
-    """Return replacement text, or None to leave the reply unchanged."""
+    """Repair presentation without discarding the answer; send checks are separate."""
     if not text or not looks_like_card(text):
         return None
-    if not lint(text):
-        return None
-    if any("missing From" in v for v in lint(text)):
-        return "Email card missing From. Not sent."
     fixed = fix(text)
-    if fixed != text and not lint(fixed):
-        return fixed
-    remaining = lint(fixed)
-    reasons = "\n".join(f"- {v}" for v in remaining[:8])
-    return (
-        "Email card failed spacing QA. Not sent.\n\n"
-        f"{reasons}\n\n"
-        "Fix: single newlines on To/Cc/From/Subject, no trailing spaces, "
-        "no <email@domain>."
-    )
+    return fixed if fixed != text else None
 
 
 SEND_TOOL_MARKERS = (

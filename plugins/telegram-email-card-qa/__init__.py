@@ -1,4 +1,4 @@
-"""Fail-closed email-card spacing QA on Telegram delivery and Gmail send."""
+"""Repair chat presentation and keep email send validation separate."""
 
 from .telegram_email_card_lint import gate_response, gate_send_tool
 

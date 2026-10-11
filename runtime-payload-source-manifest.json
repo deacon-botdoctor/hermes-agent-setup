@@ -375,31 +375,13 @@
         "kit/config/agent-browser-release-v1.json",
         "kit/config/pylock.browser-use-cli-v1.toml",
         "kit/config/native-agent-continuity-v1.json"
-      ],
-      "source_overrides": [
-        {
-          "blob": "9a6185729295274cb28aacc6eeff9ffd05559615",
-          "original_blob": "82227787350ba0f4e693146df9fa4c271cc23994",
-          "path": "bin/hermes-canary-reconciler.ps1",
-          "reason": "Run Windows scheduled Python diagnostics with UTF-8.",
-          "source_commit": "58489c1a84b732484f65baf349852cbd4545bf63",
-          "source_repository": "https://github.com/Bot-Doctor-LLC/hermes-golden"
-        },
-        {
-          "blob": "91e3c709d5cf95f82c8c1a679de06975b1cc6b5a",
-          "original_blob": "1fb74ee68201dd74e676abc18e6cd4e0b6a86d0f",
-          "path": "installers.yaml",
-          "reason": "Refresh existing profile copies of managed diagnostic helpers.",
-          "source_commit": "6933bb6e036861507b6a940e817813e67f3c9b4e",
-          "source_repository": "https://github.com/Bot-Doctor-LLC/hermes-golden"
-        }
       ]
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "4a73126b9e0e79ee1093ba7d97173c5a36b5020bf231ed7327464800d7419227",
+      "digest": "409e4ac7942b0a26ceac75fe316c36632d30463e83b30c2d13212c0623aef9a6",
       "excluded_paths": [],
-      "file_count": 767,
+      "file_count": 769,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -876,6 +858,12 @@
           "type": "blob"
         },
         {
+          "blob": "0e58edf4023693077ad7587e321b1e03af092933",
+          "mode": "100644",
+          "path": "patches/modules/cron_completion_reporter_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "25e4a6e383232a284045302b622687e2b776e6a9",
           "mode": "100644",
           "path": "patches/modules/cron_operator_delivery_v1.py",
@@ -897,6 +885,12 @@
           "blob": "f2b75b918e188a2d911bf3ba9c0c9be76f64bf15",
           "mode": "100644",
           "path": "patches/modules/cua_gateway_shutdown_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "8779e5f01d0d5aa63bbb0c3d133d7cfdefab7db2",
+          "mode": "100644",
+          "path": "patches/modules/cua_service_session_mode_v1.py",
           "type": "blob"
         },
         {
@@ -1260,13 +1254,13 @@
           "type": "blob"
         },
         {
-          "blob": "365d4b58f21880b052c1b02d1c4757dae1e61e71",
+          "blob": "c1765a6a4d0881b8b211c00f0bad9e308a7c57c6",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "475f4bad8ac7c51769596a7c9539e5ad630944fa",
+          "blob": "afe46f07798b81ccf55a8bc4a078095402fc3a73",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1356,7 +1350,7 @@
           "type": "blob"
         },
         {
-          "blob": "527aa28fb867f552b3f2c83edd8ef60d4b071a3f",
+          "blob": "c610f2c17388c7baac5545cc4f9d84e94cdf8d83",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -1488,7 +1482,7 @@
           "type": "blob"
         },
         {
-          "blob": "629393e062e8111ff7e519e09c7daa2d8184519d",
+          "blob": "324adaa6f53889bda98260f1524c12b159da970e",
           "mode": "100644",
           "path": "plugins/telegram-email-card-qa/__init__.py",
           "type": "blob"
@@ -1500,7 +1494,7 @@
           "type": "blob"
         },
         {
-          "blob": "044bb6f50c2baa6bd714c318be6b5db66c8e6280",
+          "blob": "773780455de1b7b03198811ec68fff16a01dd029",
           "mode": "100755",
           "path": "plugins/telegram-email-card-qa/telegram_email_card_lint.py",
           "type": "blob"
@@ -4920,7 +4914,7 @@
           "type": "blob"
         },
         {
-          "blob": "2794085f6b51f4e11cedd7383987055b90e19083",
+          "blob": "5a778d933348d1c8990d6d60aeb8076b7cfbe0f3",
           "mode": "100644",
           "path": "skills/fleet/email-card-qa/SKILL.md",
           "type": "blob"
@@ -5071,11 +5065,13 @@
         "patches/modules/auto_resume_contextual_reset_v1.py",
         "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
         "patches/modules/cron_operator_delivery_v1.py",
+        "patches/modules/cron_completion_reporter_v1.py",
         "patches/modules/durable_delivery_history_v1.py",
         "patches/payloads/durable-delivery-history-v1",
         "kit/bin/telegram_delivery_history.py",
         "patches/modules/cua_element_token_schema_fallback_v1.py",
         "patches/modules/cua_gateway_shutdown_v1.py",
+        "patches/modules/cua_service_session_mode_v1.py",
         "patches/payloads/cua-gateway-shutdown-v1",
         "patches/modules/cua_existing_profile_launch_grant_v1.py",
         "patches/modules/silent_context_lifecycle_v1.py",
@@ -5227,15 +5223,15 @@
       ]
     }
   },
-  "deployment_digest": "2a0d3d7c0fbb81cd8faec471962ec10b24672eebaf90711d6b230a30da7b71a2",
-  "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
+  "deployment_digest": "7a44055e2afe18518951645198a49348026ce7f68ec448c21442c157d4806000",
+  "golden_sha": "543488d48bcb9d4fabc1d816f55af5fca950ba66",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "38a30c045c5bc185dbff68ab4f3d3ac2bdc0c572df11c7e179a7ab0dd109a1a8",
+    "digest": "e2431dceabb12163b3b5e54dbc4d245b893a8a2d5a51b0e47dc32bfc8d81cdbb",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 336,
+    "file_count": 338,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5244,7 +5240,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "ce40ce8ae70098a1411f605ed43249f24ad29d883ffb0e66452f6de4e6b198da",
+        "sha256": "a942fffd620ea71bf166153bcd793ebef21e3f4a24a4807b5861d21dfcaf7bd0",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5424,7 +5420,7 @@
       },
       "agent/stage_b_hooks.py": {
         "mode": "100644",
-        "sha256": "f4af94a7f9c1cb31bc45a65a8268d18e60ed48674b82a615277374d4878a5c61",
+        "sha256": "9eece4100f2bea107d79126e0545919bd8891f17adbe705df3597b687467c0fd",
         "type": "blob"
       },
       "agent/stage_c_promises.py": {
@@ -5557,6 +5553,16 @@
         "sha256": "e1f524111dd796605f43397548ed497abc88106175b43a79a5054b06e10d9aac",
         "type": "blob"
       },
+      "cron/completion_reporter.py": {
+        "mode": "100644",
+        "sha256": "39e0aeea2da84f1f93e6c488b58e987213ed03c3005f87c49218f2561a178a32",
+        "type": "blob"
+      },
+      "cron/executions.py": {
+        "mode": "100644",
+        "sha256": "fd7551e4c70c9580de704f2a4887cc7828220adea43e1d28d52ca39a4586616a",
+        "type": "blob"
+      },
       "cron/jobs.py": {
         "mode": "100644",
         "sha256": "7edde43bb3a7b576c0227c8614f0b4f42b04d7873a0d58006144565e49ad29ee",
@@ -5564,7 +5570,7 @@
       },
       "cron/scheduler.py": {
         "mode": "100644",
-        "sha256": "e2fb30ab406d1621678dd41ff602a7794db5fb694eff76e799a92c48d6e87bff",
+        "sha256": "9c1c339abafcb1fa625ca5407b0c7e59739be4987f977a8c5801c5a835c66a1e",
         "type": "blob"
       },
       "cron/scheduler_delivery.py": {
@@ -6679,7 +6685,7 @@
       },
       "tools/computer_use/tool.py": {
         "mode": "100644",
-        "sha256": "c97dd130ca75180a411bcb38bd5c545d6fcd27afb138329094e2e92230ea18f0",
+        "sha256": "8f5473d0040070ff6fa7539831f51ce4e71003069e4d7f5ff5ba6b8f95863415",
         "type": "blob"
       },
       "tools/cronjob_tools.py": {
@@ -6918,7 +6924,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "1dd08d966c49a277d810097571ab10b77eb1a488",
+    "golden_sha": "543488d48bcb9d4fabc1d816f55af5fca950ba66",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
