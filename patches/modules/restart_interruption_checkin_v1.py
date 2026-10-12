@@ -1242,6 +1242,50 @@ def _patch_d363_resume_tests(source: str) -> str:
             body_lines[doc.lineno - 1:doc.end_lineno] = ['    """Restart markers do not authorize synthetic execution; explicit user work remains available."""\n']
             body = "".join(body_lines)
         source = "".join(lines[:node.lineno - 1]) + body + "\n" + "".join(lines[node.end_lineno:])
+    # These upstream availability tests now exercise the durable queue, while
+    # retaining their warmup, timeout, delivery, and non-cancellation assertions.
+    queue_tests = {
+        "test_fresh_boot_gate_stays_closed_until_warmup_completes",
+        "test_startup_restore_gate_releases_when_resume_turn_outlives_timeout",
+        "test_startup_restore_gate_releases_when_boot_path_send_hangs",
+    }
+    for node in reversed(ast.parse(source).body):
+        if not isinstance(node, ast.AsyncFunctionDef) or node.name not in queue_tests:
+            continue
+        lines = source.splitlines(keepends=True)
+        body = "".join(lines[node.lineno - 1:node.end_lineno])
+        if "# Golden durable startup fixture" in body:
+            continue
+        setup = '\n'.join([
+            "    # Golden durable startup fixture",
+            "    from gateway import drain_inbox",
+            "    from types import SimpleNamespace",
+            "    runner._init_durable_drain()",
+            "    await runner._claim_durable_producer()",
+            "    runner._scale_to_zero_note_real_inbound = lambda: None",
+            "    runner._hm_pre_gateway_dispatch_hook = lambda event, source: event",
+            "    runner._is_user_authorized_for_source = lambda source: True",
+            "    runner._is_session_running = lambda key: False",
+            "    runner.session_store.replay_marker_status_for_session_key.return_value = False",
+            "    runner.session_store.persist_replay_marker.return_value = True",
+            '    runner.session_store.get_or_create_session.side_effect = lambda source, **kw: SimpleNamespace(session_id="sid", session_key=runner._session_key_for_source(source))',
+            "",
+        ])
+        body = body.replace("    runner, adapter = make_restart_runner()\n", "    runner, adapter = make_restart_runner()\n" + setup)
+        body = body.replace("    async def fake_handle_message(event: MessageEvent) -> None:\n", "    async def fake_handle_message(event: MessageEvent) -> None:\n        event.handler_succeeded = True\n")
+        body = body.replace("    assert runner._startup_restore_queue == [inbound]", '    assert [row["text"] for row in drain_inbox.pending_records()] == [inbound.text]')
+        body = body.replace("    await asyncio.wait_for(finish_task, timeout=5)", "    await asyncio.wait_for(finish_task, timeout=5)\n    await asyncio.wait_for(runner._durable_replay_task, timeout=5)")
+        body = body.replace("    await asyncio.wait_for(runner._finish_startup_restore(), timeout=5)", "    await asyncio.wait_for(runner._finish_startup_restore(), timeout=5)\n    await asyncio.wait_for(runner._durable_replay_task, timeout=5)")
+        body = body.replace("    assert runner._startup_restore_queue == []", "    assert runner._startup_restore_queue == []\n    assert drain_inbox.pending_records() == []")
+        source = "".join(lines[:node.lineno - 1]) + body + "".join(lines[node.end_lineno:])
+    lines = source.splitlines(keepends=True)
+    additions = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "MessageEvent" and not any(k.arg in {"message_id", "platform_update_id"} for k in node.keywords):
+            offset = sum(len(line) for line in lines[:node.lineno - 1]) + node.col_offset + len("MessageEvent(")
+            additions.append((offset, f'message_id="fixture-{node.lineno}", '))
+    for offset, text in sorted(additions, reverse=True):
+        source = source[:offset] + text + source[offset:]
     compile(source, "native restart policy tests", "exec")
     return source
 

@@ -808,6 +808,21 @@ def _patch_native_typing(hermes_dir: Path, *, check: bool = False) -> bool:
         send = replace(send, '                    await _action()\n                    return\n', '                    return await _action()\n')
         send = send.rstrip() + '\n            return False\n\n'
         a = a[:start] + send + a[end:]
+    flush_anchor = '            if log_fn is not None:\n                log_fn(event)\n            await self.handle_message(event)\n'
+    flush_replacement = (
+        '            # HERMES_TYPING_ACK_BEFORE_AGENT_SETUP_v1\n'
+        '            receipt = getattr(event, "_typing_receipt_task", None)\n'
+        '            if where == "text" and receipt is not None and not receipt.done():\n'
+        '                # Keep synchronous agent setup from delaying the first transport ack.\n'
+        '                await asyncio.wait({receipt}, timeout=1.5)\n'
+        '                if self._should_drop_delayed_delivery():\n'
+        '                    self._hold_inbound_event(event, where=f"{where}-typing-wait")\n'
+        '                    event = None\n'
+        '                    return\n'
+        + flush_anchor
+    )
+    if flush_replacement not in a:
+        a = replace(a, flush_anchor, flush_replacement)
     if '# HERMES_NATIVE_TYPING_REFRESH_v5' not in b:
         old = '        return asyncio.create_task(self._keep_typing(event.source.chat_id, **kwargs))\n'
         new = '        # HERMES_NATIVE_TYPING_REFRESH_v5\n        async def refresh():\n            receipt = getattr(event, "_typing_receipt_task", None)\n            if receipt is not None:\n                try:\n                    await asyncio.shield(receipt)\n                except asyncio.CancelledError:\n                    raise\n                except Exception:\n                    pass\n            sent_at = getattr(event, "_typing_receipt_sent_at", None)\n            if sent_at is not None:\n                elapsed = asyncio.get_running_loop().time() - sent_at\n                await asyncio.sleep(max(0.0, 2.0 - elapsed))\n            await self._keep_typing(event.source.chat_id, **kwargs)\n        return asyncio.create_task(refresh())\n'

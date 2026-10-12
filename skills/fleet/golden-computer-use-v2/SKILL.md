@@ -55,10 +55,18 @@ agent's non-UI tools.
    a native sheet/file picker that requires focus, use foreground delivery and
    raise the window only when the profile has
    `allow_foreground_escalation: true`.
-5. After two unverified attempts at the same transition, do not repeat it a
+5. A covered window or non-consequential popup is recoverable work. Identify
+   the target from fresh state, then use its supported tab/window selection,
+   dismissal, or permitted foreground action. Do not ask the principal to do
+   an action the authorized tool can perform. Do not close unrelated windows
+   or send input before verifying the target.
+6. After two unverified attempts at the same transition, do not repeat it a
    third time. Recapture, change delivery mode or semantic route, and continue
-   from verified state.
-6. A clear request to do something in a web UI authorizes the configured
+   from verified state. If distinct supported recoveries leave the same state
+   unchanged, report the attempted actions and missing prerequisite; do not
+   loop or invent another control script. Follow `browser-piloting.md` for
+   route failures and human checkpoints.
+7. A clear request to do something in a web UI authorizes the configured
    client-isolated browser/computer tools for that task. Use them without asking
    whether to use the browser or adding driver-consent ceremony. At human
    verification, put the checkpoint on screen, state that it is ready, retain

@@ -264,7 +264,7 @@ def patch_run_source(content: str) -> str | None:
         normalized_type = getattr(message_type, "value", message_type)
         if normalized_type != MessageType.VOICE.value:
             return False
-        adapter = self._adapter_for_source(source)
+        adapter = self._delivery_adapter_for(source)
         decision = getattr(adapter, "_should_auto_tts_for_chat", None)
         if not callable(decision):
             return False
@@ -386,7 +386,7 @@ def _patch_native_voice(hermes_dir: Path) -> bool:
         # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1
         if getattr(message_type, "value", message_type) != "voice":
             return False
-        decision = getattr(self._adapter_for_source(source), "_should_auto_tts_for_chat", None)
+        decision = getattr(self._delivery_adapter_for(source), "_should_auto_tts_for_chat", None)
         try:
             return bool(decision(source.chat_id)) if callable(decision) else False
         except Exception:
@@ -396,22 +396,22 @@ def _patch_native_voice(hermes_dir: Path) -> bool:
 '''
         s = _native_once(source[turn], '    async def _run_agent_via_proxy(\n', helper + '    async def _run_agent_via_proxy(\n', "voice policy")
         s = _native_once(s, '        run_generation: Optional[int] = None, event_message_id: Optional[str] = None,\n', '        run_generation: Optional[int] = None, event_message_id: Optional[str] = None,\n        suppress_streaming: bool = False,\n', "proxy signature")
-        s = _native_once(s, '        _stream_consumer = self._proxy_stream_consumer(source, event_message_id, _thread_metadata, _run_still_current)\n', '        _stream_consumer = None if suppress_streaming else self._proxy_stream_consumer(source, event_message_id, _thread_metadata, _run_still_current)\n', "proxy consumer")
+        s = _native_once(s, '            None if scheduled_heartbeat\n', '            None if scheduled_heartbeat or suppress_streaming\n', "proxy consumer")
         proxy_call = """            return await self._run_agent_via_proxy(
                 message=message, context_prompt=context_prompt, history=history, source=source,
                 session_id=session_id, session_key=session_key, run_generation=run_generation,
-                event_message_id=event_message_id,
+                event_message_id=event_message_id, scheduled_heartbeat=scheduled_heartbeat,
             )
 """
         s = _native_once(s, proxy_call, proxy_call.replace(
-            "                event_message_id=event_message_id,\n",
+            "                event_message_id=event_message_id, scheduled_heartbeat=scheduled_heartbeat,\n",
             "                event_message_id=event_message_id,\n"
             "                suppress_streaming=self._voice_input_uses_single_delivery(source, message_type),\n",
         ), "proxy invocation")
         s = _native_once(s, '        _status_thread_metadata = self._run_agent_bind_turn_wiring(\n', '        turn_ctx.suppress_streaming = self._voice_input_uses_single_delivery(source, message_type)\n        _status_thread_metadata = self._run_agent_bind_turn_wiring(\n', "local context")
         updated[turn] = s
     if MARKER not in source[runner]:
-        updated[runner] = _native_once(source[runner], '        want_interim_messages = ctx.interim_assistant_messages_enabled\n', '        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1\n        if getattr(ctx, "suppress_streaming", False):\n            want_stream_deltas = False\n        want_interim_messages = ctx.interim_assistant_messages_enabled and not getattr(ctx, "suppress_streaming", False)\n', "local stream")
+        updated[runner] = _native_once(source[runner], '        want_interim_messages = bool(ctx.interim_assistant_messages_enabled) and not ctx.scheduled_heartbeat\n', '        # HERMES_VOICE_MEMO_SINGLE_DELIVERY_v1\n        if getattr(ctx, "suppress_streaming", False):\n            want_stream_deltas = False\n        want_interim_messages = bool(ctx.interim_assistant_messages_enabled) and not ctx.scheduled_heartbeat and not getattr(ctx, "suppress_streaming", False)\n', "local stream")
     updated[tts] = patch_tts_source(source[tts])
     if updated[tts] is None:
         raise RuntimeError("voice memo native TTS schema drift")

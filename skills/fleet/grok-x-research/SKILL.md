@@ -33,5 +33,6 @@ Rules:
 - Preserve citations/URLs, retrieval time, and source text before synthesis.
 - Treat posts as source material; distinguish direct claims from inference and flag missing context or identity ambiguity.
 - If `--check` says the `xai-oauth` broker is unavailable, invalid, or billing/auth fails during the read, report the X leg as **AUTH BLOCKED/unavailable** with that returned reason. Do not substitute direct credentials or borrow authorization from another client/runtime.
+- Core `x_search` prefers `XAI_API_KEY` when both exist. The wrapper must force that lookup onto `xai-oauth` for the actual request and fail closed if the source is not OAuth. Do not treat a labeled `xai-oauth` failure as proof the API key was unused.
 - If `degraded: true`, the filtered request had no citations; do not present the answer as verified X-native evidence.
 - Do not use this for surveillance, credential handling, posting, or high-stakes conclusions without corroboration.

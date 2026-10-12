@@ -5,7 +5,10 @@ The wrapper deliberately delegates to Hermes core's ``tools.x_search_tool`` and
 ``tools.xai_http`` paths.  It neither reads the auth store nor handles, exports, or
 caches a bearer token.  The only allowed credential contract is the calling
 runtime's brokered ``xai-oauth`` capability; direct XAI_API_KEY fallback is
-rejected before an X request is made.
+rejected before an X request is made.  Hermes core ``x_search`` prefers an
+explicit API key when both exist, so this wrapper forces the paired core
+resolver onto OAuth for the actual request and fails closed if the source
+changes.
 """
 from __future__ import annotations
 
@@ -25,6 +28,50 @@ AUTH_CONTRACT = "xai-oauth"
 DEFAULT_MODEL = "grok-4.6"
 DEFAULT_REASONING = "high"
 MAX_HANDLES = 10
+_AUTH_BLOCKED_MARKERS = (
+    "direct credentials are not permitted",
+    "did not retain the xai-oauth broker source",
+    "no usable runtime authorization",
+)
+
+
+def _oauth_only_http_resolver(
+    resolver: Callable[..., dict[str, Any]],
+) -> Callable[..., dict[str, Any]]:
+    """Force core credential lookup off the API-key preference for this process."""
+
+    def wrapped(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        kwargs = dict(kwargs)
+        kwargs["prefer_api_key"] = False
+        try:
+            creds = resolver(*args, **kwargs)
+        except TypeError:
+            kwargs.pop("prefer_api_key", None)
+            creds = resolver(*args, **kwargs)
+        provider = str(creds.get("provider") or "").strip()
+        if provider != AUTH_CONTRACT:
+            raise RuntimeError(
+                "xai-oauth broker is unavailable for this runtime; direct credentials are not permitted"
+            )
+        if not str(creds.get("api_key") or "").strip():
+            raise RuntimeError("xai-oauth broker returned no usable runtime authorization")
+        return creds
+
+    return wrapped
+
+
+def _oauth_only_bearer(resolver: Callable[..., tuple[Any, ...]]) -> Callable[..., tuple[Any, ...]]:
+    """Reject a billable X call if core resolved anything other than xai-oauth."""
+
+    def wrapped(*args: Any, **kwargs: Any) -> tuple[Any, ...]:
+        api_key, base_url, source = resolver(*args, **kwargs)
+        if str(source or "").strip() != AUTH_CONTRACT:
+            raise RuntimeError(
+                "Hermes core did not retain the xai-oauth broker source; result was rejected"
+            )
+        return api_key, base_url, source
+
+    return wrapped
 
 
 @dataclass(frozen=True)
@@ -57,7 +104,9 @@ def _core_root(home: Path) -> Path:
         try:
             binding = json.loads(binding_path.read_text(encoding="utf-8"))
             bound_root = Path(str(binding.get("runtime_root") or "")).expanduser().resolve(strict=True)
-            allowed_root = (owner / "state" / "runtime-candidates").resolve(strict=True)
+            # Windows rollout stores candidates directly under the owning home.
+            candidate_parent = owner if sys.platform == "win32" else owner / "state"
+            allowed_root = (candidate_parent / "runtime-candidates").resolve(strict=True)
             bound_root.relative_to(allowed_root)
             if binding.get("status") != "active":
                 raise RuntimeError(f"{label} runtime binding is not active")
@@ -102,13 +151,19 @@ def load_core_bridge(home: Path) -> CoreBridge:
     core_x_search = x_search_tool.x_search_tool
 
     def x_search_with_model(**kwargs: Any) -> str:
-        """Forward exact model/reasoning, including on the pinned core."""
+        """Forward exact model/reasoning, including on the pinned core.
+
+        Core x_search prefers XAI_API_KEY when both exist. Bind the paired
+        core resolver to OAuth for this call, then restore it.
+        """
         requested_model = str(kwargs.pop("model", "") or "").strip()
         requested_reasoning = str(kwargs.pop("reasoning", "") or "").strip()
         parameters = inspect.signature(core_x_search).parameters
         forwarded = dict(kwargs)
         original_model_resolver = None
         original_reasoning_resolver = None
+        original_http_resolver = getattr(x_search_tool, "resolve_xai_http_credentials", None)
+        original_bearer = getattr(x_search_tool, "_resolve_xai_bearer", None)
         if "model" in parameters:
             forwarded["model"] = requested_model
         elif requested_model:
@@ -119,6 +174,10 @@ def load_core_bridge(home: Path) -> CoreBridge:
         elif requested_reasoning:
             original_reasoning_resolver = x_search_tool._get_x_search_reasoning_effort
             x_search_tool._get_x_search_reasoning_effort = lambda: requested_reasoning
+        if original_http_resolver is not None:
+            x_search_tool.resolve_xai_http_credentials = _oauth_only_http_resolver(original_http_resolver)
+        if original_bearer is not None:
+            x_search_tool._resolve_xai_bearer = _oauth_only_bearer(original_bearer)
         try:
             return core_x_search(**forwarded)
         finally:
@@ -126,6 +185,10 @@ def load_core_bridge(home: Path) -> CoreBridge:
                 x_search_tool._get_x_search_model = original_model_resolver
             if original_reasoning_resolver is not None:
                 x_search_tool._get_x_search_reasoning_effort = original_reasoning_resolver
+            if original_http_resolver is not None:
+                x_search_tool.resolve_xai_http_credentials = original_http_resolver
+            if original_bearer is not None:
+                x_search_tool._resolve_xai_bearer = original_bearer
 
     return CoreBridge(
         resolve_xai_http_credentials=xai_http.resolve_xai_http_credentials,
@@ -218,14 +281,26 @@ def invoke_brokered_x_search(bridge: CoreBridge, args: argparse.Namespace) -> di
         )
         response = json.loads(raw)
     except Exception as exc:
-        return {"ok": False, "error": f"Hermes core X Search failed: {type(exc).__name__}: {exc}"}
+        result = {"ok": False, "error": f"Hermes core X Search failed: {type(exc).__name__}: {exc}"}
+        if any(marker in str(exc) for marker in _AUTH_BLOCKED_MARKERS):
+            result["auth_blocked"] = True
+        return result
     if not isinstance(response, dict):
         return {"ok": False, "error": "Hermes core X Search returned an invalid response"}
     if not response.get("success"):
+        error = str(response.get("error") or "xAI X Search request failed")
+        if any(marker in error for marker in _AUTH_BLOCKED_MARKERS):
+            return {
+                "ok": False,
+                "auth_blocked": True,
+                "error": "Hermes core did not retain the xai-oauth broker source; result was rejected"
+                if "did not retain the xai-oauth broker source" in error
+                else error,
+            }
         return {
             "ok": False,
             "provider": AUTH_CONTRACT,
-            "error": str(response.get("error") or "xAI X Search request failed"),
+            "error": error,
             "error_type": str(response.get("error_type") or "xai_request_failed"),
         }
     if str(response.get("credential_source") or "") != AUTH_CONTRACT:

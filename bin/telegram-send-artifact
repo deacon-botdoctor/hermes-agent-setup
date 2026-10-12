@@ -1,0 +1,464 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+import hashlib
+import sqlite3
+import datetime
+import uuid
+from pathlib import Path
+from typing import Optional
+
+from telegram_delivery import send_document_message, send_text_message
+
+
+HOME = Path.home()
+DEFAULT_HERMES_HOME = HOME / ".hermes"
+DEFAULT_FOLDER = "Hermes Telegram Deliveries"
+MATON_GATEWAY = "https://gateway.maton.ai/google-drive"
+TELEGRAM_API = "https://api.telegram.org"
+
+
+def wal_reset_bug_fixed(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> bool:
+    current = tuple((list(version) + [0, 0, 0])[:3])
+    return (
+        current >= (3, 51, 3)
+        or (3, 50, 7) <= current < (3, 51, 0)
+        or (3, 44, 6) <= current < (3, 45, 0)
+    )
+
+
+def safe_journal_mode(version: tuple[int, ...] = sqlite3.sqlite_version_info) -> str:
+    if _is_linux_platform():
+        return "DELETE"
+    return "WAL" if wal_reset_bug_fixed(version) else "DELETE"
+
+
+def _is_linux_platform() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def require_safe_journal_mode(connection: sqlite3.Connection, *, allow_initialize: bool = False) -> None:
+    effective = str(connection.execute("PRAGMA journal_mode").fetchone()[0]).upper()
+    expected = safe_journal_mode()
+    if not allow_initialize and (effective == "DELETE" or effective == expected):
+        return
+    if effective != expected and allow_initialize:
+        effective = str(connection.execute(f"PRAGMA journal_mode={expected}").fetchone()[0]).upper()
+    if effective != expected:
+        connection.close()
+        raise sqlite3.DatabaseError(f"unsafe journal mode: expected {expected}, found {effective}")
+
+
+def eprint(*args):
+    print(*args, file=sys.stderr)
+
+
+def run(cmd):
+    return subprocess.run(cmd, check=True, text=True, capture_output=True).stdout
+
+
+def load_telegram_token(hermes_home: Path, profile: Optional[str]) -> str:
+    env = os.environ.copy()
+    if profile == "doc":
+        env["HERMES_HOME"] = str(hermes_home / "profiles" / "doc")
+    else:
+        env["HERMES_HOME"] = str(hermes_home)
+    script = hermes_home / "bin" / "load-keychain-env.sh"
+    probe = f"source {sh_quote(str(script))} >/dev/null 2>&1; printf %s \"${{TELEGRAM_BOT_TOKEN:-}}\""
+    result = subprocess.run(
+        ["/bin/bash", "-lc", probe],
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    token = result.stdout.strip()
+    if token:
+        return token
+
+    env_files = []
+    if profile == "doc":
+        env_files.append(hermes_home / "profiles" / "doc" / ".env")
+        env_files.append(hermes_home / "profiles" / "doc" / ".env.secrets")
+    env_files.append(hermes_home / ".env")
+    env_files.append(hermes_home / ".env.secrets")
+    for env_file in env_files:
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if line.startswith("TELEGRAM_BOT_TOKEN="):
+                    token = line.split("=", 1)[1].strip().strip("\"'")
+                    if token:
+                        return token
+    raise SystemExit("No TELEGRAM_BOT_TOKEN found")
+
+
+def sh_quote(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def load_maton_key(hermes_home: Path, account: str) -> str:
+    target = {
+        "botdoctor": "MATON_API_KEY_BOTDOCTOR",
+        "personal": "MATON_API_KEY_PERSONAL",
+        "enoch": "MATON_API_KEY_ENOCH",
+    }[account]
+
+    direct = os.environ.get(target, "").strip()
+    if direct:
+        return direct
+    if target == "MATON_API_KEY_PERSONAL":
+        legacy = os.environ.get("MATON_API_KEY", "").strip()
+        if legacy:
+            return legacy
+
+    env_files = [hermes_home / ".env", hermes_home / ".env.secrets"]
+    for env_file in env_files:
+        if not env_file.exists():
+            continue
+        for line in env_file.read_text().splitlines():
+            if "=" not in line or line.lstrip().startswith("#"):
+                continue
+            key, value = line.split("=", 1)
+            if key.strip() == target and value.strip():
+                return value.strip().strip("\"'")
+            if target == "MATON_API_KEY_PERSONAL" and key.strip() == "MATON_API_KEY" and value.strip():
+                return value.strip().strip("\"'")
+
+    raise SystemExit(f"{target} not found in environment or {hermes_home / '.env'}")
+
+
+def maton_request(path: str, api_key: str, method: str = "GET", body: Optional[bytes] = None, headers: Optional[dict] = None):
+    req_headers = {"Authorization": f"Bearer {api_key}"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(f"{MATON_GATEWAY}{path}", data=body, headers=req_headers, method=method)
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read().decode())
+
+
+def drive_search(api_key: str, query: str):
+    q = urllib.parse.quote(query, safe="")
+    return maton_request(f"/drive/v3/files?q={q}&supportsAllDrives=true&includeItemsFromAllDrives=true", api_key)
+
+
+def ensure_drive_folder(api_key: str, folder_name: str) -> tuple[str, str]:
+    escaped_name = folder_name.replace("'", "\\'")
+    query = (
+        f"name = '{escaped_name}' and "
+        "mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    result = drive_search(api_key, query)
+    files = result.get("files") or []
+    if files:
+        folder_id = files[0]["id"]
+        return folder_id, f"https://drive.google.com/drive/folders/{folder_id}"
+
+    metadata = {"name": folder_name, "mimeType": "application/vnd.google-apps.folder"}
+    body, content_type = build_multipart(metadata, None, None)
+    created = maton_request(
+        "/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true",
+        api_key,
+        method="POST",
+        body=body,
+        headers={"Content-Type": content_type},
+    )
+    folder_id = created["id"]
+    return folder_id, f"https://drive.google.com/drive/folders/{folder_id}"
+
+
+def build_multipart(metadata: dict, file_bytes: bytes | None, mime_type: str | None):
+    boundary = f"===============_{uuid.uuid4().hex}"
+    parts = [
+        f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode(),
+        json.dumps(metadata).encode(),
+        b"\r\n",
+    ]
+    if file_bytes is not None:
+        parts.extend(
+            [
+                f"--{boundary}\r\nContent-Type: {mime_type or 'application/octet-stream'}\r\n\r\n".encode(),
+                file_bytes,
+                b"\r\n",
+            ]
+        )
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/related; boundary={boundary}"
+
+
+def upload_drive_file(api_key: str, file_path: Path, folder_id: str) -> tuple[str, str]:
+    file_bytes = file_path.read_bytes()
+    mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+    metadata = {"name": file_path.name, "parents": [folder_id]}
+    body, content_type = build_multipart(metadata, file_bytes, mime_type)
+    created = maton_request(
+        "/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true",
+        api_key,
+        method="POST",
+        body=body,
+        headers={"Content-Type": content_type},
+    )
+    file_id = created["id"]
+    return file_id, f"https://drive.google.com/file/d/{file_id}/view?usp=drivesdk"
+
+
+def parse_target(target: str) -> tuple[str, str | None]:
+    raw = target
+    if raw.startswith("telegram:"):
+        raw = raw[len("telegram:") :]
+    parts = raw.split(":")
+    if len(parts) >= 2:
+        return parts[0], parts[1]
+    return raw, None
+
+
+
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif"}
+
+def record_artifact_in_db(hermes_home: Path, chat_id: str, thread_id,
+                           message_id: int, filename: str, caption: str,
+                           file_path=None) -> None:
+    db_chat_id = ("telegram:" + chat_id + ":" + thread_id) if thread_id else ("telegram:" + chat_id)
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    text = "[file: " + filename + "]"
+    if caption and caption != filename:
+        text = "[file: " + filename + " \u2014 " + caption + "]"
+
+    # 1. transcript DB
+    transcript_db = hermes_home / "data" / "telegram-transcript.db"
+    if transcript_db.exists():
+        try:
+            con = sqlite3.connect(str(transcript_db))
+            row = con.execute(
+                "SELECT topic_name FROM telegram_topics WHERE chat_id=? AND thread_id=?",
+                (chat_id, thread_id or ""),
+            ).fetchone()
+            topic_name = row[0] if row else None
+            con.execute(
+                "INSERT OR IGNORE INTO telegram_messages"
+                " (chat_id, message_id, thread_id, timestamp, sender_id, sender_name,"
+                "  role, text, topic_name)"
+                " VALUES (?,?,?,?,?,?,?,?,?)",
+                (db_chat_id, str(message_id), thread_id, ts, "", "",
+                 "assistant", text, topic_name),
+            )
+            con.commit()
+            con.close()
+        except Exception:
+            pass
+
+    # 2. media-provenance DB — reverse map telegram message_id -> origin_path so
+    # a later user reply ("I like this one") resolves back to this exact
+    # artifact. Mirrors gateway/media_provenance.record_outgoing schema. Placed
+    # before the durable-threads block so it is never gated by that DB's
+    # presence.
+    try:
+        import mimetypes as _mt2
+        fp2 = Path(str(file_path)) if file_path else None
+        if fp2 is not None:
+            prov_db = hermes_home / "data" / "media-provenance.db"
+            prov_db.parent.mkdir(parents=True, exist_ok=True)
+            allow_initialize = not prov_db.exists() or prov_db.stat().st_size == 0
+            sha256 = None
+            try:
+                _h = hashlib.sha256()
+                with open(str(fp2), "rb") as _fh:
+                    for _chunk in iter(lambda: _fh.read(1 << 20), b""):
+                        _h.update(_chunk)
+                sha256 = _h.hexdigest()
+            except Exception:
+                sha256 = None
+            mime2 = _mt2.guess_type(str(fp2))[0]
+            kind = "photo" if (fp2.suffix.lower() in _IMAGE_EXTS) else "document"
+            now_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            pcon = sqlite3.connect(str(prov_db), timeout=5.0)
+            pcon.execute("PRAGMA busy_timeout=5000")
+            require_safe_journal_mode(pcon, allow_initialize=allow_initialize)
+            pcon.execute(
+                """CREATE TABLE IF NOT EXISTS media_provenance (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL DEFAULT 'telegram',
+                    chat_id TEXT, thread_id TEXT, message_id TEXT,
+                    direction TEXT NOT NULL, kind TEXT,
+                    file_id TEXT, file_unique_id TEXT,
+                    origin_path TEXT, local_cached_path TEXT,
+                    caption TEXT, mime_type TEXT, width INTEGER, height INTEGER,
+                    file_size INTEGER, sha256 TEXT, filename TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(platform, chat_id, message_id, file_id))"""
+            )
+            pcon.execute(
+                "CREATE INDEX IF NOT EXISTS idx_mp_lookup "
+                "ON media_provenance(platform, chat_id, thread_id, message_id)"
+            )
+            pcon.execute(
+                """INSERT OR REPLACE INTO media_provenance
+                   (platform, chat_id, thread_id, message_id, direction, kind,
+                    file_id, file_unique_id, origin_path, local_cached_path,
+                    caption, mime_type, width, height, file_size, sha256,
+                    filename, created_at)
+                   VALUES ('telegram', ?, ?, ?, 'outgoing', ?, NULL, NULL, ?, NULL,
+                           ?, ?, NULL, NULL, NULL, ?, ?, ?)""",
+                (chat_id, thread_id, str(message_id), kind, str(fp2),
+                 caption or None, mime2, sha256, fp2.name, now_iso),
+            )
+            pcon.commit()
+            pcon.close()
+    except Exception:
+        pass
+
+    # 3. durable-threads DB (context-restore / multimodal)
+    durable_db = hermes_home / "data" / "durable-threads.db"
+    if not durable_db.exists():
+        return
+    try:
+        import time as _time, json as _json, mimetypes as _mt
+        fp = Path(str(file_path)) if file_path else None
+        is_image = fp is not None and fp.suffix.lower() in _IMAGE_EXTS
+        media_urls = [str(fp)] if is_image else []
+        if is_image and fp:
+            mime = _mt.guess_type(str(fp))[0] or ("image/" + fp.suffix.lstrip("."))
+            media_types = [mime]
+        else:
+            media_types = []
+        now_unix = int(_time.time())
+        event_id = hashlib.sha256(
+            ("artifact:" + chat_id + ":" + str(thread_id) + ":" + str(message_id)).encode()
+        ).hexdigest()
+        payload = {
+            "kind": "telegram_message",
+            "platform": "telegram",
+            "chat_id": "telegram:" + chat_id,
+            "thread_id": thread_id,
+            "message_id": "tg-" + str(message_id),
+            "timestamp": ts,
+            "sender_id": "",
+            "sender_name": "",
+            "role": "assistant",
+            "text": text,
+            "media_urls": media_urls,
+            "media_types": media_types,
+            "vision_description": "",
+        }
+        con = sqlite3.connect(str(durable_db))
+        con.execute(
+            "INSERT OR IGNORE INTO durable_events"
+            " (event_id, event_type, topic_key, platform, chat_id, thread_id,"
+            "  created_at, source, summary, payload_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (event_id, "telegram_message", db_chat_id, "telegram",
+             chat_id, thread_id, now_unix, "artifact_send",
+             caption or filename, _json.dumps(payload)),
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        pass
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--file", required=True)
+    parser.add_argument("--caption", default="")
+    parser.add_argument("--folder", default=DEFAULT_FOLDER)
+    parser.add_argument("--drive-account", choices=["botdoctor", "personal", "enoch"], default="botdoctor")
+    parser.add_argument("--profile", choices=["enoch", "doc"], default="enoch")
+    parser.add_argument("--link-only", action="store_true")
+    parser.add_argument("--no-drive", action="store_true")
+    args = parser.parse_args()
+
+    hermes_home = DEFAULT_HERMES_HOME
+    file_path = Path(args.file).expanduser()
+    if not file_path.exists():
+        raise SystemExit(f"Missing file: {file_path}")
+
+    if os.environ.get("TELEGRAM_ARTIFACT_QA", "1").strip().lower() not in {"0", "false", "no", "off"}:
+        qa_script = hermes_home / "bin" / "telegram-artifact-qa"
+        if qa_script.exists():
+            qa = subprocess.run([str(qa_script), str(file_path)], text=True, capture_output=True, timeout=90)
+            if qa.returncode != 0:
+                raise SystemExit("Telegram artifact QA failed; delivery blocked. " + (qa.stdout or qa.stderr).strip())
+        else:
+            raise SystemExit(f"Telegram artifact QA script missing: {qa_script}")
+
+    chat_id, thread_id = parse_target(args.target)
+    token = load_telegram_token(hermes_home, None if args.profile == "enoch" else args.profile)
+
+    drive_link = ""
+    folder_link = ""
+    file_id = ""
+    if not args.no_drive:
+        api_key = load_maton_key(hermes_home, args.drive_account)
+        folder_id, folder_link = ensure_drive_folder(api_key, args.folder)
+        file_id, drive_link = upload_drive_file(api_key, file_path, folder_id)
+
+    caption = args.caption.strip()
+    if drive_link:
+        caption = f"{caption}\n\nDrive: {drive_link}".strip()
+    if folder_link:
+        caption = f"{caption}\nFolder: {folder_link}".strip()
+    if not caption:
+        caption = file_path.name
+    if len(caption) > 1024:
+        caption = caption[:1021] + "..."
+
+    fields = {"chat_id": chat_id, "caption": caption}
+    if thread_id:
+        fields["message_thread_id"] = thread_id
+
+    if args.link_only:
+        result = send_text_message(
+            token=token,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            text=caption,
+            sender="telegram-send-artifact",
+            summary="telegram artifact link delivered",
+            detail=str(file_path),
+            timeout=60,
+        )
+        payload = {"ok": True, "result": result}
+    else:
+        result = send_document_message(
+            token=token,
+            chat_id=chat_id,
+            thread_id=thread_id,
+            file_path=file_path,
+            caption=caption,
+            sender="telegram-send-artifact",
+            summary="telegram artifact document delivered",
+            detail=str(file_path),
+            timeout=60,
+        )
+        payload = {"ok": True, "result": result}
+
+    result = {
+        "ok": True,
+        "chat_id": chat_id,
+        "thread_id": thread_id,
+        "telegram_message_id": payload["result"]["message_id"],
+        "drive_file_id": file_id,
+        "drive_link": drive_link,
+        "drive_folder_link": folder_link,
+        "file": str(file_path),
+    }
+    record_artifact_in_db(
+        hermes_home, chat_id, thread_id,
+        payload["result"]["message_id"], file_path.name, args.caption,
+        file_path=file_path,
+    )
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -379,21 +379,9 @@ def _usage_payload(
             metadata = _openrouter_generation_usage(api_key, openrouter_generation_id)
             if metadata is not None:
                 return _openrouter_usage_payload(metadata)
-    if raw_usage is None:
-        return {
-            "input_tokens": None,
-            "output_tokens": None,
-            "cache_read_tokens": None,
-            "cache_write_tokens": None,
-            "reasoning_tokens": None,
-            "total_tokens": None,
-            "usage_status": "unavailable",
-            "cost_usd": None,
-            "cost_status": "unknown",
-            "cost_source": "none",
-        }
-
     try:
+        if raw_usage is None or _json_value(raw_usage) == {}:
+            raise ValueError("usage unavailable")
         from agent.usage_pricing import estimate_usage_cost, normalize_usage
 
         usage = normalize_usage(

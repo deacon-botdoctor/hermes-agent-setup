@@ -1,102 +1,15 @@
 #!/usr/bin/env python3
-"""Install Golden's deterministic durable-drain source carrier."""
-
+"""Install the durable inbox at the pinned split gateway owners."""
 from __future__ import annotations
 
 import ast
-import copy
 import hashlib
-import importlib.util
 import json
-import os
-import subprocess
 from pathlib import Path
-from typing import Any
 
-PAYLOAD_DIR = Path(__file__).resolve().parents[1] / "payloads" / "durable-drain-inbox-v1"
-MANIFEST_PATH = PAYLOAD_DIR / "manifest.json"
-MARKER_RELATIVE = Path(".golden-runtime-carriers/durable-drain-inbox-v1.json")
-IDEMPOTENCY = "HERMES_DURABLE_DRAIN_INBOX_CARRIER_v1"
-MULTIPLEX_TEST_MARKER = "HERMES_DURABLE_DRAIN_MULTIPLEX_TEST_COMPAT_v1"
-MULTIPLEX_TEST_ANCHOR = """    def set_topic_recovery_fn(self, handler):
-        self.topic_recovery_fn = handler
-
-    def set_authorization_check(self, handler):
-"""
-MULTIPLEX_TEST_REPLACEMENT = f"""    def set_topic_recovery_fn(self, handler):
-        self.topic_recovery_fn = handler
-
-    def set_startup_gate_handler(self, handler):
-        # {MULTIPLEX_TEST_MARKER}
-        self.startup_gate_handler = handler
-
-    def set_authorization_check(self, handler):
-"""
-PLATFORM_RECONNECT_TEST_MARKER = "HERMES_DURABLE_DRAIN_CREATE_TASK_TEST_COMPAT_v1"
-PLATFORM_RECONNECT_TEST_ANCHOR = """        def fake_create_task(coro):
-            coro.close()
-            return MagicMock()
-"""
-PLATFORM_RECONNECT_TEST_REPLACEMENT = f"""        real_create_task = asyncio.create_task
-
-        def fake_create_task(coro):
-            # {PLATFORM_RECONNECT_TEST_MARKER}
-            if getattr(getattr(coro, "cr_code", None), "co_name", None) == "to_thread":
-                return real_create_task(coro)
-            coro.close()
-            return MagicMock()
-"""
-RAFT_ADAPTER_RELATIVE = Path("plugins/platforms/raft/adapter.py")
-RAFT_WAKE_EVENT_ANCHOR = """            raw_message=payload,
-            message_id=delivery_id,
-            internal=True,
-        )
-"""
-RAFT_WAKE_EVENT_REPLACEMENT = """            raw_message=payload,
-            message_id=delivery_id,
-            internal=True,
-            durable_ingress=True,
-            retry_transport_on_admission_failure=True,
-        )
-"""
-RAFT_HANDLE_MESSAGE_ANCHOR = '''    async def handle_message(self, event: MessageEvent) -> None:
-        """Accept Raft wake hints without interrupting an active Hermes turn."""
-        if not self._message_handler:
-            return
-
-        session_key = build_session_key(
-            event.source,
-            group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
-            thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
-            profile=self._session_key_profile(event.source),
-        )
-
-        if session_key in self._active_sessions:
-            logger.debug("[raft] Wake queued for busy session %s", session_key)
-            merge_pending_message_event(self._pending_messages, session_key, event)
-            return
-
-        await super().handle_message(event)
-'''
-RAFT_HANDLE_MESSAGE_REPLACEMENT = '''    async def handle_message(self, event: MessageEvent) -> Optional[asyncio.Task]:
-        """Accept Raft wake hints without interrupting an active Hermes turn."""
-        if not self._message_handler:
-            return None
-
-        session_key = build_session_key(
-            event.source,
-            group_sessions_per_user=self.config.extra.get("group_sessions_per_user", True),
-            thread_sessions_per_user=self.config.extra.get("thread_sessions_per_user", False),
-            profile=self._session_key_profile(event.source),
-        )
-
-        if session_key in self._active_sessions:
-            logger.debug("[raft] Wake queued for busy session %s", session_key)
-            merge_pending_message_event(self._pending_messages, session_key, event)
-            return None
-
-        return await super().handle_message(event)
-'''
+# This reviewed payload still supplies the current inbox and replay-store code.
+NATIVE_PAYLOAD_DIR = Path(__file__).resolve().parents[1] / "payloads" / "durable-drain-inbox-d363-v1"
+CURRENT_MARKER = "HERMES_DURABLE_DRAIN_CURRENT_SPLIT_v1"
 
 
 def _sha256(path: Path) -> str:
@@ -107,445 +20,373 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _git_blob_oid(path: Path) -> str:
-    data = path.read_bytes()
-    return hashlib.sha1(
-        b"blob " + str(len(data)).encode("ascii") + b"\0" + data,
-        usedforsecurity=False,
-    ).hexdigest()
+def _extract_added_file(payload: Path, relative: str) -> str:
+    """Return one complete new-file image embedded in the reviewed native payload.
 
-
-def _load_manifest() -> dict[str, Any]:
-    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-    if manifest.get("schema_version") != 2:
-        raise RuntimeError("unsupported durable-drain carrier manifest")
-    for field in (
-        "base_commit",
-        "source_seed_head",
-        "reviewed_source_head",
-        "payload_finalized_against_golden_parent",
-    ):
-        value = manifest.get(field)
-        if not isinstance(value, str) or len(value) != 40 or any(
-            char not in "0123456789abcdef" for char in value
-        ):
-            raise RuntimeError(f"durable-drain carrier {field} is invalid")
-    payload = PAYLOAD_DIR / str(manifest.get("patch") or "")
-    if not payload.is_file():
-        raise RuntimeError("durable-drain carrier payload is missing")
-    if _sha256(payload) != manifest.get("patch_sha256"):
-        raise RuntimeError("durable-drain carrier payload checksum mismatch")
-    postimages = manifest.get("postimage_git_blobs")
-    if not isinstance(postimages, dict) or not postimages:
-        raise RuntimeError("durable-drain carrier postimage manifest is empty")
-    mutable = manifest.get("downstream_mutable_postimages", {})
-    if (
-        not isinstance(mutable, dict)
-        or not set(mutable).issubset(postimages)
-        or any(
-            not isinstance(fragments, list)
-            or not fragments
-            or any(not isinstance(fragment, str) or not fragment for fragment in fragments)
-            for fragments in mutable.values()
-        )
-    ):
-        raise RuntimeError("durable-drain carrier mutable postimage manifest is invalid")
-    exact_counts = manifest.get("downstream_exact_fragment_counts", {})
-    if (
-        not isinstance(exact_counts, dict)
-        or not set(exact_counts).issubset(mutable)
-        or any(
-            not isinstance(counts, dict)
-            or not counts
-            or any(
-                not isinstance(fragment, str)
-                or not fragment
-                or not isinstance(count, int)
-                or isinstance(count, bool)
-                or count < 1
-                for fragment, count in counts.items()
-            )
-            for counts in exact_counts.values()
-        )
-    ):
-        raise RuntimeError("durable-drain carrier fragment-count manifest is invalid")
-    return manifest
-
-
-def _postimage_mismatches(root: Path, manifest: dict[str, Any]) -> list[str]:
-    mismatches = []
-    for relative, expected in manifest["postimage_git_blobs"].items():
-        path = root / relative
-        if not path.is_file() or _git_blob_oid(path) != expected:
-            mismatches.append(relative)
-    return mismatches
-
-
-def _marked_install_mismatches(root: Path, manifest: dict[str, Any]) -> list[str]:
-    mutable = manifest.get("downstream_mutable_postimages", {})
-    exact_counts = manifest.get("downstream_exact_fragment_counts", {})
-    mismatches = []
-    for relative, expected in manifest["postimage_git_blobs"].items():
-        path = root / relative
-        if not path.is_file():
-            mismatches.append(relative)
-            continue
-        fragments = mutable.get(relative)
-        if fragments:
-            content = path.read_text(encoding="utf-8")
-            if any(fragment not in content for fragment in fragments) or any(
-                content.count(fragment) != expected_count
-                for fragment, expected_count in exact_counts.get(relative, {}).items()
-            ):
-                mismatches.append(relative)
-        elif _git_blob_oid(path) != expected:
-            mismatches.append(relative)
-    return mismatches
-
-
-def _repo_head(root: Path) -> str | None:
-    result = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def _apply_payload(root: Path, payload: Path, *, check: bool) -> None:
-    command = ["git", "apply", "--no-index", "--whitespace=nowarn"]
-    if check:
-        command.append("--check")
-    command.append(str(payload))
-    result = subprocess.run(
-        command,
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "git apply failed").strip()
-        raise RuntimeError(f"durable-drain carrier payload rejected: {detail}")
-
-
-def _marker_payload(manifest: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "idempotency": IDEMPOTENCY,
-        "base_commit": manifest["base_commit"],
-        "source_seed_head": manifest["source_seed_head"],
-        "reviewed_source_head": manifest["reviewed_source_head"],
-        "payload_finalized_against_golden_parent": manifest[
-            "payload_finalized_against_golden_parent"
-        ],
-        "patch_sha256": manifest["patch_sha256"],
-        "downstream_mutable_postimages": manifest.get("downstream_mutable_postimages", {}),
-        "downstream_exact_fragment_counts": manifest.get(
-            "downstream_exact_fragment_counts", {}
-        ),
-    }
-
-
-def _write_marker(root: Path, manifest: dict[str, Any]) -> None:
-    marker = root / MARKER_RELATIVE
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(_marker_payload(manifest), indent=2, sort_keys=True) + "\n"
-    temporary = marker.with_name(f".{marker.name}.{os.getpid()}.tmp")
-    temporary.write_text(content, encoding="utf-8")
-    os.replace(temporary, marker)
-
-
-NATIVE_BASE_COMMIT = "d3630f853239e8c41ce7201e09fbdf39bcbc5431"
-NATIVE_PAYLOAD_DIR = PAYLOAD_DIR.with_name("durable-drain-inbox-d363-v1")
-
-
-_SLASH_OLD = '    control_command = str(event.text or "").lstrip().startswith("/")'
-_SLASH_NEW = '    control_command = event.is_command()'
-_PRE_SLASH_LEGACY_PATCH = '8de297b57ef15538e676d09bc624e53daa3b2d2c573240344cb73e3520b67984'
-_PRE_SLASH_LEGACY_BLOB = '1130d0d887259ffd16ff44fd7c5cebfbc693d3b5'
-_PRE_SLASH_NATIVE_SHA = 'f27e83b73e9cca022ae11a1608fe4bee22cd9b3eb90ebd394ee9098880ff87d2'
-
-_ROLLBACK_OLD = '                except _PostReplaceError:\n                    try:\n                        _replace_rows(path, claimed_rows)\n                    except Exception:\n                        return queue_id, final_state\n'
-_ROLLBACK_NEW = '                except _PostReplaceError:\n                    try:\n                        _replace_rows(path, claimed_rows)\n                    except Exception:\n                        return queue_id, _CLAIMED\n'
-_PRE_ROLLBACK_LEGACY_PATCH = "f2d872c62be352f587f19abe8167763726db2a8220187f19821d74dda6d8c5ff"
-_PRE_ROLLBACK_LEGACY_BLOB = "23b7e540f367f76bb7393ab9404249def33562e8"
-
-def _patch_native_durable_drain(root: Path) -> bool:
-    """Install only the residual durable mailbox at the exact native phase-owner pin.
-
-    Both clean application and repeat calls verify full source content. A carrier
-    marker is never evidence of compatibility with this independent source line.
+    The full inbox implementation remains the reviewed, checksummed carrier
+    payload.  Current Hermes retained its invariants but moved the lifecycle
+    owners, so this helper deliberately reuses that source image instead of
+    re-creating a second, subtly different mailbox implementation.
     """
-    if _repo_head(root) != NATIVE_BASE_COMMIT:
-        raise RuntimeError("native durable drain requires exact d363 source HEAD")
-    manifest = json.loads((NATIVE_PAYLOAD_DIR / "manifest.json").read_text())
-    if manifest.get("schema_version") != 1 or manifest.get("base_commit") != NATIVE_BASE_COMMIT:
-        raise RuntimeError("native durable drain manifest provenance mismatch")
-    preimages = manifest.get("preimage_sha256")
-    postimages = manifest.get("postimage_sha256")
-    if not isinstance(preimages, dict) or not preimages or not isinstance(postimages, dict) or set(preimages) != set(postimages):
-        raise RuntimeError("native durable drain source image manifest is invalid")
-    for relative in preimages:
-        path = Path(relative)
-        if path.is_absolute() or ".." in path.parts:
-            raise RuntimeError("native durable drain source path is invalid")
-    patch_name = manifest.get("patch")
-    if not isinstance(patch_name, str) or Path(patch_name).name != patch_name:
-        raise RuntimeError("native durable drain payload name is invalid")
-    payload = NATIVE_PAYLOAD_DIR / patch_name
-    if _sha256(payload) != manifest.get("patch_sha256"):
-        raise RuntimeError("native durable drain payload checksum mismatch")
+    header = f"diff --git a/{relative} b/{relative}\\n".replace("\\n", "\n")
+    source = payload.read_text(encoding="utf-8")
+    start = source.find(header)
+    if start < 0:
+        raise RuntimeError(f"durable current source payload is missing {relative}")
+    end = source.find("\\ndiff --git ".replace("\\n", "\n"), start + len(header))
+    section = source[start:] if end < 0 else source[start:end]
+    lines = []
+    for line in section.splitlines(keepends=True):
+        if line.startswith("+") and not line.startswith("+++"):
+            lines.append(line[1:])
+    result = "".join(lines)
+    if not result.startswith('"""'):
+        raise RuntimeError(f"durable current source image is malformed: {relative}")
+    compile(result, relative, "exec")
+    return result
 
-    def matches(images):
-        return all(
-            (not (root / relative).exists()) if expected is None
-            else (root / relative).is_file() and _sha256(root / relative) == expected
-            for relative, expected in images.items()
-        )
 
-    variants = manifest.get("postimage_sha256_variants", [])
-    if not isinstance(variants, list) or any(not isinstance(v, dict) or set(v) != set(postimages) for v in variants):
-        raise RuntimeError("native durable drain composed source images are invalid")
-    if matches(postimages) or any(matches(variant) for variant in variants):
-        return False
-    for current in [postimages, *variants]:
-        previous = dict(current)
-        if "gateway/drain_inbox.py" not in previous:
+def _current_replace_once(source: str, old: str, new: str, label: str) -> str:
+    # Keep the many multi-line anchors legible in this carrier source while
+    # accepting escaped newlines from the generated patch module.
+    old = old.replace("\\n", "\n")
+    new = new.replace("\\n", "\n")
+    count = source.count(old)
+    if count != 1:
+        raise RuntimeError(f"durable current {label} anchor count is {count}, expected 1")
+    return source.replace(old, new, 1)
+
+
+def _current_replace_one_of(
+    source: str, replacements: tuple[tuple[str, str], ...], label: str
+) -> str:
+    """Apply exactly one reviewed current-shape alternative."""
+    matches = []
+    for old, new in replacements:
+        old = old.replace("\\n", "\n")
+        new = new.replace("\\n", "\n")
+        if source.count(old) == 1:
+            matches.append((old, new))
+    if len(matches) != 1:
+        raise RuntimeError(f"durable current {label} compatible anchors are {len(matches)}, expected 1")
+    old, new = matches[0]
+    return source.replace(old, new, 1)
+
+
+def _current_write(path: Path, before: str, after: str) -> None:
+    compile(after, str(path), "exec")
+    backup = path.with_name(path.name + ".bak-pre-durable-drain-current-v1")
+    if not backup.exists():
+        backup.write_text(before, encoding="utf-8")
+    path.write_text(after, encoding="utf-8")
+
+
+def _current_replay_store_updates(root: Path, payload: Path) -> list[tuple[Path, str, str]]:
+    """Port the reviewed replay-store methods omitted by the split carrier.
+
+    Validate both owners before writing either; an installed runtime marker
+    cannot stand in for the persistence contract used by admission and replay.
+    """
+    patch = payload.read_text(encoding="utf-8")
+    updates = []
+    for relative, owner, anchor, names in (
+        ("gateway/session_transcript.py", "SessionTranscriptMixin", "    def rewrite_transcript(",
+         {"replay_marker_status", "replay_marker_status_for_session_key", "persist_replay_marker"}),
+        ("hermes_state_messages.py", "SessionMessagesMixin", "    def has_platform_message_id(",
+         {"has_platform_message_id_for_session_key"}),
+    ):
+        section = patch.split(f"+++ b/{relative}\n", 1)[1].split("\ndiff --git ", 1)[0]
+        methods = "".join(line[1:] for line in section.splitlines(keepends=True)
+                          if line.startswith("+") and not line.startswith("+++"))
+        expected = ast.parse(f"class {owner}:\n" + methods).body[0]
+        expected_methods = {node.name: ast.dump(node) for node in expected.body
+                            if isinstance(node, ast.FunctionDef)}
+        if set(expected_methods) != names:
+            raise RuntimeError(f"durable replay payload owner drift: {relative}")
+        path = root / relative
+        before = path.read_text(encoding="utf-8")
+        classes = [node for node in ast.parse(before).body
+                   if isinstance(node, ast.ClassDef) and node.name == owner]
+        if len(classes) != 1:
+            raise RuntimeError(f"durable replay store owner drift: {relative}")
+        existing = {node.name: ast.dump(node) for node in classes[0].body
+                    if isinstance(node, ast.FunctionDef) and node.name in names}
+        if existing:
+            if existing != expected_methods:
+                raise RuntimeError(f"durable replay store method drift: {relative}")
             continue
-        previous["gateway/drain_inbox.py"] = _PRE_SLASH_NATIVE_SHA
-        if matches(previous):
-            target = root / "gateway/drain_inbox.py"
-            content = target.read_text()
-            if content.count(_SLASH_OLD) != 1:
-                raise RuntimeError("native slash admission preimage drift")
-            updated = content.replace(_SLASH_OLD, _SLASH_NEW, 1).replace(_ROLLBACK_OLD, _ROLLBACK_NEW, 1)
-            if hashlib.sha256(updated.encode()).hexdigest() != current["gateway/drain_inbox.py"]:
-                raise RuntimeError("native slash admission postimage drift")
-            target.write_text(updated)
-            return True
-    if not matches(preimages):
-        raise RuntimeError("native durable drain pre/post source content mismatch")
-    _apply_payload(root, payload, check=True)
-    _apply_payload(root, payload, check=False)
-    if not matches(postimages):
-        raise RuntimeError("native durable drain postimage verification failed")
-    return True
+        after = _current_replace_once(before, anchor, methods + anchor, f"replay store {relative}")
+        compile(after, str(path), "exec")
+        updates.append((path, before, after))
+    return updates
 
 
-def _upgrade_whatsapp_reservation(root: Path) -> None:
-    """Upgrade only the exact installed legacy dispatch owner."""
-    target = root / "gateway/platforms/whatsapp_cloud.py"
-    source = target.read_text()
-    methods = [node for node in ast.walk(ast.parse(source))
-               if isinstance(node, ast.AsyncFunctionDef) and node.name == "_dispatch_payload"]
-    if len(methods) != 1:
-        raise RuntimeError("WhatsApp reservation dispatch owner drift")
-    node = methods[0]
-    body = ast.get_source_segment(source, node)
-    if hashlib.sha256(body.encode()).hexdigest() != 'e12f0cdacadc72a27474f36dcef22616dba70ba947ae2b2cec8cdb15b05a9294':
-        raise RuntimeError("WhatsApp reservation installed preimage drift")
-    start = body.index("                    try:\n                        event = await self._build_message_event_from_cloud")
-    end = body.index("\n                # Log status updates", start)
-    content = body[start:end].rstrip("\n")
-    reservation = '                    inflight = getattr(self, "_inflight_wamids", None)\n                    if inflight is None:\n                        inflight = self._inflight_wamids = set()\n                    if wamid and wamid in inflight:\n                        return False  # Retry: the first delivery has not finished admission.\n                    if wamid:\n                        inflight.add(wamid)\n                    try:\n'
-    updated = body[:start] + reservation + "".join("    " + line + "\n" for line in content.splitlines()) + "                    finally:\n                        inflight.discard(wamid)\n" + body[end:]
-    if hashlib.sha256(updated.encode()).hexdigest() != '30a2fe5c0cc2d8581b438bfaf4af703590a087395766157d9ebe86a0714c45cd':
-        raise RuntimeError("WhatsApp reservation installed postimage drift")
-    target.write_text(source.replace(body, updated, 1))
+def _patch_current_split_durable_drain(root: Path) -> bool:
+    """Re-ground the durable inbox at the current split gateway owners.
 
-
-def _upgraded_finalize_rollback(root: Path) -> str:
-    target = root / "gateway/drain_inbox.py"
-    source = target.read_text()
-    functions = [node for node in ast.parse(source).body
-                 if isinstance(node, ast.FunctionDef) and node.name == "finalize_pre_dispatch_event_result"]
-    if len(functions) != 1:
-        raise RuntimeError("durable rollback finalizer owner drift")
-    body = ast.get_source_segment(source, functions[0])
-    if hashlib.sha256(body.encode()).hexdigest() != '62277e108cd1c9537365c50e46105814d5059e1b171d580f28567907d066a72f':
-        raise RuntimeError("durable rollback installed preimage drift")
-    if body.count(_ROLLBACK_OLD) != 1:
-        raise RuntimeError("durable rollback finalizer anchor drift")
-    return source.replace(body, body.replace(_ROLLBACK_OLD, _ROLLBACK_NEW, 1), 1)
-
-
-def _upgrade_finalize_rollback(root: Path) -> None:
-    (root / "gateway/drain_inbox.py").write_text(_upgraded_finalize_rollback(root))
-
-
-def patch_durable_drain_inbox_carrier_v1(root: Path) -> bool:
-    """Apply the exact pin-rooted source delta before dependent Golden patches."""
+    This is intentionally an all-or-nothing source transformation: an event is
+    durably claimed before a side-effecting hook or turn, a claimed crash stays
+    ambiguous, and a completed replay gets a canonical session marker before
+    acknowledgement.  The current shutdown spool is complementary recovery for
+    in-memory pending text; it cannot substitute for those admission invariants.
+    """
     root = Path(root).resolve()
-    if _repo_head(root) == NATIVE_BASE_COMMIT:
-        return _patch_native_durable_drain(root)
-    manifest = _load_manifest()
-    marker = root / MARKER_RELATIVE
-    mismatches = _postimage_mismatches(root, manifest)
+    run = root / "gateway/run.py"
+    inbound = root / "gateway/run_inbound.py"
+    startup = root / "gateway/run_startup.py"
+    shutdown = root / "gateway/run_shutdown.py"
+    adapters = root / "gateway/run_adapters.py"
+    base = root / "gateway/platforms/base.py"
+    required = (run, inbound, startup, shutdown, adapters, base)
+    if not all(path.is_file() for path in required):
+        raise RuntimeError("durable current split owners are incomplete")
+    payload = NATIVE_PAYLOAD_DIR / "native-durable-drain.patch"
+    manifest = json.loads((NATIVE_PAYLOAD_DIR / "manifest.json").read_text(encoding="utf-8"))
+    if _sha256(payload) != manifest.get("patch_sha256"):
+        raise RuntimeError("durable current source payload checksum mismatch")
+    replay_updates = _current_replay_store_updates(root, payload)
+    if CURRENT_MARKER in run.read_text(encoding="utf-8"):
+        for path, before, after in replay_updates:
+            _current_write(path, before, after)
+        return bool(replay_updates)
+    additions = {
+        relative: _extract_added_file(payload, relative).replace("_adapter_for_source", "_delivery_adapter_for")
+        for relative in ("gateway/drain_inbox.py", "gateway/run_durable_drain.py")
+    }
+    async_dispatch_hook = "async def _hm_pre_gateway_dispatch_hook(" in inbound.read_text(encoding="utf-8")
+    if async_dispatch_hook:
+        additions = {relative: content.replace("event = self._hm_pre_gateway_dispatch_hook(",
+                                               "event = await self._hm_pre_gateway_dispatch_hook(")
+                     for relative, content in additions.items()}
+    for relative, content in additions.items():
+        target = root / relative
+        if target.exists():
+            raise RuntimeError(f"durable current carrier refuses existing owner: {relative}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
 
-    if marker.exists():
-        installed = json.loads(marker.read_text(encoding="utf-8"))
-        # Current shipped marker and its earlier slash-admission predecessor
-        # share the same exact WhatsApp dispatch owner.
-        pre_rollback = copy.deepcopy(manifest)
-        pre_rollback["patch_sha256"] = _PRE_ROLLBACK_LEGACY_PATCH
-        pre_rollback["postimage_git_blobs"]["gateway/drain_inbox.py"] = _PRE_ROLLBACK_LEGACY_BLOB
-        pre_rollback.get("downstream_exact_fragment_counts", {}).get("gateway/drain_inbox.py", {}).pop(_ROLLBACK_NEW, None)
-        if installed == _marker_payload(pre_rollback):
-            if _marked_install_mismatches(root, pre_rollback):
-                raise RuntimeError("durable rollback installed source drift")
-            _upgrade_finalize_rollback(root)
-            _write_marker(root, manifest)
-            return True
-        pre_reservation = copy.deepcopy(pre_rollback)
-        pre_reservation["patch_sha256"] = 'a129e07f5f600f6de0db615968ffded767ae492e8db5f206d96e023213227210'
-        pre_reservation["postimage_git_blobs"]["gateway/platforms/whatsapp_cloud.py"] = '1ce0a954210ee6f56e8622b6fccc4594b3fd6b6a'
-        pre_reservation.get("downstream_exact_fragment_counts", {}).pop("gateway/platforms/whatsapp_cloud.py", None)
-        if installed == _marker_payload(pre_reservation):
-            if _marked_install_mismatches(root, pre_reservation):
-                raise RuntimeError("WhatsApp reservation installed source drift")
-            updated = _upgraded_finalize_rollback(root)
-            _upgrade_whatsapp_reservation(root)
-            (root / "gateway/drain_inbox.py").write_text(updated)
-            _write_marker(root, manifest)
-            return True
-        previous_manifest = copy.deepcopy(pre_reservation)
-        previous_manifest["patch_sha256"] = _PRE_SLASH_LEGACY_PATCH
-        previous_manifest["downstream_exact_fragment_counts"] = {key: dict(value) for key, value in pre_reservation.get("downstream_exact_fragment_counts", {}).items()}
-        previous_manifest["downstream_exact_fragment_counts"].get("gateway/drain_inbox.py", {}).pop(_SLASH_NEW, None)
-        if not previous_manifest["downstream_exact_fragment_counts"].get("gateway/drain_inbox.py"):
-            previous_manifest["downstream_exact_fragment_counts"].pop("gateway/drain_inbox.py", None)
-        previous_manifest["postimage_git_blobs"] = dict(pre_reservation["postimage_git_blobs"])
-        previous_manifest["postimage_git_blobs"]["gateway/drain_inbox.py"] = _PRE_SLASH_LEGACY_BLOB
-        if installed == _marker_payload(previous_manifest):
-            if _marked_install_mismatches(root, previous_manifest):
-                raise RuntimeError("legacy slash admission source drift")
-            target = root / "gateway/drain_inbox.py"
-            content = target.read_text()
-            if content.count(_SLASH_OLD) != 1:
-                raise RuntimeError("legacy slash admission preimage drift")
-            updated = content.replace(_SLASH_OLD, _SLASH_NEW, 1).replace(_ROLLBACK_OLD, _ROLLBACK_NEW, 1)
-            encoded = updated.encode()
-            blob = hashlib.sha1(b"blob " + str(len(encoded)).encode() + b"\0" + encoded).hexdigest()
-            if blob != manifest["postimage_git_blobs"]["gateway/drain_inbox.py"]:
-                raise RuntimeError("legacy slash admission postimage drift")
-            _upgrade_whatsapp_reservation(root)
-            target.write_text(updated)
-            _write_marker(root, manifest)
-            return True
-        if installed != _marker_payload(manifest):
-            raise RuntimeError("durable-drain carrier marker provenance mismatch")
-        marked_mismatches = _marked_install_mismatches(root, manifest)
-        if marked_mismatches:
-            raise RuntimeError(
-                "durable-drain carrier marker exists but payload drifted: " + ", ".join(marked_mismatches)
-            )
-        return False
+    event_owner = root / "gateway/platforms/event.py"
+    if not event_owner.is_file():
+        event_owner = base
+    event_before = event_owner.read_text(encoding="utf-8")
+    event_after = _current_replace_once(
+        event_before,
+        "    allow_gateway_control: bool = True\\n",
+        "    allow_gateway_control: bool = True\\n"
+        "    durable_ingress: bool = False\\n"
+        "    admission_checked: bool = False\\n"
+        "    pre_dispatch_attempted: bool = False\\n"
+        "    durable_replay: bool = False\\n"
+        "    processing_receipt: dict = field(default_factory=dict)\\n\\n"
+        "    @property\\n"
+        "    def durable_deferred(self) -> bool:\\n"
+        "        return bool(self.processing_receipt.get(\"deferred\"))\\n\\n"
+        "    @durable_deferred.setter\\n"
+        "    def durable_deferred(self, value: bool) -> None:\\n"
+        "        self.processing_receipt[\"deferred\"] = bool(value)\\n\\n"
+        "    @property\\n"
+        "    def handler_succeeded(self) -> bool:\\n"
+        "        return bool(self.processing_receipt.get(\"succeeded\"))\\n\\n"
+        "    @handler_succeeded.setter\\n"
+        "    def handler_succeeded(self, value: bool) -> None:\\n"
+        "        self.processing_receipt[\"succeeded\"] = bool(value)\\n\\n"
+        "",
+        "MessageEvent durable fields",
+    )
+    base_before = base.read_text(encoding="utf-8")
+    base_after = event_after if event_owner == base else base_before
+    base_after = _current_replace_once(
+        base_after,
+        "    async def handle_message(self, event: MessageEvent) -> None:\\n"
+        "        \"\"\"Process an incoming message; returns quickly by spawning a background\\n",
+        "    def set_startup_gate_handler(self, handler) -> None:\\n"
+        "        self._startup_gate_handler = handler\\n\\n"
+        "    async def _preflight_startup_gate(self, event: MessageEvent) -> bool:\\n"
+        "        if event.admission_checked or event.durable_replay:\\n"
+        "            return False\\n"
+        "        if event.allow_gateway_control:\\n"
+        "            coerce_plaintext_gateway_command(event)\\n"
+        "        owner = self._session_key_profile(event.source)\\n"
+        "        if owner and not event.source.profile:\\n"
+        "            event.source.profile = owner\\n"
+        "        handler = getattr(self, \"_startup_gate_handler\", None)\\n"
+        "        if handler is not None and await handler(event, self._event_session_key(event)):\\n"
+        "            return True\\n"
+        "        event.admission_checked = True\\n"
+        "        return False\\n\\n"
+        "    async def handle_message(self, event: MessageEvent) -> None:\\n"
+        "        \"\"\"Process an incoming message; returns quickly by spawning a background\\n",
+        "BasePlatformAdapter preflight",
+    )
+    base_after = _current_replace_once(
+        base_after,
+        '        if event.allow_gateway_control:\\n            coerce_plaintext_gateway_command(event)\\n        # Identity FIRST: every key below (routing check, guard lookup, batch lane) derives from it.\\n        if self._drop_unresolved(event):\\n            return\\n',
+        '        if self._drop_unresolved(event):\\n            return\\n        if await self._preflight_startup_gate(event):\\n            return\\n',
+        "BasePlatformAdapter preflight call",
+    )
+    base_after = _current_replace_once(
+        base_after,
+        "        if session_key in self._active_sessions:\\n"
+        "            await self._handle_message_while_active(event, session_key)\\n",
+        "        if session_key in self._active_sessions:\\n"
+        "            if event.durable_replay:\\n"
+        "                event.durable_deferred = True\\n"
+        "                return\\n"
+        "            await self._handle_message_while_active(event, session_key)\\n",
+        "BasePlatformAdapter durable busy replay",
+    )
+    base_after = _current_replace_once(
+        base_after,
+        "            response = await self._message_handler(event)\n",
+        "            response = await self._message_handler(event)\n"
+        "            event.handler_succeeded = True\n",
+        "BasePlatformAdapter durable success receipt",
+    )
 
-    if not mismatches:
-        _write_marker(root, manifest)
-        return True
+    inbound_before = inbound.read_text(encoding="utf-8")
+    inbound_after = _current_replace_once(
+        inbound_before,
+        "    async def _hm_admit_event(\\n        self, event: \"MessageEvent\"\\n    )",
+        "    async def _hm_admit_event(\\n        self, event: \"MessageEvent\", *, durable_admission: bool = False, durable_finalize: bool = False\\n    )",
+        "inbound signature",
+    )
+    inbound_after = _current_replace_once(
+        inbound_after,
+        "        if (\\n            getattr(self, \"_startup_restore_in_progress\", False)\\n"
+        "            and not is_internal\\n"
+        "            and not getattr(event, \"_hermes_startup_restore_replay\", False)\\n"
+        "        ):\\n            self._queue_startup_restore_event(event)\\n            return None\\n\\n"
+        "        if is_internal:\\n",
+        "        if event.durable_replay and (\\n"
+        "            self._draining or self._external_drain_active\\n"
+        "            or getattr(self, \"_startup_restore_in_progress\", False)\\n"
+        "        ):\\n            event.durable_deferred = True\\n            return None\\n"
+        "        if durable_admission:\\n            return await self._durable_admit_event(event)\\n"
+        "        if (not durable_finalize and not event.durable_replay\\n"
+        "                and self._durable_gate_active()\\n"
+        "                and not self._durable_control_event(event, self._session_key_for_source(source))):\\n"
+        "            self._durable_setup()\\n"
+        "            async with self._durable_admission_lock:\\n"
+        "                return await self._durable_admit_event(event)\\n\\n"
+        "        if is_internal:\\n",
+        "inbound startup gate",
+    )
+    hook_call = ("await " if async_dispatch_hook else "") + "self._hm_pre_gateway_dispatch_hook(event, source)"
+    inbound_after = _current_replace_once(
+        inbound_after,
+        "        event = " + hook_call + "\n",
+        "        if not event.pre_dispatch_attempted:\n"
+        "            event = " + hook_call + "\n",
+        "inbound pre-dispatch receipt",
+    )
+    if event_owner != base:
+        _current_write(event_owner, event_before, event_after)
+    _current_write(base, base_before, base_after)
+    _current_write(inbound, inbound_before, inbound_after)
 
-    head = _repo_head(root)
-    if head is not None and head != manifest["base_commit"]:
-        raise RuntimeError(f"durable-drain carrier requires base {manifest['base_commit']}, got {head}")
+    adapters_before = adapters.read_text(encoding="utf-8")
+    adapters_after = _current_replace_once(
+        adapters_before,
+        "        adapter.set_session_store(self.session_store)\\n",
+        "        adapter.set_session_store(self.session_store)\\n"
+        "        adapter.set_startup_gate_handler(self._make_durable_admission_handler(adapter))\\n",
+        "adapter admission handler",
+    )
+    _current_write(adapters, adapters_before, adapters_after)
 
-    payload = PAYLOAD_DIR / manifest["patch"]
-    _apply_payload(root, payload, check=True)
-    _apply_payload(root, payload, check=False)
-    mismatches = _postimage_mismatches(root, manifest)
-    if mismatches:
-        raise RuntimeError("durable-drain carrier postimage verification failed: " + ", ".join(mismatches))
-    _write_marker(root, manifest)
+    run_before = run.read_text(encoding="utf-8")
+    run_after = _current_replace_once(
+        run_before,
+        "from gateway.run_startup import GatewayStartupMixin\\n",
+        "from gateway.run_startup import GatewayStartupMixin\\n"
+        "from gateway.run_durable_drain import GatewayDurableDrainMixin\\n",
+        "GatewayRunner durable import",
+    )
+    mro_tail = "    GatewayAgentCacheMixin, GatewayProfileReconcileMixin):\\n" if "GatewayAgentCacheMixin, GatewayProfileReconcileMixin):" in run_after else "    GatewayAgentCacheMixin):\\n"
+    if "GatewayAgentCacheMixin, GatewayProfileReconcileMixin, GatewayPluginRewireMixin):" in run_after:
+        mro_tail = "    GatewayAgentCacheMixin, GatewayProfileReconcileMixin, GatewayPluginRewireMixin):\n"
+    run_after = _current_replace_once(
+        run_after,
+        mro_tail,
+        mro_tail.replace("):", ", GatewayDurableDrainMixin):"),
+        "GatewayRunner durable MRO",
+    )
+    run_after = _current_replace_once(
+        run_after,
+        "        self._startup_restore_queue: List[MessageEvent] = []\\n",
+        f"        self._init_durable_drain()  # {CURRENT_MARKER}\\n",
+        "GatewayRunner durable initialization",
+    )
+    _current_write(run, run_before, run_after)
+
+    startup_before = startup.read_text(encoding="utf-8")
+    startup_after = startup_before
+    startup_after = _current_replace_once(
+        startup_after,
+        "            self._startup_restore_in_progress = False\n        if drained:\n",
+        "            self._startup_restore_in_progress = False\n            self._schedule_durable_replay()\n        if drained:\n",
+        "startup durable replay release",
+    )
+    startup_after = _current_replace_once(
+        startup_after,
+        "        self._startup_restore_queue = []\\n"
+        "        self._startup_restore_tasks = []\\n",
+        "        await self._claim_durable_producer()\\n"
+        "        self._startup_restore_tasks = []\\n",
+        "startup durable lease",
+    )
+    _current_write(startup, startup_before, startup_after)
+
+    shutdown_before = shutdown.read_text(encoding="utf-8")
+    shutdown_after = _current_replace_once(
+        shutdown_before,
+        "        self._update_runtime_status(self._serving_state())\\n"
+        "\\n    async def _drain_control_watcher",
+        "        self._update_runtime_status(self._serving_state())\\n"
+        "        self._schedule_durable_replay()\\n"
+        "\\n    async def _drain_control_watcher",
+        "shutdown durable replay",
+    )
+    _current_write(shutdown, shutdown_before, shutdown_after)
+    for path, before, after in replay_updates:
+        _current_write(path, before, after)
     return True
 
 
-def _patch_multiplex_test_fixture(root: Path) -> bool:
-    """Keep the upstream fake adapter aligned with the assembled base contract."""
-    path = root / "tests/gateway/test_multiplex_adapter_registry.py"
+def _patch_external_drain_fixture(root: Path) -> bool:
+    """Prove Golden's durable admission instead of upstream's text refusal."""
+    path = root / "tests/gateway/test_external_drain_control.py"
     if not path.is_file():
         return False
-    source = path.read_text(encoding="utf-8")
-    if MULTIPLEX_TEST_MARKER in source:
+    before = path.read_text(encoding="utf-8")
+    if "# Golden durable drain admission proof" in before:
         return False
-    if MULTIPLEX_TEST_ANCHOR not in source:
-        raise RuntimeError("durable-drain multiplex test fixture anchor missing")
-    path.write_text(
-        source.replace(MULTIPLEX_TEST_ANCHOR, MULTIPLEX_TEST_REPLACEMENT, 1),
-        encoding="utf-8",
-    )
+    old = '        assert result is not None\n        assert "draining" in result.lower()\n'
+    if old not in before:
+        return False
+    setup = "        runner._external_drain_active = True\n        event = MessageEvent("
+    after = _current_replace_once(before, setup,
+        "        runner._external_drain_active = True\n"
+        "        runner.session_store.replay_marker_status_for_session_key.return_value = False\n"
+        "        await runner._claim_durable_producer()\n"
+        "        event = MessageEvent(", "external drain producer fixture")
+    after = _current_replace_once(after, old,
+        "        # Golden durable drain admission proof\n"
+        "        assert result is None\n"
+        "        from gateway.drain_inbox import pending_records\n"
+        "        records = pending_records(runner._durable_inbox_path)\n"
+        "        assert len(records) == 1\n"
+        "        assert records[0][\"message_id\"] == \"m1\"\n"
+        "        assert records[0][\"text\"] == \"hello\"\n"
+        "        assert records[0][\"state\"] == \"queued\"\n",
+        "external drain durable proof")
+    compile(after, str(path), "exec")
+    path.write_text(after, encoding="utf-8")
     return True
-
-
-def _patch_platform_reconnect_test_fixture(root: Path) -> bool:
-    """Let durable lease acquisition run through broad create-task test mocks."""
-    path = root / "tests/gateway/test_platform_reconnect.py"
-    if not path.is_file():
-        return False
-    source = path.read_text(encoding="utf-8")
-    if PLATFORM_RECONNECT_TEST_MARKER in source:
-        return False
-    count = source.count(PLATFORM_RECONNECT_TEST_ANCHOR)
-    if count != 2:
-        raise RuntimeError(f"durable-drain platform reconnect test anchor count is {count}, expected 2")
-    path.write_text(
-        source.replace(
-            PLATFORM_RECONNECT_TEST_ANCHOR,
-            PLATFORM_RECONNECT_TEST_REPLACEMENT,
-        ),
-        encoding="utf-8",
-    )
-    return True
-
-
-def _patch_raft_durable_ingress(root: Path) -> bool:
-    path = root / RAFT_ADAPTER_RELATIVE
-    if not path.is_file():
-        raise RuntimeError("durable-drain Raft adapter is missing")
-    source = path.read_text(encoding="utf-8")
-    wake_complete = RAFT_WAKE_EVENT_REPLACEMENT in source
-    handler_complete = RAFT_HANDLE_MESSAGE_REPLACEMENT in source
-    if wake_complete and handler_complete:
-        return False
-    if wake_complete or handler_complete:
-        raise RuntimeError("durable-drain Raft carrier is partially applied")
-    if source.count(RAFT_WAKE_EVENT_ANCHOR) != 1:
-        raise RuntimeError("durable-drain Raft wake anchor is missing or ambiguous")
-    if source.count(RAFT_HANDLE_MESSAGE_ANCHOR) != 1:
-        raise RuntimeError("durable-drain Raft handler anchor is missing or ambiguous")
-    path.write_text(
-        source.replace(
-            RAFT_WAKE_EVENT_ANCHOR,
-            RAFT_WAKE_EVENT_REPLACEMENT,
-            1,
-        ).replace(
-            RAFT_HANDLE_MESSAGE_ANCHOR,
-            RAFT_HANDLE_MESSAGE_REPLACEMENT,
-            1,
-        ),
-        encoding="utf-8",
-    )
-    return True
-
-
-def _load_sibling(name: str):
-    path = Path(__file__).with_name(f"{name}.py")
-    spec = importlib.util.spec_from_file_location(name, path)
-    if not spec or not spec.loader:
-        raise RuntimeError(f"durable-drain companion unavailable: {name}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def patch_durable_drain_runtime_v1(root: Path) -> bool:
-    """Apply the carrier and cron dispatch seam as one lifecycle subsystem."""
-    if _repo_head(Path(root)) == NATIVE_BASE_COMMIT:
-        return _patch_native_durable_drain(Path(root))
-    changed = patch_durable_drain_inbox_carrier_v1(root)
-    changed = _patch_raft_durable_ingress(root) or changed
-    cron = _load_sibling("cron_scheduler_can_dispatch_compat_v1")
-    changed = cron.patch_cron_scheduler_can_dispatch_compat_v1(root) or changed
-    changed = _patch_multiplex_test_fixture(root) or changed
-    changed = _patch_platform_reconnect_test_fixture(root) or changed
-    return changed
+    """Apply the current lifecycle carrier; incomplete owners fail before writes."""
+    root = Path(root)
+    changed = _patch_current_split_durable_drain(root)
+    return _patch_external_drain_fixture(root) or changed

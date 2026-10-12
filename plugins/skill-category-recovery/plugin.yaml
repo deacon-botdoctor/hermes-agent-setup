@@ -1,0 +1,6 @@
+id: skill-category-recovery
+name: skill-category-recovery
+version: 0.1.0
+description: Explain unknown skill categories using only the native visible inventory.
+provides_hooks:
+  - transform_tool_result

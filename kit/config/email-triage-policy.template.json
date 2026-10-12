@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "scopes": {
+    "example": {
+      "trusted_principals": [
+        "owner"
+      ],
+      "allowed_routine_notifications": [
+        "receipt",
+        "silent"
+      ],
+      "protected_reasons": [],
+      "protected_terms": []
+    }
+  }
+}

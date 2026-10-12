@@ -69,48 +69,10 @@ def _apply_codex_response_format(
     resp_kwargs["text"] = {{"format": native_format}}
 '''
 
-REQUEST_ANCHOR = '''        resp_kwargs: Dict[str, Any] = {
-            # Strip the Hermes-side ``-900k`` large-context picker suffix —
-            # the Codex backend only knows the base slug (mirrors the main
-            # transport in agent/transports/codex.py::build_kwargs).
-            "model": _strip_codex_ctx_variant(model),
-            "instructions": instructions,
-            "input": input_items or [{"role": "user", "content": ""}],
-            "store": False,
-        }
-
-        # Preserve the chat.completions timeout contract.'''
-
-REQUEST_REPLACEMENT = '''        resp_kwargs: Dict[str, Any] = {
-            # Strip the Hermes-side ``-900k`` large-context picker suffix —
-            # the Codex backend only knows the base slug (mirrors the main
-            # transport in agent/transports/codex.py::build_kwargs).
-            "model": _strip_codex_ctx_variant(model),
-            "instructions": instructions,
-            "input": input_items or [{"role": "user", "content": ""}],
-            "store": False,
-        }
-        _apply_codex_response_format(resp_kwargs, kwargs)
-
-        # Preserve the chat.completions timeout contract.'''
-
-RETRY_ANCHOR = "        if _is_structured_output_rejection(first_err):\n"
-RETRY_REPLACEMENT = '''        if (
-            _is_structured_output_rejection(first_err)
-            and not _strict_structured_output_requested(kwargs)
-        ):
-'''
-
-
-REFACTORED_REQUEST_ANCHOR = '''        resp_kwargs: Dict[str, Any] = {
-            # Codex only knows the base slug; strip the Hermes ``-900k`` picker suffix.
-            "model": _strip_codex_ctx_variant(model), "instructions": instructions,
-            "input": input_items or [{"role": "user", "content": ""}], "store": False,
-        }
-'''
-REFACTORED_REQUEST_REPLACEMENT = (
-    REFACTORED_REQUEST_ANCHOR + "        _apply_codex_response_format(resp_kwargs, kwargs)\n"
-)
+REQUEST_ANCHOR = '\n        # Forward the chat.completions timeout; otherwise a Codex stream can sit behind a\n'
+REQUEST_REPLACEMENT = '\n        _apply_codex_response_format(resp_kwargs, kwargs)\n' + REQUEST_ANCHOR
+STRIP_ANCHOR = '    retry_kwargs = dict(kwargs)\n    changed = retry_kwargs.pop("response_format", None) is not None\n'
+STRIP_REPLACEMENT = '    if _strict_structured_output_requested(kwargs):\n        return None\n' + STRIP_ANCHOR
 
 
 class PatchError(RuntimeError):
@@ -125,40 +87,13 @@ def _replace_once(source: str, old: str, new: str, *, label: str) -> str:
     return source.replace(old, new, 1)
 
 
-def _replace_exact(
-    source: str, old: str, new: str, *, count: int, label: str
-) -> str:
-    if source.count(new) == count:
-        return source
-    if source.count(old) != count:
-        raise PatchError(f"required exact anchors missing: {label} ({count})")
-    return source.replace(old, new, count)
-
-
 def patch_auxiliary_source(source: str) -> str:
-    source = _replace_once(
-        source,
-        HELPER_ANCHOR,
-        HELPER_SOURCE + HELPER_ANCHOR,
-        label="Codex completions adapter",
-    )
-    # The refactor shares one ladder between sync and async calls. Preserve
-    # the reviewed 0.21 output while preparing that single new owner.
-    shared_ladder = "\ndef _ladder_parameter_rungs(" in source
-    source = _replace_once(
-        source,
-        REFACTORED_REQUEST_ANCHOR if shared_ladder else REQUEST_ANCHOR,
-        REFACTORED_REQUEST_REPLACEMENT if shared_ladder else REQUEST_REPLACEMENT,
-        label="Codex Responses request",
-    )
-    return _replace_exact(
-        source,
-        RETRY_ANCHOR[4:] if shared_ladder else RETRY_ANCHOR,
-        "".join(line[4:] for line in RETRY_REPLACEMENT.splitlines(keepends=True))
-        if shared_ladder else RETRY_REPLACEMENT,
-        count=1 if shared_ladder else 2,
-        label="structured-output compatibility retry",
-    )
+    source = _replace_once(source, HELPER_ANCHOR, HELPER_SOURCE + HELPER_ANCHOR,
+                           label="Codex completions adapter")
+    source = _replace_once(source, REQUEST_ANCHOR, REQUEST_REPLACEMENT,
+                           label="Codex Responses request")
+    return _replace_once(source, STRIP_ANCHOR, STRIP_REPLACEMENT,
+                         label="strict format stripping guard")
 
 
 def patch_codex_strict_structured_output_v1(hermes_dir: Path) -> bool:

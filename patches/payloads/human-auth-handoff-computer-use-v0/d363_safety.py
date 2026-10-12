@@ -472,7 +472,7 @@ def _browser_capable_capture(
         "mail", "messages", "notes", "calendar", "system settings",
         "system preferences", "xcode", "visual studio code", "vscode",
         "music", "photos", "pages", "numbers", "keynote", "canvas app",
-        "freecad", "qt6application", "test app",
+        "freecad", "qt6application", "test app", "gedit", "notepad",
     )
     return identity.strip() not in known_native
 
@@ -873,5 +873,5 @@ def _auth_capture_response(backend, cap):
     guarded = _guard_sensitive_surface(backend, cap)
     if guarded is not None:
         return guarded
-    _remember_native_safe_snapshot(backend, cap.elements[:_DEFAULT_MAX_ELEMENTS])
+    _remember_native_safe_snapshot(backend, cap.elements)
     return _capture_response(cap)

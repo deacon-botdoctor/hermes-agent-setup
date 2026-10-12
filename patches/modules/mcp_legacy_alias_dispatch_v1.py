@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 MARKER = "HERMES_MCP_LEGACY_ALIAS_DISPATCH_v1"
-COLD_ALIAS_MARKER = "HERMES_MCP_LEGACY_COLD_ALIAS_ACTIVATION_v1"
 
 TOOL_SEARCH_FUNCTION = (
     "def resolve_underlying_call(args: Dict[str, Any]) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:\n"
@@ -49,46 +47,6 @@ def resolve_underlying_call(
     args: Dict[str, Any], *, scoped_names: Optional[frozenset[str]] = None
 ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
 '''
-
-TOOL_SEARCH_CLASSIFY = """    if not is_deferrable_tool_name(name):
-        return None, {}, (
-"""
-TOOL_SEARCH_CLASSIFY_PATCHED = """    canonical_name = _canonicalize_legacy_mcp_name(name, scoped_names)
-    if canonical_name is None:
-        return None, {}, f"Tool '{name}' has an ambiguous legacy MCP alias"
-    name = canonical_name
-    if name not in (scoped_names or ()) and not is_deferrable_tool_name(name):
-        return None, {}, (
-"""
-
-MODEL_TOOLS_CALL = (
-    "            underlying_name, underlying_args, err = "
-    "_ts_mod.resolve_underlying_call(function_args or {})\n"
-    "            if err or not underlying_name:\n"
-)
-MODEL_TOOLS_CALL_PATCHED = """            _scoped_deferrable = _ts_mod.scoped_deferrable_names(current_defs)
-            underlying_name, underlying_args, err = _ts_mod.resolve_underlying_call(
-                function_args or {}, scoped_names=_scoped_deferrable
-            )
-            if err or not underlying_name:
-"""
-MODEL_TOOLS_DUPLICATE_SCOPE = """            _scoped_deferrable = _ts_mod.scoped_deferrable_names(current_defs)
-            if underlying_name not in _scoped_deferrable:
-"""
-MODEL_TOOLS_SCOPE_REUSE = """            if underlying_name not in _scoped_deferrable:
-"""
-
-EXECUTOR_CALL = """                _underlying, _underlying_args, _err = _ts.resolve_underlying_call(function_args)
-                if not _err and _underlying:
-                    if _underlying in _tool_search_scoped_names(agent):
-"""
-EXECUTOR_CALL_PATCHED = """                _scoped_names = _tool_search_scoped_names(agent)
-                _underlying, _underlying_args, _err = _ts.resolve_underlying_call(
-                    function_args, scoped_names=_scoped_names
-                )
-                if not _err and _underlying:
-                    if _underlying in _scoped_names:
-"""
 
 
 # d363 split owners retain the same bridge contract, but their API passes the
@@ -200,12 +158,12 @@ TESTS = f'''class TestLegacyMcpAliasDispatch:
     def test_out_of_scope_legacy_alias_is_not_resolved(self):
         from tools.tool_search import resolve_underlying_call
 
-        _, _, err = resolve_underlying_call(
+        name, args, err = resolve_underlying_call(
             {{"name": "mcp_composio_google_personal_GOOGLESUPER_QUICK_ADD", "arguments": {{}}}},
             scoped_names=frozenset({{"mcp__search__search_status"}}),
         )
-        assert err is not None
-        assert "not a deferrable" in err
+        assert name is None and args == {{}}
+        assert err is not None and "mcp_composio_google_personal_GOOGLESUPER_QUICK_ADD" in err
 
     def test_model_bridge_dispatches_unique_scoped_alias(self):
         import model_tools
@@ -248,13 +206,21 @@ def patch_tool_search_text(source: str) -> str:
         source, TOOL_SEARCH_FUNCTION, TOOL_SEARCH_FUNCTION_PATCHED,
         count=1, label="tool_search function",
     )
-    if D363_TOOL_SEARCH_CLASSIFY in source:
-        return _replace_exact(
-            source, D363_TOOL_SEARCH_CLASSIFY, D363_TOOL_SEARCH_CLASSIFY_PATCHED,
-            count=1, label="d363 tool_search classification",
-        )
+    if "return None, {}, not_deferrable_error(name)" in source:
+        # Native guidance distinguishes unknown names from directly listed tools.
+        # Preserve that owner; only scoped deferred names need an extra denial.
+        classification = D363_TOOL_SEARCH_CLASSIFY.split("        return", 1)[0]
+        scoped = D363_TOOL_SEARCH_CLASSIFY_PATCHED.split("    if scoped_names is not None:", 1)[0]
+        scoped += '''    if scoped_names is not None:
+        if name in scoped_names:
+            return name, raw_args, None
+        if is_deferrable_tool_name(name, load_config_readonly().effective_defer_tools):
+            return None, {}, f"Tool '{name}' is outside this session's tool scope. Use tool_search to find an available tool."
+'''
+        return _replace_exact(source, classification, scoped + classification,
+                              count=1, label="native tool_search classification")
     return _replace_exact(
-        source, TOOL_SEARCH_CLASSIFY, TOOL_SEARCH_CLASSIFY_PATCHED,
+        source, D363_TOOL_SEARCH_CLASSIFY, D363_TOOL_SEARCH_CLASSIFY_PATCHED,
         count=1, label="tool_search classification",
     )
 
@@ -272,42 +238,24 @@ def patch_model_tools_text(source: str) -> str:
             source, D363_MODEL_TOOLS_SCOPE, D363_MODEL_TOOLS_SCOPE_PATCHED,
             count=1, label="d363 model_tools scope reuse",
         )
-    # Keep the historical cb path byte-for-byte compatible, including its
-    # cold-activation companion which only exists on that source generation.
-    if COLD_ALIAS_MARKER in source:
-        required = ("_resolve_tool_search_call_with_cold_activation(", "scoped_names=_scoped_names")
-        if not all(marker in source for marker in required):
-            raise RuntimeError("model_tools cold-alias composition drift")
-        return source
-    source = _replace_exact(
-        source, MODEL_TOOLS_CALL, MODEL_TOOLS_CALL_PATCHED,
-        count=1, label="model_tools bridge call",
-    )
-    return _replace_exact(
-        source, MODEL_TOOLS_DUPLICATE_SCOPE, MODEL_TOOLS_SCOPE_REUSE,
-        count=1, label="model_tools scope reuse",
-    )
+    raise RuntimeError("model_tools bridge call anchor drift")
 
 def patch_tool_executor_text(source: str) -> str:
     if MARKER in source or D363_EXECUTOR_CALL_PATCHED in source:
         return source
+    batch = "        if underlying == _ts.CONNECTOR_BATCH_SENTINEL:\n"
+    if batch in source:
+        old = "        underlying, underlying_args, err = _ts.resolve_underlying_call(function_args)\n        if err or not underlying:\n            return function_name, function_args, None\n"
+        new = D363_EXECUTOR_CALL_PATCHED.split("        if underlying not in _scoped_names:", 1)[0]
+        source = _replace_exact(source, old, new, count=1, label="batch executor scoped resolution")
+        return _replace_exact(source, "        if underlying not in _tool_search_scoped_names(agent):\n",
+                              "        if underlying not in _scoped_names:\n", count=1, label="batch executor scope")
     if D363_EXECUTOR_CALL in source:
         return _replace_exact(
             source, D363_EXECUTOR_CALL, D363_EXECUTOR_CALL_PATCHED,
             count=1, label="d363 tool_executor bridge call",
         )
-    # Historical cb source has two independent executor loops and is composed
-    # with its cold-activation companion; retain its exact old transform.
-    cold_helper = "_resolve_legacy_cold_alias_for_agent"
-    cold_helper_count = source.count(cold_helper)
-    if cold_helper_count == 3:
-        return source
-    if cold_helper_count:
-        raise RuntimeError("tool_executor cold-alias composition drift")
-    return _replace_exact(
-        source, EXECUTOR_CALL, EXECUTOR_CALL_PATCHED,
-        count=2, label="tool_executor bridge calls",
-    )
+    raise RuntimeError("tool_executor bridge calls anchor drift")
 
 def patch_tool_search_tests_text(source: str) -> str:
     if MARKER in source:
@@ -335,39 +283,6 @@ def patch_mcp_legacy_alias_dispatch_v1(hermes_dir: Path) -> bool:
         path.write_text(patched, encoding="utf-8")
     return bool(pending)
 
-
-def patch_mcp_legacy_alias_bridge_v1(hermes_dir: Path) -> bool:
-    """Apply alias compatibility; compose cold activation only for the old source."""
-    root = Path(hermes_dir)
-    model_source = (root / "model_tools.py").read_text(encoding="utf-8")
-    is_d363 = D363_MODEL_TOOLS_CALL in model_source or MARKER in model_source
-    transforms = {
-        "tools/tool_search.py": (patch_tool_search_text,),
-        "model_tools.py": (patch_model_tools_text,),
-        "agent/tool_executor.py": (patch_tool_executor_text,),
-        "tests/tools/test_tool_search.py": (patch_tool_search_tests_text,),
-    }
-    if not is_d363:
-        sibling = Path(__file__).with_name("mcp_legacy_cold_alias_activation_v1.py")
-        spec = importlib.util.spec_from_file_location("mcp_legacy_cold_alias_activation_v1", sibling)
-        if not spec or not spec.loader:
-            raise RuntimeError("cold alias patch module is unavailable")
-        cold = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cold)
-        transforms["model_tools.py"] += (cold.patch_model_tools_text,)
-        transforms["agent/tool_executor.py"] += (cold.patch_tool_executor_text,)
-    pending: list[tuple[Path, str]] = []
-    for relative, steps in transforms.items():
-        path = root / relative
-        original = path.read_text(encoding="utf-8")
-        patched = original
-        for transform in steps:
-            patched = transform(patched)
-        if patched != original:
-            pending.append((path, patched))
-    for path, patched in pending:
-        path.write_text(patched, encoding="utf-8")
-    return bool(pending)
 
 def main() -> int:
     import argparse

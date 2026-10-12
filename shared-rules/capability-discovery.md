@@ -44,8 +44,11 @@ profile-specific always-on tools. Native image generation, MCP tools, and
 non-core plugin tools may be deferred behind `tool_search`; that does not mean
 they are unavailable.
 
-Do not call either discovery layer for a trivial request whose tool is already
-visible.
+Do not call either discovery layer for a request whose usable route is already
+verified and visible. This includes a verified tenant-local CLI invoked through
+the terminal tool. Reuse that route within the current task. Check it again if
+the owner, configuration, or observed availability changes. A remembered command
+without current tenant and availability evidence is not a verified route.
 
 ### Native executable search
 

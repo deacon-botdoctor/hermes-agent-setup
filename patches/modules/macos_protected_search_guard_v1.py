@@ -370,8 +370,27 @@ def patch_macos_protected_search_guard_v1(hermes_dir: Path) -> bool:
     return True
 
 
+_NATIVE_CLEANUP = "            _kill_process_group_posix(proc)  # native lane is POSIX-only (gate above)"
+_NATIVE_CLEANUP_GUARDED = """            try:
+                _kill_process_group_posix(proc)  # native lane is POSIX-only (gate above)
+            except ProcessLookupError:
+                # rg can exit after poll() but before the group lookup.
+                # Only accept that race when the child has actually exited.
+                if proc.poll() is None:
+                    raise"""
+
+
+def _patch_native_cleanup(source: str) -> str:
+    if "    def _run_rg_native(" not in source:
+        return source
+    if _NATIVE_CLEANUP_GUARDED in source:
+        return source
+    return _replace_once(source, _NATIVE_CLEANUP, _NATIVE_CLEANUP_GUARDED, "native search exit race")
+
+
 def patch_refactored_sources(source: str, search_source: str) -> tuple[str, str]:
     """Keep admission before filesystem probes in both extracted search owners."""
+    search_source = _patch_native_cleanup(search_source)
     search_anchor = "    # --- SEARCH -------------------------------------------------------------\n"
     entry_anchor = "        offset, limit = normalize_search_pagination(offset, limit)\n"
     multi_anchor = '''        existing, missing = [], []

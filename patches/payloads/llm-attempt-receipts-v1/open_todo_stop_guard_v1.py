@@ -566,7 +566,7 @@ def _patch_native_stop(hermes_dir: Path) -> bool:
     native_tests = native_tests.replace('    instance.compression_enabled = False', '    instance._disable_streaming = True\n    instance.compression_enabled = False')
     outputs.update({gate: source, finalizer: final,
                     target / "agent/open_todo_stop.py": HELPER_SOURCE,
-                    target / "tests/run_agent/test_open_todo_stop_guard.py": native_tests})
+                    target / ("tests/agent/test_open_todo_stop_guard.py" if (target / "tests/agent/test_run_agent.py").is_file() else "tests/run_agent/test_open_todo_stop_guard.py"): native_tests})
     for path, body in outputs.items():
         compile(body, str(path), "exec")
     changed = False

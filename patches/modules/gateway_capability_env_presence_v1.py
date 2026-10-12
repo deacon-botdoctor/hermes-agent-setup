@@ -180,11 +180,7 @@ RUN_BLOCK = f"""    atexit.register(remove_pid_file)
 def patch_env_loader_text(source: str) -> str:
     if MARKER in source:
         return source
-    invalidation_anchor = (
-        D363_INVALIDATE_ANCHOR
-        if D363_INVALIDATE_ANCHOR in source
-        else INVALIDATE_ANCHOR
-    )
+    invalidation_anchor = '    project_env_path = Path(project_env) if project_env else None\n'
     if (
         source.count(HELPER_ANCHOR) != 1
         or source.count(CALL_ANCHOR) != 1
@@ -192,28 +188,23 @@ def patch_env_loader_text(source: str) -> str:
     ):
         raise RuntimeError("gateway capability env presence anchor drift")
     source = source.replace(HELPER_ANCHOR, HELPER_BLOCK + HELPER_ANCHOR, 1)
-    source = source.replace(
-        invalidation_anchor,
-        ("""    project_env_path = Path(project_env) if project_env else None
-    _invalidate_gateway_capability_env_presence(home_path)
-
-""" + (
-            "    if user_env.exists():  # normalize formatting / strip NULs before parsing\n"
-            if invalidation_anchor == D363_INVALIDATE_ANCHOR
-            else "    # Normalize safe formatting and remove invalid NUL bytes before parsing.\n"
-        )),
-        1,
-    )
+    source = source.replace(invalidation_anchor, invalidation_anchor +
+                            '    _invalidate_gateway_capability_env_presence(home_path)\n', 1)
     return source.replace(CALL_ANCHOR, CALL_BLOCK, 1)
 
 
 def patch_gateway_text(source: str) -> str:
     if START_MARKER in source:
         return source
-    if source.count(D363_RUN_ANCHOR) == 1:
+    split_anchor = D363_RUN_ANCHOR
+    if "_start_gateway_claim_pid_file(force=force or replace)" in source:
+        split_anchor = split_anchor.replace("_start_gateway_claim_pid_file()", "_start_gateway_claim_pid_file(force=force or replace)")
+    elif "_start_gateway_claim_pid_file(force=force)" in source:
+        split_anchor = split_anchor.replace("_start_gateway_claim_pid_file()", "_start_gateway_claim_pid_file(force=force)")
+    if source.count(split_anchor) == 1:
         return source.replace(
-            D363_RUN_ANCHOR,
-            f"""    if not _start_gateway_claim_pid_file():
+            split_anchor,
+            f"""{split_anchor.splitlines()[0]}
         return False
     # [{START_MARKER}] The split startup path has won the PID/lock claim.
     from hermes_cli.env_loader import _write_gateway_capability_env_presence

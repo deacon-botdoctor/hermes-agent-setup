@@ -29,7 +29,13 @@ Use this for creative output where quality matters: visuals, image generation, a
 
 ## Rule
 
-Do not phone it in with a local placeholder or crude composite when better image/video/design tools are available.
+Use native Codex image generation and reference editing first for images and
+artwork. Pillow/PIL is banned for all agent-authored image work, including
+small corrections, compositing, captions, cropping, resizing, and export.
+Do not import, install, invoke, or delegate Pillow. Do not replace it with
+another local drawing library to paint over artwork. This rule overrides
+older examples and skill instructions. Keep existing runtime dependencies
+installed; their presence does not authorize their use for image work.
 
 ## Required workflow
 
@@ -54,18 +60,22 @@ Do not phone it in with a local placeholder or crude composite when better image
      editable SVG before raster export.
    - video creation, editing, animation, captioning, and rendering: load the installed `hyperframes` skill first and follow `shared-rules/video-production-routing.md`.
    - approved generative-video providers: use only for source shots or plates needed by the HyperFrames composition.
-   - deterministic/local compositor only for geometry-only work, exact layout,
-     captions, print prep, or final export from an adequate/vector source.
+   - existing non-Pillow layout/export tools only for explicitly requested
+     mechanical work, exact text, print prep, or export from an adequate source.
+     Changes to artwork details use native Codex reference editing.
 
 5. Write a rich prompt when generation/editing is the selected lane:
    - subject identity and reference use
    - scene/action/composition
    - lighting/style/quality bar
-   - exact negative constraints
+   - current user constraints; discard superseded instructions after a reset
    - output format/aspect ratio
 
 6. Generate or reconstruct, then run the effective-resolution proof from the
-   shared rule. Pixel dimensions, centering, and file existence are not enough.
+   shared rule. Inspect the full output and changed details against the latest
+   request. Reject unrelated changes, duplicated details, stray marks, and
+   conflicting magnified views. A vision tool approval does not override
+   visible defects. Pixel dimensions and file existence are not enough.
 
 7. Deliver the best artifact with a short note. Use `[[as_document]]` for
    lossless Telegram image masters. If animation was requested or obvious,

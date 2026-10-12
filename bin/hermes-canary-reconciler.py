@@ -229,7 +229,10 @@ def cron_line_for(canary: dict[str, Any], script: Path, agent_id: str, agent_nam
     tag = str(canary.get("cron_tag") or f"HERMES_CANARY_{canary.get('id', 'UNKNOWN')}")
     jitter_seed = f"{HERMES}\x00{tag}".encode("utf-8")
     jitter = int.from_bytes(hashlib.sha256(jitter_seed).digest()[:4], "big") % 180
-    env_parts = [f"HERMES_HOME={sh_quote(str(HERMES))}"]
+    env_parts = [
+        f"HERMES_HOME={sh_quote(str(HERMES))}",
+        f'PATH={sh_quote(PATH_PREFIX)}:"$PATH"',
+    ]
     for k, v in (canary.get("env") or {}).items():
         env_parts.append(f"{k}={sh_quote(str(v))}")
     args = " ".join(sh_quote(x) for x in format_args(canary.get("args") or [], agent_id, agent_name))
@@ -594,7 +597,18 @@ def run_canary(script: Path, canary: dict[str, Any], agent_id: str, agent_name: 
         argv.append("--skip-canary-reconciler")
     try:
         p = run(argv, timeout=int(canary.get("timeout_seconds") or 90), env=env, cwd=HOME)
-        return {"ran": True, "rc": p.returncode, "detail": ((p.stdout or "") + " " + (p.stderr or "")).strip()[-300:]}
+        detail = ((p.stdout or "") + " " + (p.stderr or "")).strip()
+        result = {"ran": True, "rc": p.returncode, "detail": detail[-300:]}
+        # Retention must yield to a live mutation owner. Preserve its failed
+        # attempt and stale receipt, but report the expected deferral as a warning.
+        lease_errors = {
+            f"ValueError: fleet mutation lease busy: {HERMES / 'state/promotion/executor' / name}"
+            for name in ("active-rollout.lock", "runtime-mutation.lock")
+        }
+        if (canary.get("id") == "disk_retention" and p.returncode == 1
+                and detail.splitlines() and detail.splitlines()[-1] in lease_errors):
+            result.update(deferred=True, status="warning:mutation_lease_busy")
+        return result
     except Exception as exc:
         return {"ran": True, "rc": 125, "detail": f"{type(exc).__name__}: {str(exc)[:180]}"}
 
@@ -720,7 +734,7 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         action
         for action in actions
         if str(action.get("status") or "").startswith("failed:")
-        or (action.get("action") == "run_if_stale" and action.get("ran") and int(action.get("rc") or 0) != 0)
+        or (action.get("action") == "run_if_stale" and action.get("ran") and int(action.get("rc") or 0) != 0 and not action.get("deferred"))
     ]
     warnings = [action for action in actions if str(action.get("status") or "").startswith("warning:")]
     payload = {

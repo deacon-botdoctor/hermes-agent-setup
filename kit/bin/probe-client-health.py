@@ -25,6 +25,7 @@ HERMES_HOME = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
 STATE_DIR = HERMES_HOME / "state"
 OUTPUT = STATE_DIR / "client-heartbeat.json"
 GATEWAY_STATE_PATH = HERMES_HOME / "gateway_state.json"
+CONFIG_PATH = HERMES_HOME / "config.yaml"
 GATEWAY_LOG_PATH = HERMES_HOME / "logs" / "gateway.log"
 AGENT_LOG_PATH = HERMES_HOME / "logs" / "agent.log"
 SAFE_RESTART_LOG_PATH = HERMES_HOME / "logs" / "safe-restart.log"
@@ -34,8 +35,10 @@ RESPONSE_WINDOW_LINES = 1200
 SLOW_RESPONSE_SEC = 120.0
 FAIL_RESPONSE_SEC = 300.0
 RESPONSE_WINDOW_SEC = 6 * 3600
+ERROR_WINDOW_SEC = int(os.environ.get("HERMES_ERROR_WINDOW_SEC", str(6 * 3600)))
 IS_MACOS = platform.system() == "Darwin"
 IS_LINUX = platform.system() == "Linux"
+IS_WINDOWS = platform.system() == "Windows"
 
 
 def iso_now() -> str:
@@ -87,13 +90,36 @@ def safe_exists(path: Path) -> bool:
 def safe_read_lines(path: Path, tail: int = 400) -> list[str]:
     try:
         return path.read_text(encoding="utf-8", errors="ignore").splitlines()[-tail:]
-    except (PermissionError, FileNotFoundError):
+    except OSError:
         return []
+
+
+def log_readable(path: Path) -> bool:
+    try:
+        with path.open("rb") as stream:
+            stream.read(1)
+        return True
+    except OSError:
+        return False
 
 
 def kill_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if IS_WINDOWS:
+        # Windows os.kill(pid, 0) can terminate the process. Query only.
+        import csv
+        try:
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+                capture_output=True, text=True, check=False, timeout=10,
+            )
+            return result.returncode == 0 and any(
+                len(row) > 1 and row[1].strip() == str(pid)
+                for row in csv.reader(result.stdout.splitlines())
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
     try:
         os.kill(pid, 0)
         return True
@@ -101,12 +127,76 @@ def kill_alive(pid: int) -> bool:
         return False
 
 
-def count_recent_errors(path: Path) -> int:
+def count_recent_errors(
+    path: Path,
+    lower_bound: datetime | None = None,
+    now: datetime | None = None,
+) -> int:
     if not safe_exists(path):
         return 0
     pattern = re.compile(r"polling conflict|Traceback|FATAL|PANIC|Connection refused|Invalid config")
-    lines = safe_read_lines(path, 400)
-    return sum(1 for line in lines if pattern.search(line))
+    lines = safe_read_lines(path, 401)
+    cutoff = (now or datetime.now(UTC)).timestamp() - ERROR_WINDOW_SEC
+    current_timestamp = None
+    count = 0
+    scan_start = max(0, len(lines) - 400)
+    for line in lines[:scan_start]:
+        current_timestamp = parse_log_timestamp(line) or current_timestamp
+    for line in lines[scan_start:]:
+        line_timestamp = parse_log_timestamp(line)
+        if line_timestamp is not None:
+            current_timestamp = line_timestamp
+        if not pattern.search(line):
+            continue
+        # Traceback headers normally have no timestamp. Bind them to the most
+        # recent timestamped log record instead of treating old tail content as
+        # a fresh request-path failure forever on low-traffic runtimes.
+        if current_timestamp is None or current_timestamp.timestamp() < cutoff:
+            continue
+        if (
+            lower_bound is not None
+            and current_timestamp < lower_bound.replace(microsecond=0)
+        ):
+            continue
+        count += 1
+    return count
+
+
+def collect_telegram_transport_health(path: Path, lower_bound: datetime | None = None,
+                                      now: datetime | None = None) -> dict:
+    """Keep recovered failures visible for ten minutes without triggering repair."""
+    result = {"status": "unknown", "failure_count": 0, "recovery_count": 0,
+              "slow_connect_count": 0, "window_sec": 600}
+    if not log_readable(path):
+        return result
+    now = now or datetime.now(UTC)
+    cutoff = now.timestamp() - result["window_sec"]
+    failure = re.compile(
+        r"sticky telegram path .* failed|dual-stack api\.telegram\.org path failed|"
+        r"ipv4 telegram api ip .* failed|telegram polling degraded|"
+        r"replaced wedged getupdates|network retry loop"
+    )
+    for line in safe_read_lines(path, RESPONSE_WINDOW_LINES):
+        stamp = parse_log_timestamp(line)
+        if stamp is None or not cutoff <= stamp.timestamp() <= now.timestamp():
+            continue
+        if lower_bound is not None and stamp < lower_bound.replace(microsecond=0):
+            continue
+        lower = line.lower()
+        if "telegram" not in lower:
+            continue
+        if failure.search(lower):
+            result["failure_count"] += 1
+        if "telegram api transport recovered via" in lower:
+            result["recovery_count"] += 1
+        delay = re.search(r"(?:reconnected|still not connected) after ([0-9.]+)s", lower)
+        if delay and float(delay.group(1)) >= 30:
+            result["slow_connect_count"] += 1
+    result["status"] = "warn" if (
+        result["failure_count"] >= 3 or result["recovery_count"] >= 3
+        or result["slow_connect_count"] > 0
+    ) else "pass"
+    return result
 
 
 def collect_response_metrics(path: Path, lower_bound: datetime | None = None) -> dict:
@@ -300,8 +390,26 @@ def close_wait_count(pid: int) -> int:
         return 0
 
 
+def telegram_transport_expected() -> bool:
+    """Return False only for an explicit ``platforms.telegram.enabled: false``.
+
+    Same rule as hermes-local-selfcheck.py: a runtime that disables Telegram
+    must not be judged by a stale Telegram row left in gateway_state.json.
+    """
+    try:
+        import yaml
+
+        config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        telegram = (config.get("platforms") or {}).get("telegram") or {}
+    except Exception:
+        return True
+    return not (isinstance(telegram, dict) and telegram.get("enabled") is False)
+
+
 def detect_scheduler() -> tuple[str, str, str]:
     """Return (scheduler_type, state, sub_state)."""
+    if IS_WINDOWS:
+        return "windows-task", "unknown", "unknown"
     if IS_MACOS:
         # launchd: check if the gateway plist is loaded
         result = subprocess.run(
@@ -330,6 +438,13 @@ def main() -> None:
     telegram_state = str(
         ((gateway_state.get("platforms") or {}).get("telegram") or {}).get("state") or "unknown"
     )
+    ingress = ((gateway_state.get("platforms") or {}).get("telegram") or {}).get("ingress") or {}
+    ingress_stalled = isinstance(ingress, dict) and ingress.get("stalled") is True
+    telegram_expected = telegram_transport_expected()
+    telegram_detail = telegram_state
+    if not telegram_expected:
+        telegram_detail = f"disabled (platforms.telegram.enabled=false; gateway_state row={telegram_state})"
+        telegram_state = "disabled"
     gateway_updated_at = str(gateway_state.get("updated_at") or "")
     gateway_started_at = str(gateway_state.get("started_at") or gateway_updated_at or "")
     pid = int(gateway_state.get("pid") or 0)
@@ -339,9 +454,14 @@ def main() -> None:
 
     gateway_updated = parse_iso(gateway_updated_at)
     gateway_started = parse_iso(gateway_started_at)
+    gateway_started_explicit = parse_iso(str(gateway_state.get("started_at") or ""))
     gateway_age = max(0, int((now - gateway_updated).total_seconds())) if gateway_updated else -1
 
-    recent_errors = count_recent_errors(GATEWAY_LOG_PATH)
+    recent_errors = count_recent_errors(
+        GATEWAY_LOG_PATH,
+        lower_bound=gateway_started_explicit,
+        now=now,
+    )
     close_wait = close_wait_count(pid)
 
     response_lower_bound = gateway_updated
@@ -350,12 +470,26 @@ def main() -> None:
     response_metrics = collect_response_metrics(GATEWAY_LOG_PATH, response_lower_bound)
     state_pressure = collect_state_pressure_metrics(AGENT_LOG_PATH, response_lower_bound)
     state_pressure_verdict = state_pressure_status(state_pressure)
+    transport_health = collect_telegram_transport_health(
+        GATEWAY_LOG_PATH, gateway_started_explicit, now,
+    ) if telegram_expected else {"status": "disabled", "failure_count": 0,
+                                "recovery_count": 0, "slow_connect_count": 0, "window_sec": 600}
     polling_conflicts = count_polling_conflicts(GATEWAY_LOG_PATH)
     restart_churn = safe_restart_churn(SAFE_RESTART_LOG_PATH)
     score = performance_score(response_metrics, recent_errors, polling_conflicts)
 
     # --- Build indicators (same schema as Enoch/Doc) ---
-    indicators = []
+    indicators = [{
+        "name": "telegram_transport",
+        "status": transport_health["status"],
+        "detail": (f"failures={transport_health['failure_count']} "
+                   f"recoveries={transport_health['recovery_count']} "
+                   f"slow_connections={transport_health['slow_connect_count']} window_sec=600"),
+    }]
+
+    indicators.append({"name": "telegram_ingress",
+                       "status": "fail" if telegram_expected and ingress_stalled else "pass" if ingress else "unknown",
+                       "detail": "dispatcher_stalled" if ingress_stalled else "native_dispatch_observation"})
 
     indicators.append({
         "name": "process_alive",
@@ -369,8 +503,8 @@ def main() -> None:
     })
     indicators.append({
         "name": "telegram_state",
-        "status": "pass" if telegram_state == "connected" else "fail",
-        "detail": telegram_state,
+        "status": "pass" if telegram_state == "connected" or not telegram_expected else "fail",
+        "detail": telegram_detail,
     })
     indicators.append({
         "name": "gateway_freshness",
@@ -438,6 +572,20 @@ def main() -> None:
         "detail": f"score={score}",
     })
 
+    # A missing collection is not evidence that the window was clean.
+    log_sources = {
+        "recent_errors": GATEWAY_LOG_PATH,
+        "response_latency": GATEWAY_LOG_PATH,
+        "polling_conflicts": GATEWAY_LOG_PATH,
+        "performance_score": GATEWAY_LOG_PATH,
+        "state_pressure": AGENT_LOG_PATH,
+    }
+    unreadable_logs = {path for path in log_sources.values() if not log_readable(path)}
+    for indicator in indicators:
+        if log_sources.get(indicator["name"]) in unreadable_logs:
+            indicator["status"] = "unknown"
+            indicator["detail"] = "log_unreadable"
+
     # --- Verdict ---
     if restart_churn["restart_loop"]:
         verdict = "degraded"
@@ -445,7 +593,7 @@ def main() -> None:
         verdict = "down"
     elif (
         gateway_state_value == "running"
-        and telegram_state == "connected"
+        and (telegram_state == "connected" or not telegram_expected)
         and response_status == "pass"
         and state_pressure_verdict == "pass"
         and score >= 85
@@ -453,6 +601,11 @@ def main() -> None:
         verdict = "healthy"
     else:
         verdict = "degraded"
+
+    if ((telegram_expected and ingress_stalled) or transport_health["status"] == "warn") and verdict != "down":
+        verdict = "degraded"
+    if unreadable_logs and verdict == "healthy":
+        verdict = "unknown"
 
     # --- Client identity ---
     # Derive from HERMES_HOME path
@@ -474,16 +627,17 @@ def main() -> None:
             "agent": agent_name,
             "role": "fleet_client",
             "host": platform.node(),
-            "platform": "macos" if IS_MACOS else "linux",
+            "platform": "macos" if IS_MACOS else ("windows" if IS_WINDOWS else "linux"),
         },
         "generated_at": iso_now(),
         "generated_epoch": int(now.timestamp()),
         "verdict": verdict,
         "summary": {
-            "performance_score": score,
+            "performance_score": None if GATEWAY_LOG_PATH in unreadable_logs else score,
             "unit_state": unit_state,
             "gateway_state": gateway_state_value,
             "telegram_state": telegram_state,
+            "telegram_expected": telegram_expected,
             "recent_error_count": recent_errors,
             "gateway_state_age_sec": gateway_age,
             "response_count": response_metrics["count"],
@@ -514,6 +668,7 @@ def main() -> None:
         },
         "gateway_state": gateway_state_value,
         "telegram_state": telegram_state,
+        "telegram_expected": telegram_expected,
         "gateway_state_updated_at": gateway_updated_at,
         "gateway_state_age_sec": gateway_age,
         "recent_error_count": recent_errors,
@@ -521,7 +676,7 @@ def main() -> None:
         "state_pressure": state_pressure,
         "polling_conflict_count": polling_conflicts,
         "restart_churn": restart_churn,
-        "performance_score": score,
+        "performance_score": None if GATEWAY_LOG_PATH in unreadable_logs else score,
         "indicators": indicators,
     }
     # Write output — prefer HERMES_HOME/state, fall back to a mirror location

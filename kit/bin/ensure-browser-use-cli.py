@@ -196,20 +196,28 @@ def _check_hash_deadline(
         raise IntegrityHashLimitError(code)
 
 
-def _file_identity(info, system: str | None = None) -> tuple[Any, ...]:
+def _file_identity(info, system: str | None = None, *, path_comparison: bool = False) -> tuple[Any, ...]:
     mode = getattr(info, "st_mode", None)
+    timestamp = getattr(info, "st_ctime_ns", None)
+    creation_time = None
     if (system or platform.system()) == "Windows" and isinstance(mode, int):
         # CPython's Windows stat adapters can report 0666 for an executable
         # through fstat() and 0777 for the same file through stat().  The file
         # type remains authoritative; DOS execute-bit synthesis is not identity.
         mode = stat.S_IFMT(mode)
+        birthtime = getattr(info, "st_birthtime_ns", None)
+        if type(birthtime) is int:
+            creation_time = birthtime
+            if path_comparison:
+                timestamp = creation_time
     return (
         getattr(info, "st_dev", None),
         getattr(info, "st_ino", None),
         mode,
         getattr(info, "st_size", None),
         getattr(info, "st_mtime_ns", None),
-        getattr(info, "st_ctime_ns", None),
+        timestamp,
+        creation_time,
     )
 
 
@@ -250,7 +258,7 @@ def _consume_regular_file(
         current = os.stat(path, follow_symlinks=False)
         if _file_identity(before) != _file_identity(after):
             raise OSError("integrity input changed while reading")
-        if _file_identity(before) != _file_identity(current):
+        if _file_identity(before, path_comparison=True) != _file_identity(current, path_comparison=True):
             raise OSError("integrity input was replaced while reading")
         return total_bytes
     finally:
@@ -691,6 +699,27 @@ def _receipt_matches_install(
         and re.fullmatch(r"[0-9a-f]{64}", str(receipt.get("cli_sha256") or ""))
         and _interpreter_receipt_is_valid(receipt.get("interpreter"))
     )
+
+
+def verified_command(hermes_home: Path, contract: dict[str, Any], *, system: str | None = None) -> list[str] | None:
+    """Resolve an installed v2 receipt without executing code or changing state."""
+    target = hermes_home / contract["installer"]["target"]
+    receipt = _read_receipt(hermes_home / "state" / RECEIPT_NAME)
+    if not _receipt_matches_install(receipt, contract=contract, target=target,
+                                    hermes_home=hermes_home, system=system):
+        return None
+    try:
+        python = _venv_python(target, system)
+        cli = _venv_cli(target, system)
+        if (system or platform.system()) != "Windows" and not all(os.access(p, os.X_OK) for p in (python, cli)):
+            return None
+        if (_environment_sha256(target) != receipt["environment_sha256"]
+                or _sha256(cli, max_bytes=CLI_MAX_BYTES) != receipt["cli_sha256"]
+                or _interpreter_integrity(target, system) != receipt["interpreter"]):
+            return None
+        return [str(cli)] if (system or platform.system()) == "Windows" else [str(python), "-I", "-B", str(cli)]
+    except (OSError, ValueError, RuntimeError):
+        return None
 
 
 def _lexists(path: Path) -> bool:

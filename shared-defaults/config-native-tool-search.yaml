@@ -1,4 +1,35 @@
-# Deterministic native schema deferral for enabled MCP servers.
+# Keep common tools direct; discover infrequent tools through the native catalog.
+# Explicit defer replaces the native list, so retain its pinned defaults below.
 tools:
   tool_search:
     enabled: "on"
+    defer:
+      - annotate_preview
+      - apply_layout
+      - browser_console
+      - browser_get_images
+      - browser_vault_enter_code
+      - browser_vault_fill
+      - browser_vault_list
+      - browser_vault_save_login
+      - browser_vault_unlock
+      - browser_vision
+      - close_terminal
+      - computer_use
+      - cronjob_manage
+      - desktop_preview
+      - desktop_project
+      - drive_preview
+      - focus_pane
+      - gui_tour
+      - image_generate
+      - process_manage
+      - read_terminal
+      - read_window_below
+      - session_search
+      - show_tip
+      - skill_manage
+      - skills_list
+      - text_to_speech
+      - todo_list
+      - vision_analyze

@@ -1,13 +1,20 @@
-# Memory and skill tools remain available to the model. Disable only the
-# automatic post-turn review forks: upstream shares the live session identity
-# with those forks, which can wedge the foreground Relay scope under overlap.
+# Restore native Hermes review cadence. The current runtime fences/cancels
+# background reviews before foreground admission; the July 31 disable workaround
+# is obsolete after the installed overlap and persistence-isolation tests pass.
 agent:
   # Use Hermes' native bounded continuation seam for every provider. The lean
   # runtime patch scopes evidence to the current turn and permits one retry.
   intent_ack_continuation: true
 
+# Keep native titles derived from the user's text. A cosmetic title must not
+# dispatch an auxiliary model or consume the main agent's fallback capacity.
+# The per-tenant exemption mechanism can retain an intentional model upgrade.
+auxiliary:
+  title_generation:
+    model_upgrade_enabled: false
+
 memory:
-  nudge_interval: 0
+  nudge_interval: 10
 
 skills:
-  creation_nudge_interval: 0
+  creation_nudge_interval: 10

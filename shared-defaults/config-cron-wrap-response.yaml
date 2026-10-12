@@ -1,0 +1,4 @@
+# Fleet cron delivery is the agent output only.
+# Applied by merge-shared-defaults on every overlay/patch pass.
+cron:
+  wrap_response: false

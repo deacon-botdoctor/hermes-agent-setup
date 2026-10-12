@@ -78,6 +78,7 @@ def _load_registry_without_yaml(registry_path: Path) -> List[Dict[str, Any]]:
         key, value = line.strip().split(":", 1)
         if key in {
             "module",
+            "companion_modules",
             "function",
             "target",
             "owner",

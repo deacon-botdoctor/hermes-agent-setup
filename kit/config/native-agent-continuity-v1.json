@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "capability": "native-agent-continuity",
+  "reconcile_interval_seconds": 900,
+  "session_sync_interval_seconds": 1800,
+  "gbrain_release": {
+    "version": "0.46.28.0",
+    "tag": "v0.46.28.0",
+    "commit": "67e7e8a9246b75b9aec359e17dc3e5746d62fc62",
+    "repo": "https://github.com/garrytan/gbrain.git",
+    "assets": {
+      "macos_arm64": {
+        "name": "gbrain-darwin-arm64",
+        "url": "https://github.com/garrytan/gbrain/releases/download/v0.46.28.0/gbrain-darwin-arm64",
+        "sha256": "d21554d526c30cfda0f1ef04b9958a8e5689a4296b47cd93b638db5565a3a094"
+      },
+      "linux_x64": {
+        "name": "gbrain-linux-x64",
+        "url": "https://github.com/garrytan/gbrain/releases/download/v0.46.28.0/gbrain-linux-x64",
+        "sha256": "4191f9336f954de46153a0c5d8fa403ea1bad42992c7ef59bebd86865ec56e3f"
+      }
+    }
+  },
+  "mcp_tools": [
+    "get_page",
+    "list_pages",
+    "search",
+    "query",
+    "get_stats",
+    "get_health",
+    "backlinks",
+    "graph",
+    "code_def",
+    "put_page",
+    "tag_page",
+    "untag_page",
+    "link_pages",
+    "unlink_pages",
+    "timeline_add"
+  ],
+  "providers": {
+    "codex": {
+      "platforms": ["linux", "macos", "windows"],
+      "mode": "bind_and_ingest",
+      "requires_existing_auth": true,
+      "native_canary": "mcp_put_get"
+    },
+    "claude-code": {
+      "platforms": ["linux", "macos", "windows"],
+      "mode": "detected_not_enrolled",
+      "reason": "adapter_not_yet_activated"
+    },
+    "claude-desktop": {
+      "platforms": ["macos", "windows"],
+      "mode": "detected_not_enrolled",
+      "reason": "cross_platform_adapter_not_yet_activated"
+    },
+    "gemini-cli": {
+      "platforms": ["linux", "macos", "windows"],
+      "mode": "detected_not_enrolled",
+      "reason": "binding_only_adapter_not_yet_activated"
+    }
+  },
+  "boundaries": {
+    "install_provider": false,
+    "change_credentials": false,
+    "enable_paid_service": false,
+    "ingest_unknown_transcript_format": false,
+    "persistent_gbrain_server": false,
+    "daily_card_limit": null,
+    "raw_transcripts_leave_host": false
+  }
+}

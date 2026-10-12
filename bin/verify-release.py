@@ -273,7 +273,10 @@ def verify_native_agent_continuity_contract(
             or not path.is_file()
             or path.is_symlink()
             or hashlib.sha256(path.read_bytes()).hexdigest() != digest
-            or format(path.stat().st_mode & 0o777, "04o") != mode
+            or (
+                _tracked_mode(item) != ("100755" if int(mode, 8) & 0o111 else "100644")
+                if os.name == "nt" else format(path.stat().st_mode & 0o777, "04o") != mode
+            )
         ):
             errors.append(f"release native_agent_continuity file drifted: {item}")
             continue

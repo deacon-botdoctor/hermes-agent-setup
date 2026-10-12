@@ -26,6 +26,7 @@ def _is_native_d363(root: Path) -> bool:
 
 
 _TELEGRAM_CHECKPOINT_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v2"
+_TELEGRAM_DIRECTION_CARD_MARKER = "HERMES_TELEGRAM_ORGANIC_CHECKPOINTS_v3"
 _KANBAN_DELEGATED_PROGRESS_MARKER = "HERMES_KANBAN_DELEGATED_PROGRESS_CHECKPOINTS_v1"
 _TELEGRAM_CHECKPOINT_HELPERS = {
     "_telegram_checkpoint_task_label",
@@ -181,6 +182,7 @@ def _probe_telegram_checkpoint_notifier(
         "resolve_display_setting": lambda *_args, **_kwargs: True,
         "self": SimpleNamespace(
             _adapter_for_source=lambda _source: adapter,
+            _delivery_adapter_for=lambda _source: adapter,
             _should_emit_long_running_notification=lambda *_args: True,
         ),
         "session_key": "probe-session",
@@ -258,13 +260,13 @@ def _function_signature(function: ast.FunctionDef) -> inspect.Signature:
 
 
 def _native_init_keyword_names(agent_dir: Path, tree: ast.Module, call: ast.Call) -> list[str] | None:
-    """Bind only d363's canonical locals-comprehension forwarder, never arbitrary **kwargs."""
-    import subprocess
+    """Bind Hermes' exact locals-comprehension forwarder, never arbitrary **kwargs.
 
-    head = subprocess.run(["git", "-C", str(agent_dir), "rev-parse", "HEAD"],
-                          capture_output=True, text=True, check=False)
-    if head.returncode or head.stdout.strip() != "d3630f853239e8c41ce7201e09fbdf39bcbc5431":
-        return None
+    The source shape is the evidence here: it forwards every declared ``__init__``
+    parameter except the deprecated local-only ``tool_delay``.  That remains safe
+    across the split-current source line, unlike accepting a generic ``**kwargs``
+    forwarder.  The d363 pin used this same shape; current Hermes retained it.
+    """
     owners = [method for cls in tree.body if isinstance(cls, ast.ClassDef) and cls.name == "AIAgent"
               for method in cls.body if isinstance(method, ast.FunctionDef) and method.name == "__init__"
               if call in list(ast.walk(method))]
@@ -343,7 +345,9 @@ def verify_agent_init_forwarder_contract(agent_dir: Path) -> None:
 
 def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
     """Reject assembled runtimes that weaken custom Telegram checkpoints."""
-    native = _is_native_d363(agent_dir)
+    # Current Hermes keeps this semantic owner in the split ``run_turn``
+    # module.  The d363-native checks apply unchanged to that layout.
+    native = _is_native_d363(agent_dir) or (agent_dir / "gateway" / "run_turn.py").is_file()
     gateway_path = agent_dir / "gateway" / ("run_turn.py" if native else "run.py")
     if not gateway_path.exists():
         return
@@ -356,6 +360,7 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
 
     if _TELEGRAM_CHECKPOINT_MARKER not in source:
         raise AssembledRuntimeContractError("assembled gateway is missing the Telegram checkpoint marker")
+    direction_card_v3 = _TELEGRAM_DIRECTION_CARD_MARKER in source
 
     wiring_source = source
     if native:
@@ -372,7 +377,22 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         "scheduled checkpoint deadline": ("_notify_deadline = _notify_start + (_notify_tick * _NOTIFY_INTERVAL)"),
         "same-message Telegram failure boundary": ("_heartbeat_msg_id and source.platform == Platform.TELEGRAM"),
     }
-    if native:
+    if native and direction_card_v3:
+        required_wiring.update({
+            # The split runner preserves these pre-v3 capture boundaries. The
+            # v3 notifier replaces the fixed tick, so bind it to its event /
+            # fallback equivalent instead of the removed deadline expression.
+            "interim-message privacy boundary": "if not want_interim_messages: return",
+            "Telegram commentary callback": "want_interim_messages or ctx.source.platform == Platform.TELEGRAM",
+            "scheduled checkpoint deadline": "_next_fallback = _notify_start + _notify_interval",
+            "commentary wake-up event": "checkpoint_event.set()",
+            "event-driven checkpoint wait": "_checkpoint_event.is_set()",
+            "fallback checkpoint deadline": "_next_fallback = _notify_start + _notify_interval",
+            "Telegram edit floor": "_edit_floor = 60.0",
+            "Telegram fallback cadence floor": "_notify_interval = max(300.0, _configured_interval)",
+            "same-message Telegram failure boundary": "not getattr(_notify_res, \"success\", False)",
+        })
+    elif native:
         required_wiring.update({
             "interim-message privacy boundary": "if not want_interim_messages: return",
             "Telegram commentary callback": "want_interim_messages or ctx.source.platform == Platform.TELEGRAM",
@@ -384,6 +404,22 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
         raise AssembledRuntimeContractError(
             "assembled Telegram checkpoint wiring is incomplete: " + ", ".join(missing_wiring)
         )
+
+    if direction_card_v3:
+        helper_names = {
+            node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        }
+        required_direction_helpers = {
+            "_telegram_checkpoint_safe_lines_v3",
+            "_telegram_checkpoint_phase_lines_v3",
+        }
+        missing_helpers = sorted(required_direction_helpers - helper_names)
+        if missing_helpers:
+            raise AssembledRuntimeContractError(
+                "assembled Telegram direction-card helpers are incomplete: "
+                + ", ".join(missing_helpers)
+            )
+        return
 
     notifier_nodes = [
         node
@@ -525,7 +561,9 @@ def verify_telegram_checkpoint_contract(agent_dir: Path) -> None:
 
 def verify_restart_recovery_contract(agent_dir: Path) -> None:
     """Reject client-visible or replaying restart recovery in assembled Golden."""
-    if _is_native_d363(agent_dir):
+    # The current upstream retains the split startup owner and the same
+    # fail-closed no-replay scheduler as d363.
+    if _is_native_d363(agent_dir) or (agent_dir / "gateway" / "run_startup.py").is_file():
         path = agent_dir / "gateway/run_startup.py"
         tree = ast.parse(path.read_text())
         schedulers = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_schedule_resume_pending_sessions"]
@@ -621,7 +659,9 @@ def verify_native_session_liveness_contract(agent_dir: Path) -> None:
             gateway_path.read_text(encoding="utf-8", errors="strict"),
             filename=str(gateway_path),
         )
-        if _is_native_d363(agent_dir):
+        # The current upstream keeps this lifecycle owner split across the
+        # same phase modules as d363; assemble those owners before probing.
+        if _is_native_d363(agent_dir) or (agent_dir / "gateway" / "run_inbound.py").is_file():
             owner = _runtime_class(gateway_tree, "GatewayRunner", gateway_path)
             for relative in ("gateway/run_agent_cache.py", "gateway/run_inbound.py"):
                 part = ast.parse((agent_dir / relative).read_text())
@@ -715,12 +755,15 @@ def _probe_adapter_stale_lock_recovery_inner(path: Path, tree: ast.Module) -> No
         for name in (
             "_session_task_is_stale",
             "_heal_stale_session_lock",
+            "_drop_unresolved",
             "handle_message",
         )
     ]
     if any(isinstance(n, ast.FunctionDef) and n.name == "_event_session_key" for n in class_node.body):
         methods.extend(_runtime_method(class_node, name, path) for name in
                        ("_preflight_startup_gate", "_event_session_key", "_handle_message_while_active"))
+    if any(isinstance(n, ast.FunctionDef) and n.name == "_source_session_key" for n in class_node.body):
+        methods.append(_runtime_method(class_node, "_source_session_key", path))
     namespace = {
         "asyncio": asyncio,
         "logger": SimpleNamespace(
@@ -736,9 +779,12 @@ def _probe_adapter_stale_lock_recovery_inner(path: Path, tree: ast.Module) -> No
     adapter = object.__new__(probe_class)
     adapter.name = "contract-probe"
     adapter.config = SimpleNamespace(extra={})
+    # Match the pinned initializer: stale-lock healing clears drain back-off state.
+    adapter._requeue_counts = {}
     adapter._message_handler = object()
     adapter._topic_recovery_fn = None
     adapter._session_key_profile = lambda _source: None
+    adapter._canonicalize = lambda source: source
     discarded = []
     started = []
     adapter._discard_text_debounce = discarded.append
@@ -899,12 +945,28 @@ def _probe_gateway_stale_state_eviction(path: Path, tree: ast.Module) -> None:
         "suppress": suppress,
         "logger": SimpleNamespace(warning=lambda *_args, **_kwargs: None, debug=lambda *_args, **_kwargs: None),
     }
-    probe_class = _compile_probe_class(
-        path,
-        "GatewayRunner",
-        [release, probe, *[m for m in class_node.body if isinstance(m, ast.FunctionDef) and m.name == "_hm_evict_running_agent"]],
-        namespace,
-    )
+    dependency_names = {"_hm_evict_running_agent", "_interrupt_running_turn", "_drop_turn_slot"}
+    dependencies = [copy.deepcopy(m) for m in class_node.body
+                    if isinstance(m, ast.FunctionDef) and m.name in dependency_names]
+    # Resolve only the probe's explicit gateway.run dependencies. Importing the
+    # whole gateway would bind runtime services during a source-only rehearsal.
+    run_constants = {node.targets[0].id: node.value.value for node in tree.body
+                     if isinstance(node, ast.Assign) and len(node.targets) == 1
+                     and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Constant)}
+    interrupts = []
+    namespace.update({"_INTERRUPT_REASON_EVICTED": run_constants.get("_INTERRUPT_REASON_EVICTED"),
+                      "_INTERRUPT_TOOL_REASON_EVICTED": run_constants.get("_INTERRUPT_TOOL_REASON_EVICTED"),
+                      "request_hard_interrupt": lambda agent, reason, **kwargs: interrupts.append((agent, reason)),
+                      "_reap_gateway_turn_processes": lambda *args, **kwargs: None,
+                      "_log_suppressed": lambda *args, **kwargs: suppress(Exception),
+                      "logging": SimpleNamespace(WARNING=30)})
+    for method in dependencies:
+        imports = [n for n in method.body if isinstance(n, ast.ImportFrom) and n.module == "gateway.run"]
+        for node in imports:
+            if any(alias.asname or alias.name not in namespace for alias in node.names):
+                raise AssembledRuntimeContractError("stale eviction probe dependency drift")
+            method.body.remove(node)
+    probe_class = _compile_probe_class(path, "GatewayRunner", [release, probe, *dependencies], namespace)
 
     class Lease:
         released = False
@@ -942,10 +1004,15 @@ def _probe_gateway_stale_state_eviction(path: Path, tree: ast.Module) -> None:
     runner._is_session_run_current = lambda _key, _generation: True
     runner._invalidate_session_run_generation = lambda key, *, reason: invalidations.append((key, reason))
     runner._persist_active_agents = lambda: persisted.append(True)
+    evicted = []
+    runner._evict_cached_agent = evicted.append
     try:
         runner._probe_stale_eviction("probe-session")
     except Exception as exc:
         raise AssembledRuntimeContractError(f"gateway stale-state eviction probe failed: {exc}") from exc
+    if any(m.name == "_interrupt_running_turn" for m in dependencies):
+        if len(interrupts) != 1 or evicted != ["probe-session"] or not namespace["_INTERRUPT_REASON_EVICTED"]:
+            raise AssembledRuntimeContractError("native stale eviction did not interrupt and evict the cached agent")
     if (
         invalidations != [("probe-session", "stale_running_agent_eviction")]
         or not turn.cleared
@@ -1029,7 +1096,12 @@ def verify_kanban_delegated_progress_contract(agent_dir: Path) -> None:
         raise AssembledRuntimeContractError(
             "delegated Kanban progress DB and watcher must be assembled together"
         )
-    native = _is_native_d363(agent_dir)
+    # Current Hermes retained the same split Kanban ownership introduced in
+    # d363, even though it has since advanced beyond that exact commit.
+    native = _is_native_d363(agent_dir) or (
+        (agent_dir / "gateway" / "kanban_watchers_notifier.py").is_file()
+        and (agent_dir / "hermes_cli" / "kanban_db_notify.py").is_file()
+    )
     watcher = watcher_path.read_text(encoding="utf-8", errors="strict")
     database = db_path.read_text(encoding="utf-8", errors="strict")
     if native:
@@ -1152,6 +1224,18 @@ def verify_kanban_delegated_progress_contract(agent_dir: Path) -> None:
             )
 
 
+def verify_hybrid_retrieval_contract(agent_dir: Path) -> None:
+    """Reject an incremental assembly that retains automatic tenant retrieval."""
+    turn_path = agent_dir / "agent" / "turn_context.py"
+    source = turn_path.read_text(encoding="utf-8") if turn_path.exists() else ""
+    if (agent_dir / "agent" / "gbrain_context.py").exists() or any(
+        marker in source for marker in ("HERMES_GBRAIN_CONTEXT_v1", "agent.gbrain_context")
+    ):
+        raise AssembledRuntimeContractError(
+            "retired automatic GBrain retrieval remains; rebuild from clean pinned upstream"
+        )
+
+
 def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     """Verify incident-backed cross-file AIAgent contracts.
 
@@ -1159,6 +1243,7 @@ def verify_conversation_loop_agent_contract(agent_dir: Path) -> None:
     signature and optional concrete-agent methods used by the conversation
     loop.
     """
+    verify_hybrid_retrieval_contract(agent_dir)
     verify_agent_init_forwarder_contract(agent_dir)
     verify_telegram_checkpoint_contract(agent_dir)
     verify_kanban_delegated_progress_contract(agent_dir)

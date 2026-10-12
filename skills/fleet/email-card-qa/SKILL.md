@@ -5,7 +5,7 @@ description: "Use when drafting or sending email. Lint the card/body first."
 
 # Email card QA
 
-Fail-closed lint for email drafts, chat cards, and send bodies. A writing reminder is not enough.
+Repair email-card presentation without removing the answer. Validate send bodies before invoking a send or draft tool.
 
 ## When to Use
 
@@ -16,7 +16,7 @@ Fail-closed lint for email drafts, chat cards, and send bodies. A writing remind
 
 ## Hard Rule
 
-Do not show or send until this exits 0:
+Use the card linter to find presentation defects. Fix them without replacing substantive content with a warning:
 
 ```bash
 python3 ~/.hermes/plugins/telegram-email-card-qa/telegram_email_card_lint.py --text '...exact card...'
@@ -24,12 +24,11 @@ python3 ~/.hermes/plugins/telegram-email-card-qa/telegram_email_card_lint.py --t
 python3 ~/.hermes/plugins/telegram-email-card-qa/telegram_email_card_lint.py --mime --text '...body...'
 ```
 
-Non-zero = fix, re-run, then deliver. Never ship a failing card with a caveat.
+Before sending or creating a draft, fix MIME body defects and rerun the MIME check until it exits 0. Do not invent missing recipients, senders, subjects, or body text. Ask for missing information when the requested action requires it.
 
 If plugin `telegram-email-card-qa` is enabled, Gmail send/draft tools and
 terminal `gog send`/`gmail send` are blocked when the MIME body fails.
-Assembled chat cards with a To/From/Subject header block are repaired or
-held. Streamed Telegram text can still appear before that repair.
+Assembled chat cards receive safe spacing and address-format repairs. A remaining presentation defect must not discard the answer or imply that an email was sent. Streamed Telegram text can appear before that repair.
 
 ## Card format
 
@@ -46,6 +45,8 @@ Hello,
 - Single newlines between labeled fields. No blank line between To/Cc/From/Subject.
 - One blank line between header block and body, and between paragraphs.
 - No trailing spaces. No `<email@domain>`. No tables. No `###`.
+- From is required on every To/Subject send card. Missing From cannot be auto-fixed.
+- Reply-to-thread is a send. The send tool must be the mailbox named on From.
 
 ## Adversarial pass
 

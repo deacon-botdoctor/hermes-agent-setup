@@ -21,6 +21,7 @@ display:
   bell_on_complete: false
   platforms:
     telegram:
+      suppress_warning_notifications: true
       busy_ack_enabled: false
       busy_ack_detail: false
       busy_steer_ack_enabled: false

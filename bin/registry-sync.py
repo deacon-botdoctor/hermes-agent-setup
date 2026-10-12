@@ -48,6 +48,7 @@ import datetime
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -410,8 +411,71 @@ def _auto_mcp_capabilities(
     return cats, caps
 
 
+
+def _native_skill_capabilities() -> tuple[list[dict], str]:
+    """Ask the bound runtime's native scanner; no duplicate filesystem parser.
+
+    A missing native scanner is explicit degraded discovery, not an empty
+    successful inventory. Never borrow a different tenant's runtime or PATH CLI.
+    HERMES_NATIVE_SKILL_HOME selects a contained profile without changing the
+    registry's account-wide configuration scope.
+    """
+    try:
+        home = Path(os.environ.get("HERMES_NATIVE_SKILL_HOME", HERMES_HOME)).resolve()
+        home.relative_to(HERMES_HOME.resolve())
+        binding = json.loads((home / "state/runtime-binding.json").read_text())
+        if Path(binding["hermes_home"]).resolve() != home:
+            return [], "tenant_mismatch"
+        runtime = Path(binding["runtime_root"]).resolve()
+        # Fleet candidates and legacy roots are both contained by the owning home.
+        runtime.relative_to(home)
+        python = Path(binding["runtime_python"])
+        python.absolute().relative_to(runtime)
+        helper = runtime / "tools/skills_tool.py"
+        if not helper.is_file():
+            return [], "scanner_missing"
+        env = os.environ.copy()
+        env["HERMES_HOME"] = str(home)
+        env["HERMES_CONFIG"] = str(CONFIG)
+        # Use the bound runtime's scanner directly. Registry synchronization is
+        # on demand and must not depend on the retired per-turn retrieval hook.
+        scan = ("import sys,json; sys.path.insert(0,sys.argv[1]); "
+                "from tools.skills_tool import _find_all_skills; "
+                "print(json.dumps({'skills': _find_all_skills()}))")
+        result = subprocess.run([str(python), "-I", "-c", scan, str(runtime)],
+                                capture_output=True, text=True, env=env,
+                                timeout=8, check=False, cwd=home)
+        if result.returncode:
+            return [], "scan_failed"
+        data = json.loads(result.stdout)
+        entries = data["skills"]
+        if not isinstance(entries, list):
+            return [], "scan_invalid"
+        caps = []
+        for entry in entries:
+            name = entry["name"]
+            if not isinstance(name, str) or not name:
+                continue
+            desc = str(entry.get("description") or "")
+            caps.append({
+                "id": "skill." + _slug(name), "kind": "skill",
+                "category": "runtime-skills", "label": name, "summary": desc,
+                "invocation": {"skill": name},
+                "preferred_for": [name.replace("-", " "), desc],
+                "source": "autogen:native-skills", "installed": True,
+            })
+        return caps, "scanned"
+    except subprocess.TimeoutExpired:
+        return [], "scan_timeout"
+    except (OSError, ValueError, KeyError, TypeError):
+        return [], "binding_unavailable"
+
+
 def _merge(canonical: dict, extras: dict | None) -> dict:
     extras = extras or {"capabilities": [], "categories": []}
+    native_skills, skill_status = _native_skill_capabilities()
+    if skill_status != "scanned":
+        _log("WARN", "native skill inventory degraded: " + skill_status)
     policy_state = _mcp_policy_state_across_configs()
     if policy_state is not None:
         allowed_servers, selected_cold_servers = policy_state
@@ -462,6 +526,14 @@ def _merge(canonical: dict, extras: dict | None) -> dict:
     for c in extras_caps:
         cap_by_id[c["id"]] = c
 
+    if skill_status == "scanned":
+        # Replace previous generated entries, including removed/disabled skills.
+        cap_by_id = {key: cap for key, cap in cap_by_id.items()
+                     if cap.get("source") != "autogen:native-skills"}
+        for cap in native_skills:
+            cap_by_id[cap["id"]] = cap
+        cat_by_id["runtime-skills"] = {"id": "runtime-skills", "label": "Installed runtime skills"}
+
     schema_version = max(
         canonical.get("schema_version", 1),
         extras.get("schema_version", 1),
@@ -474,6 +546,7 @@ def _merge(canonical: dict, extras: dict | None) -> dict:
         "categories": list(cat_by_id.values()),
         "capabilities": list(cap_by_id.values()),
         "_sync_meta": {
+            "native_skill_inventory": {"status": skill_status, "count": len(native_skills)},
             "canonical_caps": len(canonical.get("capabilities") or []),
             "extras_caps": len(extras_caps),
             "extras_overrides": overrides,

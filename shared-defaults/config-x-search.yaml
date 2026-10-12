@@ -1,0 +1,3 @@
+# Default only: preserve an explicit tenant model and manifest exemptions.
+x_search:
+  model: grok-4.6

@@ -144,7 +144,7 @@ def initialize_staging_config(home: Path, config_path: Path) -> None:
 
 def runtime_python(runtime: Path, explicit: Path | None) -> Path:
     if explicit:
-        candidate = explicit.expanduser().resolve()
+        candidate = _lexical_path(explicit)
         if candidate.is_file():
             return candidate
         raise ValueError(f"runtime Python does not exist: {candidate}")
@@ -196,6 +196,26 @@ def ensure_cua_driver(
         raise RuntimeError(f"pinned Cua Driver installation failed: {detail}")
     if receipt.get("after", {}).get("version") != RELEASE["cua_driver"]["version"]:
         raise RuntimeError("pinned Cua Driver version was not verified")
+    return receipt
+
+
+def ensure_agent_browser(home: Path) -> dict[str, Any]:
+    contract = ROOT / "kit/config/agent-browser-release-v1.json"
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "kit/bin/ensure-agent-browser.py"),
+         "--hermes-home", str(home), "--contract", str(contract)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=False, timeout=120,
+    )
+    try:
+        receipt = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError("Native browser installer returned invalid JSON") from None
+    expected = json.loads(contract.read_text(encoding="utf-8"))["version"]
+    if (proc.returncode != 0 or receipt.get("ok") is not True
+            or receipt.get("status") not in {"installed", "idempotent"}
+            or receipt.get("version") != expected):
+        raise RuntimeError("Pinned native browser installation failed")
     return receipt
 
 
@@ -636,6 +656,8 @@ def main() -> int:
         require_ready=args.require_computer_use_ready,
     )
 
+    browser_receipt = ensure_agent_browser(home)
+
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     backup = home / "state" / "public-setup-backups" / stamp
     if backup.exists():
@@ -701,6 +723,7 @@ def main() -> int:
         "service_switched": False,
         "gateway_restarted": False,
         "cua_driver": driver_receipt,
+        "agent_browser": browser_receipt,
         "rollback": str(backup),
     }
     atomic_bytes(

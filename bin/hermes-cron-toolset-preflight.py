@@ -41,6 +41,7 @@ for job in payload.get("jobs") or []:
         registry.get_registered_toolset_names(),
         registry.get_registered_toolset_aliases(),
         configured_mcp,
+        config=config,
     )
     rows.append({
         "job_id": str(job.get("id") or ""),

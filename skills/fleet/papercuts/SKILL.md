@@ -32,3 +32,14 @@ python3 "${HERMES_HOME:-$HOME/.hermes}/bin/papercut_inbox.py"
 Do not manually acknowledge events during normal work. The event-driven reflection harness triggers when the inbox is non-empty, includes the pending events in the agent's private reflection, and acknowledges them only after a valid reflection report is written. Repeated patterns should become a concrete repair, a proposal-first skill candidate, or an escalation—not a vague promise to “watch it.”
 
 Remediation remains bounded: `skill_candidate` enters the inert proposal/draft lane, while `repair` and `escalate` create a local repair envelope for operator-control collection. Never execute model-authored shell text. Credentials, restarts, client/fleet mutation, destructive actions, and other hard stops still require their normal approval.
+
+## Plugin catalog
+
+For a `tool` or `dependency` papercut, or a repeated tool gap, first use an
+installed, authorized capability. If the gap remains, run
+`hermes plugins search "<gap keywords>" --json`. Propose a catalog plugin only
+when it uniquely closes the observed gap and does not duplicate an installed
+MCP or skill. Skip a plugin that needs spending, PII transfer, or new OAuth
+unless that surface is already authorized. Use the existing `escalate`
+disposition with the plugin name and reason. Never install, enable, or grant
+tool overrides from reflection. Reuse the existing reflection cadence.

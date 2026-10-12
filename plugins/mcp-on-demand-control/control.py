@@ -114,13 +114,13 @@ def _load_config() -> dict[str, Any]:
 
 
 def _get_status() -> list[dict[str, Any]]:
-    from tools.mcp_tool import get_mcp_status
+    from tools.mcp_tool_discovery import get_mcp_status
 
     return list(get_mcp_status() or [])
 
 
 def _register_server(server_name: str, server_config: dict[str, Any]) -> None:
-    from tools.mcp_tool import register_mcp_servers
+    from tools.mcp_tool_discovery import register_mcp_servers
 
     register_mcp_servers({server_name: server_config})
 

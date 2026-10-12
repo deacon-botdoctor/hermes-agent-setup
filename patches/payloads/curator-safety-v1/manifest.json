@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
+  "patch_sha256": "d2773786ad21885114f92c13899cb5a3ea54798c77a4f32b20bf661a63934849",
+  "files": {
+    "agent/curator.py": {
+      "before": {
+        "sha256": "b3808d3d818a16c9abd3f4a997e14ddb9da6e9c5542e2d732faf56dbdf599c16",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "864515586ec15e1fba86644e0193a67a55f65f8b8cb13686b37c7cc9968e4752",
+        "mode": 420
+      }
+    },
+    "tools/skill_manager_tool.py": {
+      "before": {
+        "sha256": "bc6cb8f949b74185071aae682d242748fe2c029e906203d61d225d915fefa799",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "c8e1975358d679c7612884f5bde65a5484e447543e8830aaaea39b9d4046278b",
+        "mode": 420
+      }
+    },
+    "tools/skill_provenance.py": {
+      "before": {
+        "sha256": "5c492a925cdde61c3257eb5db76568822d26be3d9a2c40d364a9997a3a7cb576",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "9f147ea1c65843ea1d32b9b0f9dc62a1ec41d3d8ec62043e57f80cb17fd0a924",
+        "mode": 420
+      }
+    },
+    "tests/agent/test_curator.py": {
+      "before": {
+        "sha256": "7442ce28162e7daccb56676bfc5c8a55889384ab4bae9877132da01aa64518f0",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "1c72e95acc20eea4517edef693608dd7184665318cdcb5f2e268cbf816d90ff2",
+        "mode": 420
+      }
+    },
+    "tests/tools/test_skill_manager_tool.py": {
+      "before": {
+        "sha256": "f888b1fb762abc3a03165481c77e27c254767913ebd17e89a84f23a7eacd31c4",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "5f0f0f365ddf34e36bcfe4799a3facde2b1b3530916ba880af98bcb91dd5728a",
+        "mode": 420
+      }
+    },
+    "website/docs/user-guide/features/curator.md": {
+      "before": {
+        "sha256": "12d9a9e5fd681069e57183b73adf613f405115437ba8df65996979564866ebf3",
+        "mode": 420
+      },
+      "after": {
+        "sha256": "1fd000ef2bfa5df0a346a276d9d7834f95b96bf9ce9d89c7474ad5e4aea6c047",
+        "mode": 420
+      }
+    }
+  },
+  "upstream_repair_commit": "03b1c797f23b4ca58633a7476f16aef7d1d48d86",
+  "native_backport_commit": "5789221977aa4b94e620a9f727d7df9c121a4211",
+  "quota_contributor": "liuhao1024",
+  "quota_upstream_pr": "https://github.com/NousResearch/hermes-agent/pull/126731"
+}
