@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "upstream_commit": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-  "patch_sha256": "1e25168605263d436b860b737b02d5e359d42b51491e76e8afd7051495db6f74",
+  "patch_sha256": "28376b8c692b7b22532274004a965f070c39a131288231b4f99824a1fee5a2c6",
   "baseline_tree": "c5401b54705b406e4fe14b16bde6c5825961440e",
   "files": {
     "agent/agent_init.py": {
@@ -1907,7 +1907,7 @@
         "git_mode": "100644"
       },
       "after": {
-        "sha256": "d7e82b8e8bf8a2cb6805e6e821580a18d8690bbfcecf362410a31dfe08c97c4b",
+        "sha256": "ec62f3095abfa8d7fa9b480882c27246562ed0be8bb4329ebe90dcb09527ade6",
         "mode": 420,
         "git_mode": "100644"
       }

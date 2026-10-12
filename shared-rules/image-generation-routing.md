@@ -1,5 +1,23 @@
 # Image Generation Routing
 
+## Required tool choice
+
+Pillow/PIL is banned for agent-authored image work. Do not import, install,
+invoke, or delegate it for generation, editing, drawing, compositing, resizing,
+cropping, captions, or export. This rule overrides older skills and examples
+that recommend Pillow. Do not use another local drawing library to evade the
+ban by painting over artwork or rebuilding a requested visual edit in code.
+
+Use native Codex image generation first for images and artwork. Use native
+Codex reference editing for changes to an existing image, including small
+corrections. Pass the source image and describe the requested change and the
+details that must stay. A small edit is not permission to draw over the image.
+
+If native generation fails, report the actual failure and use the approved
+image-provider escalation route. Never fall back to Pillow/PIL. Existing
+application dependencies are not authorization for agent-authored Pillow work;
+do not uninstall libraries required by the runtime.
+
 ## Classify the operation before choosing a tool
 
 Image work has four different lanes. Do not collapse them into "make the file
@@ -7,7 +25,9 @@ bigger."
 
 1. **Geometry-only raster work** — crop, pad, rotate, format conversion,
    compositing, deterministic captions, or exporting an already adequate
-   source. Pillow, ImageMagick, canvas, and deterministic renderers are valid.
+   source. Use an existing non-Pillow export or layout tool only for the
+   explicitly requested mechanical operation. This lane does not permit
+   drawing, repainting, or replacing details in an illustration.
    They do not create source detail and must not be described as restoration,
    sharpening, upscaling, high definition, or higher resolution.
 2. **Restoration or detail recovery** — requests such as "higher resolution,"
@@ -81,8 +101,8 @@ silent replacement for an available generative image/editing tool.
 
 For publishable assets, no image model is the final authority on exact text or facts:
 
-1. Generate or edit the visual with native Codex high unless that attempt is unavailable or fails QA.
-2. Rebuild exact words, dates, addresses, URLs, logos, and captions as deterministic/editable layers when precision matters.
+1. Generate or edit the visual with native Codex first unless that attempt is unavailable or fails QA. Report requested and returned quality separately when they differ.
+2. Use a dedicated layout or vector editor for exact words, dates, addresses, URLs, logos, and captions when precision matters. Do not use Pillow/PIL.
 3. Run OCR or visual QA before calling the asset final.
 4. Escalate to a paid or specialized lane when QA fails or final polish requires it.
 5. Deliver lossless masters through the platform's document/file route. On

@@ -202,6 +202,51 @@ patches:
     reason: Windows Session 0 cannot start an interactive private daemon; service gateways must retain their configured desktop bridge
     upstream_issue: none
     retirement_condition: remove when native CUA preserves configured mode in Windows service sessions
+  - name: cua_linux_ax_walk_v1
+    module: modules/cua_linux_ax_walk_v1.py
+    function: patch_cua_linux_ax_walk_v1
+    target: hermes_cli/config_defaults.py + tools/computer_use/cua_backend.py + tools/computer_use/cua_backend_capture.py
+    owner: engineering-lead
+    idempotency: HERMES_CUA_LINUX_AX_WALK_v1
+    test: python3 -m compileall -q patches/modules/cua_linux_ax_walk_v1.py
+    rollback: rebind the prior immutable candidate
+    client_impact: restart_required
+    tags: [computer-use, cua, linux, accessibility]
+    status: extracted
+    route: upstream-pr
+    reason: Linux AT-SPI scans earlier application windows before the target; a 200-node default hides file chooser controls
+    upstream_issue: none
+    retirement_condition: remove when native Linux capture bounds the requested window without dropping its controls
+  - name: cua_token_only_actions_v1
+    module: modules/cua_token_only_actions_v1.py
+    function: patch_cua_token_only_actions_v1
+    target: tools/computer_use/cua_backend.py
+    owner: engineering-lead
+    idempotency: HERMES_CUA_TOKEN_ONLY_ACTIONS_v1
+    test: python3 -m compileall -q patches/modules/cua_token_only_actions_v1.py
+    rollback: rebind the prior immutable candidate
+    client_impact: restart_required
+    tags: [computer-use, cua, accessibility]
+    status: extracted
+    route: upstream-pr
+    reason: current drivers accept snapshot tokens but reject the removed element_index argument
+    upstream_issue: none
+    retirement_condition: remove when native CUA omits arguments absent from the live action schema
+  - name: cua_macos_app_identity_v1
+    module: modules/cua_macos_app_identity_v1.py
+    function: patch_cua_macos_app_identity_v1
+    target: tools/computer_use/cua_backend_daemon.py
+    owner: engineering-lead
+    idempotency: HERMES_CUA_MACOS_APP_IDENTITY_v1
+    test: python3 -m compileall -q patches/modules/cua_macos_app_identity_v1.py
+    rollback: rebind the prior immutable candidate
+    client_impact: restart_required
+    tags: [computer-use, cua, macos]
+    status: extracted
+    route: upstream-pr
+    reason: LaunchServices supplies launchd as parent and embedded attribution loses the signed app identity
+    upstream_issue: none
+    retirement_condition: remove when native macOS CUA launch retains signed app identity
   - name: cua_gateway_shutdown_v1
     module: modules/cua_gateway_shutdown_v1.py
     function: patch_cua_gateway_shutdown_v1

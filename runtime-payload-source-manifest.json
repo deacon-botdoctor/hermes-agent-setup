@@ -3,7 +3,7 @@
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "0ac01101ffc9340cae16989fe451dd28fcf1698d032a9a2107256a34bcd9ec0c",
+      "digest": "8b88f490f73c9104a066fb7325d40eb77dafc2c3ee0ae7dc0a6f35242a6af280",
       "excluded_paths": [],
       "file_count": 52,
       "files": [
@@ -302,7 +302,7 @@
           "type": "blob"
         },
         {
-          "blob": "b3c4583791a68c3b31771bece63631a77b5f89c5",
+          "blob": "351005e852296932b76e8016047164c0e11357bd",
           "mode": "100644",
           "path": "kit/config/cua-driver-release-v1.json",
           "type": "blob"
@@ -379,9 +379,9 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "ce595eb56476d062f23bc270794c0c61f96dfff0cace93e3765d8401554ea6f1",
+      "digest": "7c9738d8c51c799b36b71d30f17f953659cc369d5815cbfc7854f7a6e63c0e1f",
       "excluded_paths": [],
-      "file_count": 769,
+      "file_count": 772,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -888,9 +888,27 @@
           "type": "blob"
         },
         {
+          "blob": "17cb8ead0f434dd280bad5566ff812221ce56c7d",
+          "mode": "100644",
+          "path": "patches/modules/cua_linux_ax_walk_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "a8f74770466ba7b653c088ed936b004169ab7683",
+          "mode": "100644",
+          "path": "patches/modules/cua_macos_app_identity_v1.py",
+          "type": "blob"
+        },
+        {
           "blob": "8779e5f01d0d5aa63bbb0c3d133d7cfdefab7db2",
           "mode": "100644",
           "path": "patches/modules/cua_service_session_mode_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "cfe04f8133a4a0970b27354c42deb69ea0596e21",
+          "mode": "100644",
+          "path": "patches/modules/cua_token_only_actions_v1.py",
           "type": "blob"
         },
         {
@@ -1254,13 +1272,13 @@
           "type": "blob"
         },
         {
-          "blob": "c6774054fb9568965ff1f7bd86d200c364c5b74a",
+          "blob": "ba5e5b68d830fd22fc3f9ebfd5dcf1ab2486a9ce",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
           "type": "blob"
         },
         {
-          "blob": "f6aee74fdf2c45dc99eeb6b7f0c209159e4b5e88",
+          "blob": "db23e370e7c7f163a977154fdbb3cb373d667c96",
           "mode": "100644",
           "path": "patches/payloads/golden-rebuild-20261004/native.patch",
           "type": "blob"
@@ -1272,7 +1290,7 @@
           "type": "blob"
         },
         {
-          "blob": "16739b51b8b4e53b5737be2decde5cd6f4a9c924",
+          "blob": "342dcfbedc7e6e2923fb3853dd079a1abd40f19f",
           "mode": "100644",
           "path": "patches/payloads/human-auth-handoff-computer-use-v0/d363_safety.py",
           "type": "blob"
@@ -1350,7 +1368,7 @@
           "type": "blob"
         },
         {
-          "blob": "c610f2c17388c7baac5545cc4f9d84e94cdf8d83",
+          "blob": "39c010296f55e205229347fe3a1742245884812b",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
@@ -1614,7 +1632,7 @@
           "type": "blob"
         },
         {
-          "blob": "80b51ab7549f14737699aa91547e22d4e2639a40",
+          "blob": "33a039481bb2436a28f27448decce1bf178846b3",
           "mode": "100644",
           "path": "shared-defaults/skill-catalog-index.json",
           "type": "blob"
@@ -1674,7 +1692,7 @@
           "type": "blob"
         },
         {
-          "blob": "88241ba316cc83013f229b6ae35093242764ba3d",
+          "blob": "cb5040975065905088c6672ccea8f340c6b54826",
           "mode": "100644",
           "path": "shared-rules/image-generation-routing.md",
           "type": "blob"
@@ -4974,7 +4992,7 @@
           "type": "blob"
         },
         {
-          "blob": "d69d16bd957e2f370ed18838507c7b8859330dc2",
+          "blob": "ef4571386508b8aebde151b47ee207d215bfc09c",
           "mode": "100644",
           "path": "skills/internal/creative-output-escalation/SKILL.md",
           "type": "blob"
@@ -5072,6 +5090,9 @@
         "patches/modules/cua_element_token_schema_fallback_v1.py",
         "patches/modules/cua_gateway_shutdown_v1.py",
         "patches/modules/cua_service_session_mode_v1.py",
+        "patches/modules/cua_linux_ax_walk_v1.py",
+        "patches/modules/cua_macos_app_identity_v1.py",
+        "patches/modules/cua_token_only_actions_v1.py",
         "patches/payloads/cua-gateway-shutdown-v1",
         "patches/modules/cua_existing_profile_launch_grant_v1.py",
         "patches/modules/silent_context_lifecycle_v1.py",
@@ -5223,15 +5244,15 @@
       ]
     }
   },
-  "deployment_digest": "f7c9e7b3866948cfe3c72bc9b5c10e3b8cda776cfd1a8113e2da5701324891bc",
-  "golden_sha": "0f8a76407d89edb4debfdc3fdb081f6e9e03b8fe",
+  "deployment_digest": "eff92b836c7f9f7f981d8eb9a466cfc7193f17693f7df0a58095528e0fae1d1c",
+  "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "0e50ffe0b4e6a0496114936159969d159a27dbf437073ae8a27dfdfeaf076134",
+    "digest": "a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
     "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 338,
+    "file_count": 340,
     "files": {
       ".golden-runtime-carriers/curator-safety-v1.json": {
         "mode": "100644",
@@ -5240,7 +5261,7 @@
       },
       ".golden-runtime-carriers/golden-rebuild-20261004.json": {
         "mode": "100644",
-        "sha256": "b7cff7d9fdbaa50e6cca2246c12d66feb86db92f484d54f4b11ae5967de311ed",
+        "sha256": "a361c6f260fcc68d3a659906fbba9e00f6820d8bff04aa172db3b3f47ca5637e",
         "type": "blob"
       },
       ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
@@ -5810,7 +5831,7 @@
       },
       "hermes_cli/config_defaults.py": {
         "mode": "100644",
-        "sha256": "d91cd524a69a426ee34e83e1a495a098abd508face0d91c4c96441052e2fa931",
+        "sha256": "c8f4037414b52b1449ef6557dc2fe58ed4d5146e372f19a859be67c5886256ac",
         "type": "blob"
       },
       "hermes_cli/env_loader.py": {
@@ -5935,7 +5956,7 @@
       },
       "pm/lock.json": {
         "mode": "100644",
-        "sha256": "d7e82b8e8bf8a2cb6805e6e821580a18d8690bbfcecf362410a31dfe08c97c4b",
+        "sha256": "ec62f3095abfa8d7fa9b480882c27246562ed0be8bb4329ebe90dcb09527ade6",
         "type": "blob"
       },
       "pyproject.toml": {
@@ -6678,14 +6699,24 @@
         "sha256": "bf595cc9d9f2804973b021b9b57002f2ed4c8510f3a0213fb7025febc41f7d31",
         "type": "blob"
       },
+      "tools/computer_use/cua_backend.py": {
+        "mode": "100644",
+        "sha256": "3173cd3fc0f2607175de684b6eb1c7a3ed10ba588f7f22fd63540eeb9b22bbd8",
+        "type": "blob"
+      },
+      "tools/computer_use/cua_backend_capture.py": {
+        "mode": "100644",
+        "sha256": "2857174e47077b301088276c4a2f3987bf44036d6d16d920e7d227c376149268",
+        "type": "blob"
+      },
       "tools/computer_use/cua_backend_daemon.py": {
         "mode": "100644",
-        "sha256": "9e0dd2d790e2d08129eff0a34e4c2227e945d32f5332a5b2e7a9486f3fef8baa",
+        "sha256": "2fb7a5f69c36a4d2dae6f37f315a1b73e292478c852a47a6650f071ca840cf5a",
         "type": "blob"
       },
       "tools/computer_use/tool.py": {
         "mode": "100644",
-        "sha256": "8f5473d0040070ff6fa7539831f51ce4e71003069e4d7f5ff5ba6b8f95863415",
+        "sha256": "08dc50247ea6419c7d2725d766b9138787a8840c2cc79673898d03dbf9669358",
         "type": "blob"
       },
       "tools/cronjob_tools.py": {
@@ -6924,7 +6955,7 @@
         "type": "blob"
       }
     },
-    "golden_sha": "0f8a76407d89edb4debfdc3fdb081f6e9e03b8fe",
+    "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
     "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
     "verified": true
   },
