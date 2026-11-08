@@ -3,7 +3,7 @@
     "digest": "a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0",
     "file_count": 340
   },
-  "baseline_wiring_digest": "8b88f490f73c9104a066fb7325d40eb77dafc2c3ee0ae7dc0a6f35242a6af280",
+  "baseline_wiring_digest": "5d8581742b832046920f70e5c121d33475314cd59b1bd6f6688d5517ffa1b9d0",
   "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
@@ -20,7 +20,7 @@
     "tag": "cua-driver-rs-v0.22.0",
     "version": "0.22.0"
   },
-  "deployment_digest": "eff92b836c7f9f7f981d8eb9a466cfc7193f17693f7df0a58095528e0fae1d1c",
+  "deployment_digest": "204ff78409d9a9e237c7d7d5e523659d3301a1bcf7aad1578798c6480cefc50a",
   "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
