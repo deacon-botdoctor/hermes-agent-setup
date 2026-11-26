@@ -16,7 +16,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+try:
+    from operator_native_llm import call_native
+except ModuleNotFoundError:
+    from bin.operator_native_llm import call_native
 
 try:
     from native_memory_limits import char_limit_for_target, automatic_memory_review_enabled
@@ -75,52 +78,6 @@ logger = logging.getLogger("dream")
 MAX_SESSIONS = 5
 MAX_TRANSCRIPT_CHARS = 60000
 MIN_MESSAGES = 3
-
-
-def load_config():
-    """Read model config from config.yaml for dream extraction."""
-    import yaml
-    config_path = HERMES_HOME / "config.yaml"
-    if not config_path.exists():
-        return None, None, None
-
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-    providers = cfg.get("providers", {}) or {}
-    env_file = HERMES_HOME / ".env"
-
-    def resolve_section(section):
-        if not isinstance(section, dict):
-            return None, None, None
-        model = str(section.get("model") or section.get("default") or "").strip()
-        provider_name = str(section.get("provider") or "").strip()
-        provider_cfg = providers.get(provider_name, {}) if provider_name else {}
-        provider_cfg = provider_cfg if isinstance(provider_cfg, dict) else {}
-        base_url = str(section.get("base_url") or section.get("api") or provider_cfg.get("api") or provider_cfg.get("base_url") or "").strip()
-        if not base_url and provider_name == "openrouter":
-            base_url = "https://openrouter.ai/api/v1"
-        api_key = str(section.get("api_key") or provider_cfg.get("api_key") or "").strip()
-        env_key = str(section.get("api_key_env") or provider_cfg.get("api_key_env") or "").strip()
-        if not env_key and provider_name == "openrouter":
-            env_key = "OPENROUTER_API_KEY"
-        if not api_key and env_key:
-            api_key = os.environ.get(env_key, "")
-            if not api_key and env_file.exists():
-                for line in env_file.read_text(encoding="utf-8").splitlines():
-                    if line.startswith(f"{env_key}="):
-                        api_key = line.split("=", 1)[1].strip().strip("'\"")
-                        break
-        if model and base_url and api_key:
-            return model, base_url.rstrip("/"), api_key
-        return None, None, None
-
-    aux = cfg.get("auxiliary", {}) or {}
-    for key in ("compression", "session_search", "approval"):
-        model, base_url, api_key = resolve_section(aux.get(key, {}) or {})
-        if model and base_url and api_key:
-            return model, base_url, api_key
-
-    model, base_url, api_key = resolve_section(cfg.get("model", {}) or {})
-    return model, base_url, api_key
 
 
 def get_consolidated_ids():
@@ -195,7 +152,7 @@ def build_transcript(session_id):
     return "\n\n".join(lines)
 
 
-def extract_facts(transcript, model, base_url, api_key):
+def extract_facts(transcript):
     """Call the configured model to extract facts from a transcript."""
     system_prompt = (
         "You are a memory extraction system. Read the conversation transcript "
@@ -209,30 +166,9 @@ def extract_facts(transcript, model, base_url, api_key):
 
     prompt = f"Extract facts from this conversation:\n\n{transcript}"
 
-    with httpx.Client(timeout=60) as client:
-        resp = client.post(
-            f"{base_url}/chat/completions",
-            json={
-                "model": model,
-                "temperature": 0.1,
-                "max_tokens": 1024,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": prompt},
-                ],
-            },
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-        )
-
-    if resp.status_code != 200:
-        logger.warning("API error %d: %s", resp.status_code, resp.text[:200])
-        return []
-
-    data = resp.json()
-    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    content = call_native(system_prompt, prompt, 1024, HERMES_HOME)
+    if not content:
+        raise RuntimeError("native dream extraction failed")
 
     # Parse JSON from response
     try:
@@ -242,12 +178,11 @@ def extract_facts(transcript, model, base_url, api_key):
             if content.startswith("json"):
                 content = content[4:]
         facts = json.loads(content.strip())
-        if isinstance(facts, list):
-            return facts
-    except (json.JSONDecodeError, IndexError):
-        logger.warning("Failed to parse facts JSON: %s", content[:200])
-
-    return []
+        if (not isinstance(facts, list) or any(not isinstance(f, dict) or f.get("type") not in ("memory", "user") or not isinstance(f.get("fact"), str) or not f["fact"].strip() for f in facts)):
+            raise ValueError("invalid extraction verdict")
+        return facts
+    except (ValueError, IndexError) as exc:
+        raise RuntimeError("invalid native dream extraction verdict") from exc
 
 
 def main():
@@ -259,13 +194,6 @@ def main():
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 
     logger.info("Dream cycle starting")
-
-    model, base_url, api_key = load_config()
-    if not model or not base_url or not api_key:
-        logger.error("No model configured for dream extraction")
-        return
-
-    logger.info("Using model: %s at %s", model, base_url)
 
     sessions = get_sessions_to_process()
     if not sessions:
@@ -288,7 +216,7 @@ def main():
             continue
 
         logger.info("Extracting facts from session %s (%d chars)", sid, len(transcript))
-        facts = extract_facts(transcript, model, base_url, api_key)
+        facts = extract_facts(transcript)
 
         if not facts:
             mark_consolidated(sid)

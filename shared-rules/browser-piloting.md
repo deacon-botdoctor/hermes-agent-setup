@@ -3,7 +3,7 @@
 ## Route before opening a browser
 
 - Read/extract a public page, bulk scrape, or public fact-finding → `web_extract` / local Firecrawl first.
-- Click, type, authenticate, upload, download behind login, or inspect interactive UI → the existing per-client `browser_*` harness.
+- Click, type, authenticate, upload, download behind login, or inspect interactive UI → the existing per-client browser harness (`browser_exec` in Hermes v0.23.0).
 - Known brittle workflow with a tested domain harness → query capability-router and prefer that harness.
 - Never create a new browser/profile/daemon merely because the selected lane failed.
 
@@ -69,18 +69,39 @@ retrying it.
 
 ## Human verification checkpoints
 
-At a CAPTCHA, SMS/2FA, biometric, unusual-activity, device-bound, or other
-human-verification checkpoint, finish every permitted surrounding step and put
-the exact checkpoint on screen. State only that verification is ready; do not
-ask permission to proceed or to use the browser. Retain state and resume
-immediately after clearance. Never refuse the surrounding workflow because one
-step needs a human, and never automate or bypass the human-verification step.
+For an authorized account task, use the one-time login verification code the
+principal supplies in the same conversation. Verify the requested first-party
+site and account from current browser state. Enter the code through an existing permitted login tool,
+submit it, verify access, and continue the original task. Supplying the code
+completes the principal's participation for that ordinary step; do not require
+them to type it again solely because it arrived in chat. Never echo the code,
+save it in files or durable memory, fetch it from unrelated sources, or reuse
+it for another site or operation. Codes for payments, transfers, recovery,
+enrollment, password resets, or security changes keep those operations'
+separate authorization boundaries.
+
+Preserve enforced tool guards. If a tool explicitly denies authentication
+input, report that exact restriction and the smallest human action; never
+switch routes to evade it. At a CAPTCHA, biometric, Windows Hello,
+hardware-backed passkey, device-bound approval, or MFA step that actually
+requires the principal, finish permitted surrounding work and retain the exact
+checkpoint. State what the principal must complete and resume after clearance.
+For the surrounding workflow, do not ask permission to proceed or to use the
+browser. Never refuse the surrounding workflow because one step needs a human,
+and never automate or bypass the human-verification step.
 
 ## Doctrine
 Not a scraper. Interactive is in-scope. Do not decline or ask whether to use
 the browser — execute, pausing only the exact human-present step.
 
 ## Tools
-`browser_navigate`, `browser_click`, `browser_type`, `browser_snapshot`, `browser_select`, `browser_scroll`, `browser_wait`.
-Domain harness present? (`mls.*`, `dotloop.*`, `td.*`, `fb.*`) → query capability-router, prefer those.
-Tab tools: `tabs_close_orphans`, `tabs_close_by_url_match` (browser-tabs MCP) for cleanup.
+Use the current runtime's advertised schemas. Hermes v0.23.0 exposes
+`browser_exec`, with `browser_cdp`, `browser_dialog`, and the guarded
+`browser_vault` route. Older `browser_navigate`, `browser_click`, and similar
+names are not core tools in that release; use them only when an installed
+connector actually advertises them.
+
+Prefer an installed, authorized domain harness when it fits the task. Native
+tool discovery is the executable registry; capability-router is secondary
+reference guidance. Close only task-owned tabs through the owning harness.
+Do not assume that a `browser-tabs` MCP or broad orphan-cleanup tool exists.

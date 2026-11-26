@@ -1,0 +1,5 @@
+# Use native review for skill-tool writes; disable automatic maintenance.
+skills:
+  write_approval: true
+curator:
+  enabled: false

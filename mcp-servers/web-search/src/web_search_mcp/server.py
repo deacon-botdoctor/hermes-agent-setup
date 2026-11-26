@@ -65,11 +65,18 @@ def web_search(query: str, max_results: int = 8) -> dict[str, Any]:
     except Exception as exc:
         return {"ok": False, "backend": "searxng", "error": str(exc), "results": []}
     raw_results = data.get("results", []) if isinstance(data, dict) else []
+    engine_errors = data.get("unresponsive_engines", []) if isinstance(data, dict) else []
     return {
-        "ok": True,
+        "ok": bool(raw_results),
         "backend": "searxng",
         "query": query,
         "results": [_normalize(item) for item in raw_results[: max(1, int(max_results))]],
+        "unresponsive_engines": engine_errors,
+        **({} if raw_results else {
+            "error": "Search engines unavailable" if engine_errors else "No results retrieved; coverage is unverified.",
+            "next": "Use another configured route or fetch known primary sources. "
+                    "Empty or failed retrieval is not evidence that the subject does not exist.",
+        }),
     }
 
 

@@ -105,8 +105,37 @@ def windows_pid_alive(pid: int, kernel32: Any | None = None) -> bool:
         api.CloseHandle(handle)
 
 
-def telegram_heartbeat(state: dict[str, Any]) -> str | None:
+def native_telegram_liveness(hermes_home: Path) -> bool:
+    """True when the bound runtime no longer stamps ``last_successful_poll_at``.
+
+    Same detection as client-selfheal-heartbeat.sh. The native Telegram adapter
+    tracks polling progress in-process and publishes stalls through its own
+    connected/retrying state and ``ingress.stalled``; the legacy poll stamp is
+    then a frozen leftover. An unreadable binding keeps the legacy rule.
+    """
+    try:
+        binding = json.loads((hermes_home / "state/runtime-binding.json").read_text(encoding="utf-8"))
+        runtime_root = Path(binding["runtime_root"])
+        if not runtime_root.is_absolute():
+            return False
+        # Explicit UTF-8: Windows defaults to cp1252, which cannot decode the
+        # adapter and would silently fall back to the legacy rule.
+        adapter = (runtime_root / "plugins/platforms/telegram/adapter.py").read_text(
+            encoding="utf-8", errors="replace")
+        publisher = (runtime_root / "gateway/status.py").read_text(encoding="utf-8", errors="replace")
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+    return not ("HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1" in adapter
+                or "last_successful_poll_at" in publisher)
+
+
+def telegram_heartbeat(state: dict[str, Any], *, native: bool = False) -> str | None:
     telegram = ((state.get("platforms") or {}).get("telegram") or {})
+    if native:
+        # The live gateway's housekeeping refreshes ``updated_at``; it counts as
+        # Telegram liveness only while that same process reports Telegram connected.
+        live_writer = telegram.get("writer_pid") == state.get("pid")
+        return state.get("updated_at") if live_writer and telegram.get("state") == "connected" else None
     return telegram.get("last_successful_poll_at") or telegram.get("updated_at")
 
 
@@ -115,7 +144,7 @@ def telegram_transport_expected(hermes_home: Path) -> bool:
     try:
         import yaml
 
-        config = yaml.safe_load((hermes_home / "config.yaml").read_text()) or {}
+        config = yaml.safe_load((hermes_home / "config.yaml").read_text(encoding="utf-8")) or {}
         telegram = (config.get("platforms") or {}).get("telegram") or {}
         return not (isinstance(telegram, dict) and telegram.get("enabled") is False)
     except Exception:
@@ -129,11 +158,12 @@ def classify_gateway(
     heartbeat_max_age: int,
     transaction_health: dict | None = None,
     telegram_required: bool = True,
+    native_telegram: bool = False,
 ) -> dict[str, Any]:
     pid = state.get("pid")
     gateway_state = str(state.get("gateway_state") or "missing")
     alive = pid_alive(pid)
-    heartbeat = telegram_heartbeat(state)
+    heartbeat = telegram_heartbeat(state, native=native_telegram)
     heartbeat_at = parse_iso(heartbeat)
     heartbeat_age = (
         max(0, int((now - heartbeat_at).total_seconds())) if heartbeat_at else None
@@ -184,18 +214,61 @@ def classify_gateway(
     }
 
 
+def native_readiness_health(payload: dict) -> dict:
+    """Map native ``/health/detailed`` readiness to the transaction verdict.
+
+    Based on hermes-local-selfcheck.py ``_api_health_evidence``: native Hermes
+    publishes read-only readiness instead of ``state_transaction``. The gateway
+    path checks must be ok; an overall ``degraded`` caused only by other
+    readiness checks (for example disk) is a host warning, not a gateway fault.
+    """
+    readiness = payload.get("readiness")
+    readiness = readiness if isinstance(readiness, dict) else {}
+    checks = readiness.get("checks")
+    checks = checks if isinstance(checks, dict) else {}
+    heartbeat = parse_iso(payload.get("last_heartbeat"))
+    serving = {"ok", "degraded"}
+    ok = (payload.get("status") in serving and payload.get("gateway_state") == "running"
+          and readiness.get("status") in serving
+          and all(isinstance(checks.get(name), dict) and checks[name].get("status") == "ok"
+                  for name in ("state_db", "session_store", "gateway"))
+          and checks["state_db"].get("detail") != "not initialized"
+          and heartbeat is not None
+          and 0 <= datetime.now(UTC).timestamp() - heartbeat.timestamp() <= 30)
+    warnings = sorted(name for name, check in checks.items()
+                      if isinstance(check, dict) and check.get("status") != "ok")
+    return {"pid": payload.get("pid"), "status": "pass" if ok else "fail",
+            "source": "native_readiness_read_only", "readiness_warnings": warnings}
+
+
+def _api_env(paths) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for path in paths:
+        if path.is_file():
+            for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                key, separator, value = line.strip().partition("=")
+                if separator and key in {"API_SERVER_KEY", "API_SERVER_PORT"}:
+                    env[key] = value.strip().strip("\"'")
+    return env
+
+
 def gateway_transaction_health(hermes_home: Path) -> dict:
     """Query the owner over loopback; never open its database or import SessionDB."""
     try:
-        env = {}
-        for name in (".env", ".env.secrets"):
-            path = hermes_home / name
-            if path.is_file():
-                for line in path.read_text().splitlines():
-                    key, separator, value = line.strip().partition("=")
-                    if separator and key in {"API_SERVER_KEY", "API_SERVER_PORT"}:
-                        env[key] = value.strip().strip("\"'")
+        env = _api_env(hermes_home / name for name in (".env", ".env.secrets"))
         key = os.environ.get("API_SERVER_KEY") or env.get("API_SERVER_KEY")
+        if not key:
+            # Same fixed managed tenant API location as hermes-local-selfcheck.py;
+            # never a receipt's arbitrary path or a sibling profile's credential.
+            receipt = load_json(hermes_home / "state/tenant-local-api/receipt.json", {})
+            relative = "state/tenant-local-api/managed/.env"
+            managed = hermes_home / relative
+            if (isinstance(receipt, dict) and receipt.get("home")
+                    and Path(receipt["home"]).resolve() == hermes_home.resolve()
+                    and receipt.get("credential_file") == relative
+                    and managed.resolve().is_relative_to(hermes_home.resolve())):
+                env = _api_env((managed,))
+                key = env.get("API_SERVER_KEY")
         if not key:
             return {}
         port = int(os.environ.get("API_SERVER_PORT") or env.get("API_SERVER_PORT") or 8642)
@@ -203,7 +276,10 @@ def gateway_transaction_health(hermes_home: Path) -> dict:
                                          headers={"Authorization": f"Bearer {key}"})
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         with opener.open(request, timeout=10) as response:
-            health = json.load(response).get("state_transaction", {})
+            payload = json.load(response)
+        if "state_transaction" not in payload:
+            return native_readiness_health(payload)
+        health = payload.get("state_transaction") or {}
         checked = health.get("checked_at")
         if not isinstance(checked, (int, float)) or not 0 <= datetime.now(UTC).timestamp() - checked <= 30:
             return {}
@@ -280,6 +356,7 @@ def run_watchdog(
         heartbeat_max_age=max(300, int(heartbeat_max_age)),
         transaction_health=transaction_health,
         telegram_required=telegram_transport_expected(hermes_home),
+        native_telegram=native_telegram_liveness(hermes_home),
     )
     if supervisor_kind == "launchd-system-observe":
         if not SAFE_UNIT.fullmatch(supervisor_unit):

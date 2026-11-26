@@ -1,9 +1,0 @@
-name: task-ledger
-version: 1.2.0
-description: Persistent task tracking with acceptance reconciliation, blocker evidence, and verified delivery state
-provides_tools:
-  - task_open
-  - task_update
-  - task_done
-  - task_block
-  - task_list

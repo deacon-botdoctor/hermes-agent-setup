@@ -26,13 +26,16 @@ active runtime generation assembled from the exact release in `release.json`.
 - Store secrets only in the platform-supported local secret/config path.
 - Use an external knowledge system only as an explicitly declared boundary;
   never silently substitute a local database for a shared canonical one.
-- Keep the bundled task-ledger and Telegram transcript read-tool plugins
-  disabled unless the user explicitly selects them. The narrow Telegram hook
-  remains active to index only the current chat/topic for fresh-topic
-  rehydration and current-topic search; it is not broad replay or a second
-  memory authority. External GBrain capture separately requires
-  `HERMES_ENABLE_GBRAIN_CAPTURE=1`. A task-ledger changelog backend is loaded
-  only from an explicitly configured `HERMES_TASK_CHANGELOG_DIR`.
+- The task-ledger plugin and the Telegram transcript read-tool and hook are
+  retired in this release; native Hermes tasks and session search own that
+  work. External GBrain capture still requires
+  `HERMES_ENABLE_GBRAIN_CAPTURE=1`.
+- Shared defaults route every auxiliary task and subagent to the agent's main
+  model. Record any deliberate difference in
+  `shared-defaults/fleet-exemptions.yaml` with a reason; the public file
+  ships with no rows.
+- Skill writes from the agent use native approval
+  (`skills.write_approval: true`), and the automatic curator is off.
 
 ## Capability model
 

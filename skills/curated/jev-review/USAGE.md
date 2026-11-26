@@ -63,4 +63,4 @@ Exit status 0 means a reviewed result or successful dry-run. Exit 2 means invali
 4. Attach the advisory result and hashes to the existing review step.
 5. Keep the existing action checks and owner decision in control.
 
-For Enoch, start with inbox leftovers and commitment evidence. For Doc, start with incident and completion claims. For Testing Bot, run offline failure cases and then a permitted live sample. This portable package does not itself bind those runtimes, distribute credentials, schedule calls, or authorize rollout.
+For the operator agent, start with inbox leftovers and commitment evidence. For Doc, start with incident and completion claims. For Testing Bot, run offline failure cases and then a permitted live sample. This portable package does not itself bind those runtimes, distribute credentials, schedule calls, or authorize rollout.

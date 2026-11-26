@@ -161,14 +161,21 @@ def load_core_bridge(home: Path) -> CoreBridge:
         parameters = inspect.signature(core_x_search).parameters
         forwarded = dict(kwargs)
         original_model_resolver = None
+        original_config_loader = None
         original_reasoning_resolver = None
         original_http_resolver = getattr(x_search_tool, "resolve_xai_http_credentials", None)
         original_bearer = getattr(x_search_tool, "_resolve_xai_bearer", None)
         if "model" in parameters:
             forwarded["model"] = requested_model
         elif requested_model:
-            original_model_resolver = x_search_tool._get_x_search_model
-            x_search_tool._get_x_search_model = lambda: requested_model
+            if hasattr(x_search_tool, "_get_x_search_model"):
+                original_model_resolver = x_search_tool._get_x_search_model
+                x_search_tool._get_x_search_model = lambda: requested_model
+            else:
+                original_config_loader = x_search_tool._load_x_search_config
+                x_search_tool._load_x_search_config = lambda: {
+                    **original_config_loader(), "model": requested_model,
+                }
         if "reasoning_effort" in parameters:
             forwarded["reasoning_effort"] = requested_reasoning
         elif requested_reasoning:
@@ -183,6 +190,8 @@ def load_core_bridge(home: Path) -> CoreBridge:
         finally:
             if original_model_resolver is not None:
                 x_search_tool._get_x_search_model = original_model_resolver
+            if original_config_loader is not None:
+                x_search_tool._load_x_search_config = original_config_loader
             if original_reasoning_resolver is not None:
                 x_search_tool._get_x_search_reasoning_effort = original_reasoning_resolver
             if original_http_resolver is not None:

@@ -1,3 +1,5 @@
 platforms:
   telegram:
     reply_to_mode: "off"
+    extra:
+      drop_pending_on_cold_boot: false

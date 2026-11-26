@@ -50,7 +50,19 @@ def detect_gateway_unit(hermes_home: Path, current_platform: str) -> str:
     text = config.read_text(encoding="utf-8", errors="ignore") if config.is_file() else ""
     if current_platform == "windows":
         match = re.search(r"^\s*windows_task_name\s*:\s*['\"]?([^'\"#\r\n]+)", text, re.MULTILINE)
-        return (match.group(1).strip() if match else "HermesGateway")
+        if match:
+            return match.group(1).strip()
+        # The safe-restart settings record the installed gateway task, which
+        # may carry a client-specific name such as ClientHermesGateway.
+        settings = hermes_home / "state" / "safe-restart-settings.json"
+        if settings.is_file():
+            try:
+                task_name = json.loads(settings.read_text(encoding="utf-8-sig")).get("TaskName")
+            except (OSError, ValueError, AttributeError):
+                task_name = None
+            if isinstance(task_name, str) and SAFE_UNIT.fullmatch(task_name.strip()):
+                return task_name.strip()
+        return "HermesGateway"
     if current_platform == "macos":
         for unit in ("ai.hermes.gateway", "com.hermes.gateway"):
             if (Path.home() / "Library" / "LaunchAgents" / f"{unit}.plist").is_file():
@@ -299,26 +311,23 @@ def install_windows(
     # so keep the exact command in a stable host-local wrapper and schedule the
     # short wrapper invocation instead.
     wrapper = hermes_home / "bin" / f"{WATCHDOG_NAME}.cmd"
-    hidden = existing_hidden_windows_watchdog(wrapper)
     wrapper_result = atomic_write_text(
         "@echo off\r\n" + subprocess.list2cmdline(argv) + "\r\n",
         wrapper,
         dry_run=dry_run,
     )
-    if hidden:
-        # Rebind only the managed payload. Recreating the task loses its hidden
-        # action, principal, trigger and maintenance state even on an upgrade.
-        return {
-            "kind": "windows-scheduled-task",
-            "unit": WINDOWS_TASK,
-            "gateway_supervisor_unit": supervisor_unit,
-            "files": [str(wrapper)],
-            "wrapper": wrapper_result,
-            "commands": [],
-            "preserved_existing": True,
-            **hidden,
-        }
-    action = subprocess.list2cmdline(["cmd.exe", "/d", "/c", str(wrapper)])
+    # The task runs as the signed-in user. Launch the wrapper through WSH with
+    # window style 0 so each run does not open a terminal over the desktop;
+    # the launcher waits and returns the wrapper's exit code.
+    launcher = hermes_home / "bin" / f"{WATCHDOG_NAME}.vbs"
+    wrapper_command = subprocess.list2cmdline(["cmd.exe", "/d", "/c", str(wrapper)])
+    launcher_result = atomic_write_text(
+        'Set sh = CreateObject("WScript.Shell")\r\n'
+        + 'WScript.Quit sh.Run("' + wrapper_command.replace('"', '""') + '", 0, True)\r\n',
+        launcher,
+        dry_run=dry_run,
+    )
+    action = subprocess.list2cmdline(["wscript.exe", "//B", "//NoLogo", str(launcher)])
     if len(action) > 261:
         raise RuntimeError("Windows watchdog wrapper action exceeds schtasks /TR limit")
     command = [
@@ -341,83 +350,10 @@ def install_windows(
         "kind": "windows-scheduled-task",
         "unit": WINDOWS_TASK,
         "gateway_supervisor_unit": supervisor_unit,
-        "files": [str(wrapper)],
+        "files": [str(wrapper), str(launcher)],
         "wrapper": wrapper_result,
+        "launcher": launcher_result,
         "commands": [result],
-    }
-
-
-def existing_hidden_windows_watchdog(wrapper: Path) -> dict[str, str] | None:
-    """Recognize the existing hidden launcher without executing or replacing it."""
-    import hashlib
-
-    listing = subprocess.run(
-        ["schtasks.exe", "/Query", "/FO", "CSV", "/NH"],
-        capture_output=True, text=True, timeout=30, check=False,
-    )
-    if listing.returncode:
-        raise RuntimeError("Windows watchdog task discovery failed; refusing task replacement")
-    if not any(row and row[0].strip().lstrip("\\") == WINDOWS_TASK
-               for row in csv.reader(io.StringIO(listing.stdout))):
-        return None
-    query = subprocess.run(
-        ["schtasks.exe", "/Query", "/TN", WINDOWS_TASK, "/XML"],
-        capture_output=True, timeout=30, check=False,
-    )
-    if query.returncode:
-        raise RuntimeError("cannot inspect the existing Windows watchdog task")
-    xml_bytes = query.stdout if isinstance(query.stdout, bytes) else query.stdout.encode("utf-8")
-    if isinstance(query.stdout, bytes):
-        encoding = "utf-16" if xml_bytes.startswith((b"\xff\xfe", b"\xfe\xff", b"<\x00")) else "utf-8-sig"
-        xml_text = xml_bytes.decode(encoding)
-    else:
-        xml_text = query.stdout
-    # schtasks can emit UTF-8 pipe bytes with a UTF-16 XML declaration.
-    # Parse decoded text; retain the unnormalized bytes for receipt identity.
-    root = ET.fromstring(xml_text)
-    actions = root.findall("./{*}Actions/{*}Exec")
-    if len(actions) != 1:
-        raise RuntimeError("existing Windows watchdog has no single executable action")
-    command = actions[0].findtext("{*}Command", "")
-    if Path(command).name.lower() != "wscript.exe":
-        return None
-    system_root = os.environ.get("SystemRoot")
-    if not system_root or os.path.normcase(command) != os.path.normcase(
-        str(Path(system_root) / "System32" / "wscript.exe")
-    ):
-        raise RuntimeError("hidden watchdog does not use the native WScript host")
-    arguments = actions[0].findtext("{*}Arguments", "")
-    match = re.fullmatch(
-        r'\s*(?:(?://B|//NoLogo)\s+)*(?:"([^"\r\n]+\.vbs)"|([^\s"]+\.vbs))\s*',
-        arguments, re.IGNORECASE,
-    )
-    if not match:
-        raise RuntimeError("hidden watchdog arguments are not a single VBS launcher")
-    launcher = Path(match.group(1) or match.group(2))
-    if not launcher.is_absolute() or not launcher.is_file():
-        raise RuntimeError("hidden watchdog launcher is unavailable")
-    payload = launcher.read_bytes()
-    text = payload.decode("utf-16" if payload.startswith((b"\xff\xfe", b"\xfe\xff")) else "utf-8-sig")
-    invocation = re.fullmatch(
-        r'\s*Set\s+(?P<shell>\w+)\s*=\s*CreateObject\("WScript\.Shell"\)\s*'
-        r'(?P<result>\w+)\s*=\s*(?P=shell)\.Run\("(?P<command>(?:[^"]|"")*)",\s*0,\s*True\)\s*'
-        r'WScript\.Quit\s+(?P=result)\s*',
-        text, re.IGNORECASE,
-    )
-    command_match = re.fullmatch(
-        r'(?:"([^"\r\n]+)"|([^\s"]+))\s+/d\s+/c\s+(?:"([^"\r\n]+)"|([^\s"]+))',
-        invocation.group("command").replace('""', '"') if invocation else "",
-        re.IGNORECASE,
-    )
-    if not command_match:
-        raise RuntimeError("hidden watchdog does not target the managed CMD payload")
-    executable = os.path.normcase(command_match.group(1) or command_match.group(2))
-    target = os.path.normcase(command_match.group(3) or command_match.group(4))
-    if executable not in {"cmd.exe", os.path.normcase(str(Path(system_root) / "System32" / "cmd.exe"))} or target != os.path.normcase(str(wrapper)):
-        raise RuntimeError("hidden watchdog does not target the managed CMD payload")
-    return {
-        "launcher_sha256": hashlib.sha256(payload).hexdigest(),
-        "task_definition_sha256": hashlib.sha256(xml_bytes).hexdigest(),
     }
 
 
@@ -600,6 +536,7 @@ def install(
     else:
         service = install_windows(argv, hermes_home, unit, dry_run=dry_run)
     wrapper_status = (service.get("wrapper") or {}).get("status")
+    launcher_status = (service.get("launcher") or {}).get("status")
     return {
         "ok": True,
         "status": (
@@ -609,6 +546,7 @@ def install(
             if file_result["status"] == "idempotent"
             and all(item["status"] == "idempotent" for item in dependencies)
             and wrapper_status in {None, "idempotent"}
+            and launcher_status in {None, "idempotent"}
             else "installed"
         ),
         "generated_at": utc_now(),

@@ -84,14 +84,34 @@ if state_path.exists():
             age = int(time.time() - dt.timestamp())
     except Exception:
         state = 'parse_error'
-# HERMES_TELEGRAM_LIVENESS_v1 — extract polling-liveness age as a separate signal.
+# HERMES_TELEGRAM_LIVENESS_v3 — select the signal from the ACTIVE runtime,
+# never timestamp ordering. Unknown capability keeps the legacy 600s gate.
+legacy_poll_writer = True
+try:
+    binding = json.loads((home / 'state/runtime-binding.json').read_text())
+    runtime_root = Path(binding['runtime_root'])
+    if not runtime_root.is_absolute():
+        raise ValueError('runtime_root must be absolute')
+    adapter = (runtime_root / 'plugins/platforms/telegram/adapter.py').read_text()
+    publisher = (runtime_root / 'gateway/status.py').read_text()
+    legacy_poll_writer = ('HERMES_TELEGRAM_POLL_LIVENESS_WRITER_v1' in adapter
+                          or 'last_successful_poll_at' in publisher)
+except (OSError, ValueError, KeyError, TypeError):
+    pass
 poll_age = 10**9
 try:
-    poll_at = (platforms.get('telegram') or {}).get('last_successful_poll_at')
-    if poll_at:
-        from datetime import datetime, timezone
-        pdt = datetime.fromisoformat(str(poll_at).replace('Z', '+00:00')).astimezone(timezone.utc)
-        poll_age = int(time.time() - pdt.timestamp())
+    from datetime import datetime, timezone
+    if legacy_poll_writer:
+        poll_at = (platforms.get('telegram') or {}).get('last_successful_poll_at')
+        if poll_at:
+            poll_epoch = datetime.fromisoformat(str(poll_at).replace('Z', '+00:00')).timestamp()
+            poll_age = int(time.time() - poll_epoch)
+    else:
+        updated = payload.get('updated_at')
+        updated_epoch = datetime.fromisoformat(str(updated).replace('Z', '+00:00')).timestamp()
+        # Housekeeping writes every 60s. Bound both stale and future state;
+        # use the unrounded age so >120s skew cannot truncate into health.
+        poll_age = 0 if -120 <= time.time() - updated_epoch <= 120 else 10**9
 except Exception:
     pass
 # HERMES_TELEGRAM_EXPECTED_v1 — same rule as hermes-local-selfcheck.py: only an

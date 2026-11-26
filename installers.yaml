@@ -13,6 +13,9 @@ installers:
       - bin/dream.py
       - bin/dream_consolidate.py
       - bin/native_memory_limits.py
+      - bin/operator_native_llm.py
+      - bin/hermes-nightly-dream-cycle.py
+      - bin/hermes-disk-retention.py
     destination_dir: "{hermes_home}/bin"
     mode: "0755"
     post_install_check:
@@ -21,6 +24,9 @@ installers:
         - "{hermes_home}/bin/dream.py"
         - "{hermes_home}/bin/dream_consolidate.py"
         - "{hermes_home}/bin/native_memory_limits.py"
+        - "{hermes_home}/bin/operator_native_llm.py"
+        - "{hermes_home}/bin/hermes-nightly-dream-cycle.py"
+        - "{hermes_home}/bin/hermes-disk-retention.py"
   - name: install_default_mcp_floor
     owner_lane: baseline_wiring
     current_registry_entry: default_mcp_floor
@@ -72,6 +78,9 @@ installers:
       - source: mcp-servers/shared/hermes_resilient_fetch.py
         destination: "{hermes_home}/mcp-servers/shared/hermes_resilient_fetch.py"
         mode: "0644"
+      - source: bin/capability-state-report
+        destination: "{hermes_home}/bin/capability-state-report"
+        mode: "0755"
       - source: kit/bin/refero-styles
         destination: "{hermes_home}/bin/refero-styles"
         mode: "0755"
@@ -118,6 +127,7 @@ installers:
         - "{hermes_home}/mcp-servers/capability-router/src/capability_router/server.py"
         - "{hermes_home}/mcp-servers/search/src/search_mcp/server.py"
         - "{hermes_home}/mcp-servers/shared/hermes_resilient_fetch.py"
+        - "{hermes_home}/bin/capability-state-report"
     rollback: Restore per-file receipt backups; remove only receipt-listed destinations whose previous_sha256 is null. Tenant configuration, credentials, MCP policy, and schedules are unchanged.
 
   - name: sync_existing_optional_mcp_servers
@@ -192,16 +202,20 @@ installers:
       - source: kit/bin/telegram-watchdog-depth-probe.ps1
         destination: "{hermes_home}/bin/telegram-watchdog-depth-probe.ps1"
         existing_profile_overlays: true
+      - source: kit/config/injected-rule-hashes.json
+        destination: "{hermes_home}/config/injected-rule-hashes.json"
+        existing_profile_overlays: true
       - source: bin/hermes-local-selfcheck.py
         destination: "{hermes_home}/bin/hermes-local-selfcheck.py"
         existing_profile_overlays: true
       - bin/agent-probe-mac.py
-      - bin/hermes-cron-toolset-preflight.py
       - bin/hermes-canary-reconciler.py
       - source: bin/hermes-canary-reconciler.ps1
         destination: "{hermes_home}/bin/hermes-canary-reconciler.ps1"
         existing_profile_overlays: true
       - bin/hermes-disk-retention.py
+      - bin/hermes-disk-monitor.sh
+      - bin/hermes-session-cleanup.sh
       - bin/hermes-fileprovider-online-only.swift
       - bin/hermes-windows-capacity-containment.ps1
       - source: bin/tool-readiness-probe.py
@@ -223,10 +237,11 @@ installers:
         - "{hermes_home}/bin/gateway-health-probe.ps1"
         - "{hermes_home}/bin/telegram-watchdog-depth-probe.ps1"
         - "{hermes_home}/bin/hermes-local-selfcheck.py"
-        - "{hermes_home}/bin/hermes-cron-toolset-preflight.py"
         - "{hermes_home}/bin/hermes-windows-capacity-containment.ps1"
         - "{hermes_home}/bin/hermes-canary-reconciler.py"
         - "{hermes_home}/bin/hermes-disk-retention.py"
+        - "{hermes_home}/bin/hermes-disk-monitor.sh"
+        - "{hermes_home}/bin/hermes-session-cleanup.sh"
         - "{hermes_home}/bin/hermes-fileprovider-online-only.swift"
         - "{hermes_home}/bin/tool-readiness-probe.py"
         - "{hermes_home}/bin/operator-handoff.py"
@@ -308,6 +323,8 @@ installers:
       - kit/bin/agent-browser-orphan-reaper.py
       - bin/hermes-host-hygiene.py
       - bin/hermes-host-steward.py
+      - bin/hermes-local-selfcheck.py
+      - bin/hermes-disk-retention.py
     destination_dir: "{hermes_home}/bin"
     owner: preserve
     mode: "0755"
@@ -329,6 +346,8 @@ installers:
     operation: copy_many
     sources:
       - bin/hermes-host-steward.py
+      - bin/hermes-local-selfcheck.py
+      - bin/hermes-disk-retention.py
     destination_dir: "{hermes_home}/bin"
     owner: preserve
     mode: "0755"
@@ -507,6 +526,126 @@ installers:
     require_ready: false
     timeout_seconds: 960
     rollback: reinstall the prior approved version through the same native Hermes command; never edit OS permission databases
+
+  - name: install_printing_press_workflow
+    owner_lane: baseline_wiring
+    current_registry_entry: printing_press_full_pass
+    description: Deliver the complete pinned Printing Press workflow and fleet rule without replacing the owning runtime.
+    platforms: [linux, macos, windows]
+    operation: copy_many
+    existing_profile_overlays: false
+    mode: "0644"
+    sources:
+      - source: skills/printing-press/LICENSE
+        destination: "{hermes_home}/skills/printing-press/LICENSE"
+      - source: skills/printing-press/SKILL.md
+        destination: "{hermes_home}/skills/printing-press/SKILL.md"
+      - source: skills/printing-press/UPSTREAM.json
+        destination: "{hermes_home}/skills/printing-press/UPSTREAM.json"
+      - source: skills/printing-press/phases/01-preflight.md
+        destination: "{hermes_home}/skills/printing-press/phases/01-preflight.md"
+      - source: skills/printing-press/phases/02-run-initialization.md
+        destination: "{hermes_home}/skills/printing-press/phases/02-run-initialization.md"
+      - source: skills/printing-press/phases/03-resolve-and-reuse.md
+        destination: "{hermes_home}/skills/printing-press/phases/03-resolve-and-reuse.md"
+      - source: skills/printing-press/phases/04-research-brief.md
+        destination: "{hermes_home}/skills/printing-press/phases/04-research-brief.md"
+      - source: skills/printing-press/phases/05-pre-browser-sniff-auth-intelligence.md
+        destination: "{hermes_home}/skills/printing-press/phases/05-pre-browser-sniff-auth-intelligence.md"
+      - source: skills/printing-press/phases/06-browser-sniff-gate.md
+        destination: "{hermes_home}/skills/printing-press/phases/06-browser-sniff-gate.md"
+      - source: skills/printing-press/phases/07-crowd-sniff-gate.md
+        destination: "{hermes_home}/skills/printing-press/phases/07-crowd-sniff-gate.md"
+      - source: skills/printing-press/phases/08-ecosystem-absorb-gate.md
+        destination: "{hermes_home}/skills/printing-press/phases/08-ecosystem-absorb-gate.md"
+      - source: skills/printing-press/phases/09-api-reachability-gate.md
+        destination: "{hermes_home}/skills/printing-press/phases/09-api-reachability-gate.md"
+      - source: skills/printing-press/phases/10-generate.md
+        destination: "{hermes_home}/skills/printing-press/phases/10-generate.md"
+      - source: skills/printing-press/phases/11-build-the-goat.md
+        destination: "{hermes_home}/skills/printing-press/phases/11-build-the-goat.md"
+      - source: skills/printing-press/phases/12-shipcheck.md
+        destination: "{hermes_home}/skills/printing-press/phases/12-shipcheck.md"
+      - source: skills/printing-press/phases/13-sync-param-drop-gate.md
+        destination: "{hermes_home}/skills/printing-press/phases/13-sync-param-drop-gate.md"
+      - source: skills/printing-press/phases/14-agentic-skill-review.md
+        destination: "{hermes_home}/skills/printing-press/phases/14-agentic-skill-review.md"
+      - source: skills/printing-press/phases/15-readme-skill-agents-correctness-audit.md
+        destination: "{hermes_home}/skills/printing-press/phases/15-readme-skill-agents-correctness-audit.md"
+      - source: skills/printing-press/phases/16-agentic-output-review.md
+        destination: "{hermes_home}/skills/printing-press/phases/16-agentic-output-review.md"
+      - source: skills/printing-press/phases/17-local-code-review.md
+        destination: "{hermes_home}/skills/printing-press/phases/17-local-code-review.md"
+      - source: skills/printing-press/phases/18-dogfood-testing.md
+        destination: "{hermes_home}/skills/printing-press/phases/18-dogfood-testing.md"
+      - source: skills/printing-press/phases/19-polish.md
+        destination: "{hermes_home}/skills/printing-press/phases/19-polish.md"
+      - source: skills/printing-press/phases/20-promote-and-archive.md
+        destination: "{hermes_home}/skills/printing-press/phases/20-promote-and-archive.md"
+      - source: skills/printing-press/phases/21-next-steps.md
+        destination: "{hermes_home}/skills/printing-press/phases/21-next-steps.md"
+      - source: skills/printing-press/references/absorb-scoring.md
+        destination: "{hermes_home}/skills/printing-press/references/absorb-scoring.md"
+      - source: skills/printing-press/references/aggregator-pattern.md
+        destination: "{hermes_home}/skills/printing-press/references/aggregator-pattern.md"
+      - source: skills/printing-press/references/auth-companion.md
+        destination: "{hermes_home}/skills/printing-press/references/auth-companion.md"
+      - source: skills/printing-press/references/browser-sniff-capture.md
+        destination: "{hermes_home}/skills/printing-press/references/browser-sniff-capture.md"
+      - source: skills/printing-press/references/codex-delegation.md
+        destination: "{hermes_home}/skills/printing-press/references/codex-delegation.md"
+      - source: skills/printing-press/references/crowd-sniff.md
+        destination: "{hermes_home}/skills/printing-press/references/crowd-sniff.md"
+      - source: skills/printing-press/references/deepwiki-research.md
+        destination: "{hermes_home}/skills/printing-press/references/deepwiki-research.md"
+      - source: skills/printing-press/references/device-sniff-ble.md
+        destination: "{hermes_home}/skills/printing-press/references/device-sniff-ble.md"
+      - source: skills/printing-press/references/dogfood-testing.md
+        destination: "{hermes_home}/skills/printing-press/references/dogfood-testing.md"
+      - source: skills/printing-press/references/fetch-docs.md
+        destination: "{hermes_home}/skills/printing-press/references/fetch-docs.md"
+      - source: skills/printing-press/references/fetch-docs.sh
+        destination: "{hermes_home}/skills/printing-press/references/fetch-docs.sh"
+      - source: skills/printing-press/references/fleet-contract.md
+        destination: "{hermes_home}/skills/printing-press/references/fleet-contract.md"
+      - source: skills/printing-press/references/known-specs.md
+        destination: "{hermes_home}/skills/printing-press/references/known-specs.md"
+      - source: skills/printing-press/references/noi-examples.md
+        destination: "{hermes_home}/skills/printing-press/references/noi-examples.md"
+      - source: skills/printing-press/references/novel-features-subagent.md
+        destination: "{hermes_home}/skills/printing-press/references/novel-features-subagent.md"
+      - source: skills/printing-press/references/oauth2-pkce-cli-checklist.md
+        destination: "{hermes_home}/skills/printing-press/references/oauth2-pkce-cli-checklist.md"
+      - source: skills/printing-press/references/per-source-rate-limiting.md
+        destination: "{hermes_home}/skills/printing-press/references/per-source-rate-limiting.md"
+      - source: skills/printing-press/references/phase-receipts.md
+        destination: "{hermes_home}/skills/printing-press/references/phase-receipts.md"
+      - source: skills/printing-press/references/run-resolution.md
+        destination: "{hermes_home}/skills/printing-press/references/run-resolution.md"
+      - source: skills/printing-press/references/scorecard-patterns.md
+        destination: "{hermes_home}/skills/printing-press/references/scorecard-patterns.md"
+      - source: skills/printing-press/references/secret-protection.md
+        destination: "{hermes_home}/skills/printing-press/references/secret-protection.md"
+      - source: skills/printing-press/references/setup-checks.md
+        destination: "{hermes_home}/skills/printing-press/references/setup-checks.md"
+      - source: skills/printing-press/references/spec-format.md
+        destination: "{hermes_home}/skills/printing-press/references/spec-format.md"
+      - source: skills/printing-press/references/ws-primary-pattern.md
+        destination: "{hermes_home}/skills/printing-press/references/ws-primary-pattern.md"
+      - source: shared-rules/printing-press.md
+        destination: "{hermes_home}/shared-rules/printing-press.md"
+    rollback: Restore the per-file receipt backups outside skill discovery through the governed runtime rollback.
+
+  - name: ensure_printing_press
+    owner_lane: baseline_wiring
+    current_registry_entry: printing_press_full_pass
+    description: Install the checksum-pinned Printing Press engine without replacing runtime code, with a verified rollback backup.
+    platforms: [linux, macos, windows]
+    operation: ensure_printing_press
+    helper: kit/bin/ensure-printing-press.py
+    contract: kit/config/printing-press-release-v1.json
+    timeout_seconds: 240
+    rollback: run the same helper with --hermes-home and the exact --restore-backup path in its receipt; it refuses changed postimages
 
   - name: ensure_browser_use_cli
     owner_lane: baseline_wiring

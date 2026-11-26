@@ -213,7 +213,7 @@ def _host_level_target_absent(entry: dict, hermes_dir: Path) -> bool:
 
     Covers host-level (non-agent-tree) artifact roots: bin/, crons/, hooks/,
     LaunchAgents, and MCP server trees (mcp-servers/, local-mcp-servers/).
-    mcp-servers/ added 2026-07-02: anamnesis server.py is an Enoch-only
+    mcp-servers/ added 2026-07-02: anamnesis server.py is an operator-only
     artifact, so its recall patches must classify as env-skip (not
     ANCHOR-MISS) on client hosts where the server is absent.
     """
@@ -246,18 +246,24 @@ def _native_carrier_postimage_verified(hermes_dir: Path, patches_dir: Path, name
 
     modules = {
         "platform_delivery_drain_v1": "platform_delivery_drain_v1",
+        "native_cua_lock_v1": "native_cua_lock_v1",
     }
     if name not in modules:
         return None
     head = subprocess.run(["git", "-C", str(hermes_dir), "rev-parse", "HEAD"],
                           capture_output=True, text=True, check=False)
-    if head.returncode or head.stdout.strip() != "d3630f853239e8c41ce7201e09fbdf39bcbc5431":
+    expected_head = ("2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+                     if name == "native_cua_lock_v1"
+                     else "d3630f853239e8c41ce7201e09fbdf39bcbc5431")
+    if head.returncode or head.stdout.strip() != expected_head:
         return None
     try:
         path = patches_dir / "modules" / (modules[name] + ".py")
         spec = importlib.util.spec_from_file_location("_native_postverify_" + name, path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        if name == "native_cua_lock_v1":
+            return mod.verify_native_cua_lock_v1(hermes_dir)
         if name == "platform_delivery_drain_v1":
             target = hermes_dir / "gateway/run_shutdown.py"
             return (not target.is_symlink() and target.is_file()

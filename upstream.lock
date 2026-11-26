@@ -1,7 +1,6 @@
-# Single source of truth for the upstream Hermes version pinned by hermes-golden.
-# Isolated upgrade candidate; the immutable commit is the pin.
-tag: v2026.9.24
-commit: d62fbea7e110c6008e1ffe1b226d1f593ba4bc28
-hermes_version: 0.21.5
-pinned_at: 2026-10-04
+# Stable upstream qualification candidate. The immutable commit is authoritative.
+tag: v0.23.0
+commit: 2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19
+hermes_version: 0.23.0
+pinned_at: 2026-11-07
 source_repo: https://github.com/NousResearch/hermes-agent.git

@@ -1,6 +1,6 @@
 ---
 name: golden-visual-qa
-description: Render and fail-closed review compiled client-facing visuals before delivery. Use for PDF, HTML, email HTML, newsletter, social-frame image, or slide-deck artifacts when an agent is about to show, send, post, publish, or hand the artifact to Deacon or a client.
+description: Render and fail-closed review compiled client-facing visuals before delivery. Use for PDF, HTML, email HTML, newsletter, social-frame image, or slide-deck artifacts when an agent is about to show, send, post, publish, or hand the artifact to the principal or a client.
 ---
 
 # Golden visual QA

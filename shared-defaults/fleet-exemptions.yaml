@@ -1,0 +1,13 @@
+schema_version: 1
+
+# Golden-recorded per-agent exemptions from shared defaults.
+# Key: fleet agent id. Pass it with merge-shared-defaults.py --agent-id; the
+# config's client_identity is the fallback when that flag is absent.
+# Every row needs a dotted path and a concrete, current reason: a dated decision,
+# a named contract, tenant identity, or an operator role boundary. A difference
+# without a row here is drift, and the merge converges it.
+# Public release: fleet-specific agent rows are removed. Add your own rows, e.g.
+#   <agent-id>:
+#     - path: stt.enabled
+#       reason: Principal sends voice notes; keep speech-to-text on.
+agents: {}

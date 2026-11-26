@@ -6,6 +6,68 @@ preserves the normal authorization, plugin, and audit path through `tool_call`.
 Use the custom capability router only as a secondary reference index for cold,
 uninstalled, other-lane, or operating-pattern guidance.
 
+### Research API discovery
+
+For identity resolution, people/company enrichment, web/news/social data and
+extraction, load `capability-scout` and discover the appropriate API by task.
+Do not wait for a generic web search to fail or for the principal to name TReg.
+Use native tool discovery, TReg catalog search, schema/price inspection and the
+requesting runtime's own authorized identity. Match the endpoint to available
+identifiers. Read sources and record remaining gaps after the API call.
+
+X (Twitter) posts, accounts and replies go through TReg's routed X endpoints
+(`treg.x.search.posts`, `treg.x.user.posts`, `treg.x.post.comments`,
+`treg.x.user.profile`); load `x-research`. The native `x_search` tool is
+disabled because it needs xAI Grok, which is reserved for Grok Bot.
+
+Data Patriot is retired. Older skills and caller guidance cannot reactivate its
+lookup, enhanced, deep, status or brief routes. Use the research discovery adapter
+instead. Before named-person or organization research, load the canonical GBrain
+`workflows/treg-research-discovery` (guidance revision
+`508d22d6-f30b-4b68-89da-5955b973dd97`) through the principal's authorized knowledge
+route; never borrow another tenant's brain. If unavailable, report the load gap
+and keep required research incomplete/unverified.
+
+Apply its completion gate: use 2–3 independent originating sources (default 3)
+and record the task-local source ledger before claiming done. Directory entries
+and duplicate syndication are not independent sources. Supplied-source-only tasks
+may stay within that evidence; unmet independent corroboration remains
+incomplete/unverified. Every material status line needs attributable evidence
+linked to the actual claim plus an observed-at time, or an explicit unverified
+label; a bare homepage is not proof. Unavailable or partial traces do not prove
+zero tool calls. This is a load-and-gate pointer; the canonical workflow owns the
+full procedure.
+
+### Discover the procedure from the request
+
+Before a multi-step task, use the principal's task words to find the applicable
+installed skill or tenant-local workflow. Use native skill discovery and open
+the resolved procedure. A catalog title or remembered procedure is not its body.
+Load one applicable workflow, then only the references needed for the next action.
+Do not preload every workflow or ask the principal to name a skill.
+
+Use the configured tenant's knowledge index for filed operating facts. Follow a
+workflow hub only when that tenant exposes one. Do not query an operator vault
+from a client runtime or assume every tenant has the same workflow slugs.
+Distinguish local file paths, knowledge slugs, package manifests, and native job
+IDs. Open a local reference on its owning filesystem; do not reinterpret it as
+a knowledge-store path.
+
+Check the resolved skill path and package version when duplicate names exist.
+Use the maintained procedure for that runtime. A historical helper or duplicate
+entry point must not override current instructions. Preserve local customization;
+report conflicting managed copies for source repair rather than deleting them
+without authority.
+
+A procedure supplies method, not permission. Reuse the principal's existing
+bounded authority and task identity. A cold connection is not a missing
+capability: follow the discovery and activation rules below. After acting,
+verify the relevant owner, target and result through a live read or supported
+receipt. Distinguish discovered, opened, used, written, delivered and received.
+An explanatory question can finish with an evidence-based answer; do not create
+a background task, delegate, schedule work or send a message merely because a
+workflow mentions those capabilities.
+
 ### Hard rule
 
 For a request that needs a capability not already visible in the hot toolset:
@@ -95,7 +157,7 @@ underlying lane they name. Important examples include:
   monitoring, or restart-survival need; duration, complexity, and auditability alone do not move ownership
   out of the live conversation;
 - GBrain local administration through its bounded operator lane;
-- isolated worktrees for repo-writing work;
+- repository ownership and the principal's current checkout policy;
 - resource-capacity gates for local inference;
 - artifact-first closeout for substantial research;
 - the bounded public-web/browser routing contract.

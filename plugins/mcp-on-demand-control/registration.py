@@ -1,12 +1,10 @@
-"""Side-effect-free registration contract for MCP control tools."""
+"""MCP control tools only; retired research-routing hooks stay retired."""
 
 from __future__ import annotations
 
 from .control import (
     RESTART_SCHEMA,
     STATUS_SCHEMA,
-    guard_native_research,
-    preferred_research_context,
     restart_handler,
     start_activation_heartbeat,
     status_handler,
@@ -33,7 +31,3 @@ def register(ctx):
         description="Activate or reconnect a policy-allowed MCP backend",
         emoji="🔄",
     )
-    register_hook = getattr(ctx, "register_hook", None)
-    if callable(register_hook):
-        register_hook("pre_llm_call", preferred_research_context)
-        register_hook("pre_tool_call", guard_native_research)

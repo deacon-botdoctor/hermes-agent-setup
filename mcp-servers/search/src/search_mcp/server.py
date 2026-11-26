@@ -31,6 +31,7 @@ import re
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -65,7 +66,6 @@ _SEARCH_TIMEOUT = 25.0
 _SEARXNG_RETRIES = 3       # retry transient empty result sets
 _SEARXNG_BACKOFF = 0.6     # seconds, multiplied by attempt number
 _SCRAPE_TIMEOUT = 50.0
-_SCRAPE_RETRIES = 2
 _EXA_TIMEOUT = 45.0
 _FETCH_TIMEOUT = 30.0
 _MAX_FETCH_BYTES = 2_000_000
@@ -85,9 +85,7 @@ def _utc() -> str:
 
 # ── Free stack: SearXNG + Firecrawl ─────────────────────────────────────────
 def _searxng(query: str, limit: int) -> list[dict]:
-    # SearXNG intermittently returns an empty result set for a valid query
-    # (upstream engine rate-limits/timeouts), even on a 200. Retry empties a few
-    # times with light backoff; only raise if every attempt errored outright.
+    # HTTP 200 can contain upstream engine failures rather than a search result.
     params = {"q": query, "format": "json", "pageno": 1}
     results: list[dict] = []
     last_exc: Exception | None = None
@@ -100,6 +98,11 @@ def _searxng(query: str, limit: int) -> list[dict]:
             results = list(data.get("results") or [])
             if results:
                 break
+            engine_errors = data.get("unresponsive_engines") or []
+            if engine_errors:
+                last_exc = RuntimeError(f"Search engines unavailable: {engine_errors}")
+                break
+            last_exc = None
         except Exception as exc:
             last_exc = exc
         if attempt < _SEARXNG_RETRIES - 1:
@@ -118,22 +121,20 @@ def _searxng(query: str, limit: int) -> list[dict]:
 
 
 def _firecrawl_scrape_once(url: str) -> dict[str, Any]:
-    payload = {"url": url, "formats": ["markdown"]}
-    last_err = None
-    for _ in range(_SCRAPE_RETRIES + 1):
-        try:
-            with httpx.Client(timeout=_SCRAPE_TIMEOUT, headers={"User-Agent": _UA}) as c:
-                r = c.post(f"{FIRECRAWL}/v1/scrape", json=payload)
-                d = r.json()
-            if d.get("success") and d.get("data"):
-                page = d["data"]
-                md = page.get("markdown") or ""
-                return {"ok": True, "url": url, "chars": len(md), "markdown": md,
-                        "metadata": page.get("metadata") or {}}
-            last_err = d.get("error", "scrape unsuccessful")
-        except Exception as exc:
-            last_err = str(exc)[:200]
-    return {"ok": False, "url": url, "error": last_err}
+    payload = {"url": url, "formats": ["markdown"], "timeout": 45000}
+    try:
+        with httpx.Client(timeout=_SCRAPE_TIMEOUT, headers={"User-Agent": _UA}) as c:
+            r = c.post(f"{FIRECRAWL}/v1/scrape", json=payload)
+            d = r.json()
+        if r.is_success and d.get("success") and d.get("data"):
+            page = d["data"]
+            md = page.get("markdown") or ""
+            return {"ok": True, "url": url, "chars": len(md), "markdown": md,
+                    "metadata": page.get("metadata") or {}}
+        error = d.get("error", f"HTTP {r.status_code}: scrape unsuccessful")
+    except Exception as exc:
+        error = str(exc)[:200]
+    return {"ok": False, "url": url, "error": error}
 
 
 def _firecrawl_scrape(url: str) -> dict[str, Any]:
@@ -299,6 +300,10 @@ def search(
 
     This is the default search tool. It returns real page CONTENT, not just
     snippets, so prefer it over a bare snippet search when you need to read.
+    Check that results answer the full query. Empty, unrelated, or failed
+    retrieval does not establish absence. Recover within the same turn through
+    another configured route or known primary sources; do not wait for the user
+    to ask for more research. Never request an unconfigured paid mode.
 
     mode:
       - "free" (default behaviour, no cost): SearXNG keyword search + Firecrawl
@@ -314,7 +319,7 @@ def search(
         query: Natural-language or keyword query.
         mode: "free" | "exa" | "auto" (default "auto", which is free-first).
         num_results: Ranked results to return (default 8, max 20).
-        scrape_top: How many top results to auto-read for full text (default 3, max 6).
+        scrape_top: How many top results to auto-read (default 3, max 6; 0 skips page reads).
         max_chars: Truncate each page's text (default 4000).
         category: Optional Exa category hint (only used in exa/auto-escalation).
 
@@ -326,7 +331,7 @@ def search(
     if mode not in {"free", "exa", "auto"}:
         mode = "auto"
     num_results = max(1, min(int(num_results or 8), 20))
-    scrape_top = max(0, min(int(scrape_top or 3), 6))
+    scrape_top = max(0, min(int(scrape_top), 6))
 
     # Direct paid path.
     if mode == "exa":
@@ -351,15 +356,18 @@ def search(
                          for x in ex["results"][:scrape_top] if x.get("text")]
                 return {"ok": True, "query": query, "mode_used": "exa(auto-escalated:searxng-down)", "cost": "exa-credits",
                         "result_count": len(results), "results": results, "scraped": len(pages), "pages": pages}
-        return {"ok": False, "mode_used": "free", "error": f"search failed: {str(exc)[:200]}"}
+        return {"ok": False, "query": query, "mode_used": "free",
+                "error": f"search failed: {str(exc)[:500]}",
+                "results": [], "pages": [],
+                "next": "Use another configured search route or fetch known primary sources. "
+                        "This retrieval failure is not evidence that the subject does not exist."}
 
     pages = []
     usable = 0
-    for res in results[:scrape_top]:
-        url = res.get("url")
-        if not url:
-            continue
-        scraped = _firecrawl_scrape(url)
+    urls = [res["url"] for res in results[:scrape_top] if res.get("url")]
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        scraped_pages = list(pool.map(_firecrawl_scrape, urls))
+    for url, scraped in zip(urls, scraped_pages):
         if scraped.get("ok"):
             md = scraped["markdown"][:max_chars]
             walled = _looks_walled(md)
@@ -373,7 +381,7 @@ def search(
                           "attempts": scraped.get("attempts", []), "next": scraped.get("next")})
 
     # auto escalation: weak free recall -> try Exa to enrich.
-    if mode == "auto" and usable < _AUTO_ESCALATE_MIN_USABLE and _exa_key():
+    if mode == "auto" and scrape_top > 0 and usable < _AUTO_ESCALATE_MIN_USABLE and _exa_key():
         ex = _exa_search(query, num_results, True, max_chars, category)
         if ex.get("ok") and ex["results"]:
             seen = {p["url"] for p in pages}
@@ -386,8 +394,13 @@ def search(
             return {"ok": True, "query": query, "mode_used": "auto(free+exa)", "cost": "exa-credits",
                     "result_count": len(merged), "results": merged, "scraped": len(pages), "pages": pages}
 
-    return {"ok": True, "query": query, "mode_used": "free", "cost": "free",
-            "result_count": len(results), "results": results, "scraped": len(pages), "pages": pages}
+    return {"ok": bool(results), "query": query, "mode_used": "free", "cost": "free",
+            "result_count": len(results), "results": results, "scraped": len(pages), "pages": pages,
+            **({} if results else {
+                "error": "No results retrieved; coverage is unverified.",
+                "next": "Broaden the query or use another configured route and primary sources "
+                        "before concluding the research. An empty search is not proof of absence.",
+            })}
 
 
 @mcp.tool()

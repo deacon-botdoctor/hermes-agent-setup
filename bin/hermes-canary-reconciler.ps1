@@ -19,17 +19,20 @@ function ReadJson($Path) {
     try { [IO.File]::ReadAllText($Path) | ConvertFrom-Json } catch { $null }
   }
 }
-function WriteJsonAtomic($Path, $Obj) {
+function WriteTextAtomic($Path, $Text, $Encoding) {
   $parent = Split-Path -Parent $Path
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
   $tmp = Join-Path $parent ('.' + (Split-Path -Leaf $Path) + '.tmp-' + $PID + '-' + [Guid]::NewGuid().ToString('N'))
   try {
-    $json = $Obj | ConvertTo-Json -Depth 16
-    [IO.File]::WriteAllText($tmp, $json + [Environment]::NewLine, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($tmp, $Text, $Encoding)
     Move-Item -LiteralPath $tmp -Destination $Path -Force
   } finally {
     Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   }
+}
+function WriteJsonAtomic($Path, $Obj) {
+  $json = $Obj | ConvertTo-Json -Depth 16
+  WriteTextAtomic $Path ($json + [Environment]::NewLine) (New-Object Text.UTF8Encoding($false))
 }
 function PsLiteral($Value) { "'" + ([string]$Value).Replace("'", "''") + "'" }
 
@@ -89,7 +92,30 @@ function NewBoundedSettings($ExecutionMinutes) {
     -StartWhenAvailable
 }
 
-function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes, $Principal) {
+function IsInteractivePrincipal($Principal) {
+  # Interactive principals run in the signed-in desktop session, where a
+  # console program opens a visible terminal window over the user's work.
+  return ([string]$Principal.LogonType -notin @('ServiceAccount', 'S4U', 'Password'))
+}
+
+function HiddenTaskLauncher($Name, $Execute, $Arguments) {
+  # A per-task WSH launcher runs the exact command with window style 0, waits,
+  # and returns the child's exit code as the task result.
+  $path = Join-Path $State ('task-launchers\' + $Name + '.vbs')
+  $command = ('"' + $Execute + '" ' + $Arguments).Replace('"', '""')
+  @{
+    Path=$path
+    Text=('Set sh = CreateObject("WScript.Shell")' + "`r`n" + 'WScript.Quit sh.Run("' + $command + '", 0, True)' + "`r`n")
+    Execute=(Join-Path ([Environment]::SystemDirectory) 'wscript.exe')
+    Arguments=('//B //NoLogo "' + $path + '"')
+  }
+}
+
+function TestLauncher($Launcher) {
+  return [bool]((Test-Path -LiteralPath $Launcher.Path -PathType Leaf) -and [IO.File]::ReadAllText($Launcher.Path) -ceq $Launcher.Text)
+}
+
+function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes, $Principal, $Launcher) {
   if (-not $Task) { return $false }
   try {
     $actions = @($Task.Actions)
@@ -105,7 +131,7 @@ function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $Execu
       [string]$actions[0].Execute -ieq $Execute -and
       [string]$actions[0].Arguments -eq $Arguments -and
       [string]$actions[0].WorkingDirectory -eq '' -and
-      [string]$actions[0].Arguments.IndexOf($Script, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+      $(if ($Launcher) { (TestLauncher $Launcher) -and $Launcher.Text.IndexOf($Script, [StringComparison]::OrdinalIgnoreCase) -ge 0 } else { ([string]$actions[0].Arguments).IndexOf($Script, [StringComparison]::OrdinalIgnoreCase) -ge 0 }) -and
       [System.Xml.XmlConvert]::ToTimeSpan($interval).TotalMinutes -eq $Minutes -and
       $policy -eq 'StopExisting' -and
       $limit.TotalMinutes -eq $ExecutionMinutes -and
@@ -119,17 +145,28 @@ function TestTaskContract($Task, $Execute, $Arguments, $Script, $Minutes, $Execu
 function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMinutes, $OutputPath) {
   if (-not (Test-Path -LiteralPath $Script)) { return 'script_missing' }
   try {
-    # Tool readiness reads the gateway account's protected environment file.
+    # These checks read the gateway owner's protected environment and API key.
     # Keep other maintenance tasks on SYSTEM. Never broaden secret-file ACLs.
-    $principal = if ($Name -eq 'HermesToolReadiness') {
+    $principal = if ($Name -in @('HermesToolReadiness', 'HermesLocalSelfCheck')) {
       (Get-ScheduledTask -TaskName (GatewayTaskName) -ErrorAction Stop).Principal
     } else {
       New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     }
     if (-not $principal -or -not $principal.UserId) { throw 'health task principal unavailable' }
-    $TaskContracts[$Name] = @{Execute=$Execute;Arguments=$Arguments;Script=$Script;Minutes=$Minutes;ExecutionMinutes=$ExecutionMinutes;Principal=$principal;OutputPath=$OutputPath}
+    $launcher = $null
+    $launcherWritten = $false
+    if (IsInteractivePrincipal $principal) {
+      $launcher = HiddenTaskLauncher $Name $Execute $Arguments
+      $Execute = $launcher.Execute
+      $Arguments = $launcher.Arguments
+      if (-not (TestLauncher $launcher)) {
+        WriteTextAtomic $launcher.Path $launcher.Text ([Text.Encoding]::Unicode)
+        $launcherWritten = $true
+      }
+    }
+    $TaskContracts[$Name] = @{Execute=$Execute;Arguments=$Arguments;Script=$Script;Minutes=$Minutes;ExecutionMinutes=$ExecutionMinutes;Principal=$principal;OutputPath=$OutputPath;Launcher=$launcher}
     $existing = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-    if (TestTaskContract $existing $Execute $Arguments $Script $Minutes $ExecutionMinutes $principal) { return 'already_compliant' }
+    if (TestTaskContract $existing $Execute $Arguments $Script $Minutes $ExecutionMinutes $principal $launcher) { return $(if ($launcherWritten) { 'ensured' } else { 'already_compliant' }) }
     $action = New-ScheduledTaskAction -Execute $Execute -Argument $Arguments
     $trigger = New-ScheduledTaskTrigger `
       -Once `
@@ -137,6 +174,11 @@ function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMi
       -RepetitionInterval (New-TimeSpan -Minutes $Minutes) `
       -RepetitionDuration (New-TimeSpan -Days 3650)
     $settings = NewBoundedSettings $ExecutionMinutes
+    # A rollout owner can hold retention disabled through final acceptance.
+    # Rebinding its interpreter must not silently release that hold.
+    if ($Name -eq 'HermesDiskRetention' -and $existing -and -not $existing.Settings.Enabled) {
+      $settings.Enabled = $false
+    }
     Register-ScheduledTask `
       -TaskName $Name `
       -Action $action `
@@ -155,6 +197,7 @@ function EnsureTask($Name, $Execute, $Arguments, $Script, $Minutes, $ExecutionMi
 function PythonArguments($Python, $Script, $ExtraArgs) {
   $command = '$env:HERMES_HOME=' + (PsLiteral $Hermes) + '; $env:PYTHONUTF8=1; & ' + (PsLiteral $Python) + ' ' + (PsLiteral $Script)
   if ($ExtraArgs) { $command += ' ' + $ExtraArgs }
+  $command += '; exit $LASTEXITCODE'
   '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + $command.Replace('"','`"') + '"'
 }
 
@@ -180,7 +223,7 @@ function TaskEvidence($Name, $IntervalMinutes, $ExecutionMinutes) {
   $contract = $TaskContracts[$Name]
   $contractOk = $false
   if ($contract) {
-    $contractOk = TestTaskContract $task $contract.Execute $contract.Arguments $contract.Script $contract.Minutes $contract.ExecutionMinutes $contract.Principal
+    $contractOk = TestTaskContract $task $contract.Execute $contract.Arguments $contract.Script $contract.Minutes $contract.ExecutionMinutes $contract.Principal $contract.Launcher
   }
   $scriptHash = $null
   if ($contract -and (Test-Path -LiteralPath $contract.Script -PathType Leaf)) {
@@ -189,10 +232,11 @@ function TaskEvidence($Name, $IntervalMinutes, $ExecutionMinutes) {
   $verdict = 'pass'
   if ([string]$task.State -eq 'Disabled') { $verdict = 'disabled' }
   elseif ($null -ne $runningSeconds -and $runningSeconds -gt ($IntervalMinutes * 120)) { $verdict = 'running_too_long' }
-  elseif ($null -ne $lastResult -and $lastResult -ne 0 -and [string]$task.State -ne 'Running') { $verdict = 'last_result_failed' }
+  elseif ($null -ne $lastResult -and $lastResult -ne 0 -and [string]$task.State -ne 'Running' -and -not ($Name -eq 'HermesDiskRetention' -and $lastResult -eq 75)) { $verdict = 'last_result_failed' }
   elseif (-not $contractOk) { $verdict = 'definition_mismatch' }
   elseif ($instancePolicy -ne 'StopExisting') { $verdict = 'instance_policy_unsafe' }
   elseif ($null -eq $limit -or $limit -ne ($ExecutionMinutes * 60)) { $verdict = 'execution_limit_unsafe' }
+  elseif ($Name -eq 'HermesDiskRetention' -and $lastResult -eq 75 -and [string]$task.State -ne 'Running') { $verdict = 'deferred' }
   [ordered]@{
     name=$Name
     present=$true
@@ -272,7 +316,7 @@ foreach ($schedule in @($selfStatus,$readinessStatus,$retentionStatus,$capacityS
   }
 }
 foreach ($task in $taskEvidence) {
-  if ($task.verdict -eq 'pass') { continue }
+  if ($task.verdict -in @('pass','deferred')) { continue }
   # The local self-check owns and publishes its own failure receipt, which Doc
   # consumes directly. Mirroring that result into the reconciler creates a
   # circular latch: self-check fails because reconciler is red, while the

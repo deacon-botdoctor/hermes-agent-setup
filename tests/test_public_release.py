@@ -63,28 +63,19 @@ def test_release_identity_matches_source_manifest():
         release["runtime_payload_digest"]
         == manifest["components"]["runtime_payload"]["digest"]
     )
-    assert manifest["components"]["runtime_payload"]["file_count"] == 772
-    assert manifest["components"]["baseline_wiring"]["file_count"] == 52
     assert set(manifest["components"]) == {"baseline_wiring", "runtime_payload"}
+    for component in manifest["components"].values():
+        assert component["file_count"] == len(component["files"]) > 0
     assert release["source_scope"] == "sanitized_deployable_components"
+    fingerprint = manifest["runtime_fingerprint"]
+    assert fingerprint["file_count"] == len(fingerprint["files"]) > 0
     assert release["assembled_runtime_fingerprint"] == {
-        "digest": "a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0",
-        "file_count": 340,
+        "digest": fingerprint["digest"],
+        "file_count": fingerprint["file_count"],
     }
-    assert manifest["runtime_fingerprint"]["digest"] == (
-        release["assembled_runtime_fingerprint"]["digest"]
-    )
-    assert manifest["runtime_fingerprint"]["file_count"] == 340
-    assert manifest["runtime_fingerprint"]["golden_sha"] == release["golden_sha"]
-    assert (
-        manifest["runtime_fingerprint"]["upstream_sha"]
-        == release["canonical_upstream_sha"]
-    )
-    assert (
-        manifest["runtime_fingerprint"]["expected_upstream_sha"]
-        == release["canonical_upstream_sha"]
-    )
-    assert len(manifest["runtime_fingerprint"]["files"]) == 340
+    assert fingerprint["golden_sha"] == release["golden_sha"]
+    assert fingerprint["upstream_sha"] == release["canonical_upstream_sha"]
+    assert fingerprint["expected_upstream_sha"] == release["canonical_upstream_sha"]
     assert set(release) == {
         "schema_version",
         "release",
@@ -109,48 +100,25 @@ def test_release_identity_matches_source_manifest():
     }
 
 
-@pytest.mark.parametrize("typing_progress", [None, False, True])
-@pytest.mark.parametrize("failure", [None, "global_typing", "callback", "marker", "binding", "live_root", "generation"])
-def test_automatic_selfcheck_delayed_checkpoint_contract(tmp_path, monkeypatch, typing_progress, failure):
-    module = load_script("automatic_checkpoint_contract", "hermes-local-selfcheck.py")
-    home = tmp_path / "profile"
-    runtime = home / "runtime-candidates/current"
-    (home / "state").mkdir(parents=True)
-    (runtime / "gateway").mkdir(parents=True)
-    (runtime / "agent").mkdir()
+@pytest.mark.parametrize("global_typing", [False, True])
+def test_automatic_selfcheck_enforces_quiet_display(tmp_path, monkeypatch, global_typing):
+    module = load_script("automatic_quiet_display", "hermes-local-selfcheck.py")
     config = yaml.safe_load((ROOT / "shared-defaults/config-client-quiet-display.yaml").read_text())
-    checkpoint = yaml.safe_load((ROOT / "shared-defaults/config-telegram-organic-checkpoints.yaml").read_text())
-    config["agent"] = checkpoint["agent"]
-    config["display"]["platforms"]["telegram"].update(checkpoint["display"]["platforms"]["telegram"])
-    telegram = config["display"]["platforms"]["telegram"]
-    if typing_progress is None:
-        telegram.pop("progress_on_typing")
-    else:
-        telegram["progress_on_typing"] = typing_progress
-    if failure == "global_typing": config["display"]["progress_on_typing"] = True
-    (home / "config.yaml").write_text(yaml.safe_dump(config))
-    marker = "# HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3\n"
-    (runtime / "gateway/run_turn.py").write_text(marker)
-    callback = "agent._telegram_checkpoint_commentary_capture = callback\n"
-    (runtime / "gateway/run_turn_runner.py").write_text(
-        ("missing" if failure == "marker" else marker)
-        + ("" if failure == "callback" else callback)
-    )
-    (runtime / "agent/codex_runtime.py").write_text(marker)
-    binding = {"kind":"botdoctor_runtime_binding", "status":"held" if failure == "binding" else "active",
-               "runtime_root":str(runtime), "generated_at":"2026-09-07T17:38:34Z"}
-    (home / "state/runtime-binding.json").write_text(json.dumps(binding))
-    monkeypatch.setattr(module, "HERMES", home)
-    monkeypatch.setattr(module, "gateway_runtime_binding", lambda: {"pid":123,
-        "runtime_root":str(tmp_path / "other") if failure == "live_root" else str(runtime)})
-    monkeypatch.setattr(module, "_process_started_at", lambda pid: module.parse_dt(
-        "2026-09-07T17:38:33Z" if failure == "generation" else "2026-09-07T17:38:35Z"))
-    before = {p:p.read_bytes() for p in [home / "config.yaml", home / "state/runtime-binding.json"]}
+    assert config["display"]["progress_on_typing"] is False
+    if global_typing:
+        config["display"]["progress_on_typing"] = True
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    monkeypatch.setattr(module, "HERMES", tmp_path)
+    monkeypatch.setattr(module, "api_only_profile", lambda: False)
+    monkeypatch.setattr(module, "_local_manager_binding", lambda: False)
+    monkeypatch.setattr(module, "telegram_transport_expected", lambda: True)
+    before = config_path.read_bytes()
     immersion = module.check_immersion_quality()
-    checkpoints = module.check_telegram_organic_checkpoints()
-    assert immersion["status"] == ("fail" if failure == "global_typing" else "pass"), immersion
-    assert checkpoints["status"] == ("pass" if typing_progress is True and failure in {None, "global_typing"} else "fail"), checkpoints
-    assert {p:p.read_bytes() for p in before} == before
+    assert immersion["status"] == ("fail" if global_typing else "pass"), immersion
+    if global_typing:
+        assert "display.progress_on_typing=True->False" in immersion["detail"]
+    assert config_path.read_bytes() == before
 
 
 @pytest.mark.parametrize("failed", [False, True])
@@ -168,7 +136,7 @@ def test_automatic_selfcheck_preserves_stale_canary_and_failed_action_guard(tmp_
     assert path.read_bytes() == before
 
 
-def test_host_health_and_cron_self_repair_are_release_owned():
+def test_host_health_tools_and_policy_are_release_owned():
     manifest = json.loads(
         (ROOT / "runtime-payload-source-manifest.json").read_text(encoding="utf-8")
     )
@@ -182,7 +150,6 @@ def test_host_health_and_cron_self_repair_are_release_owned():
         "bin/hermes-canary-reconciler.py",
         "bin/hermes-disk-retention.py",
         "bin/tool-readiness-probe.py",
-        "patches/modules/cron_operator_delivery_v1.py",
         "shared-rules/host-health.md",
     } <= owned_paths
 
@@ -205,20 +172,6 @@ def test_host_health_and_cron_self_repair_are_release_owned():
     assert "never automatically blocks a requested job" in host_rule
     assert "Allocated swap and active swap churn are distinct signals" in host_rule
     assert "Never reboot the host or stop unknown" in host_rule
-
-    cron_patch = (
-        ROOT / "patches" / "modules" / "cron_operator_delivery_v1.py"
-    ).read_text(encoding="utf-8")
-    assert "# HERMES_CRON_SELF_REMEDIATION_v1" in cron_patch
-    assert '"_cron_repair_attempt": True' in cron_patch
-    assert "Do not blindly rerun external side effects" in cron_patch
-    assert "Never tell the operator to inspect logs" in cron_patch
-    assert "automatic repair stopped:" in cron_patch
-
-    registry = yaml.safe_load((ROOT / "patches" / "registry.yaml").read_text())
-    entry = next(row for row in registry["patches"] if row["name"] == "cron_operator_delivery_v1")
-    assert entry["module"] == "modules/cron_operator_delivery_v1.py"
-    assert entry["function"] == "patch_cron_operator_delivery_v1"
 
 
 def test_verifier_rejects_nested_fingerprint_golden_mismatch(monkeypatch):
@@ -609,14 +562,19 @@ def test_release_payload_keeps_critical_blobs():
         for component in manifest["components"].values()
         for entry in component["files"]
     }
-    assert (
-        blobs["patches/modules/codex_401_paid_fallback_circuit_v1.py"]
-        == "997d49f723c41653ccf5a41c2f5f8316399b7853"
+    critical_paths = (
+        "patches/apply-all-patches.py",
+        "patches/registry.yaml",
+        "patches/modules/assembled_runtime_contract.py",
+        "patches/modules/session_url_storage_redaction_v1.py",
+        "patches/modules/subscription_rollover_v1.py",
     )
-    assert (
-        blobs["patches/modules/telegram_dm_topic_recovery_root_guard_v1.py"]
-        == "65b70c2ad89538de89a9e1ebfb68b92d6ee308bd"
-    )
+    for path in critical_paths:
+        expected = blobs[path]
+        actual = subprocess.check_output(
+            ["git", "hash-object", f"--path={path}", "--", path], cwd=ROOT, text=True
+        ).strip()
+        assert actual == expected, path
 
 
 def test_registry_has_only_explained_retirable_patches():
@@ -624,7 +582,7 @@ def test_registry_has_only_explained_retirable_patches():
         (ROOT / "patches" / "registry.yaml").read_text(encoding="utf-8")
     )
     patches = registry["patches"]
-    assert len(patches) == 66
+    assert len(patches) == 10
     for patch in patches:
         assert patch["reason"].strip()
         assert patch["retirement_condition"].strip()
@@ -642,7 +600,8 @@ def test_profile_installer_maps_only_bounded_profile_files(tmp_path):
     assert "plugins/botdoctor-immersion/plugin.yaml" in destinations
     assert "plugins/semantic-computer-control-guard/plugin.yaml" in destinations
     assert "skills/fleet/golden-computer-use-v2/SKILL.md" in destinations
-    assert "hooks/telegram-transcript/handler.py" in destinations
+    assert "plugins/botdoctor-telegram/plugin.yaml" in destinations
+    assert "hooks/telegram-transcript/handler.py" not in destinations
     assert "mcp-servers/capability-router/registry.json" in destinations
     assert "bin/telegram-transaction-canary.py" in destinations
     assert "bin/native-agent-continuity.py" in destinations
@@ -2054,7 +2013,7 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
         destination.write_text(f"before-{index}\n", encoding="utf-8")
     sources = [
         ROOT / "plugins" / "botdoctor-immersion" / "__init__.py",
-        ROOT / "plugins" / "task-ledger" / "__init__.py",
+        ROOT / "plugins" / "mcp-on-demand-control" / "__init__.py",
     ]
 
     monkeypatch.setattr(installer, "verify_runtime", lambda _runtime: None)
@@ -2154,7 +2113,7 @@ def test_shared_default_merge_preserves_config_mode(tmp_path):
     assert config_path.stat().st_mode & 0o777 == 0o600
 
 
-def test_gbrain_is_opt_in_and_telegram_continuity_stays_enabled(monkeypatch):
+def test_gbrain_capture_is_opt_in(monkeypatch):
     monkeypatch.delenv("HERMES_ENABLE_GBRAIN_CAPTURE", raising=False)
     gbrain = load_script(
         "public_gbrain_capture", "../hooks/gbrain-capture/handler.py"
@@ -2166,21 +2125,6 @@ def test_gbrain_is_opt_in_and_telegram_continuity_stays_enabled(monkeypatch):
         lambda _context: pytest.fail("disabled GBrain hook executed"),
     )
     asyncio.run(gbrain.handle("agent:end", {"platform": "telegram"}))
-    transcript_source = (
-        ROOT / "hooks" / "telegram-transcript" / "handler.py"
-    ).read_text(encoding="utf-8")
-    transcript_hook = yaml.safe_load(
-        (ROOT / "hooks" / "telegram-transcript" / "HOOK.yaml").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert "HERMES_ENABLE_TELEGRAM_TRANSCRIPT" not in transcript_source
-    assert transcript_hook["name"] == "telegram-transcript"
-    assert set(transcript_hook["events"]) == {
-        "agent:start",
-        "agent:end",
-        "processing:complete",
-    }
 
 
 def test_windows_installer_is_pinned_and_paths_are_split():
@@ -2432,17 +2376,17 @@ def test_coherence_cli_resolves_current_binding_each_invocation(tmp_path, monkey
 def test_coherence_windows_scheduler_can_use_profile_binding(tmp_path):
     installer = load_path("profile_binding_scheduler", ROOT / "maintenance/bin/install-runtime-coherence.py")
     home = tmp_path / "home/.hermes"
-    runtime = home / "profiles/posca/state/runtime-candidates/release"
+    runtime = home / "profiles/client/state/runtime-candidates/release"
     runtime_python = runtime / "venv/Scripts/python.exe"
     scheduler_python = tmp_path / "python.exe"
-    binding = home / "profiles/posca/state/runtime-binding.json"
+    binding = home / "profiles/client/state/runtime-binding.json"
     runtime_python.parent.mkdir(parents=True)
     runtime_python.write_bytes(b"python")
     scheduler_python.write_bytes(b"python")
     binding.parent.mkdir(parents=True, exist_ok=True)
     binding.write_text("{}")
     args = SimpleNamespace(
-        agent_id="posca", platform="windows", user_home=tmp_path / "home",
+        agent_id="client", platform="windows", user_home=tmp_path / "home",
         home=home, runtime_root=runtime, runtime_python=runtime_python,
         scheduler_python=scheduler_python, runtime_user="Joshua", receipt=None,
         binding_receipt=binding, state_dir=None,
@@ -2626,7 +2570,7 @@ def test_coherence_preimage_drift_never_invokes_file_rollback(tmp_path, monkeypa
     assert installer.main() == 1
     assert target.read_bytes() == b"external edit"
 
-@pytest.mark.parametrize("kind,label", [("launchd-user", "ai.hermes.gateway"), ("launchd-daemon", "ai.hermes.gateway-feanor")])
+@pytest.mark.parametrize("kind,label", [("launchd-user", "ai.hermes.gateway"), ("launchd-daemon", "ai.hermes.gateway-client")])
 @pytest.mark.parametrize("failure", [None, "malformed_binding", "definition_drift", "missing_helper", "helper_failure", "unbound"])
 def test_macos_legacy_launcher_uses_bound_service(tmp_path, kind, label, failure):
     import hashlib

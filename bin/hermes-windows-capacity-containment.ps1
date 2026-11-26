@@ -116,7 +116,7 @@ $gatewayPid = 0
 try { $gatewayPid = [int](Get-Content -Raw -LiteralPath $statePath | ConvertFrom-Json).pid } catch {}
 
 # This is intentionally a bounded CIM query over shell/SSH names only. It is
-# never the WMI-wide process walk that previously wedged the Posca watchdog.
+# never the WMI-wide process walk that previously wedged a client watchdog.
 $shellRows = @()
 try {
   $shellRows = @(Get-CimInstance Win32_Process -Filter "Name='sshd.exe' OR Name='ssh.exe' OR Name='powershell.exe' OR Name='pwsh.exe' OR Name='cmd.exe' OR Name='conhost.exe'")

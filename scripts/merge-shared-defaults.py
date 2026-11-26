@@ -104,7 +104,7 @@ def _merge_cli_toolsets(existing: Any, shared: Any) -> list[str]:
 # Primary client model-routing keys are owned by the client config, never by shared
 # defaults. merge-sd must NEVER overwrite these even if a (possibly stale)
 # defaults file declares them. Hard floor against the 2026-06-07 Codex->openrouter
-# clobber where a leftover config-routing-client-enoch.yaml reverted 6 agents.
+# clobber where a leftover config-routing-client-<agent>.yaml reverted 6 agents.
 #
 # Auxiliary lanes are different: they are fleet-owned routine tool routes. Drift
 # here breaks tools silently (for example Codex-mini vision on ChatGPT accounts).
@@ -126,6 +126,25 @@ PROTECTED_PREFIXES = (
 
 IMAGE_GEN_LEAVES = {"image_gen.provider", "image_gen.model"}
 
+# Shared-default lists that add entries to an agent's own list instead of
+# replacing it (an agent's other disabled toolsets are tenant-owned).
+LIST_UNION_PATHS = {"agent.disabled_toolsets"}
+
+
+class _ExemptPaths:
+    """Dotted-path exemptions. A row exempts that path and everything under it."""
+
+    def __init__(self, paths: Iterable[str]):
+        self.paths = {str(p) for p in paths}
+
+    def __contains__(self, dotted: object) -> bool:
+        if not isinstance(dotted, str):
+            return False
+        return dotted in self.paths or any(dotted.startswith(p + ".") for p in self.paths)
+
+    def __iter__(self):
+        return iter(sorted(self.paths))
+
 
 def _is_protected(dotted: str) -> bool:
     """True if dotted path is a client-owned routing key shared defaults must not touch."""
@@ -136,13 +155,21 @@ def _is_protected(dotted: str) -> bool:
 
 
 def reconcile_subscription_failover(client_config: dict, defaults: dict, exemptions: Iterable[str]):
-    """Keep the primary route; exhaust subscriptions before the tenant API route."""
+    """Keep the primary route; install the ordered governed subscription backup chain."""
     merged = _deep_copy(client_config)
     model = merged.get("model") or {}
     if not isinstance(model, dict):
         raise ValueError("model must be a provider mapping")
     primary = model.get("provider")
-    if primary not in ("openai-codex", "xai-oauth"):
+    # Governed subscription primaries (and any primary retaining a retired paid xai
+    # API fallback) reconcile onto the ordered brokered backup chain. Unrelated
+    # custom/local-only chains remain tenant-owned.
+    existing = merged.get("fallback_providers", [])
+    has_retired_xai_api = isinstance(existing, list) and any(
+        isinstance(route, dict) and route.get("provider") == "xai"
+        for route in existing
+    )
+    if primary not in ("anthropic", "openai-codex", "xai-oauth") and not has_retired_xai_api:
         return merged, [], ["fallback_providers"]
     exempt = set(exemptions)
     applied, skipped = [], []
@@ -151,12 +178,24 @@ def reconcile_subscription_failover(client_config: dict, defaults: dict, exempti
     existing = merged.get("fallback_providers", [])
     if not isinstance(existing, list) or any(not isinstance(route, dict) for route in existing):
         raise ValueError("fallback_providers must be a list of provider mappings")
-    opposite = "xai-oauth" if primary == "openai-codex" else "openai-codex"
-    routes = defaults["routes"]
-    alternate = [route for route in existing if route.get("provider") == opposite]
-    api = [route for route in existing if route.get("provider") == "xai"]
-    custom = [route for route in existing if route.get("provider") not in (primary, opposite, "xai")]
-    fallbacks = (alternate or [routes[opposite]]) + custom + (api or [routes["xai"]])
+    routes = defaults.get("routes") or {}
+    order = defaults.get("order") or list(routes.keys())
+    governed_providers = tuple(order)
+    # The governed fallback chain is the ordered brokered subscription pool
+    # (the operator, Nov 24 2026: primary anthropic claude-opus-5-5 medium; backups
+    # xai-oauth grok-4.7 then openai-codex gpt-6.2-sol; no paid third-party API
+    # lane). Duplicate primary-provider and retired paid xai entries are removed;
+    # tenant-specific custom routes are kept after the governed backups.
+    governed = [
+        _deep_copy(routes[prov])
+        for prov in governed_providers
+        if prov != primary and prov in routes
+    ]
+    custom = [
+        route for route in existing
+        if route.get("provider") not in (primary, *governed_providers, "xai")
+    ]
+    fallbacks = governed + custom
     if _set_dotted(merged, "fallback_providers", fallbacks):
         applied.append("fallback_providers")
     retry_path = "agent.api_max_retries"
@@ -180,7 +219,7 @@ def merge(
     exemptions: Iterable[str],
 ) -> tuple[dict, list[str], list[str]]:
     """Return (merged_config, applied_paths, skipped_paths)."""
-    exempt_set = set(exemptions)
+    exempt_set = _ExemptPaths(exemptions)
     applied: list[str] = []
     skipped: list[str] = []
 
@@ -194,12 +233,21 @@ def merge(
         if dotted in IMAGE_GEN_LEAVES and preserve_image_block:
             skipped.append(dotted)
             continue
-        search = client_config.get("x_search")
-        if (dotted == "x_search.model" and isinstance(search, dict)
-                and str(search.get("model") or "").strip()):
-            # A native default never replaced an explicit tenant search model.
-            skipped.append(dotted)
-            continue
+        if dotted in LIST_UNION_PATHS:
+            current = merged
+            for part in dotted.split("."):
+                current = current.get(part) if isinstance(current, dict) else None
+            if isinstance(current, str) and current.strip():
+                existing = [current]
+            elif current is None:
+                existing = []
+            elif isinstance(current, list):
+                existing = current
+            else:
+                # Never replace a tenant value whose shape the union cannot keep.
+                skipped.append(dotted)
+                continue
+            value = [*existing, *[item for item in (value or []) if item not in existing]]
         if dotted == "platform_toolsets.cli":
             platforms = merged.get("platform_toolsets")
             current = platforms.get("cli") if isinstance(platforms, dict) else None
@@ -215,7 +263,7 @@ def reconcile_mcp_control_defaults(
     exemptions: Iterable[str],
 ) -> tuple[dict, list[str], list[str]]:
     """Add only the governed MCP control scopes without replacing client lists."""
-    exempt_set = set(exemptions)
+    exempt_set = _ExemptPaths(exemptions)
     merged = _deep_copy(client_config)
     applied: list[str] = []
     skipped: list[str] = []
@@ -323,7 +371,7 @@ def retire_matching_defaults(
     merged = _deep_copy(client_config)
     removed: list[str] = []
     skipped: list[str] = []
-    exempt_set = set(exemptions)
+    exempt_set = _ExemptPaths(exemptions)
 
     def walk(current: dict, retired: dict, prefix: str = "") -> None:
         for key, retired_value in retired.items():
@@ -356,6 +404,83 @@ def _load_yaml(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f"{path}: top-level must be a mapping")
     return data
+
+
+FLEET_EXEMPTIONS_FILE = "fleet-exemptions.yaml"
+INERT_KEYS_FILE = "retired-inert-keys-v1.yaml"
+# Old per-agent tuning overrides removed so the pinned build default applies
+# (the operator, 2026-11-16: "simple is better"). Same semantics as the inert list.
+LEGACY_OVERRIDES_FILE = "retired-legacy-overrides-v1.yaml"
+# Reviewed removal of model-routing instructions (the operator, 2026-11-16: one model
+# per agent, set in one place). It may name protected routing paths, because it
+# deletes a stale route and never writes one; model.default/provider and
+# fallback_providers stay out of it.
+ROUTING_RETIREMENT_FILE = "retired-model-routing-v1.yaml"
+ROUTING_RETIREMENT_FORBIDDEN = ("model.default", "model.provider", "model.base_url", "model.api_key_env",
+                                "fallback_providers")
+
+
+def load_fleet_exemptions(defaults_dir: Path, agent_id: str | None) -> list[str]:
+    """Return Golden-recorded dotted-path exemptions for one fleet agent.
+
+    Every row must name its reason; an exemption without a recorded reason is drift.
+    """
+    path = defaults_dir / FLEET_EXEMPTIONS_FILE
+    if not agent_id or not path.exists():
+        return []
+    data = _load_yaml(path)
+    agents = data.get("agents")
+    if data.get("schema_version") != 1 or not isinstance(agents, dict):
+        raise ValueError(f"{path}: invalid fleet exemptions file")
+    rows = agents.get(agent_id) or []
+    if not isinstance(rows, list):
+        raise ValueError(f"{path}: {agent_id}: exemptions must be a list")
+    paths = []
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("path"), str)
+                or not str(row.get("reason") or "").strip()):
+            raise ValueError(f"{path}: {agent_id}: each exemption needs a path and a reason")
+        paths.append(row["path"])
+    return paths
+
+
+def remove_inert_keys(
+    client_config: dict, paths: Iterable[str], exemptions: Iterable[str], *, allow_protected: bool = False
+) -> tuple[dict, list[str], list[str]]:
+    """Delete dotted paths the pinned runtime no longer reads, unless exempt."""
+    merged: dict = _deep_copy(client_config)  # type: ignore[assignment]
+    exempt_set = _ExemptPaths(exemptions)
+    removed: list[str] = []
+    skipped: list[str] = []
+    for dotted in paths:
+        if not allow_protected and any(dotted == p or dotted.startswith(p + ".") or p.startswith(dotted + ".")
+                                       for p in PROTECTED_PREFIXES):
+            raise ValueError(f"inert path {dotted} is a protected client-owned key")
+        if any(dotted == p or dotted.startswith(p + ".") or p.startswith(dotted + ".")
+               for p in ROUTING_RETIREMENT_FORBIDDEN):
+            raise ValueError(f"removal path {dotted} is the agent's primary or fallback route")
+        parts = dotted.split(".")
+        chain = []
+        cur: Any = merged
+        for part in parts[:-1]:
+            if not isinstance(cur, dict) or not isinstance(cur.get(part), dict):
+                cur = None
+                break
+            chain.append((cur, part))
+            cur = cur[part]
+        if not isinstance(cur, dict) or parts[-1] not in cur:
+            continue
+        if dotted in exempt_set:
+            skipped.append(dotted)
+            continue
+        del cur[parts[-1]]
+        removed.append(dotted)
+        for parent, key in reversed(chain):
+            if parent[key] == {}:
+                del parent[key]
+            else:
+                break
+    return merged, removed, skipped
 
 
 def reconcile_client_warnings(client_config: dict, defaults_dir: Path, exemptions=()):
@@ -404,7 +529,7 @@ def _reconcile_native_image_exposure(
     if not isinstance(platform_toolsets, dict):
         raise ValueError("native-image MCP defaults omit platform_toolsets")
 
-    exempt_set = set(exemptions)
+    exempt_set = _ExemptPaths(exemptions)
     merged = _deep_copy(client_config)
     platforms = merged.get("platform_toolsets")
     if not isinstance(platforms, dict):
@@ -858,7 +983,37 @@ def _run_refero_scope(args) -> int:
             or not os.access(python_path, os.X_OK)
         ):
             raise ValueError("Refero scope requires the explicit candidate Python")
-        paths = {"config.yaml": home / "config.yaml", REFERO_REGISTRY: registry_home / REFERO_REGISTRY}
+        config_path = home / "config.yaml"
+        if config_path.is_symlink() or not config_path.is_file():
+            raise ValueError("Refero scope requires existing regular config")
+        config_bytes = config_path.read_bytes()
+        config = _refero_yaml(config_bytes)
+        if not isinstance(config, dict):
+            raise ValueError("Refero scope requires a config mapping")
+        exemptions = list(args.exemption)
+        if args.manifest:
+            manifest = _refero_yaml(args.manifest.read_bytes())
+            if not isinstance(manifest, dict):
+                raise ValueError("Refero manifest must be a mapping")
+            exemptions += _refero_names(manifest.get("overlay_config_exemptions", []))
+        # A reviewed exemption owns the entire declaration transaction, including
+        # absent integrations. Do not require or create their registry or package.
+        early = sorted({exemption for exemption in exemptions if (
+            exemption == "platform_toolsets" or any(
+                path == exemption or path.startswith(exemption + ".") or exemption.startswith(path + ".")
+                for path in ("mcp_servers.refero-styles", "mcp_policy.on_demand")
+            )
+        )})
+        if early:
+            digest = hashlib.sha256(config_bytes).hexdigest()
+            print(json.dumps({"scope": "refero-styles", "status": "preserved_exemption",
+                              "registration_status": "not_applicable",
+                              "reason": "reviewed_exemption", "exemptions": early,
+                              "dry_run": args.dry_run, "changed_paths": [],
+                              "files": {"config.yaml": {"before_sha256": digest, "after_sha256": digest}}},
+                             sort_keys=True))
+            return 0
+        paths = {"config.yaml": config_path, REFERO_REGISTRY: registry_home / REFERO_REGISTRY}
         if any(path.is_symlink() or not path.is_file() for path in paths.values()):
             raise ValueError("Refero scope requires existing regular config and consumed registry")
         for relative, path in paths.items():
@@ -870,12 +1025,6 @@ def _run_refero_scope(args) -> int:
         source_rows = [row for row in _refero_registry(source) if row["id"] == REFERO_ID]
         if len(source_rows) != 1:
             raise ValueError("Refero source registry must contain exactly one owned row")
-        exemptions = list(args.exemption)
-        if args.manifest:
-            manifest = _refero_yaml(args.manifest.read_bytes())
-            if not isinstance(manifest, dict):
-                raise ValueError("Refero manifest must be a mapping")
-            exemptions += _refero_names(manifest.get("overlay_config_exemptions", []))
         merged, merged_registry, receipt = reconcile_refero_styles(
             config, registry, source_rows[0], hermes_home=str(home),
             hermes_python=python, package_home=str(package), registry_home=str(registry_home), exemptions=exemptions,
@@ -1118,6 +1267,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--manifest", type=Path, help="Path to manifest yaml (for overlay_config_exemptions)")
     parser.add_argument("--exemption", action="append", default=[], help="Extra dotted-path exemption; repeatable")
     parser.add_argument(
+        "--agent-id",
+        help="Fleet agent id for Golden-recorded exemptions (default: config client_identity)",
+    )
+    parser.add_argument(
         "--defaults-dir",
         type=Path,
         default=Path(__file__).resolve().parent.parent / "shared-defaults",
@@ -1182,8 +1335,9 @@ def main(argv: list[str]) -> int:
         return 1
 
     exemptions: list[str] = list(args.exemption)
-    if args.manifest:
-        manifest_path = args.manifest.expanduser().resolve()
+    manifest_path = (args.manifest.expanduser().resolve() if args.manifest
+                     else config_path.parent / "runtime-manifest.json")
+    if args.manifest or manifest_path.exists():
         try:
             manifest = _load_yaml(manifest_path)
         except (FileNotFoundError, ValueError) as exc:
@@ -1197,6 +1351,15 @@ def main(argv: list[str]) -> int:
 
     try:
         client_config = _load_yaml(config_path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    agent_id = args.agent_id
+    if agent_id is None and isinstance(client_config.get("client_identity"), str):
+        agent_id = client_config["client_identity"]
+    try:
+        exemptions.extend(load_fleet_exemptions(args.defaults_dir, agent_id))
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -1224,6 +1387,38 @@ def main(argv: list[str]) -> int:
             all_retired.append((retirement_path.name, key))
         for key in skipped:
             all_skipped.append((retirement_path.name, key))
+
+    for inert_path in (args.defaults_dir / INERT_KEYS_FILE, args.defaults_dir / LEGACY_OVERRIDES_FILE):
+        if args.scope == "all" and inert_path.exists():
+            try:
+                inert = _load_yaml(inert_path)
+                paths = inert.get("removed_paths")
+                if inert.get("schema_version") != 1 or not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                    raise ValueError(f"{inert_path}: invalid inert-key manifest")
+                merged, removed, skipped = remove_inert_keys(merged, paths, exemptions)
+            except ValueError as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return 1
+            for key in removed:
+                all_retired.append((inert_path.name, key))
+            for key in skipped:
+                all_skipped.append((inert_path.name, key))
+
+    routing_path = args.defaults_dir / ROUTING_RETIREMENT_FILE
+    if args.scope == "all" and routing_path.exists():
+        try:
+            routing = _load_yaml(routing_path)
+            paths = routing.get("removed_paths")
+            if routing.get("schema_version") != 1 or not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
+                raise ValueError(f"{routing_path}: invalid routing retirement manifest")
+            merged, removed, skipped = remove_inert_keys(merged, paths, exemptions, allow_protected=True)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        for key in removed:
+            all_retired.append((routing_path.name, key))
+        for key in skipped:
+            all_skipped.append((routing_path.name, key))
 
     for defaults_path in defaults_files:
         try:

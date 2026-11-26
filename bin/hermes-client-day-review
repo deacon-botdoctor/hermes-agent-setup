@@ -1320,7 +1320,7 @@ def build_doc_review_packet(
                 "proposed-change approval card if repair is warranted."
             ),
             "why_you": (
-                "Doc owns investigation, cross-client comparison, and repair proposal packaging for Deacon approval."
+                "Doc owns investigation, cross-client comparison, and repair proposal packaging for operator approval."
             ),
             "constraint": (
                 "Propose-only. Do not modify files, restart services, send client-visible messages, or change "
@@ -1331,7 +1331,7 @@ def build_doc_review_packet(
             "requires_ack": True,
         },
         "morning_digest": body
-        + " Doc should investigate automatically; no Deacon approval is needed until there is a concrete "
+        + " Doc should investigate automatically; no operator approval is needed until there is a concrete "
         "proposed change.",
         "approval_cards": cards,
     }

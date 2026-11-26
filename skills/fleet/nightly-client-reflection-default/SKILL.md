@@ -1,31 +1,34 @@
 ---
 name: nightly-client-reflection-default
-description: "Default fleet workflow for nightly Hermes client-agent self-reflection and day-review closeout."
+description: "Opt-in workflow for explicitly authorized nightly self-reflection and day-review closeout."
 version: 2.0.0
 tags: [hermes, default, nightly-reflection, client-day-review, skillify]
 category: fleet-default
 status: active
 ---
 
-# Nightly Client Reflection Default
+# Nightly Client Reflection (Opt-in)
 
-Use this whenever a Hermes runtime performs its nightly client-agent self-reflection or day-review closeout.
+Automatic reflection is disabled by default. Use this workflow only for an
+explicitly approved opt-in whose configuration has
+`auxiliary.background_review.enabled: true`. Do not enable reflection, create
+a schedule, or infer approval from this skill being installed.
 
 ## Hard rule
 
 Do not Skillify the generic nightly reflection mechanism itself. It is already a
-golden default. Record a candidate only when reflection reveals a specific
+shared procedure for approved opt-ins. Record a candidate only when reflection reveals a specific
 reusable workflow beyond the reflection job. The nightly runtime does not create
 local drafts, archives, or active skills: its findings stay in the day-review
 report until the central collector accepts a content-free proposal envelope.
 
-## Default workflow
+## Opt-in workflow
 
 1. Start from deterministic day-review signals: scores, verdict, client-visible harm, escalations, open/promised asks, existing deterministic Skillify candidates, and every pending local papercut.
 2. Read the bounded recent-skill inventory produced from successful local skill loads. Treat it as use evidence only, never proof that a skill caused an outcome.
 3. Reflect honestly in the standard JSON shape: `did_it_suck`, `narrative`, `failures`, `proposal_inputs`, `open_promises`, `role_alignment`, `operator_systems_lessons`, `papercut_actions`, and `escalate_to_doc`.
 4. Keep green days plain and short; do not invent work to justify the reflection.
-5. Convert yellow/red findings into specific next actions: proof closeout, client-safe response hygiene, routing repair, tool/auth repair, or Doc/Enoch escalation.
+5. Convert yellow/red findings into specific next actions: proof closeout, client-safe response hygiene, routing repair, tool/auth repair, or Doc/operator escalation.
 6. Suppress generic candidates named like nightly reflection, self-review, reflection JSON, or agent reflection; those are covered by this default.
 7. Emit `proposal_inputs` only for concrete repeated workflows with a trigger and why it matters. A proposal about an existing skill must copy its exact `skill_id`, `skill_version`, and `skill_sha256` from the recent inventory and classify the evidence as repeated failure, operator correction, client rework, or repeated success. Mismatches are discarded.
 8. An actionable outcome may carry task-contract metadata only when the day-review contract has exactly one complete, canonical `client-chat-help` declaration. The metadata is fixed, contains no transcript/request text, and requests independent client acceptance or Doc certification; it is not a success verdict and must not be hand-tuned.
@@ -34,4 +37,6 @@ report until the central collector accepts a content-free proposal envelope.
 
 ## Approval boundary
 
-Promoting this default across the fleet is allowed as a golden default, but any client-visible runtime/config change discovered during reflection still requires the normal approval gate.
+This skill grants no rollout or scheduling authority. Enabling reflection
+requires an explicit operator decision. Any client-visible runtime/config
+change discovered during reflection retains its normal approval boundary.

@@ -1,0 +1,134 @@
+# Old per-agent tuning overrides, removed so each agent uses the pinned build's
+# native default. the operator, 2026-11-16: "a lot of those technical knobs can go away
+# probably poor add ons I did out of frustration before I moved to coding better"
+# and "simple is better lets get out of our own damn way".
+#
+# Each path was checked against Golden's template and shared defaults (no
+# deliberate value), the fleet decision pages, and an exact-name code search of
+# Golden and the runtime for custom readers. Recorded exemptions in
+# fleet-exemptions.yaml win. Deliberately not listed (they still have users or
+# a removal would add prompts, change channels or access, or cut retention):
+# hooks_auto_accept, jobs.*, durable_runtime*, mcp_proxy.*, memory_upgrades,
+# logging.*, operator_alerts.*, web.*, browser.engine/cloud_provider, display.*,
+# streaming.*, platforms.*, providers.*, model_catalog.excluded_providers,
+# tools.disabled, thread/group session isolation, browser.camofox.*,
+# updates.pre_update_backup, session_reset.*, kanban.dispatch_in_gateway,
+# browser.record_sessions, terminal backend images, plugins, toolsets, cron, sessions,
+# memory, security, approvals and model routing.
+schema_version: 1
+removed_paths:
+  - agent.clarify_timeout
+  - agent.image_input_mode
+  - agent.intent_ack_continuation
+  - auxiliary.approval.context_length
+  - auxiliary.approval.reasoning_effort
+  - auxiliary.background_review.reasoning_effort
+  - auxiliary.compression.context_length
+  - auxiliary.compression.reasoning_effort
+  - auxiliary.dream.reasoning_effort
+  - auxiliary.dream.timeout
+  - auxiliary.flush_memories.context_length
+  - auxiliary.flush_memories.extra_body
+  - auxiliary.flush_memories.reasoning_effort
+  - auxiliary.goal_judge.reasoning_effort
+  - auxiliary.group_router.extra_body
+  - auxiliary.group_router.reasoning_effort
+  - auxiliary.group_router.timeout
+  - auxiliary.kanban_decomposer.reasoning_effort
+  - auxiliary.mcp.context_length
+  - auxiliary.mcp.reasoning_effort
+  - auxiliary.memory_query_rewrite.reasoning_effort
+  - auxiliary.moa_aggregator.reasoning_effort
+  - auxiliary.moa_reference.reasoning_effort
+  - auxiliary.monitor.reasoning_effort
+  - auxiliary.profile_describer.reasoning_effort
+  - auxiliary.promise_extraction.context_length
+  - auxiliary.promise_extraction.reasoning_effort
+  - auxiliary.research.context_length
+  - auxiliary.research.extra_body
+  - auxiliary.research.reasoning_effort
+  - auxiliary.review.reasoning_effort
+  - auxiliary.session_search.context_length
+  - auxiliary.session_search.extra_body
+  - auxiliary.session_search.max_concurrency
+  - auxiliary.session_search.reasoning_effort
+  - auxiliary.skills_hub.context_length
+  - auxiliary.skills_hub.extra_body
+  - auxiliary.skills_hub.reasoning_effort
+  - auxiliary.skills_hub.timeout
+  - auxiliary.title_generation.context_length
+  - auxiliary.title_generation.reasoning_effort
+  - auxiliary.triage_specifier.reasoning_effort
+  - auxiliary.vision.reasoning_effort
+  - auxiliary.vision.timeout
+  - auxiliary.voice_chat.reasoning_effort
+  - auxiliary.web_extract.context_length
+  - auxiliary.web_extract.reasoning_effort
+  - auxiliary.web_extract.timeout
+  - client_operating_model.advisory_fast_path_seconds
+  - client_operating_model.cache_discipline.persist_only_if_future_relevant
+  - client_operating_model.cache_discipline.verify_before_client_visible_facts
+  - client_operating_model.cache_policy
+  - client_operating_model.client_visible_style
+  - client_operating_model.external_work_partial_status_seconds
+  - client_operating_model.failure_budget.do_not_block_advisory_on_tooling
+  - client_operating_model.failure_budget.long_task_status_after_seconds
+  - client_operating_model.failure_budget.same_tool_failures_before_route_change
+  - client_operating_model.fast_path.avoid_tools_unless_required
+  - client_operating_model.fast_path.bypass_for
+  - client_operating_model.fast_path.enabled
+  - client_operating_model.fast_path.max_words_default
+  - client_operating_model.fast_path.target_seconds
+  - client_operating_model.interface_rule
+  - client_operating_model.mode
+  - client_operating_model.model
+  - client_operating_model.self_structure_contract.source_of_truth_order
+  - client_operating_model.self_structure_contract.status_shape
+  - client_operating_model.visibility_contract
+  - code_execution.max_tool_calls
+  - code_execution.timeout
+  - compression.in_place
+  - compression.max_attempts
+  - context_file_max_chars
+  - delegation.child_timeout_seconds
+  - delegation.context_length
+  - delegation.max_tokens
+  - delegation.prefix_stagger_seconds
+  - delegation.reasoning_effort
+  - delegation.timeout
+  - delegation.timeout_seconds
+  - delegation_profiles.analysis.context_length
+  - delegation_profiles.analysis.reasoning_effort
+  - delegation_profiles.analysis.timeout
+  - delegation_profiles.client_communication.context_length
+  - delegation_profiles.client_communication.reasoning_effort
+  - delegation_profiles.client_communication.timeout
+  - delegation_profiles.code_generation.context_length
+  - delegation_profiles.code_generation.reasoning_effort
+  - delegation_profiles.code_generation.timeout
+  - delegation_profiles.deep_research.context_length
+  - delegation_profiles.deep_research.reasoning_effort
+  - delegation_profiles.deep_research.timeout
+  - delegation_profiles.deep_research_premium.context_length
+  - delegation_profiles.deep_research_premium.reasoning_effort
+  - delegation_profiles.deep_research_premium.timeout
+  - delegation_profiles.kun.reasoning_effort
+  - file_read_max_chars
+  - mcp_discovery_timeout
+  - model.max_tokens
+  - model.switch_context_confirm_tokens
+  - model.temperature
+  - model_catalog.ttl_hours
+  - onboarding.BUSY_INPUT_FLAG
+  - onboarding.profile_build
+  - provider_fallback_events
+  - reply_to_mode
+  - terminal.lifetime_seconds
+  - tool_budget.mcp_result_size_chars
+  - tool_loop_guardrails.hard_stop_after.exact_failure
+  - tool_loop_guardrails.hard_stop_after.idempotent_no_progress
+  - tool_loop_guardrails.hard_stop_after.same_tool_failure
+  - tool_loop_guardrails.hard_stop_enabled
+  - tools.tool_search.enabled
+  - tools.tool_search.max_search_limit
+  - tools.tool_search.threshold_pct

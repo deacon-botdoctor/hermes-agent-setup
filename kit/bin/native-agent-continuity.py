@@ -20,6 +20,8 @@ import runpy
 import secrets
 import shutil
 import subprocess
+import threading
+import queue
 import sys
 import time
 import tomllib
@@ -59,6 +61,13 @@ CONFIG_START = "# >>> botdoctor:native-agent-continuity:gbrain >>>"
 CONFIG_END = "# <<< botdoctor:native-agent-continuity:gbrain <<<"
 INSTRUCTION_START = "<!-- botdoctor:native-agent-continuity:gbrain:start -->"
 INSTRUCTION_END = "<!-- botdoctor:native-agent-continuity:gbrain:end -->"
+HERMES_MCP_NAME = "gbrain"
+BRAIN_TOOLS = ("get_page", "search")  # every GBrain MCP flavor in the fleet serves these
+
+
+def serves_brain(tools: list[str] | None) -> bool:
+    """True when a probe saw the brain tools, or a live single-writer brain held by the gateway."""
+    return bool(tools) and (set(BRAIN_TOOLS) <= set(tools) or tools == ["gbrain_status", "lock_held"])
 LEGACY_INSTRUCTION_START = "<!-- BEGIN BOT DOCTOR PRINCIPAL GBRAIN -->"
 LEGACY_INSTRUCTION_END = "<!-- END BOT DOCTOR PRINCIPAL GBRAIN -->"
 LEGACY_READONLY_TOOLS = (
@@ -457,6 +466,323 @@ def codex_instruction_body(manifest: dict[str, Any]) -> str:
     )
 
 
+def hermes_binding_block(manifest: dict[str, Any], newline: str) -> str:
+    """Render the gateway's own GBrain MCP entry; JSON strings are valid YAML scalars."""
+    paths = manifest["_paths"]
+    args = [str(paths["mcp_server"]), "--gbrain", str(paths["gbrain"]), "--lock-file", str(paths["lock_file"])]
+    env = {
+        "GBRAIN_HOME": str(paths["gbrain_home"]),
+        "GBRAIN_PRINCIPAL_NAME": str(manifest["principal_name"]),
+        "GBRAIN_VAULT": str(paths["vault"]),
+    }
+    if manifest.get("storage_mode") == "existing_remote":
+        env["GBRAIN_STORAGE_MODE"] = "existing_remote"
+    lines = [f"  {HERMES_MCP_NAME}:", f"    command: {json.dumps(str(paths['mcp_python']))}", "    args:"]
+    lines += [f"    - {json.dumps(arg)}" for arg in args]
+    lines += ["    env:"] + [f"      {key}: {json.dumps(value)}" for key, value in env.items()]
+    lines += ["    enabled: true", "    tier: on_demand", "    timeout: 120"]
+    return newline.join(lines) + newline
+
+
+def binding_targets_principal(entry: dict[str, Any], home: Path, base: Path, expected: list[Path]) -> bool:
+    """True when an MCP entry can run and opens one of the ``expected`` GBrain stores.
+
+    A store is identified by the engine and database named in ``<GBRAIN_HOME>/.gbrain/config.json``
+    (GBRAIN_HOME, else HOME, from the entry's env), so two homes that share one database match and
+    an alternate store under the same home does not. Remote URL entries carry no verifiable store
+    identity and never satisfy the binding. Every path the entry passes must stay inside ``home``.
+    Relative values resolve against the entry's cwd (or ``base``). hermes-local-selfcheck.py keeps an identical copy because it is deployed and run separately.
+    """
+    if entry.get("url"):
+        return False
+    cwd = Path(os.path.expanduser(str(entry.get("cwd") or base)))
+    cwd = cwd if cwd.is_absolute() else base / cwd
+
+    def resolve(value: object) -> Path | None:
+        text = os.path.expanduser(str(value))
+        if os.path.isabs(text):
+            return Path(text).resolve()
+        if "/" in text or "\\" in text or text.startswith("."):
+            return (cwd / text).resolve()
+        return None
+
+    command = str(entry.get("command") or "")
+    if not command:
+        return False
+    command_path = resolve(command)
+    if command_path is None:
+        if shutil.which(command) is None:
+            return False
+    elif not (command_path.is_file() and os.access(command_path, os.X_OK)):
+        return False
+    root = Path(home).resolve()
+    env = entry.get("env")
+    env = env if isinstance(env, dict) else {}
+    for value in [*(entry.get("args") or []), *env.values()]:
+        path = resolve(value)
+        if path is not None and not path.is_relative_to(root):
+            return False
+    store_home = resolve(env.get("GBRAIN_HOME") or env.get("HOME") or "")
+    if store_home is None or not store_home.is_relative_to(root):
+        return False
+    wanted = [Path(path).resolve() for path in expected]
+    if store_home in wanted:
+        return True
+    identity = brain_store_identity(store_home)
+    return identity is not None and identity in {brain_store_identity(path) for path in wanted}
+
+
+def brain_store_identity(gbrain_home: Path) -> tuple[str, str, str] | None:
+    """(engine, database) from a GBrain home's config, or None when it has no readable config."""
+    config_dir = Path(gbrain_home) / ".gbrain"
+    try:
+        config = json.loads((config_dir / "config.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(config, dict):
+        return None
+    if config.get("database_url"):
+        return (str(config.get("engine") or ""), "url", str(config["database_url"]))
+    if config.get("database_path"):
+        db = Path(os.path.expanduser(str(config["database_path"])))
+        return (str(config.get("engine") or ""), "path", str((db if db.is_absolute() else config_dir / db).resolve()))
+    return None
+
+
+def enable_disabled_entry(text: str) -> str:
+    """Flip the block-style `enabled:` key of mcp_servers.gbrain to true, preserving everything else.
+
+    Accepts any YAML 1.1 false spelling, an inline comment, CRLF, and a missing final newline.
+    The caller re-parses the result and refuses any other change.
+    """
+    lines = text.splitlines(keepends=True)
+
+    def body(index: int) -> str:
+        return lines[index].rstrip("\r\n")
+
+    def indent(value: str) -> int:
+        return len(value) - len(value.lstrip())
+
+    def children(start: int, parent: int) -> list[int]:
+        rows: list[int] = []
+        for index in range(start + 1, len(lines)):
+            value = body(index)
+            if not value.strip() or value.lstrip().startswith("#"):
+                continue
+            if indent(value) <= parent:
+                break
+            rows.append(index)
+        return rows
+
+    def direct(rows: list[int]) -> list[int]:
+        depth = min((indent(body(i)) for i in rows), default=0)
+        return [i for i in rows if indent(body(i)) == depth]
+
+    root = next((i for i in range(len(lines)) if re.match(r"^mcp_servers:[ \t]*(?:#.*)?$", body(i))), None)
+    if root is None:
+        raise RuntimeError("Hermes config.yaml has no block-style mcp_servers mapping")
+    entry = next(
+        (i for i in direct(children(root, 0)) if re.match(rf"^[ \t]+{HERMES_MCP_NAME}:[ \t]*(?:#.*)?$", body(i))),
+        None,
+    )
+    if entry is None:
+        raise RuntimeError("disabled Hermes GBrain MCP entry cannot be located")
+    key = re.compile(
+        r"^(?P<lead>[ \t]+enabled:[ \t]*)(?:false|False|FALSE|no|No|NO|off|Off|OFF)(?P<tail>[ \t]*(?:#.*)?)$"
+    )
+    hits = [(i, m) for i in direct(children(entry, indent(body(entry)))) if (m := key.match(body(i)))]
+    if len(hits) != 1:
+        raise RuntimeError("disabled Hermes GBrain MCP entry has no single block-style enabled key")
+    index, match = hits[0]
+    ending = lines[index][len(body(index)) :]
+    lines[index] = match.group("lead") + "true" + match.group("tail") + ending
+    return "".join(lines)
+
+
+def probe_brain_mcp(entry: dict[str, Any], base: Path, timeout: int = 60) -> list[str] | None:
+    """Launch a stdio MCP entry exactly as configured and return its tool names.
+
+    Waits for each reply before the next message and closes stdin last, as a gateway does. Returns None when the process
+    cannot start, times out, or answers without a tool list. hermes-local-selfcheck.py keeps an identical copy.
+    """
+    command = str(entry.get("command") or "")
+    args = [str(value) for value in (entry.get("args") or [])]
+    env = os.environ.copy()
+    if isinstance(entry.get("env"), dict):
+        env.update({str(key): str(value) for key, value in entry["env"].items()})
+    cwd = Path(os.path.expanduser(str(entry.get("cwd") or base)))
+    cwd = cwd if cwd.is_absolute() else base / cwd
+    initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2024-11-05", "capabilities": {},
+        "clientInfo": {"name": "botdoctor-brain-binding-probe", "version": "1"}}}
+    try:
+        proc = subprocess.Popen(
+            [command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", env=env, cwd=str(cwd) if cwd.is_dir() else None,
+        )
+    except OSError:
+        return None
+    replies: queue.Queue = queue.Queue()
+    errors: list[str] = []
+    threading.Thread(target=lambda: [replies.put(line) for line in proc.stdout], daemon=True).start()
+    threading.Thread(target=lambda: errors.extend(proc.stderr), daemon=True).start()
+    deadline = time.monotonic() + timeout
+
+    def send(message) -> bool:
+        try:
+            proc.stdin.write(json.dumps(message) + "\n")
+            proc.stdin.flush()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def reply(wanted):
+        while time.monotonic() < deadline:
+            try:
+                line = replies.get(timeout=max(0.05, min(1.0, deadline - time.monotonic())))
+            except queue.Empty:
+                if proc.poll() is not None and replies.empty():
+                    return None
+                continue
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and message.get("id") == wanted:
+                return message
+        return None
+
+    tools = None
+    try:
+        if send(initialize) and reply(1) is not None:
+            send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            if send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}):
+                answer = reply(2)
+                tools = ((answer or {}).get("result") or {}).get("tools")
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    if not isinstance(tools, list):
+        return None
+    names = [str(row.get("name")) for row in tools if isinstance(row, dict)]
+    # A single-writer brain already open in the live gateway's own server answers in
+    # status-only mode with reason lock_held. That proves this entry launches the real
+    # server for an existing, healthy store; any other status-mode reason is a failure.
+    if names == ["gbrain_status"] and '"reason":"lock_held"' in "".join(errors).replace(" ", ""):
+        return ["gbrain_status", "lock_held"]
+    return names
+
+
+def plan_hermes_binding(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Return the gateway config text that binds the principal's brain, or why none is needed.
+
+    An enabled gbrain entry is left untouched: runtimes may already bind the same
+    brain through `gbrain serve`. Only a missing or disabled entry is repaired.
+    """
+    import yaml
+
+    path = manifest["_paths"]["hermes_home"] / "config.yaml"
+    provider_text(path)  # symlink and regular-file safety
+    # Read bytes so Windows text mode cannot rewrite CRLF line endings.
+    raw = path.read_bytes() if path.exists() else b""
+    bom = "\ufeff" if raw.startswith(b"\xef\xbb\xbf") else ""
+    text = raw.decode("utf-8-sig")
+    if not text.strip():
+        return {"status": "no_hermes_config", "path": str(path)}
+    config = yaml.safe_load(text)
+    servers = config.get("mcp_servers") if isinstance(config, dict) else None
+    if not isinstance(config, dict) or not isinstance(servers, (dict, type(None))):
+        raise RuntimeError("Hermes config.yaml mcp_servers layout is invalid")
+    servers = servers or {}
+    home = manifest["_paths"]["home"]
+    agent = config.get("agent")
+    disabled = set((agent.get("disabled_toolsets") or []) if isinstance(agent, dict) else [])
+    if any(
+        str(name).startswith(HERMES_MCP_NAME) and isinstance(entry, dict)
+        and entry.get("enabled", True) is not False and f"mcp-{name}" not in disabled
+        and binding_targets_principal(entry, home, path.parent, [manifest["_paths"]["gbrain_home"]])
+        and serves_brain(probe_brain_mcp(entry, path.parent))
+        for name, entry in servers.items()
+    ):
+        return {"status": "present", "path": str(path)}
+    if f"mcp-{HERMES_MCP_NAME}" in disabled:
+        raise RuntimeError("agent.disabled_toolsets contains mcp-gbrain; remove it to bind the principal brain")
+    current = servers.get(HERMES_MCP_NAME)
+    if isinstance(current, dict) and current.get("enabled", True) is not False:
+        raise RuntimeError("existing mcp_servers.gbrain is enabled but does not serve this principal's brain")
+    if isinstance(current, dict) and not binding_targets_principal(current, home, path.parent, [manifest["_paths"]["gbrain_home"]]):
+        raise RuntimeError("existing mcp_servers.gbrain does not target this principal's brain")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    if current is None:
+        block = hermes_binding_block(manifest, newline)
+        header = re.search(r"(?m)^mcp_servers:[ \t]*(?:#.*)?\r?\n", text)
+        empty = re.search(r"(?m)^mcp_servers:[ \t]*\{\}[ \t]*\r?$", text)
+        if header:
+            next_text = text[: header.end()] + block + text[header.end() :]
+        elif empty:
+            next_text = text[: empty.start()] + "mcp_servers:" + newline + block.rstrip("\r\n") + text[empty.end() :]
+        elif "mcp_servers" in config:
+            raise RuntimeError("Hermes config.yaml mcp_servers layout is not editable")
+        else:
+            next_text = text.rstrip("\r\n") + newline + "mcp_servers:" + newline + block
+        action = "added"
+    else:
+        next_text = enable_disabled_entry(text)
+        action = "enabled"
+    after = yaml.safe_load(next_text)
+    after_servers = after.get("mcp_servers") or {}
+    if (
+        after_servers.get(HERMES_MCP_NAME, {}).get("enabled") is not True
+        or {k: v for k, v in after.items() if k != "mcp_servers"} != {k: v for k, v in config.items() if k != "mcp_servers"}
+        or {k: v for k, v in after_servers.items() if k != HERMES_MCP_NAME} != {k: v for k, v in servers.items() if k != HERMES_MCP_NAME}
+    ):
+        raise RuntimeError("Hermes GBrain MCP binding would change unrelated configuration")
+    return {"status": action, "path": str(path), "next_text": bom + next_text, "source_sha256": sha256_bytes(raw)}
+
+
+def apply_hermes_binding(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Bind the Hermes gateway itself to the same brain Codex uses; the gateway hot-reconciles MCP config."""
+    plan = plan_hermes_binding(manifest)
+    if "next_text" not in plan:
+        return {"status": plan["status"]}
+    path = Path(plan["path"])
+    # Prove the new entry serves the brain before touching config.yaml, so a failure needs no
+    # restore and cannot race a concurrent edit; the write itself is atomic.
+    import yaml
+
+    entry = (yaml.safe_load(plan["next_text"].lstrip("\ufeff")).get("mcp_servers") or {}).get(HERMES_MCP_NAME) or {}
+    if not serves_brain(probe_brain_mcp(entry, path.parent)):
+        raise RuntimeError("new Hermes GBrain MCP binding did not serve the brain; config.yaml left unchanged")
+    if sha256_bytes(path.read_bytes()) != plan["source_sha256"]:
+        raise RuntimeError("config.yaml changed during the binding probe; rerun reconcile")
+    rollout = state_root(manifest) / "receipts" / f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}-{os.getpid()}-hermes-gateway"
+    record = snapshot(path, rollout / "backups")
+    atomic_bytes(path, plan["next_text"].encode("utf-8"), mode=path.stat().st_mode & 0o777)
+    record["after_sha256"] = sha256_bytes(path.read_bytes())
+    receipt_path = rollout / "receipt.json"
+    atomic_json(
+        receipt_path,
+        {
+            "schema": SCHEMA,
+            "status": "verified",
+            "capability": CAPABILITY,
+            "provider": "hermes_gateway",
+            "principal_id": manifest["principal_id"],
+            "action": plan["status"],
+            "verified_at": iso(),
+            "files": [record],
+        },
+    )
+    return {"status": plan["status"], "receipt": str(receipt_path)}
+
+
 def codex_login(command: list[str]) -> tuple[bool, str]:
     result = run([*command, "login", "status"], timeout=90)
     text = (result.stdout + result.stderr).strip()
@@ -631,12 +957,16 @@ def reconcile(manifest: dict[str, Any], *, force: bool = False) -> dict[str, Any
             if time.time() - updated.timestamp() < RECONCILE_INTERVAL_SECONDS:
                 return {"schema": SCHEMA, "status": "rate_limited", "capability_live": prior.get("capability_live") is True, "prior_status": prior.get("status")}
         observed = scan(manifest)
+        try:
+            observed["hermes_gateway"] = apply_hermes_binding(manifest)
+        except Exception as exc:  # noqa: BLE001 - keep Codex enrollment; selfcheck reports the gap
+            observed["hermes_gateway"] = {"status": "failed", "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
         provider = observed["providers"]["codex"]
         if provider["status"] == "absent":
-            write_observation(manifest, {"status": "ready_no_providers", "capability_live": True, "providers": observed["providers"], "baseline": observed["baseline"]})
+            write_observation(manifest, {"status": "ready_no_providers", "capability_live": True, "providers": observed["providers"], "baseline": observed["baseline"], "hermes_gateway": observed["hermes_gateway"]})
             return observed
         if not provider["logged_in"]:
-            write_observation(manifest, {"status": "detected_not_enrolled", "capability_live": True, "providers": observed["providers"], "baseline": observed["baseline"]})
+            write_observation(manifest, {"status": "detected_not_enrolled", "capability_live": True, "providers": observed["providers"], "baseline": observed["baseline"], "hermes_gateway": observed["hermes_gateway"]})
             return observed
         config, instructions = codex_paths(manifest)
         config_text = provider_text(config)
@@ -670,6 +1000,7 @@ def reconcile(manifest: dict[str, Any], *, force: bool = False) -> dict[str, Any
                         }
                     },
                     "baseline": observed["baseline"],
+                    "hermes_gateway": observed["hermes_gateway"],
                 },
             )
             return {
@@ -709,7 +1040,7 @@ def reconcile(manifest: dict[str, Any], *, force: bool = False) -> dict[str, Any
             canary = native_canary(manifest, provider["command"])
             receipt.update({"status": "verified", "verified_at": iso(), "provider": "codex", "native_canary": canary, "files": records, "capability_live": True})
             atomic_json(receipt_path, receipt)
-            write_observation(manifest, {"status": "verified", "capability_live": True, "providers": {"codex": {"status": "verified", "command": provider["command"], "receipt": str(receipt_path)}}, "baseline": observed["baseline"]})
+            write_observation(manifest, {"status": "verified", "capability_live": True, "providers": {"codex": {"status": "verified", "command": provider["command"], "receipt": str(receipt_path)}}, "baseline": observed["baseline"], "hermes_gateway": observed["hermes_gateway"]})
             return receipt
         except Exception as exc:
             receipt.update({"status": "failed", "failed_at": iso(), "error": f"{type(exc).__name__}: {str(exc)[:1000]}", "files": records})

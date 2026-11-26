@@ -1,0 +1,12 @@
+name: botdoctor-telegram
+version: 1.1.0
+description: One task-specific Telegram progress message updated from actual model commentary.
+platforms:
+  - telegram
+entrypoint: __init__.py
+provides_hooks:
+  - pre_gateway_dispatch
+  - pre_llm_call
+  - on_interim_message
+  - post_llm_call
+  - agent_loop_stopped

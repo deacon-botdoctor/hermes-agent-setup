@@ -3,9 +3,14 @@ schema_version: 1
 # Temporary exact-value unapply map for the former Golden policy overlays.
 # Remove this file after fleet receipts prove these values are absent.
 retired_defaults:
+  durable_runtime_stage_c: false
   model:
     max_tokens: 32768
   compression:
+    threshold_tokens: 240000
+    proactive_prune_tokens: 48000
+    progress_notices: false
+    summary_base_url: https://chatgpt.com/backend-api/codex
     enabled: true
     codex_gpt55_autoraise: true
     codex_gpt55_autoraise_notice: false
@@ -18,6 +23,8 @@ retired_defaults:
     summary_model: gpt-5.6-luna
     summary_provider: openai-codex
   auxiliary:
+    background_review:
+      enabled: false
     image_gen:
       provider: openai-codex
       model: gpt-image-2-high
@@ -74,6 +81,7 @@ retired_defaults:
       timeout: 30
       base_url: https://chatgpt.com/backend-api/codex
     title_generation:
+      model_upgrade_enabled: false
       provider: openai-codex
       model: gpt-5.6-luna
       timeout: 30
@@ -117,6 +125,7 @@ retired_defaults:
   gateway:
     interrupt_recursion_max_depth: 1
   agent:
+    intent_ack_continuation: true
     gateway_timeout: 300
   delegation:
     # The retired client scaffold forced every progressing child to stop at
@@ -148,3 +157,62 @@ retired_defaults:
     personality: helpful
     resume_display: full
     skin: default
+
+  # Withdraw only unchanged former Golden values; tenant exemptions remain authoritative.
+  sessions:
+    auto_prune: true
+    retention_days: 90
+    vacuum_after_prune: true
+    min_interval_hours: 24
+  memory:
+    nudge_interval: 0
+  skills:
+    creation_nudge_interval: 0
+  tools:
+    tool_search:
+      enabled: 'on'
+      defer:
+      - annotate_preview
+      - apply_layout
+      - browser_console
+      - browser_get_images
+      - browser_vault_enter_code
+      - browser_vault_fill
+      - browser_vault_list
+      - browser_vault_save_login
+      - browser_vault_unlock
+      - browser_vision
+      - close_terminal
+      - computer_use
+      - cronjob_manage
+      - desktop_preview
+      - desktop_project
+      - drive_preview
+      - focus_pane
+      - gui_tour
+      - image_generate
+      - process_manage
+      - read_terminal
+      - read_window_below
+      - session_search
+      - show_tip
+      - skill_manage
+      - skills_list
+      - text_to_speech
+      - todo_list
+      - vision_analyze
+  plugins:
+    enabled:
+    - botdoctor-telegram
+    - botdoctor-immersion
+    - composio-onboarding
+    - mcp-on-demand-control
+    - client-followups
+    - session-topic-recall
+    - telegram-email-card-qa
+    entries:
+      client-followups:
+        allow_gateway_injection: true
+      session-topic-recall:
+        granted_capabilities:
+        - tools.override

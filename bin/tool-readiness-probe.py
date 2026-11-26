@@ -290,14 +290,26 @@ def check_firecrawl(cfg: dict, env: dict, smoke: bool) -> dict:
     if smoke:
         provider_smoke = """
 import asyncio
-from tools.web_tools import web_extract_tool
+import json
+from urllib.parse import urlparse
+from tools.web_tools import web_extract_tool, web_search_tool
 
 async def main():
-    result = await web_extract_tool(
-        ["https://example.com"],
-        format="markdown",
+    extracted = await web_extract_tool(["https://example.com"], format="markdown")
+    searched = web_search_tool("Internet Assigned Numbers Authority example domains", limit=5)
+    search_data = json.loads(searched) if isinstance(searched, str) else searched
+    web = search_data.get("data", {}).get("web", []) if isinstance(search_data, dict) else []
+    search_ok = any(
+        urlparse(item.get("url", "")).hostname in {"iana.org", "www.iana.org"}
+        for item in web if isinstance(item, dict)
     )
-    print(result)
+    print(json.dumps({
+        "extract_ok": "Example Domain" in str(extracted),
+        "search_ok": search_ok,
+        "search_result_count": len(web),
+        "search_result_hosts": [urlparse(item.get("url", "")).hostname for item in web[:5] if isinstance(item, dict)],
+        "search_error": search_data.get("error") if isinstance(search_data, dict) else "invalid search response",
+    }))
 
 asyncio.run(main())
 """
@@ -318,12 +330,23 @@ asyncio.run(main())
         else:
             provider_error = (probe.stderr or probe.stdout or "provider returned no output")[-500:]
         provider_output = probe.stdout if probe is not None else ""
-        if probe is not None and probe.returncode == 0 and "Example Domain" in provider_output:
+        try:
+            proof = json.loads(provider_output.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            proof = {}
+        result["extract_smoke"] = "ok" if proof.get("extract_ok") else "fail"
+        result["search_smoke"] = "ok" if proof.get("search_ok") else "fail"
+        if probe is not None and probe.returncode == 0 and proof.get("extract_ok") and proof.get("search_ok"):
             result["smoke"] = "ok"
         else:
             result["smoke"] = "fail"
             result["status"] = "broken"
-            result["detail"] = f"Hermes web_extract provider smoke failed: {provider_error}"
+            result["detail"] = (
+                f"Hermes web provider smoke failed: extract={result['extract_smoke']} "
+                f"search={result['search_smoke']} results={proof.get('search_result_count')} "
+                f"hosts={proof.get('search_result_hosts')}; "
+                f"{proof.get('search_error') or provider_error}"
+            )
     elif target_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]")):
         failures = []
         for candidate in local_url_variants(target_url):
@@ -342,223 +365,32 @@ asyncio.run(main())
     return result
 
 
-def _browser_pid_exists(pid: int) -> bool:
-    if pid <= 0:
-        return False
-    if os.name == "nt":
-        try:
-            import ctypes
-
-            kernel32 = ctypes.windll.kernel32
-            kernel32.OpenProcess.argtypes = [ctypes.c_uint, ctypes.c_int, ctypes.c_uint]
-            kernel32.OpenProcess.restype = ctypes.c_void_p
-            kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
-            kernel32.WaitForSingleObject.restype = ctypes.c_uint
-            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-            handle = kernel32.OpenProcess(0x100000 | 0x1000, False, pid)
-            if not handle:
-                return kernel32.GetLastError() == 5
-            try:
-                return kernel32.WaitForSingleObject(handle, 0) == 0x102
-            finally:
-                kernel32.CloseHandle(handle)
-        except (AttributeError, OSError):
-            return False
-    try:
-        os.kill(pid, 0)
-        return True
-    except PermissionError:
-        return True
-    except (ProcessLookupError, OSError):
-        return False
 
 
-def _browser_pid_file_alive(path: Path) -> bool | None:
-    try:
-        return _browser_pid_exists(int(path.read_text(encoding="utf-8").strip()))
-    except (ValueError, OSError):
-        return None
 
 
 def check_browser(cfg: dict, env: dict, smoke: bool) -> dict:
-    """Check Hermes' native per-task agent-browser path and session pressure."""
-    result = {"status": "ok", "config": "ok", "plumbing": "ok", "smoke": "skip"}
-    browser_tool = AGENT_ROOT / "tools" / "browser_tool.py"
-    if not browser_tool.exists():
-        result.update(
-            {
-                "status": "broken",
-                "plumbing": "native_tool_missing",
-                "detail": f"Native Hermes browser tool is missing: {browser_tool}",
-                "fix_hint": "Repair/update hermes-agent; do not add browser-lane or a second browser daemon.",
-            }
-        )
+    """Check the native browser_exec dependency without starting a browser."""
+    result = {"status": "broken", "config": "ok", "plumbing": "requirements_probe_failed",
+              "runtime": "browser_exec", "browser_backend": "native",
+              "smoke": "manual_canary_required" if smoke else "skip"}
+    probe_env = {**env, **os.environ, "PYTHONPATH": str(AGENT_ROOT)}
+    code = 'import json,os\ntry:\n    from tools.browser_use_cli import browser_exec_available\n    os.write(1,json.dumps({"ready":bool(browser_exec_available())}).encode()+b"\\n")\n    os._exit(0)\nexcept BaseException as exc:\n    os.write(2,(type(exc).__name__+": "+str(exc)).encode(errors="replace"))\n    os._exit(1)\n'
+    try:
+        proc = subprocess.run([str(VENV_PYTHON), "-B", "-c", code], cwd=str(AGENT_ROOT),
+                              env=probe_env, capture_output=True, text=True, timeout=20)
+        native = json.loads(proc.stdout.strip().splitlines()[-1]) if proc.returncode == 0 else {}
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as exc:
+        result["detail"] = f"{type(exc).__name__}: {exc}"
         return result
-
-    python_candidates = (
-        VENV_PYTHON,
-        AGENT_ROOT / ".venv" / "bin" / "python3",
-        HERMES / "venv" / "bin" / "python3",
-        HOME / "venv" / "bin" / "python3",
-        AGENT_ROOT / "venv" / "Scripts" / "python.exe",
-        HERMES / "venv" / "Scripts" / "python.exe",
-        Path(sys.executable),
-    )
-    python = next((candidate for candidate in python_candidates if candidate.exists()), Path(sys.executable))
-    probe_env = dict(env)
-    probe_env.update(os.environ)
-    probe_env["PYTHONPATH"] = str(AGENT_ROOT)
-    code = """
-import os
-try:
-    import json
-    from tools import browser_tool
-    cdp = getattr(browser_tool, "_cdp", browser_tool)
-    cloud = getattr(browser_tool, "_cloud", browser_tool)
-    install = getattr(browser_tool, "_install", browser_tool)
-    try:
-        from tools import browser_use_cli
-        browser_use_mode = browser_use_cli.is_browser_use_cli_mode()
-    except Exception:
-        browser_use_mode = False
-    if browser_use_mode:
-        runtime = "browser_use_cli"
-        backend = "browser-use"
-        ready = True
-    elif browser_tool._is_camofox_mode():
-        runtime = "camofox"
-        backend = "camofox"
-        ready = bool(install.check_browser_requirements())
-    elif cdp._get_cdp_override():
-        runtime = "cdp_override"
-        backend = "cdp_override"
-        ready = bool(install.check_browser_requirements())
+    if proc.returncode:
+        result["detail"] = (proc.stderr or proc.stdout).strip()[-300:]
+    elif native.get("ready") is True:
+        result.update(status="ok", plumbing="ok", detail="Native browser_exec dependency is available; no session was started.")
     else:
-        provider = cloud._get_cloud_provider()
-        runtime = "cloud_browser" if provider is not None else "native_agent_browser"
-        backend = provider.provider_name() if provider is not None else "agent_browser"
-        ready = bool(install.check_browser_requirements())
-    payload = json.dumps({
-        "ready": ready,
-        "runtime": runtime,
-        "backend": backend,
-        "inactivity_timeout_sec": browser_tool.BROWSER_SESSION_INACTIVITY_TIMEOUT,
-    }).encode()
-    os.write(1, payload + b"\\n")
-    os._exit(0)
-except BaseException as exc:
-    os.write(2, (type(exc).__name__ + ": " + str(exc)).encode(errors="replace"))
-    os._exit(1)
-"""
-    proc = None
-    native = {}
-    try:
-        proc = subprocess.run(
-            [str(python), "-B", "-c", code],
-            cwd=str(AGENT_ROOT),
-            env=probe_env,
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-    except Exception as exc:
-        result.update({"status": "broken", "plumbing": "requirements_probe_failed", "detail": str(exc)})
-    else:
-        detail = (proc.stderr or proc.stdout).strip()[-300:]
-        if proc.returncode != 0:
-            result.update(
-                {
-                    "status": "broken",
-                    "plumbing": "requirements_probe_failed",
-                    "detail": detail or f"requirements probe exited {proc.returncode}",
-                }
-            )
-        else:
-            try:
-                native = json.loads(proc.stdout.strip().splitlines()[-1])
-            except (IndexError, json.JSONDecodeError) as exc:
-                result.update(
-                    {
-                        "status": "broken",
-                        "plumbing": "requirements_probe_failed",
-                        "detail": str(exc),
-                    }
-                )
-    if result["plumbing"] != "requirements_probe_failed" and not native.get("ready"):
-        runtime = native.get("runtime", "unknown")
-        native_runtime = runtime == "native_agent_browser"
-        result.update(
-            {
-                "status": "broken",
-                "plumbing": "requirements_missing",
-                "detail": ((proc.stderr or proc.stdout).strip()[-300:] if proc else "")
-                or (
-                    "agent-browser CLI or Chromium is unavailable"
-                    if native_runtime
-                    else f"Configured {native.get('backend', runtime)} browser backend is unavailable"
-                ),
-                "fix_hint": (
-                    "Repair the existing per-client agent-browser/Chromium install; "
-                    "do not spawn a second browser/profile."
-                    if native_runtime
-                    else f"Repair the configured {runtime} backend or select the local agent-browser path."
-                ),
-            }
-        )
-    timeout_sec = int(native.get("inactivity_timeout_sec") or 120)
-    socket_root = Path("/tmp") if sys.platform == "darwin" else Path(tempfile.gettempdir())
-    session_dirs = []
-    current_uid = os.getuid() if hasattr(os, "getuid") else None
-    for path in socket_root.glob("agent-browser-*"):
-        try:
-            if current_uid is None or path.stat().st_uid == current_uid:
-                session_dirs.append(path)
-        except OSError:
-            pass
-    orphan_ages = []
-    live_count = 0
-    now = time.time()
-    for path in session_dirs:
-        session_name = path.name.removeprefix("agent-browser-")
-        try:
-            age = max(0, int(now - path.stat().st_mtime))
-        except OSError:
-            continue
-        owner_alive = _browser_pid_file_alive(path / f"{session_name}.owner_pid")
-        daemon_alive = _browser_pid_file_alive(path / f"{session_name}.pid")
-        if owner_alive is True and daemon_alive is True:
-            live_count += 1
-        else:
-            orphan_ages.append(age)
-    result.update(
-        {
-            "runtime": native.get("runtime", "unknown"),
-            "browser_backend": native.get("backend", "unknown"),
-            "inactivity_timeout_sec": timeout_sec,
-            "session_artifact_count": len(session_dirs),
-            "live_session_artifact_count": live_count,
-            "orphan_session_artifact_count": len(orphan_ages),
-            "oldest_session_artifact_age_sec": max(orphan_ages, default=0),
-        }
-    )
-    if result["status"] == "ok" and (len(session_dirs) > 4 or max(orphan_ages, default=0) > timeout_sec * 2):
-        result.update(
-            {
-                "status": "degraded",
-                "plumbing": "session_pressure",
-                "detail": (
-                    f"Found {len(session_dirs)} agent-browser session artifacts, "
-                    f"{len(orphan_ages)} orphaned; oldest orphan is {max(orphan_ages, default=0)}s"
-                ),
-            }
-        )
-
-    if smoke:
-        # Do not create sessions from a fleet-wide audit. agent-browser 0.27.0
-        # on Spark was verified to hang on close and leak its Chromium tree.
-        # Interactive canaries remain an explicit, isolated rollout step.
-        result["smoke"] = "manual_canary_required"
+        result.update(plumbing="requirements_missing", detail="Native browser_exec dependency is unavailable.")
     return result
+
 
 
 def check_auxiliary_task(cfg: dict, env: dict, task: str) -> dict:
@@ -861,6 +693,112 @@ def check_delegation(cfg: dict, env: dict, smoke: bool) -> dict:
     return result
 
 
+def _research_mcp_smoke(server_cfg: dict, env: dict) -> dict:
+    """Exercise the configured search transport, not the independent native provider."""
+    server_env = dict(os.environ)
+    server_env.update({key: str(value) for key, value in env.items()})
+    for key, value in (server_cfg.get("env") or {}).items():
+        expanded, missing = expand_env_refs(str(value), server_env)
+        if missing and key != "EXA_API_KEY":
+            return {"status": "degraded", "smoke": "fail", "detail": "Research MCP environment unresolved"}
+        # This probe explicitly selects free mode; an optional paid-search key
+        # must neither prevent that operation nor be sent as a literal placeholder.
+        server_env[key] = "" if missing else expanded
+    if not server_cfg.get("command"):
+        return {"status": "degraded", "smoke": "fail", "detail": "Research MCP smoke requires configured stdio transport"}
+    request = {
+        "command": server_cfg["command"], "args": server_cfg.get("args") or [],
+        "cwd": server_cfg.get("cwd"), "env": server_env,
+    }
+    # The MCP SDK lives in the bound agent interpreter. Credentials travel only
+    # through stdin/environment, never command arguments or the public report.
+    code = r'''
+import asyncio, json, sys
+
+from urllib.parse import urlsplit
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+def payload(reply):
+    if getattr(reply, "isError", False) or getattr(reply, "is_error", False):
+        return {"ok": False}
+    value = getattr(reply, "structuredContent", None) or getattr(reply, "structured_content", None)
+    if not isinstance(value, dict):
+        value = next((item.text for item in reply.content if getattr(item, "type", "") == "text"), None)
+    for _ in range(6):
+        if isinstance(value, str):
+            value = json.loads(value)
+        elif isinstance(value, dict) and "result" in value:
+            value = value["result"]
+        else:
+            break
+    return value if isinstance(value, dict) else {}
+
+async def main():
+    cfg = json.load(sys.stdin)
+    result = {"status": "degraded", "smoke": "fail", "search_smoke": "fail", "fetch_smoke": "fail"}
+    try:
+        params = StdioServerParameters(**cfg)
+        async with stdio_client(params) as (reader, writer):
+            async with ClientSession(reader, writer) as session:
+                await asyncio.wait_for(session.initialize(), timeout=15)
+                for operation, arguments in [
+                    ("search", {"query": "Internet Assigned Numbers Authority example domains", "mode": "free", "num_results": 5, "scrape_top": 0}),
+                    ("fetch_page", {"url": "https://www.iana.org/help/example-domains"}),
+                ]:
+                    key = "search_smoke" if operation == "search" else "fetch_smoke"
+                    try:
+                        value = payload(await asyncio.wait_for(session.call_tool(operation, arguments), timeout=35))
+                        failed = value.get("ok") is False or value.get("success") is False or bool(value.get("error"))
+                        if operation == "search":
+                            rows = value.get("results") or []
+                            usable = any(urlsplit(item.get("url", "")).hostname in {"iana.org", "www.iana.org"}
+                                         for item in rows if isinstance(item, dict))
+                        else:
+                            text = str(value.get("content") or value.get("markdown") or "")
+                            usable = len(text) >= 100 and "example domains" in text.lower()
+                            result["fetch_content_smoke"] = "ok" if usable and not failed else "fail"
+                            result["fetch_via"] = str(value.get("via") or "unknown")[:40]
+                            # Publish provider/status only, not raw errors that can contain credentials.
+                            result["fetch_attempts"] = [
+                                {"backend": str(item.get("backend", "unknown"))[:40],
+                                 "status": str(item.get("status", "unknown"))[:20]}
+                                for item in (value.get("attempts") or []) if isinstance(item, dict)
+                            ][:8]
+                            if cfg["env"].get("FIRECRAWL_URL"):
+                                # A successful rescue fetch must not hide a broken configured endpoint.
+                                primary_ok = value.get("via") == "firecrawl" and not failed
+                                result["fetch_primary_smoke"] = "ok" if primary_ok else "fail"
+                                if not primary_ok:
+                                    result["fetch_smoke_error"] = "configured_firecrawl_failed"
+                                usable = usable and primary_ok
+                        result[key] = "ok" if usable and not failed else "fail"
+                        if failed:
+                            result[key + "_error"] = "research_operation_failed"
+                    except Exception as exc:
+                        result[key + "_error"] = type(exc).__name__
+        if result["search_smoke"] == result["fetch_smoke"] == "ok":
+            result.update(status="ok", smoke="ok")
+    except Exception as exc:
+        result["detail"] = "Research MCP transport failed: " + type(exc).__name__
+    print(json.dumps(result))
+
+asyncio.run(main())
+'''
+    try:
+        probe = subprocess.run(
+            [str(VENV_PYTHON), "-c", code], input=json.dumps(request),
+            cwd=AGENT_ROOT, env=server_env, capture_output=True, text=True, timeout=100,
+        )
+        if probe.returncode == 0:
+            proof = json.loads(probe.stdout.strip().splitlines()[-1])
+            if proof.get("status") in {"ok", "degraded"}:
+                return proof
+    except (OSError, subprocess.TimeoutExpired, ValueError, IndexError) as exc:
+        return {"status": "degraded", "smoke": "fail", "detail": "Research MCP smoke failed: " + type(exc).__name__}
+    return {"status": "degraded", "smoke": "fail", "detail": "Research MCP smoke returned no valid proof"}
+
+
 def check_mcp_servers(cfg: dict, env: dict, smoke: bool) -> dict:
     result = {"status": "ok", "config": "ok", "plumbing": "ok", "smoke": "skip", "servers": {}}
 
@@ -900,10 +838,23 @@ def check_mcp_servers(cfg: dict, env: dict, smoke: bool) -> dict:
             broken += 1
         else:
             result["servers"][name] = launch or {"status": "ok"}
+            preferred = (cfg.get("mcp_policy") or {}).get("preferred_research_backend")
+            if name == preferred or name == "search":
+                if smoke:
+                    proof = _research_mcp_smoke(server_cfg, env)
+                    result["servers"][name].update(proof)
+                    result["smoke"] = proof["smoke"]
+                    if proof["status"] != "ok":
+                        broken += 1
+                else:
+                    result["servers"][name].update(
+                        status="degraded", smoke="skip", detail="Research MCP operations not exercised",
+                    )
+                    broken += 1
 
     if broken > 0:
         result["status"] = "degraded"
-        result["detail"] = f"{broken} MCP server(s) failed startup readiness"
+        result["detail"] = f"{broken} MCP server(s) failed startup or research-operation readiness"
 
     return result
 

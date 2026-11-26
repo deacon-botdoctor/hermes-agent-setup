@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""HERMES_BROKER_CODEX_CLI_v1: use the owning head's currently verified runtime."""
+from pathlib import Path, PurePosixPath
+import hashlib
+import json
+import os
+import sys
+
+source = Path(__file__).resolve().parents[2]
+head = (source.parent.parent.parent if source.parent.parent.name == 'state'
+        else source.parent.parent) if source.parent.name == 'runtime-candidates' else source.parent
+binding_raw = (head / 'state/runtime-binding.json').read_bytes()
+binding = json.loads(binding_raw.decode('utf-8-sig'))
+runtime = Path(binding['runtime_root']).resolve(strict=True)
+binding_home = Path(binding['hermes_home']).resolve()
+if binding_home != head.resolve():
+    if not (head.parent.name == 'profiles' and binding_home == head.parent.parent.resolve()
+            and runtime.is_relative_to(head.resolve())
+            and (binding_home / 'state/runtime-binding.json').read_bytes() == binding_raw):
+        raise SystemExit('Broker worker binding belongs to another tenant')
+if os.name != 'nt' and head.stat().st_uid != os.getuid():
+    raise SystemExit('Run the broker worker as its tenant owner')
+runtime.relative_to(head.resolve())
+python = Path(binding['runtime_python'])
+python.absolute().relative_to(runtime)
+python.resolve(strict=True).relative_to(runtime)
+launcher = runtime / '.operator-control/verified-runtime-launch.py'
+receipt = runtime / '.operator-control/runtime-fingerprint.json'
+if not python.is_file():
+    raise SystemExit('The bound broker worker interpreter is unavailable')
+if os.name == 'nt':
+    # Native Windows bindings attest a scheduled-task wrapper, not a POSIX launcher.
+    launchers = binding['service']['launchers']
+    if not launchers:
+        raise SystemExit('The verified broker worker launcher is unavailable')
+    for row in launchers:
+        path = Path(row['path']).resolve(strict=True)
+        path.relative_to(binding_home / 'bin')
+        if hashlib.sha256(path.read_bytes()).hexdigest() != row['sha256']:
+            raise SystemExit('The verified broker worker launcher is unavailable')
+    fingerprint = json.loads(receipt.read_text(encoding='utf-8-sig'))
+    files = fingerprint.get('files')
+    if (fingerprint.get('verified') is not True or not isinstance(files, dict)
+            or type(fingerprint.get('file_count')) is not int
+            or fingerprint['file_count'] != len(files)
+            or fingerprint.get('digest') != binding['runtime_fingerprint_digest']):
+        raise SystemExit('The bound broker worker fingerprint is invalid')
+    canonical = []
+    for relative in sorted(files):
+        identity = files[relative]
+        pure = PurePosixPath(relative)
+        if (not relative or pure.is_absolute() or '..' in pure.parts
+                or identity.get('mode') not in {'100644', '100755'}
+                or identity.get('type') != 'blob'):
+            raise SystemExit('The bound broker worker fingerprint is invalid')
+        path = runtime.joinpath(*pure.parts).resolve(strict=True)
+        path.relative_to(runtime)
+        expected = identity['sha256']
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise SystemExit('The bound broker worker runtime has changed')
+        canonical.append(f"{relative}\t{identity['mode']}\t{identity['type']}\t{expected}\n")
+    if hashlib.sha256(''.join(canonical).encode()).hexdigest() != fingerprint['digest']:
+        raise SystemExit('The bound broker worker fingerprint is inconsistent')
+else:
+    expected = [row['sha256'] for row in binding['service']['launchers']
+                if Path(row['path']) == launcher]
+    if (not launcher.is_file() or len(expected) != 1
+            or hashlib.sha256(launcher.read_bytes()).hexdigest() != expected[0]):
+        raise SystemExit('The verified broker worker launcher is unavailable')
+environment = {**os.environ, 'HERMES_BROKER_HOME': str(head),
+               'HERMES_BROKER_WORK_CWD': os.getcwd()}
+environment.setdefault('HERMES_HOME', str(head))
+code = ('import os,sys;os.chdir(os.environ["HERMES_BROKER_WORK_CWD"]);'
+        'sys.path.insert(0,' + repr(str(runtime)) + ');'
+        'from agent.broker_codex_cli_bootstrap import main;sys.exit(main())')
+arguments = ['-I', '-B', '-c', code, *sys.argv[1:]]
+if os.name != 'nt':
+    arguments = ['-I', '-B', str(launcher), str(receipt), str(runtime), *arguments]
+if os.name == 'nt':
+    import subprocess
+    raise SystemExit(subprocess.call([str(python), *arguments], env=environment))
+os.execve(str(python), [str(python), *arguments], environment)

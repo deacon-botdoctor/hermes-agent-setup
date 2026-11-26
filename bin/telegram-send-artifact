@@ -110,7 +110,7 @@ def load_maton_key(hermes_home: Path, account: str) -> str:
     target = {
         "botdoctor": "MATON_API_KEY_BOTDOCTOR",
         "personal": "MATON_API_KEY_PERSONAL",
-        "enoch": "MATON_API_KEY_ENOCH",
+        "operator": "MATON_API_KEY_OPERATOR",
     }[account]
 
     direct = os.environ.get(target, "").strip()
@@ -371,8 +371,8 @@ def main():
     parser.add_argument("--file", required=True)
     parser.add_argument("--caption", default="")
     parser.add_argument("--folder", default=DEFAULT_FOLDER)
-    parser.add_argument("--drive-account", choices=["botdoctor", "personal", "enoch"], default="botdoctor")
-    parser.add_argument("--profile", choices=["enoch", "doc"], default="enoch")
+    parser.add_argument("--drive-account", choices=["botdoctor", "personal", "operator"], default="botdoctor")
+    parser.add_argument("--profile", choices=["operator", "doc"], default="operator")
     parser.add_argument("--link-only", action="store_true")
     parser.add_argument("--no-drive", action="store_true")
     args = parser.parse_args()
@@ -392,7 +392,7 @@ def main():
             raise SystemExit(f"Telegram artifact QA script missing: {qa_script}")
 
     chat_id, thread_id = parse_target(args.target)
-    token = load_telegram_token(hermes_home, None if args.profile == "enoch" else args.profile)
+    token = load_telegram_token(hermes_home, None if args.profile == "operator" else args.profile)
 
     drive_link = ""
     folder_link = ""

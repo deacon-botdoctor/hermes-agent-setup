@@ -2003,7 +2003,7 @@ def build_report(home: Path) -> dict:
     report["client_summary"] = build_client_summary(report)
     report["recommended_agent_action"] = build_recommended_agent_action(report)
     report["recommended_doc_action"] = build_recommended_doc_action(report)
-    report["recommended_deacon_note"] = build_recommended_deacon_note(report)
+    report["recommended_operator_note"] = build_recommended_operator_note(report)
     report["handoff_recommended"] = report["overall_status"] != "healthy"
     return report
 
@@ -2048,7 +2048,7 @@ def build_recommended_doc_action(report: dict) -> str:
     )
 
 
-def build_recommended_deacon_note(report: dict) -> str:
+def build_recommended_operator_note(report: dict) -> str:
     if report["overall_status"] == "healthy":
         return "No the operator note required."
     return (
@@ -2081,7 +2081,7 @@ def write_outputs(home: Path, report: dict) -> tuple[Path, Path, Path]:
         f"- Client summary: {report['client_summary']}",
         f"- Agent action: {report['recommended_agent_action']}",
         f"- Doc action: {report['recommended_doc_action']}",
-        f"- the operator note: {report['recommended_deacon_note']}",
+        f"- the operator note: {report['recommended_operator_note']}",
         "",
         "## Reasons",
     ]

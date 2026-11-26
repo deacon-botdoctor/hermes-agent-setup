@@ -1,0 +1,60 @@
+schema_version: 1
+
+# Model-routing instructions removed fleet-wide (the operator, 2026-11-16: one model
+# per agent, set in one place). The full-scope merge deletes these paths unless
+# an agent has a recorded exemption. Deleting a path returns it to the native
+# meaning "use the agent's main model".
+# - smart_model_routing, codex_oauth_stack_routing, fallback_policy: disabled or
+#   prose-only legacy routers (cheap/deep Astra/Luna, Grok emergency lanes).
+#   Pinned v0.23 does not read smart_model_routing (only the setup wizard writes
+#   it); the remaining readers are fleet preflight scripts that treat a missing
+#   section as empty. The operator agent's model-control-plane reader is retired (disabled in
+#   its crontab 2026-07-10).
+# - agent.reasoning_overrides: per-model effort for models the fleet no longer
+#   runs; agent.reasoning_effort is the single effort setting.
+# - model.fallback: legacy nested fallback; fallback_providers is the chain.
+# - compression.summary_*: duplicate compressor route; auxiliary.compression owns it.
+# - auxiliary.<task> routes for tasks outside the native default table (old
+#   Grok, gpt-5.4-mini and dead local-proxy pins). Unset means the main model.
+# - x_search: Grok model settings for the native x_search tool, which
+#   config-x-search.yaml now disables (X research goes through TReg).
+# Never list model.default/provider/base_url, or fallback_providers: the merge
+# refuses them.
+removed_paths:
+  - smart_model_routing
+  - fallback_policy
+  - codex_oauth_stack_routing
+  - model.fallback
+  - agent.reasoning_overrides
+  - compression.summary_model
+  - compression.summary_provider
+  - compression.summary_base_url
+  - auxiliary.dream.provider
+  - auxiliary.dream.model
+  - auxiliary.dream.base_url
+  - auxiliary.dream.api_key
+  - auxiliary.flush_memories.provider
+  - auxiliary.flush_memories.model
+  - auxiliary.flush_memories.base_url
+  - auxiliary.flush_memories.api_key
+  - auxiliary.promise_extraction.provider
+  - auxiliary.promise_extraction.model
+  - auxiliary.promise_extraction.base_url
+  - auxiliary.promise_extraction.api_key
+  - auxiliary.research.provider
+  - auxiliary.research.model
+  - auxiliary.research.base_url
+  - auxiliary.research.api_key
+  - auxiliary.session_search.provider
+  - auxiliary.session_search.model
+  - auxiliary.session_search.base_url
+  - auxiliary.session_search.api_key
+  - auxiliary.skills_hub.provider
+  - auxiliary.skills_hub.model
+  - auxiliary.skills_hub.base_url
+  - auxiliary.skills_hub.api_key
+  - auxiliary.web_extract.provider
+  - auxiliary.web_extract.model
+  - auxiliary.web_extract.base_url
+  - auxiliary.web_extract.api_key
+  - x_search
