@@ -74,8 +74,12 @@ Route in this order:
 
 1. native Hermes or a local user-owned capability;
 2. connected SaaS through the user's approved connector or Composio surface;
-3. browser automation only when the task requires UI interaction or the
-   approved API/connector has a verified gap.
+3. **Agent Desktop** (`vercel-labs/agent-desktop`) as the default tool on every
+   computer for desktop app and browser UI automation whenever a task requires
+   UI interaction or the approved API/connector has a verified gap;
+4. Hermes-native `computer_use` (`cua-driver`) or other UI tools only as an
+   explicit fallback when Agent Desktop is unavailable or cannot reach the
+   surface.
 
 Availability never grants permission. A visible tool, account, page, token, or
 connector does not authorize a read or mutation beyond the user's request and
@@ -108,7 +112,14 @@ new integration.
 - copied upstream source or placeholder compatibility plugins;
 - direct broad GitHub credentials.
 
-## Desktop exception
+## Desktop standard (Agent Desktop)
+
+Every computer should have **Agent Desktop** (`vercel-labs/agent-desktop`)
+installed, and all agents should default to **Agent Desktop** over every other
+desktop or browser automation tool (Cua, Playwright, raw OS scripting, or pixel
+clicking). Agent Desktop uses native accessibility trees and element refs
+without hijacking the user's cursor or foreground window. Keep the pinned
+Hermes-native `cua-driver` (`0.34.1`) as a verified compatibility fallback only.
 
 On a user-operated desktop, a local notes application or search launcher may be
 useful. That is a user-interface choice, not a runtime memory requirement. Keep

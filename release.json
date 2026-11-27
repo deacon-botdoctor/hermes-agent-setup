@@ -9,16 +9,16 @@
     "baseline_acceptance": "exact_version_present",
     "contract": {
       "path": "contracts/cua-driver-release-v1.json",
-      "sha256": "3207daaee7e3c673a1b5c19e0e018e8643f17c0e3063d1bf4341d56fd232a818"
+      "sha256": "34fd93c5506a277dba8fb858dd43909c4227c673db942e68fe0514b2e877d080"
     },
     "gui_acceptance": "doctor_ready_and_list_windows",
     "helper": {
       "path": "bin/ensure-cua-driver.py",
       "sha256": "c2ec1b746197999a10457685ca64b3b2296a4f8d6a920f8aed26f3fc78674398"
     },
-    "source_commit": "ac9b1643acb61e20d5af078215e7d1b8c414db89",
-    "tag": "cua-driver-rs-v0.22.0",
-    "version": "0.22.0"
+    "source_commit": "0c69d9a2c8abbb5051a2df4a23f0fa166d5385dc",
+    "tag": "cua-driver-rs-v0.34.1",
+    "version": "0.34.1"
   },
   "deployment_digest": "cea91b19c8759e8b85b97a9aa73039d999a9e7c23f8cf16f3ac5ee28764b62e5",
   "golden_sha": "0e9165b3fc38a7514b11a7f1d579fd01d14db54e",

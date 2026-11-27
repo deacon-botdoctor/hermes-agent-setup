@@ -68,7 +68,8 @@ Follow these steps in order. Do not skip the preflight.
 6. Fill in your identity files from the templates in section 13.
 7. Configure only the parts that apply to you: auth (section 5), model routing
    (section 6), multi-machine (section 7), shipping (section 8), schedules
-   (section 9), and email triage (section 14).
+   (section 9), email triage (section 14), and desktop automation with Agent
+   Desktop (section 15).
 8. Run the acceptance checks in section 11 and section 12.
 9. Report to your principal what you did, what you verified, and what remains.
 
@@ -1194,6 +1195,83 @@ card, one tap, an action in the same run, and silence when nothing needs
 them: that gives back attention. Learning from taps instead of guesses makes
 the recommendations improve without new rules the principal never approved.
 
+# 15. Desktop and browser automation (Agent Desktop)
+
+**Label:** [Bot Doctor convention] for Agent Desktop as the universal default;
+[Hermes-native] and [This release] for the pinned `cua-driver` fallback.
+
+## 15.1 The rule: Agent Desktop first on every machine
+
+Install **Agent Desktop** (`vercel-labs/agent-desktop`) on every computer that
+runs GUI or browser work, and configure every agent to default to **Agent
+Desktop** over every other desktop or browser automation tool.
+
+Route desktop and browser UI tasks in this strict order:
+
+1. **Native CLI, local capability, or approved API/connector** when no UI is
+   needed.
+2. **Agent Desktop** (the default for all native desktop apps and browser UI
+   work).
+3. **Hermes-native `computer_use` (`cua-driver`)** only as an explicit fallback
+   when Agent Desktop is unavailable or cannot reach the target surface.
+
+Do not default to Cua, Playwright, raw OS scripting, pixel clicking, or
+foreground cursor hijacking when Agent Desktop can do the job.
+
+## 15.2 Install and wire Agent Desktop
+
+Install the CLI globally and register it as a `stdio` MCP server in the agent's
+MCP configuration:
+
+```bash
+npm install -g agent-desktop
+```
+
+```json
+{
+  "mcpServers": {
+    "agent-desktop": {
+      "command": "agent-desktop",
+      "args": []
+    }
+  }
+}
+```
+
+For browser workflows, pair Agent Desktop with a **dedicated, persistent agent
+browser profile** separate from the principal's personal browser. Never import
+personal cookies or passwords silently, and never hijack the principal's active
+browser window.
+
+## 15.3 Operating rules
+
+- **Use accessibility refs, not pixel coordinates.** Snapshot the target window
+  or tab, act on the returned ref, and take a fresh snapshot after navigation
+  or state changes.
+- **Work without stealing focus.** Keep actions scoped to the owned window or
+  tab so the human keeps control of their cursor and foreground apps.
+- **Verify state on the app itself.** A delivered click or keystroke is not
+  proof that a form saved. Read back the resulting UI state.
+- **Protect secrets.** Enter credentials only through a protected password path
+  checked against the expected origin or field type. Never log secret values or
+  capture screenshots while a secret field is populated.
+
+## 15.4 Pinned `cua-driver` fallback [This release]
+
+Hermes ships a native `computer_use` backend backed by `cua-driver`. This
+release pins `cua-driver-rs` `0.34.1` consistently across
+`contracts/cua-driver-release-v1.json`, `release.json`, and `pm/lock.json`
+(`native_cua_lock_v1`). Keep it installed and verified for compatibility and
+explicit fallback, while keeping **Agent Desktop** as the primary desktop tool
+every agent chooses first.
+
+## 15.5 Why
+
+Agent Desktop reads each operating system's native accessibility tree (macOS
+AX, Windows UIA, Linux AT-SPI) and exposes lightweight, structured element refs
+instead of screenshots and pixel guesses. It runs faster, uses fewer tokens,
+breaks less often across window sizes, and keeps out of the principal's way.
+
 # Appendix A. File map
 
 | Path | Purpose |
@@ -1230,4 +1308,6 @@ Confirm each item before you report the install as complete.
 10. Isolation confirmed for every tenant.
 11. Acceptance checks pass; rollback rehearsed.
 12. Email deployment (if used): one owner per mailbox; dry run passes.
-13. Report to the principal: done, verified, remaining.
+13. Desktop machines: Agent Desktop installed and set as the default desktop
+    and browser automation tool over all other UI tools.
+14. Report to the principal: done, verified, remaining.

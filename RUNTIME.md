@@ -106,11 +106,6 @@ account-specific default URL). No change alters runtime logic.
 - Later Golden main commits that are not yet fleet-released, for example the
   xAI broker pool-row preservation fix and the scheduled self-check runtime
   binding. A later public release picks them up after fleet rollout.
-- **Desktop-driver contract.** The assembled runtime's native package lock
-  now pins driver version `0.34.1` (`native_cua_lock_v1`). The public
-  profile-install contract in `contracts/` and the `release.json` driver
-  block still pin `0.22.0`. Check the pull request status before you rely on
-  `bin/install-profile.py` on a GUI host.
 
 ## Known issues carried from the Golden source
 
@@ -145,6 +140,11 @@ needs them.
 - Every auxiliary task and subagent follows the agent's main model, unless a
   row in `fleet-exemptions.yaml` records a reason.
 - Skill writes from the agent go through native approval.
+- **Desktop default:** every computer should install **Agent Desktop**
+  (`vercel-labs/agent-desktop`) and default all agents to Agent Desktop over
+  other desktop or browser UI tools. The Hermes-native `cua-driver` fallback is
+  aligned at `0.34.1` across `contracts/cua-driver-release-v1.json`,
+  `release.json`, and `pm/lock.json` (`native_cua_lock_v1`).
 
 The setup preserves local model and provider choices. It removes retired
 Golden values only when they still exactly match the old defaults.

@@ -204,8 +204,8 @@ def test_release_pins_the_golden_cua_driver_contract():
     contract_path = ROOT / driver["contract"]["path"]
     contract = json.loads(contract_path.read_text(encoding="utf-8"))
 
-    assert driver["version"] == "0.22.0"
-    assert driver["tag"] == "cua-driver-rs-v0.22.0"
+    assert driver["version"] == "0.34.1"
+    assert driver["tag"] == "cua-driver-rs-v0.34.1"
     assert driver["baseline_acceptance"] == "exact_version_present"
     assert driver["gui_acceptance"] == "doctor_ready_and_list_windows"
     assert hashlib.sha256(helper.read_bytes()).hexdigest() == driver["helper"]["sha256"]
@@ -794,7 +794,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
                 {
                     "ok": True,
                     "status": "installed",
-                    "after": {"installed": True, "version": "0.22.0"},
+                    "after": {"installed": True, "version": "0.34.1"},
                     "doctor_ready": False,
                 }
             ),
@@ -804,7 +804,7 @@ def test_profile_installer_requires_pinned_driver_before_profile_mutation(
     monkeypatch.setattr(installer.subprocess, "run", fake_run)
     receipt = installer.ensure_cua_driver(runtime_python, home)
 
-    assert receipt["after"]["version"] == "0.22.0"
+    assert receipt["after"]["version"] == "0.34.1"
     assert calls[0][0] == sys.executable
     assert calls[0][1] == str(ROOT / "bin" / "ensure-cua-driver.py")
     assert calls[0][calls[0].index("--hermes-python") + 1] == str(runtime_python)
@@ -877,7 +877,7 @@ def test_profile_installer_can_require_gui_driver_readiness(tmp_path, monkeypatc
                 {
                     "ok": False,
                     "status": "blocked_not_ready",
-                    "after": {"installed": True, "version": "0.22.0"},
+                    "after": {"installed": True, "version": "0.34.1"},
                     "doctor_ready": False,
                 }
             ),
@@ -2025,7 +2025,7 @@ def test_profile_install_interrupt_restores_from_pending_receipt(
         "ensure_cua_driver",
         lambda *_args, **_kwargs: {
             "ok": True,
-            "after": {"version": "0.22.0"},
+            "after": {"version": "0.34.1"},
             "doctor_ready": False,
         },
     )

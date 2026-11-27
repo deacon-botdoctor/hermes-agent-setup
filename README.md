@@ -31,8 +31,10 @@ agent can read and act on to rebuild itself the way the reference operator
 is set up. It covers the covenant and operating floors, the STE writing
 style, memory and knowledge, the auth broker pattern, model routing, the
 multi-machine T3 setup, shipping and merge policy, scheduled jobs,
-client isolation, self-repair, install and rollback, what to customize, and the
-T3 email triage workflow (approval cards, one-tap actions, silent runs).
+client isolation, self-repair, install and rollback, what to customize, the
+T3 email triage workflow (approval cards, one-tap actions, silent runs), and
+desktop/browser automation with Agent Desktop as the default tool on every
+computer.
 Each section marks what is Hermes-native and what is a Bot Doctor convention.
 Rebuild the PDF with `sh docs/build-drop-in-guide.sh`.
 
@@ -64,11 +66,17 @@ fingerprint. It does not stop or install a gateway.
 
 See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 
-### Semantic computer-control readiness
+### Desktop automation and semantic computer-control readiness
 
-The lazy skill and native `computer_use` tool are discoverable on CLI and
-Telegram by default. Profile installation now installs and verifies the exact
-Golden-pinned Cua Driver version through native Hermes. A headless host may
+Every computer should install **Agent Desktop** (`vercel-labs/agent-desktop`)
+and configure agents to default to **Agent Desktop** over every other desktop or
+browser UI tool (see `docs/drop-in-guide.md`, section 15, and
+[`DEFAULTS.md`](DEFAULTS.md)).
+
+For Hermes-native fallback, the lazy skill and native `computer_use` tool are
+discoverable on CLI and Telegram by default. Profile installation installs and
+verifies the exact Golden-pinned Cua Driver version (`0.34.1`) through native
+Hermes. A headless host may
 record a degraded desktop doctor while retaining normal automation; the
 stricter semantic-only guard stays off unless a local GUI host passes the
 public, read-only wiring audit:
