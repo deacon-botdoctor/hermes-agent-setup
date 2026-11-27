@@ -601,12 +601,22 @@ def run_canary(script: Path, canary: dict[str, Any], agent_id: str, agent_name: 
         result = {"ran": True, "rc": p.returncode, "detail": detail[-300:]}
         # Retention must yield to a live mutation owner. Preserve its failed
         # attempt and stale receipt, but report the expected deferral as a warning.
-        lease_errors = {
-            f"ValueError: fleet mutation lease busy: {HERMES / 'state/promotion/executor' / name}"
+        lease_reasons = {
+            f"fleet mutation lease busy: {HERMES / 'state/promotion/executor' / name}"
             for name in ("active-rollout.lock", "runtime-mutation.lock")
         }
-        if (canary.get("id") == "disk_retention" and p.returncode == 1
-                and detail.splitlines() and detail.splitlines()[-1] in lease_errors):
+        lease_busy = (p.returncode == 1 and detail.splitlines()
+                      and detail.splitlines()[-1] in {"ValueError: " + reason for reason in lease_reasons})
+        if canary.get("id") == "disk_retention" and p.returncode == 75:
+            try:
+                deferred = json.loads(p.stdout or "")
+            except (TypeError, ValueError):
+                deferred = None
+            lease_busy = (isinstance(deferred, dict) and deferred.get("status") == "deferred"
+                          and deferred.get("reason") in lease_reasons
+                          and type(deferred.get("deleted_count")) is int
+                          and deferred["deleted_count"] == 0)
+        if canary.get("id") == "disk_retention" and lease_busy:
             result.update(deferred=True, status="warning:mutation_lease_busy")
         return result
     except Exception as exc:
@@ -696,6 +706,9 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         native_schedule = schedule_kind in {"launchd", "systemd-user"}
         if cron_lines is None:
             cron_change = "failed:crontab_read"
+        elif native_schedule and not any(_cron_line_has_tag(item, tag) for item in cron_lines):
+            # Only a readable crontab proves there is no tagged job to remove.
+            cron_change = "unchanged"
         elif schedule_kind in {"cron", "cron-compatible"} and sum(
             _cron_line_has_tag(item, tag) for item in cron_lines
         ) == 1:
@@ -722,7 +735,7 @@ def reconcile(args: argparse.Namespace) -> dict[str, Any]:
         age = state_age(state)
         stale = age is None or age > int(canary.get("run_if_stale_seconds") or 3600)
         run_result = {"ran": False, "reason": "fresh", "age_seconds": age}
-        if stale or args.run_canaries:
+        if (stale or args.run_canaries) and not getattr(args, "schedule_only", False):
             run_result = run_canary(script, canary, agent_id, agent_name, args.dry_run)
             actions.append({"capability": cap_id, "canary": canary.get("id"), "action": "run_if_stale", **run_result})
         cap["canary"].update(
@@ -779,6 +792,7 @@ def main() -> int:
     ap.add_argument("--agent-name")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--run-canaries", action="store_true", help="Run enabled canaries even if their state is fresh.")
+    ap.add_argument("--schedule-only", action="store_true", help="Publish actual schedule inventory without running canaries or retention.")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
     payload = reconcile(args)

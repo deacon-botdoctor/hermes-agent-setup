@@ -7,9 +7,13 @@ import gzip
 import json
 import os
 import re
+import runpy
 import shutil
+import signal
 import sqlite3
 import subprocess
+import threading
+import queue
 import sys
 import tempfile
 import time
@@ -22,10 +26,7 @@ PROC_ROOT = Path("/proc")
 AGENT_PROBE_MAX_AGE_S = int(os.environ.get("HERMES_AGENT_PROBE_MAX_AGE_SECONDS", "1800"))
 # Unified search is free-first; Exa is an optional paid escalation backend.
 OPTIONAL_CAPABILITY_ENV_KEYS = {"EXA_API_KEY"}
-DISK_WARN_PERCENT = int(os.environ.get("HERMES_DISK_WARN_PERCENT", "85"))
-DISK_FAIL_PERCENT = int(os.environ.get("HERMES_DISK_FAIL_PERCENT", "92"))
-DISK_WARN_FREE_BYTES = int(os.environ.get("HERMES_DISK_WARN_FREE_BYTES", str(15 * 1024**3)))
-DISK_FAIL_FREE_BYTES = int(os.environ.get("HERMES_DISK_FAIL_FREE_BYTES", str(5 * 1024**3)))
+KEYLESS_MCP_ENV_ARGS = {"EXA_API_KEY": ["-m", "search_mcp.server"]}
 
 
 def _gateway_descriptor_defaults(platform_name):
@@ -58,7 +59,6 @@ HOST_SWAP_RATE_MAX_WINDOW_SECONDS = 2 * 60 * 60
 HOST_PROCESS_WARN = int(os.environ.get("HERMES_HOST_PROCESS_WARN", "500"))
 HOST_PROCESS_FAIL = int(os.environ.get("HERMES_HOST_PROCESS_FAIL", "800"))
 HOST_POWERSHELL_WARN = int(os.environ.get("HERMES_HOST_POWERSHELL_WARN", "25"))
-HOST_SSH_SESSION_WARN = int(os.environ.get("HERMES_HOST_SSH_SESSION_WARN", "20"))
 HOST_PROCESS_HANDLE_FAIL = int(os.environ.get("HERMES_HOST_PROCESS_HANDLE_FAIL", "50000"))
 WINDOWS_HANDLE_OBSERVATION_LIMIT = 40
 WINDOWS_HANDLE_GROWTH_WARN = 256
@@ -157,6 +157,16 @@ def run(cmd, timeout=8):
         return Result()
 
 
+def run_user_service(*args):
+    # Cron and sudo do not carry the service owner's login-session environment.
+    runtime_dir = f"/run/user/{os.geteuid()}"
+    return run([
+        "env", f"XDG_RUNTIME_DIR={runtime_dir}",
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path={runtime_dir}/bus", "TZ=UTC",
+        "systemctl", "--user", *args,
+    ], timeout=5)
+
+
 def pid_is_alive(pid: int) -> bool:
     """Use a Windows-native process lookup; ``os.kill(pid, 0)`` is unreliable there."""
     if os.name == "nt":
@@ -174,21 +184,149 @@ def check_config():
     return {"name": "config", "status": "pass" if p.exists() and p.stat().st_size > 0 else "fail", "detail": str(p)}
 
 
+def check_on_demand_runtime():
+    missing = [name for name in ("SOUL.md", "AGENTS.md")
+               if not (HERMES / name).is_file() or not (HERMES / name).stat().st_size]
+    if missing:
+        return {"name": "on_demand_runtime", "status": "fail",
+                "detail": "missing profile instructions: " + ", ".join(missing)}
+    probe = subprocess.run(
+        [sys.executable, "-I", "-c",
+         "import json,run_agent,hermes_cli; print(json.dumps({'source':run_agent.__file__}))"],
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    if probe.returncode:
+        return {"name": "on_demand_runtime", "status": "fail",
+                "detail": f"native runtime import failed, exit={probe.returncode}"}
+    source = json.loads(probe.stdout.splitlines()[-1])["source"]
+    return {"name": "on_demand_runtime", "status": "pass",
+            "detail": f"profile instructions present; native runtime import passed; source={source}"}
+
+
 def check_client_context():
     p = HERMES / "CLIENT_CONTEXT.md"
     return {"name": "client_context", "status": "pass" if p.exists() else "warn", "detail": str(p)}
 
 
+def api_only_profile():
+    """Recognize an explicitly configured API surface, never missing config."""
+    import yaml
+
+    try:
+        config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8-sig")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    if not isinstance(config, dict):
+        return False
+    platforms = config.get("platforms") or {}
+    declared = (isinstance(platforms, dict)
+            and isinstance(platforms.get("api_server"), dict)
+            and platforms["api_server"].get("enabled") is True
+            and all(isinstance(value, dict) and value.get("enabled") is False
+                    for name, value in platforms.items() if name != "api_server"))
+    if not declared:
+        return False
+    # The native loader owns gateway.json, nested YAML and environment/plugin
+    # precedence. Do not infer that an omitted chat platform is disabled.
+    program = ("import json;from gateway.config import load_gateway_config;"
+               "c=load_gateway_config();print(json.dumps(sorted("
+               "p.value for p,v in c.platforms.items() if v.enabled)))")
+    try:
+        result = subprocess.run([sys.executable, "-I", "-c", program],
+                                env={**_read_env_keys(), **os.environ, "HERMES_HOME": str(HERMES)},
+                                capture_output=True, text=True, timeout=15)
+        return result.returncode == 0 and json.loads(result.stdout) == ["api_server"]
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return False
+
+
 def telegram_transport_expected():
-    """Return False only for an explicit ``platforms.telegram.enabled: false``."""
+    """Honor configured API-only profiles and explicit Telegram opt-outs."""
     try:
         import yaml
 
         config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8")) or {}
     except Exception:
         return True
+    if api_only_profile():
+        return False
     telegram = ((config.get("platforms") or {}).get("telegram") or {})
     return not (isinstance(telegram, dict) and telegram.get("enabled") is False)
+
+
+def runtime_host_receipt(binding):
+    """Read the receipt from the bound service owner's native publication home."""
+    agent_id = (binding.get("identity") or {}).get("agent_id")
+    if (binding.get("service") or {}).get("kind") != "windows-scheduled-task":
+        return (load_json(HERMES / "state/host-receipts" / f"latest-{agent_id}.json", {})
+                if isinstance(agent_id, str) and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", agent_id) else {})
+    # Windows publishes at the base home and deliberately has no POSIX identity.
+    # Do not search other profiles or accept a receipt outside this exact owner.
+    try:
+        base = Path(str(binding.get("hermes_home") or ""))
+        if (binding.get("schema_version") != 1 or binding.get("kind") != "botdoctor_runtime_binding"
+                or binding.get("status") != "active" or not base.is_absolute()
+                or not isinstance(binding.get("target_sha"), str) or not binding["target_sha"]
+                or not isinstance(binding.get("runtime_fingerprint_digest"), str)
+                or not binding["runtime_fingerprint_digest"]):
+            return {}
+        # Only Windows scheduled-task bindings reach this point; others returned above.
+        receipts = base / "state/host-receipts"
+        if (HERMES.parent.name == "profiles" and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", HERMES.name)
+                and base.resolve() == HERMES.parent.parent.resolve()):
+            candidates = [receipts / f"latest-{HERMES.name}.json"]
+        elif base.resolve() == HERMES.resolve():
+            # A single-home Windows runtime is its own base. Its receipt is named
+            # for the manifest host, which the binding does not carry, so accept
+            # only one verified receipt bound to this exact binding and home.
+            candidates = sorted(receipts.glob("latest-*.json"))
+        else:
+            return {}
+        matches = []
+        for path in candidates:
+            host = path.name[len("latest-"):-len(".json")]
+            receipt = load_json(path, {}) if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", host) else {}
+            if not isinstance(receipt, dict):
+                continue
+            contract = receipt.get("runtime_contract") or {}
+            if not isinstance(contract, dict):
+                continue
+            profile = Path(str(contract.get("profile_home") or ""))
+            owner = Path(str(contract.get("hermes_home") or ""))
+            if (receipt.get("verified") is True and receipt.get("manifest_host") == host
+                    and receipt.get("target_sha") == binding.get("target_sha")
+                    and receipt.get("runtime_fingerprint_digest") == binding.get("runtime_fingerprint_digest")
+                    and profile.is_absolute() and profile.resolve() == HERMES.resolve()
+                    and owner.is_absolute() and owner.resolve() == base.resolve()):
+                matches.append(receipt)
+        return matches[0] if len(matches) == 1 else {}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def _api_health_evidence(payload, pid):
+    """Validate the server's actual contract without inventing diagnostics."""
+    if not isinstance(payload, dict):
+        return False, None, None
+    if "state_transaction" in payload:
+        health = payload["state_transaction"]
+        ok = (isinstance(health, dict) and health.get("pid") == pid
+              and health.get("database_status", health.get("status")) == "pass"
+              and isinstance(health.get("checked_at"), (int, float))
+              and 0 <= time.time() - health["checked_at"] <= 30)
+        return ok, "writer_transaction", None
+    readiness = payload.get("readiness") or {}
+    readiness = readiness if isinstance(readiness, dict) else {}
+    checks = readiness.get("checks") or {}
+    checks = checks if isinstance(checks, dict) else {}
+    heartbeat = parse_dt(payload.get("last_heartbeat"))
+    ok = (payload.get("pid") == pid and payload.get("status") == "ok"
+          and payload.get("gateway_state") == "running" and readiness.get("status") == "ok"
+          and all(isinstance(checks.get(name), dict) and checks[name].get("status") == "ok"
+                  for name in ("state_db", "session_store", "gateway"))
+          and checks["state_db"].get("detail") != "not initialized"
+          and heartbeat is not None and 0 <= time.time() - heartbeat.timestamp() <= 30)
+    return ok, "native_readiness_read_only", checks
 
 
 def check_gateway_state():
@@ -219,11 +357,37 @@ def check_gateway_state():
                 else None
             )
             telegram_expected = telegram_transport_expected()
-            telegram_ok = (
-                telegram_state == "connected"
-                and poll_age is not None
-                and 0 <= poll_age <= TELEGRAM_POLL_MAX_AGE_S
+            binding = load_json(HERMES / "state/runtime-binding.json", {})
+            receipt = runtime_host_receipt(binding)
+            native_poll_health = (
+                (receipt.get("native_image_config") or {}).get("status") == "pass"
+                and receipt.get("target_sha") == binding.get("target_sha")
+                and receipt.get("runtime_fingerprint_digest") == binding.get("runtime_fingerprint_digest")
             )
+            if native_poll_health:
+                started = _live_process_start_time(pid)
+                writer_start = telegram.get("writer_start_time")
+                poll_healthy = (
+                    started is not None and telegram.get("writer_pid") == pid
+                    and writer_start == started
+                    and (telegram.get("ingress") or {}).get("stalled") is not True
+                )
+            else:
+                poll_healthy = poll_age is not None and 0 <= poll_age <= TELEGRAM_POLL_MAX_AGE_S
+            telegram_ok = telegram_state == "connected" and poll_healthy
+            api_only = api_only_profile()
+            api_ok = False
+            api_health_contract = None
+            api_readiness_checks = None
+            if api_only:
+                api = (d.get("platforms") or {}).get("api_server") or {}
+                started = _live_process_start_time(pid) if pid_alive else None
+                payload = _gateway_api_state_transaction(full_document=True)
+                health_ok, api_health_contract, api_readiness_checks = _api_health_evidence(payload, pid)
+                api_ok = (api.get("state") == "connected" and started is not None
+                          and api.get("writer_pid") == pid and api.get("writer_start_time") == started
+                          and health_ok
+                          and age is not None and 0 <= age <= 120)
             session_status = (d.get("session_store") or {}).get("status", "unknown")
             session_failed = session_status in {"unavailable", "retrying"}
             ok = (
@@ -231,6 +395,7 @@ def check_gateway_state():
                 and state == "running"
                 and pid_alive
                 and (telegram_ok or not telegram_expected)
+                and (api_ok or not api_only)
             )
             return {
                 "name": "gateway_state",
@@ -245,7 +410,10 @@ def check_gateway_state():
                 ),
                 "gateway_pid": pid,
                 "pid_alive": pid_alive,
-                "transport_healthy": telegram_ok if telegram_expected else None,
+                "transport_healthy": api_ok if api_only else (telegram_ok if telegram_expected else None),
+                "transport_health_source": "api_server" if api_only else ("native_adapter" if native_poll_health else "golden_poll_receipt"),
+                "api_health_contract": api_health_contract,
+                "api_readiness_checks": api_readiness_checks,
                 "session_store_healthy": False if session_failed else (True if session_status == "ok" else None),
                 "agent_turn_healthy": False if session_failed else None,
                 "session_store_status": session_status,
@@ -254,6 +422,9 @@ def check_gateway_state():
                 "last_successful_poll_at": telegram.get("last_successful_poll_at"),
                 "poll_age_seconds": poll_age,
             }
+    if api_only_profile():
+        return {"name": "gateway_state", "status": "fail", "severity": "P1",
+                "detail": "configured API-only profile has no gateway-owned platform state"}
     proc = run(["pgrep", "-f", str(HERMES)], timeout=5)
     ok = proc.returncode == 0 and bool(proc.stdout.strip())
     return {
@@ -603,11 +774,11 @@ def check_local_manager_health(binding):
             or observation.get("pid_alive") is not True or observation.get("telegram_required") is not False):
         failures.append("profile watchdog evidence is missing, stale, or unhealthy")
     timer = f"hermes-gateway-watchdog-client-{agent_id}.timer"
-    state = run(["systemctl", "--user", "show", service, "-p", "MainPID", "-p", "ActiveState"], timeout=5)
+    state = run_user_service("show", service, "-p", "MainPID", "-p", "ActiveState")
     if state.returncode or f"MainPID={pid}" not in state.stdout.splitlines() or "ActiveState=active" not in state.stdout.splitlines():
         failures.append("manager service is not active on the bound process")
     for action, expected in (("is-active", "active"), ("is-enabled", "enabled")):
-        result = run(["systemctl", "--user", action, timer], timeout=5)
+        result = run_user_service(action, timer)
         if result.returncode or result.stdout.strip() != expected:
             failures.append(f"profile watchdog timer failed {action}")
     return {"name": "local_manager_health", "status": "fail" if failures else "pass",
@@ -615,16 +786,21 @@ def check_local_manager_health(binding):
             f"same-PID API/database, {len(enabled)} local jobs, service and profile watchdog verified"}
 
 
-# Release-bound hashes of the nine files injected by immersion middleware.
-INJECTED_RULE_HASHES = {'campaign-and-viewpoint-work.md': '75e2a35f2a78ac7bf5c768dc813ee48836d1ef469a2b528f9d38cec967b5c1d7',
- 'content-policy.md': '6ae5876a446e65a519b886b29a300e152af6dd88b248e2c3a96bffcff56704bd',
- 'knowledge-routing.md': 'f7ced0d2417f8e7355473f0a7bff2e3f85beb6b9f5a8a6d69a99560cd9793023',
- 'machine-capability.md': 'd6a91c7b62d88baa8e418f5159c4b524c9c1b3c8bc6ff590848bacbc27a8d5a0',
- 'operator-duty.md': '25658e047b1257342134ca81e8ce75656ab223ab85b4e293f954aec15100cd8c',
- 'operator-privacy-judgment.md': 'cf54d0ebc191f694d554bc9b7d86d56a12afc8c3451da8d8e2539c08c56f0b16',
- 'response-formatting.md': '1b8f35361c4a981ebb827301a4dbe395485c614898da07b83164c245746125bd',
- 'truth-over-comfort.md': '90c68d38b19d74c9fef17d76edc6a286c53dbcb112d499aa8af2eb60babc4899',
- 'westminster-marque.md': 'fd64de827034ff50a47188f8702ed9f5d1987b6ad8932a38a4b763278202394a'}
+# Installed configuration and source-tree configuration share the same format.
+_rule_hash_path = Path(__file__).resolve().parents[1] / "config/injected-rule-hashes.json"
+if not _rule_hash_path.exists():
+    _rule_hash_path = Path(__file__).resolve().parents[1] / "kit/config/injected-rule-hashes.json"
+try:
+    INJECTED_RULE_HASHES = json.loads(_rule_hash_path.read_text(encoding="utf-8"))
+    if (not isinstance(INJECTED_RULE_HASHES, dict) or not INJECTED_RULE_HASHES
+            or any(not isinstance(name, str) or Path(name).name != name
+                   or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                   for name, digest in INJECTED_RULE_HASHES.items())):
+        raise ValueError("expected a nonempty rule-name to SHA-256 object")
+    _rule_hash_error = None
+except (OSError, ValueError) as exc:
+    INJECTED_RULE_HASHES = {}
+    _rule_hash_error = str(exc)
 INJECTED_FLOOR_MARKERS = ('HERMES_OPERATING_FLOOR_v1',
  'HERMES_SELF_REPAIR_FLOOR_v1',
  'HERMES_CREDENTIAL_INTAKE_FLOOR_v1',
@@ -640,6 +816,10 @@ INJECTED_FLOOR_MARKERS = ('HERMES_OPERATING_FLOOR_v1',
 
 
 def check_injected_shared_rules():
+    if _rule_hash_error:
+        return {"name": "injected_shared_rules", "status": "fail", "severity": "P1",
+                "detail": f"cannot load rule hashes: {_rule_hash_error}",
+                "mismatches": ["injected-rule-hashes.json:invalid"]}
     mismatches = []
     matched = 0
     floors = 0
@@ -665,6 +845,8 @@ def check_injected_shared_rules():
 
 def check_immersion_plugin():
     """Installed middleware has no effect unless Hermes can enable it."""
+    if api_only_profile():
+        return {"name": "immersion_plugin", "status": "skip", "detail": "configured API-only profile has no chat middleware surface"}
     if _local_manager_binding():
         return {"name": "immersion_plugin", "status": "skip", "detail": "local manager has no chat surface; manager health is checked separately"}
     try:
@@ -698,7 +880,6 @@ def check_immersion_quality():
         }
     text = p.read_text(encoding="utf-8", errors="replace")
     display = _top_level_block(text, "display")
-    compression = _top_level_block(text, "compression")
     session_reset = _top_level_block(text, "session_reset")
     platforms = _top_level_block(text, "platforms")
     telegram = _nested_block(platforms, "telegram")
@@ -723,42 +904,130 @@ def check_immersion_quality():
         "tool_progress_command": False,
     }
     manager = _local_manager_binding()
-    if manager:
+    if api_only_profile():
+        required_display = {}
+    elif manager:
         required_display.pop("progress_on_typing")
     drift = []
     for key, expected in required_display.items():
         actual = _scalar_from_block(display, key)
         if actual != expected:
             drift.append(f"display.{key}={actual!r}->{expected!r}")
-    required_compression = {
-        "threshold": 0.85,
-        "threshold_tokens": 240000,
-        "progress_notices": False,
-    }
-    # Honor only the approved Enoch pair from the installed generation's receipt.
     binding = load_json(HERMES / "state/runtime-binding.json", {})
-    receipt = load_json(HERMES / "state/host-receipts/latest-enoch.json", {})
-    if (isinstance(binding, dict) and isinstance(receipt, dict)
-            and receipt.get("verified") is True
-            and receipt.get("manifest_host") == "enoch"
+    # Installed behavior reads must use native defaults, expansion and managed
+    # overlays, not Golden's retired raw compression presets. Before a runtime
+    # is bound, only the explicit configuration is available for diagnostics.
+    try:
+        if isinstance(binding, dict) and (binding.get("runtime_root") or binding.get("runtime_python")):
+            runtime = Path(binding["runtime_root"]).resolve(strict=True)
+            python = Path(binding["runtime_python"]).expanduser()
+            profile_home = HERMES.resolve(strict=True)
+            binding_homes = {profile_home}
+            if profile_home.parent.name == "profiles":
+                # Windows bindings name the base home, including the copy
+                # installed in its selected profile. Keep runtime custody
+                # below this profile; do not accept another profile's root.
+                binding_homes.add(profile_home.parent.parent)
+            if (binding.get("kind") != "botdoctor_runtime_binding" or binding.get("status") != "active"
+                    or Path(binding["hermes_home"]).resolve(strict=True) not in binding_homes
+                    or not python.is_absolute() or not python.is_file() or not os.access(python, os.X_OK)):
+                raise ValueError("invalid runtime binding")
+            # Match the existing Refero selector's managed-root and physical
+            # interpreter-parent custody; retain the final venv Python symlink.
+            for candidate_root in (HERMES / "runtime-candidates", HERMES / "state/runtime-candidates"):
+                try:
+                    relative_root = runtime.relative_to(candidate_root.resolve(strict=True))
+                except (OSError, ValueError):
+                    continue
+                if relative_root.parts:
+                    break
+            else:
+                raise ValueError("runtime is outside a managed candidate root")
+            python = Path(os.path.abspath(python))
+            if python.relative_to(runtime).as_posix() not in {
+                    f"{venv}/{suffix}" for venv in ("venv", ".venv")
+                    for suffix in ("bin/python", "bin/python3", "Scripts/python.exe")}:
+                raise ValueError("unexpected runtime interpreter layout")
+            python.parent.resolve(strict=True).relative_to(runtime)
+            probe = run([
+                str(python), "-I", "-B", "-c",
+                "import json, os, sys; os.environ['HERMES_HOME'] = sys.argv[1]; "
+                "sys.path.insert(0, sys.argv[2]); "
+                "from hermes_cli.config import load_config_readonly; "
+                "config = load_config_readonly(); "
+                "print(json.dumps(None if getattr(config, 'read_error', None) else "
+                "{'compression': config.get('compression')}))",
+                str(HERMES), str(runtime),
+            ], timeout=10)
+            if probe.returncode:
+                raise ValueError("native effective configuration unavailable")
+            config = json.loads(probe.stdout)
+        else:
+            import yaml
+
+            config = yaml.safe_load(text)
+        compression = config.get("compression", {})
+        if not isinstance(compression, dict):
+            raise ValueError("compression must be a mapping")
+    except Exception as exc:
+        compression = {}
+        drift.append(f"compression effective configuration unavailable or invalid ({type(exc).__name__})")
+    if compression.get("enabled", True) is not True:
+        drift.append("compression.enabled must remain True")
+    if compression.get("progress_notices", False) is not False:
+        drift.append("compression.progress_notices must remain False")
+    # A receipt may own an explicit cap/idle override, but absence is never a
+    # match for that override. Native no-cap/idle-off needs no Golden preset.
+    required_compression = {}
+    identity = binding.get("identity") if isinstance(binding, dict) else None
+    agent_id = identity.get("agent_id") if isinstance(identity, dict) else None
+    receipt = {}
+    if isinstance(agent_id, str) and re.fullmatch(r"[a-z0-9][a-z0-9_-]*", agent_id):
+        receipt = load_json(HERMES / "state/host-receipts" / f"latest-{agent_id}.json", {})
+    if (isinstance(receipt, dict) and receipt.get("verified") is True
+            and receipt.get("manifest_host") == agent_id
             and binding.get("target_sha")
-            and receipt.get("target_sha") == binding.get("target_sha")):
+            and receipt.get("target_sha") == binding["target_sha"]):
         policy = receipt.get("effective_session_policy")
         approved = policy.get("compression") if isinstance(policy, dict) else None
-        if (isinstance(approved, dict)
-                and approved.get("threshold_tokens") == 100000
-                and approved.get("idle_compact_after_seconds") == 1800):
+        if isinstance(policy, dict) and "compression" not in policy:
+            # The installed policy owns no compression override, so the native
+            # no-cap/idle-off check below applies (fleet baseline, Nov 15 2026).
+            pass
+        elif (isinstance(approved, dict)
+                and type(approved.get("threshold_tokens")) is int
+                and approved["threshold_tokens"] > 0
+                and type(approved.get("idle_compact_after_seconds")) is int
+                and approved["idle_compact_after_seconds"] >= 0):
             required_compression.update(
-                threshold_tokens=100000, idle_compact_after_seconds=1800)
+                threshold_tokens=approved["threshold_tokens"],
+                idle_compact_after_seconds=approved["idle_compact_after_seconds"])
+        elif "effective_session_policy" in receipt:
+            drift.append("compression installed policy is malformed")
+    elif isinstance(receipt, dict) and "effective_session_policy" in receipt:
+        drift.append("compression installed policy lacks verified host/target custody")
+    if not required_compression:
+        try:
+            try:
+                raw_cap = compression.get("threshold_tokens")
+                cap = int(raw_cap) if raw_cap is not None else 0
+            except (TypeError, ValueError):
+                cap = 0  # Native _positive_int treats these values as no cap.
+            idle = max(0, int(compression.get("idle_compact_after_seconds", 0)))
+        except (OverflowError, TypeError, ValueError):
+            drift.append("compression effective cap/idle configuration is invalid")
+        else:
+            if cap > 0 or idle > 0:
+                drift.append("compression override lacks verified host/target policy")
     for key, expected in required_compression.items():
-        actual = _scalar_from_block(compression, key)
-        if actual != expected:
+        actual = compression.get(key)
+        if type(actual) is not int or actual != expected:
             drift.append(f"compression.{key}={actual!r}->{expected!r}")
     actual = _scalar_from_block(session_reset, "notify")
     if actual is not False:
         drift.append(f"session_reset.notify={actual!r}->False")
     actual = _scalar_from_block(telegram, "gateway_restart_notification", indent=4)
-    if not manager and actual is not False:
+    if not manager and telegram_transport_expected() and actual is not False:
         drift.append(f"platforms.telegram.gateway_restart_notification={actual!r}->False")
     if drift:
         return {
@@ -771,139 +1040,10 @@ def check_immersion_quality():
     return {"name": "immersion_quality", "status": "pass", "detail": "silent immersion policy enforced"}
 
 
-def _process_started_at(pid: int):
-    """Return a cross-platform UTC process start time when it can be proved."""
-    if os.name == "nt":
-        proc = run(
-            [
-                "powershell",
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                f"(Get-Process -Id {pid}).StartTime.ToUniversalTime().ToString('o')",
-            ],
-            timeout=8,
-        )
-        return parse_dt(proc.stdout.strip()) if proc.returncode == 0 else None
-    proc = run(["ps", "-o", "lstart=", "-p", str(pid)], timeout=5)
-    if proc.returncode != 0 or not proc.stdout.strip():
-        return None
-    try:
-        local = datetime.strptime(" ".join(proc.stdout.split()), "%a %b %d %H:%M:%S %Y")
-        return local.replace(tzinfo=datetime.now().astimezone().tzinfo).astimezone(timezone.utc)
-    except ValueError:
-        return None
 
 
-def _overlay_config_exemptions() -> set[str]:
-    manifest = load_json(HERMES / "runtime-manifest.json", {})
-    exemptions = manifest.get("overlay_config_exemptions")
-    if not isinstance(exemptions, list):
-        return set()
-    return {str(value) for value in exemptions}
 
 
-def check_telegram_organic_checkpoints():
-    """Prove the effective v3 contract from the active immutable runtime."""
-    if _local_manager_binding():
-        return {"name": "telegram_organic_checkpoints", "status": "skip", "detail": "local manager has no Telegram surface; manager health is checked separately"}
-    config_path = HERMES / "config.yaml"
-    binding_path = HERMES / "state/runtime-binding.json"
-    failures = []
-    if not config_path.exists():
-        failures.append("config missing")
-        text = ""
-    else:
-        text = config_path.read_text(encoding="utf-8", errors="replace")
-
-    agent = _top_level_block(text, "agent")
-    display = _top_level_block(text, "display")
-    display_platforms = _nested_block(display, "platforms")
-    telegram = _nested_block(display_platforms, "telegram", indent=4)
-    interval = _scalar_from_block(agent, "gateway_notify_interval")
-    global_enabled = _scalar_from_block(display, "long_running_notifications")
-    telegram_enabled = _scalar_from_block(telegram, "long_running_notifications", indent=6)
-    telegram_cleanup = _scalar_from_block(telegram, "cleanup_progress", indent=6)
-    telegram_typing_progress = _scalar_from_block(
-        telegram, "progress_on_typing", indent=6
-    )
-    exemptions = _overlay_config_exemptions()
-    if "agent.gateway_notify_interval" not in exemptions and interval != 300:
-        failures.append(f"interval={interval!r} expected=300")
-    if "display.long_running_notifications" not in exemptions and global_enabled is not False:
-        failures.append(f"global={global_enabled!r} expected=False")
-    if "display.platforms.telegram.long_running_notifications" not in exemptions and telegram_enabled is not True:
-        failures.append(f"telegram={telegram_enabled!r} expected=True")
-    if "display.platforms.telegram.cleanup_progress" not in exemptions and telegram_cleanup is not True:
-        failures.append(f"cleanup={telegram_cleanup!r} expected=True")
-    if (
-        "display.platforms.telegram.progress_on_typing" not in exemptions
-        and telegram_typing_progress is not True
-    ):
-        failures.append(
-            f"progress_on_typing={telegram_typing_progress!r} expected=True"
-        )
-
-    binding = load_json(binding_path, {})
-    runtime_raw = str(binding.get("runtime_root") or "").strip()
-    runtime_root = Path(runtime_raw).expanduser()
-    split_gateway = any((runtime_root / path).exists() for path in (
-        "gateway/run_turn.py", "gateway/run_turn_runner.py",
-    ))
-    marker_paths = (
-        runtime_root / ("gateway/run_turn.py" if split_gateway else "gateway/run.py"),
-        runtime_root / ("gateway/run_turn_runner.py" if split_gateway else "run_agent.py"),
-        runtime_root / "agent/codex_runtime.py",
-    )
-    marker = "HERMES_TELEGRAM_COMMENTARY_CAPTURE_v3"
-    marker_hash = ""
-    if (
-        binding.get("kind") != "botdoctor_runtime_binding"
-        or binding.get("status") != "active"
-        or not runtime_raw
-        or not runtime_root.is_dir()
-    ):
-        failures.append("active immutable runtime binding missing or invalid")
-    elif any(not path.is_file() for path in marker_paths):
-        failures.append("active runtime checkpoint source missing")
-    else:
-        sources = [path.read_bytes() for path in marker_paths]
-        marker_hash = hashlib.sha256(b"\0".join(sources)).hexdigest()
-        if any(marker.encode() not in source for source in sources):
-            failures.append("active runtime v3 commentary-capture marker missing")
-        if split_gateway:
-            if b"agent._telegram_checkpoint_commentary_capture" not in sources[1]:
-                failures.append("active runtime Telegram commentary callback binding missing")
-        elif b'"progress_on_typing"' not in sources[0]:
-            failures.append("active runtime progress_on_typing implementation missing")
-
-    live = gateway_runtime_binding()
-    live_root = Path(str(live.get("runtime_root") or "")).expanduser()
-    if runtime_raw and live_root != runtime_root:
-        failures.append(f"live runtime mismatch live={live_root} bound={runtime_root}")
-    activated_at = parse_dt(binding.get("generated_at"))
-    process_started = _process_started_at(live["pid"]) if live.get("pid") else None
-    if activated_at is None:
-        failures.append("binding activation timestamp missing")
-    if process_started is None:
-        failures.append("process generation unavailable")
-    elif activated_at is not None and process_started < activated_at:
-        failures.append("gateway process predates runtime activation")
-
-    detail = (
-        f"interval={interval!r} global={global_enabled!r} telegram={telegram_enabled!r} "
-        f"cleanup={telegram_cleanup!r} progress_on_typing={telegram_typing_progress!r} "
-        f"exemptions={','.join(sorted(exemptions)) or 'none'} "
-        f"runtime={runtime_root} marker_sha256={marker_hash or 'missing'} "
-        f"process_started={process_started.isoformat() if process_started else 'unknown'}"
-    )
-    return {
-        "name": "telegram_organic_checkpoints",
-        "status": "fail" if failures else "pass",
-        "severity": "P1",
-        "fix_class": "restart_or_redeploy",
-        "detail": "; ".join(failures) + ("; " if failures else "") + detail,
-    }
 
 
 def _agent_probe_producer_installed():
@@ -1140,6 +1280,51 @@ def email_auth_client_choice():
     return status
 
 
+def configured_readiness_core():
+    """Use native surface resolution; unresolved configuration stays conservative."""
+    default = {"api_key_validity", "firecrawl", "browser", "email", "mcp_servers"}
+    try:
+        import yaml
+        from hermes_cli.tools_config import _get_platform_tools
+        from toolsets import resolve_toolset
+
+        config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8-sig")) or {}
+        platforms = config.get("platforms") or {}
+        surfaces = {"cli"} | set(config.get("platform_toolsets") or {}) | set(platforms)
+        exposed = set()
+        for surface in surfaces:
+            if (platforms.get(surface) or {}).get("enabled") is not False:
+                exposed.update(_get_platform_tools(config, surface))
+        tools = {tool for name in exposed for tool in resolve_toolset(name)}
+        core = {"api_key_validity"}
+        if tools & {"web_search", "web_extract"}:
+            core.add("firecrawl")
+        if any(tool.startswith("browser_") for tool in tools):
+            core.add("browser")
+        servers = config.get("mcp_servers") or {}
+        enabled_servers = {
+            name: entry for name, entry in servers.items()
+            if isinstance(entry, dict) and entry.get("enabled", True) is not False
+            and (name in exposed or f"mcp-{name}" in exposed)
+        }
+        if enabled_servers:
+            core.add("mcp_servers")
+        if "email" in exposed or any(
+            "composio" in name.lower() and any(
+                word in (name + " " + str((entry.get("metadata") or {}).get("description", ""))).lower()
+                for word in ("gmail", "google")
+            ) for name, entry in enabled_servers.items()
+        ):
+            core.add("email")
+        # The readiness producer also supports these existing legacy email routes.
+        env = _read_env_keys()
+        if any(env.get(key) for key in ("COMPOSIO_API_KEY", "MATON_API_KEY")):
+            core.add("email")
+        return core
+    except Exception:
+        return default
+
+
 def check_tool_readiness():
     p = HERMES / "state/tool-readiness-probe-latest.json"
     if not p.exists():
@@ -1148,7 +1333,7 @@ def check_tool_readiness():
     ts = parse_dt(d.get("timestamp") or d.get("generated_at") or d.get("checked_at"))
     age = int((datetime.now(timezone.utc) - ts).total_seconds()) if ts else 10**9
     email_choice = email_auth_client_choice()
-    core = {"api_key_validity", "firecrawl", "browser", "email", "mcp_servers"}
+    core = configured_readiness_core()
     if email_choice in {"opted_out", "pending"}:
         core.discard("email")
     unhealthy = []
@@ -1202,6 +1387,17 @@ def check_image_quality_surface():
             "detail": f"missing config: {config_path}",
         }
     text = config_path.read_text(encoding="utf-8-sig", errors="replace")
+    try:
+        import yaml
+
+        config = yaml.safe_load(text) or {}
+        platforms = config.get("platforms") or {}
+        telegram = platforms.get("telegram")
+        configured = "telegram" in platforms or "telegram" in (config.get("platform_toolsets") or {})
+        if not configured or (isinstance(telegram, dict) and telegram.get("enabled") is False):
+            return {"name": "image_quality_surface", "status": "skip", "detail": "not required"}
+    except Exception:
+        return {"name": "image_quality_surface", "status": "fail", "detail": "unreadable config"}
     image_gen = _top_level_block(text, "image_gen")
     provider = str(_scalar_from_block(image_gen, "provider") or "").strip()
     model = str(_scalar_from_block(image_gen, "model") or "").strip()
@@ -1283,47 +1479,13 @@ def check_document_visual_delivery():
     }
 
 
-def check_cron_toolset_preflight():
-    """Fail before rollout when an enabled cron resolves an unknown toolset."""
-    preflight = HERMES / "bin/hermes-cron-toolset-preflight.py"
-    if not preflight.is_file():
-        return {
-            "name": "cron_toolset_preflight",
-            "status": "fail",
-            "severity": "P1",
-            "fix_class": "restart_or_redeploy",
-            "detail": f"cron toolset preflight missing: {preflight}",
-        }
-    probe = run([sys.executable, str(preflight), "--hermes-home", str(HERMES), "--json"], timeout=100)
-    try:
-        payload = json.loads(probe.stdout or "{}")
-    except json.JSONDecodeError:
-        payload = {}
-    passed = probe.returncode == 0 and payload.get("status") == "pass"
-    findings = payload.get("findings") if isinstance(payload.get("findings"), list) else []
-    detail = (
-        f"enabled_inference_jobs={payload.get('enabled_inference_jobs', 0)} "
-        f"jobs_with_unknown_toolsets={payload.get('jobs_with_unknown_toolsets', 0)}"
-    )
-    if payload.get("error"):
-        detail += f" error={str(payload['error'])[:240]}"
-    elif findings:
-        detail += " findings=" + ",".join(
-            f"{item.get('job_id')}:{'|'.join(item.get('unknown_toolsets') or [])}"
-            for item in findings[:8]
-        )
-    return {
-        "name": "cron_toolset_preflight",
-        "status": "pass" if passed else "fail",
-        "severity": "P1",
-        "fix_class": "runtime_contract",
-        "detail": detail,
-        "enabled_inference_jobs": payload.get("enabled_inference_jobs", 0),
-        "jobs_with_unknown_toolsets": payload.get("jobs_with_unknown_toolsets", 0),
-    }
 
 
 def check_canary_reconciler():
+    if api_only_profile():
+        result = check_gateway_state()
+        return {**result, "name": "canary_reconciler",
+                "detail": "configured API-only surface: " + result["detail"]}
     manager = _local_manager_binding()
     if manager:
         return check_local_manager_health(manager)
@@ -1496,8 +1658,11 @@ def _live_process_start_time(pid):
     expected_python = runtime_root / (
         "venv/Scripts/python.exe" if os.name == "nt" else "venv/bin/python"
     )
+    home_bound = bound_home == expected_home
+    if os.name == "nt" and (binding.get("service") or {}).get("kind") == "windows-scheduled-task":
+        home_bound = bool(runtime_host_receipt(binding)) and runtime_root.is_relative_to(expected_home)
     if (
-        bound_home != expected_home
+        not home_bound
         or not runtime_root.is_dir()
         or runtime_python != expected_python
         or not runtime_python.is_file()
@@ -1529,62 +1694,47 @@ def _live_process_start_time(pid):
         return None
 
 
-def _gateway_env_receipt_present_keys(config_bytes):
-    """Return names proven present by one exact live-gateway receipt check."""
+def _gateway_env_present_keys():
+    """Read names from the current gateway generation, without a stored receipt."""
     pid_path = HERMES / "gateway.pid"
-    receipt_path = HERMES / "state/gateway-capability-env-presence.json"
-    if (
-        not pid_path.is_file()
-        or pid_path.is_symlink()
-        or not receipt_path.is_file()
-        or receipt_path.is_symlink()
-    ):
+    if not pid_path.is_file() or pid_path.is_symlink():
         return frozenset()
-    pid_record = load_json(pid_path, {})
-    receipt = load_json(receipt_path, {})
-    if not isinstance(pid_record, dict) or not isinstance(receipt, dict):
-        return frozenset()
-    if pid_record.get("kind") != "hermes-gateway":
-        return frozenset()
-    if receipt.get("schema") != "botdoctor.gateway-capability-env-presence.v1":
+    record = load_json(pid_path, {})
+    if not isinstance(record, dict) or record.get("kind") != "hermes-gateway":
         return frozenset()
     try:
-        pid = int(pid_record.get("pid") or 0)
-        start_time = int(pid_record.get("start_time"))
-        receipt_pid = int(receipt.get("pid") or 0)
-        receipt_start_time = int(receipt.get("start_time"))
-        expected_home = HERMES.resolve(strict=True)
-        receipt_home = Path(str(receipt.get("hermes_home") or "")).resolve(strict=True)
-    except (OSError, TypeError, ValueError):
+        pid = int(record.get("pid") or 0)
+        start_time = int(record.get("start_time"))
+        if pid <= 0 or not pid_is_alive(pid) or _live_process_start_time(pid) != start_time:
+            return frozenset()
+        if sys.platform.startswith("linux"):
+            entries = (PROC_ROOT / str(pid) / "environ").read_bytes().split(b"\0")
+            keys = [entry.split(b"=", 1)[0].decode("ascii") for entry in entries
+                    if b"=" in entry and entry.split(b"=", 1)[1]]
+        else:
+            # _live_process_start_time validates this profile's exact bound interpreter.
+            binding = load_json(HERMES / "state/runtime-binding.json", {})
+            probe = run([
+                str(binding["runtime_python"]), "-c",
+                "import json, psutil, sys; print(json.dumps([k for k,v in psutil.Process(int(sys.argv[1])).environ().items() if v]))",
+                str(pid),
+            ], timeout=5)
+            if probe.returncode != 0:
+                return frozenset()
+            keys = json.loads(probe.stdout)
+        if (_live_process_start_time(pid) != start_time
+                or load_json(pid_path, {}) != record
+                or not isinstance(keys, list)
+                or not all(isinstance(key, str) for key in keys)):
+            return frozenset()
+        return frozenset(keys)
+    except (OSError, ValueError, TypeError, KeyError, UnicodeError):
         return frozenset()
-    if (
-        pid <= 0
-        or receipt_pid != pid
-        or receipt_start_time != start_time
-        or receipt_home != expected_home
-        or not pid_is_alive(pid)
-        or _live_process_start_time(pid) != start_time
-    ):
-        return frozenset()
-    if receipt.get("config_sha256") != hashlib.sha256(config_bytes).hexdigest():
-        return frozenset()
-    observed_keys = receipt.get("observed_keys")
-    present_keys = receipt.get("present_keys")
-    if not isinstance(observed_keys, list) or not isinstance(present_keys, list):
-        return frozenset()
-    if not all(isinstance(item, str) for item in observed_keys + present_keys):
-        return frozenset()
-    observed = frozenset(observed_keys)
-    present = frozenset(present_keys)
-    if len(observed) != len(observed_keys) or len(present) != len(present_keys):
-        return frozenset()
-    if not present.issubset(observed):
-        return frozenset()
-    return present
 
 
-def _gateway_state_transaction():
-    """Read authenticated, fresh evidence from the owning gateway; never open state.db."""
+
+def _gateway_api_state_transaction(*, full_document=False):
+    """Read authenticated native health, retaining its actual proof contract."""
     import urllib.request
     env = _read_env_keys()
     key = os.environ.get("API_SERVER_KEY") or env.get("API_SERVER_KEY")
@@ -1613,14 +1763,99 @@ def _gateway_state_transaction():
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     with opener.open(request, timeout=10) as response:
         payload = json.load(response)
-    health = payload.get("state_transaction")
+    if not isinstance(payload, dict):
+        raise RuntimeError("gateway API health document is not a mapping")
+    if full_document:
+        return payload
+    return payload.get("state_transaction")
+
+
+def _gateway_socket_state_transaction():
+    import socket
+    import stat
+
+    if os.name == "nt":
+        return None
+    path = HERMES / "gateway.sock"
+    connected = False
+    try:
+        if not path.exists():
+            pointer = HERMES / "gateway.sock.path"
+            metadata = pointer.lstat()
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid()
+                    or metadata.st_mode & 0o022 or metadata.st_size > 4096):
+                return None
+            path = Path(pointer.read_text(encoding="utf-8").strip())
+            home_hash = hashlib.sha256(os.path.normcase(str(HERMES.resolve())).encode("utf-8")).hexdigest()[:16]
+            if not path.is_absolute() or path.name != f"hermes-gw-{home_hash}.sock":
+                return None
+        metadata = path.lstat()
+        if (not stat.S_ISSOCK(metadata.st_mode) or metadata.st_uid != os.geteuid()
+                or metadata.st_mode & 0o077):
+            return None
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            deadline = time.monotonic() + 10
+            client.settimeout(10)
+            client.connect(str(path))
+            connected = True
+            client.sendall(b'{"verb":"state-transaction-health","protocol":1}\n')
+            payload = bytearray()
+            while b"\n" not in payload:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ValueError("gateway socket diagnostics timed out")
+                client.settimeout(remaining)
+                chunk = client.recv(65536)
+                if not chunk:
+                    raise ValueError("incomplete gateway socket diagnostics response")
+                payload.extend(chunk)
+                if len(payload) > 512 * 1024:
+                    raise ValueError("gateway socket diagnostics response too large")
+        response = json.loads(payload.partition(b"\n")[0])
+    except OSError as exc:
+        if connected:
+            raise ValueError("gateway socket diagnostics transport failed") from exc
+        return None
+    if (not isinstance(response, dict) or type(response.get("protocol")) is not int
+            or response["protocol"] != 1):
+        raise ValueError("invalid gateway socket diagnostics response")
+    if response.get("ok") is not True:
+        supported = response.get("supported_verbs")
+        if (response.get("error") == "unknown verb: 'state-transaction-health'"
+                and isinstance(supported, list) and "state-transaction-health" not in supported):
+            return None
+        raise ValueError("gateway socket diagnostics failed")
+    health = response.get("result")
+    if not isinstance(health, dict):
+        raise ValueError("invalid gateway socket diagnostics result")
+    return dict(health, _transport="gateway_socket")
+
+
+def _gateway_state_transaction():
+    """Read fresh evidence from the owning gateway; never open state.db."""
+    health = _gateway_socket_state_transaction()
+    if health is None:
+        health = _gateway_api_state_transaction()
+    if not isinstance(health, dict):
+        raise RuntimeError("gateway state transaction is unavailable, failed, or stale")
     live = load_json(HERMES / "gateway_state.json", {})
+    # The producer fills these two fields before optional activity statistics.
+    # A budget expiry after both fields cannot invalidate their completed reads;
+    # real store failures replace error_type with the latched failure class.
+    required_reads_complete = (
+        isinstance(health, dict)
+        and all(type(health.get(name)) is int and health[name] >= 0
+                for name in ("topic_bindings", "credential_tool_errors"))
+    )
+    optional_statistics_expired = (
+        required_reads_complete and health.get("error_type") == "DiagnosticBudgetExceeded"
+    )
     if (not isinstance(health, dict)
-            or health.get("database_status", health.get("status")) != "pass"
-            or ("database_status" in health and health.get("diagnostics_complete") is not True)
-            or health.get("diagnostics_complete") is False
-            or not all(type(health.get(name)) is int and health[name] >= 0
-                       for name in ("topic_bindings", "credential_tool_errors"))
+            or not required_reads_complete
+            or (not optional_statistics_expired and (
+                health.get("database_status", health.get("status")) != "pass"
+                or ("database_status" in health and health.get("diagnostics_complete") is not True)
+                or health.get("diagnostics_complete") is False))
             or health.get("pid") != live.get("pid")
             or not isinstance(health.get("checked_at"), (int, float))
             or not 0 <= time.time() - health["checked_at"] <= 30):
@@ -1631,23 +1866,369 @@ def _gateway_state_transaction():
 def check_local_brain():
     candidates = [HOME / ".gbrain", HOME / "Documents" / "Brain" / "Principal Brain", HERMES / ".gbrain"]
     present = [str(path) for path in candidates if path.exists()]
+    if not present:
+        manifest = load_json(HERMES / "state/native-agent-continuity/manifest.json", {})
+        paths = manifest.get("paths") or {}
+        brain_home = Path(str(paths.get("gbrain_home") or ""))
+        if (manifest.get("schema") == "native-agent-continuity-manifest/v1"
+                and manifest.get("storage_mode") == "existing_remote"
+                and Path(str(paths.get("home") or "")) == HOME
+                and Path(str(paths.get("hermes_home") or "")) == HERMES
+                and brain_home.is_absolute() and brain_home.is_relative_to(HOME)
+                and (brain_home / ".gbrain/config.json").is_file()):
+            return {"name": "local_brain", "status": "pass",
+                    "detail": "existing remote GBrain configuration present"}
     status = "pass" if present else "warn"
     detail = "present=" + ",".join(present[:3]) if present else "no local gbrain/principal brain path found"
     return {"name": "local_brain", "status": status, "detail": detail}
 
 
-def check_topic_session_bindings():
+def _principal_home():
+    """The user root that owns this runtime's brain, independent of the process account.
+
+    Order: native-agent-continuity manifest, the parent of a standard ``.hermes`` home, then the
+    nearest ancestor of HERMES that holds a ``.gbrain`` directory (Windows service runtimes).
+    """
+    manifest = load_json(HERMES / "state/native-agent-continuity/manifest.json", {})
+    configured = str((manifest.get("paths") or {}).get("home") or "")
+    if (manifest.get("schema") == "native-agent-continuity-manifest/v1"
+            and Path(str((manifest.get("paths") or {}).get("hermes_home") or "")) == HERMES
+            and Path(configured).is_absolute()):
+        return Path(configured)
+    if HERMES.name == ".hermes":
+        return HERMES.parent
+    for ancestor in HERMES.resolve().parents:
+        if (ancestor / ".gbrain").is_dir():
+            return ancestor
+    return None
+
+
+def check_gateway_brain_binding():
+    """Fail when this principal has a brain but the gateway has no usable GBrain MCP.
+
+    A `gbrain` shell command is not a binding: agent terminals may not see it.
+    """
+    # A proprietary principal Brain is not a native GBrain store. Require an
+    # explicit owner declaration and an actual read, never merely tools/list.
     try:
-        health = _gateway_state_transaction()
-        count = health["topic_bindings"]
-        require = os.environ.get("HERMES_REQUIRE_TOPIC_BINDINGS", "").lower() in {"1", "true", "yes"}
-        if not isinstance(count, int) or count < 0:
-            raise ValueError("invalid topic binding evidence")
-        return {"name": "topic_session_bindings", "status": "pass" if count or not require else "fail",
-                "detail": f"backend=gateway_api bindings={count} required={require}"}
-    except Exception as error:
-        return {"name": "topic_session_bindings", "status": "fail",
-                "detail": f"{type(error).__name__}: gateway transaction evidence unavailable"}
+        import yaml
+        declared_config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8-sig")) or {}
+    except FileNotFoundError:
+        declared_config = {}
+    except Exception as exc:
+        return {"name": "gateway_brain_binding", "status": "fail",
+                "detail": f"config.yaml unreadable: {type(exc).__name__}"}
+    if isinstance(declared_config, dict) and "principal_brain" in declared_config:
+        return _check_declared_principal_brain(declared_config)
+    home = _principal_home()
+    manifest = load_json(HERMES / "state/native-agent-continuity/manifest.json", {})
+    pinned = str((manifest.get("paths") or {}).get("gbrain_home") or "")
+    if pinned and Path(pinned).is_absolute():
+        stores = [Path(pinned)]
+    else:
+        # ``home / ".gbrain"`` covers a brain opened with GBRAIN_HOME=~/.gbrain, whose config
+        # lives at ~/.gbrain/.gbrain/config.json (one client runtime). Without it that brain looks foreign.
+        candidates = (home, home / ".gbrain" if home else None, HERMES, HERMES / "state/gbrain")
+        stores = [path for path in candidates if path and (path / ".gbrain").exists()]
+    if not stores:
+        return {"name": "gateway_brain_binding", "status": "pass", "detail": "no principal brain on this host"}
+    try:
+        import yaml
+
+        config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8-sig")) or {}
+    except Exception as e:
+        return {"name": "gateway_brain_binding", "status": "fail",
+                "detail": f"config.yaml unreadable: {type(e).__name__}"}
+    servers = config.get("mcp_servers") if isinstance(config, dict) else None
+    servers = servers if isinstance(servers, dict) else {}
+    agent = config.get("agent")
+    disabled = set((agent.get("disabled_toolsets") or []) if isinstance(agent, dict) else [])
+    root = home or HERMES
+    bound = sorted(
+        name for name, entry in servers.items()
+        if isinstance(entry, dict)
+        and entry.get("enabled", True) is not False and f"mcp-{name}" not in disabled
+        and _brain_binding_targets_principal(entry, root, HERMES, stores)
+        and _serves_brain(_probe_brain_mcp(entry, HERMES))
+    )
+    if bound:
+        return {"name": "gateway_brain_binding", "status": "pass",
+                "detail": "enabled GBrain MCP: " + ",".join(bound)}
+    present = sorted(name for name in servers if str(name).startswith("gbrain"))
+    detail = ("GBrain MCP present but disabled, remote, not this principal's store, or did not serve get_page/search: "
+              + ",".join(present) if present
+              else "principal brain exists but config.yaml has no GBrain MCP server")
+    return {"name": "gateway_brain_binding", "status": "fail", "detail": detail}
+
+
+def _check_declared_principal_brain(config):
+    declaration = config.get("principal_brain")
+    declaration = declaration if isinstance(declaration, dict) else {}
+    name = declaration.get("mcp_server")
+    probe = declaration.get("read_probe")
+    servers = config.get("mcp_servers")
+    entry = servers.get(name) if isinstance(servers, dict) and isinstance(name, str) else None
+    agent = config.get("agent")
+    disabled = (agent.get("disabled_toolsets") or []) if isinstance(agent, dict) else []
+    result = {"name": "gateway_brain_binding", "status": "fail"}
+    if (not isinstance(entry, dict) or entry.get("enabled", True) is False
+            or f"mcp-{name}" in disabled or "mcp" in disabled
+            or not isinstance(probe, dict) or not isinstance(probe.get("tool"), str)
+            or not isinstance(probe.get("arguments"), dict)):
+        return {**result, "detail": "principal_brain requires an enabled MCP server and a read_probe tool/arguments"}
+    # Run the configured transport in a finite child. Never emit route values,
+    # credentials, page contents or exception messages in health publication.
+    code = ("import runpy,sys; m=runpy.run_path(sys.argv[1]); "
+            "m['_declared_principal_brain_probe']()")
+    proc = subprocess.Popen(
+        [sys.executable, "-B", "-c", code, str(Path(__file__).resolve())],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        start_new_session=os.name != "nt",
+    )
+    try:
+        output, _ = proc.communicate(input=json.dumps(declaration).encode(), timeout=55)
+        if proc.returncode == 0 and output.strip() == b"principal-brain-read-ok":
+            return {**result, "status": "pass", "detail": f"declared principal Brain MCP live read succeeded: {name}"}
+        return {**result, "detail": f"declared principal Brain MCP read failed or was not read-only: {name}"}
+    except subprocess.TimeoutExpired:
+        return {**result, "detail": f"declared principal Brain MCP read timed out: {name}"}
+    finally:
+        if proc.poll() is None:
+            if os.name == "nt":
+                proc.kill()
+            else:
+                os.killpg(proc.pid, signal.SIGKILL)
+            proc.communicate()
+
+
+def _declared_principal_brain_probe():
+    """Private finite reader; config names the principal server and known page."""
+    import asyncio
+    from contextlib import AsyncExitStack
+    import yaml
+    from dotenv import load_dotenv
+    from mcp import ClientSession, StdioServerParameters
+    from mcp.client.stdio import stdio_client
+
+    async def read():
+        config = yaml.safe_load((HERMES / "config.yaml").read_text(encoding="utf-8-sig"))
+        declaration = json.load(sys.stdin)
+        entry = config["mcp_servers"][declaration["mcp_server"]]
+        probe = declaration["read_probe"]
+        load_dotenv(HERMES / ".env", override=False)
+        expand = lambda value: os.path.expandvars(str(value))
+        async with AsyncExitStack() as stack:
+            if entry.get("url"):
+                url = expand(entry["url"])
+                headers = {key: expand(value) for key, value in (entry.get("headers") or {}).items()}
+                if entry.get("transport") == "sse" or url.rstrip("/").endswith("/sse"):
+                    from mcp.client.sse import sse_client
+                    streams = await stack.enter_async_context(sse_client(url, headers=headers, timeout=40))
+                else:
+                    from mcp.client.streamable_http import streamable_http_client
+                    from mcp.shared._httpx_utils import create_mcp_http_client
+                    client = await stack.enter_async_context(create_mcp_http_client(headers=headers))
+                    streams = await stack.enter_async_context(streamable_http_client(url, http_client=client))
+            else:
+                env = dict(os.environ)
+                env.update({key: expand(value) for key, value in (entry.get("env") or {}).items()})
+                cwd = Path(os.path.expanduser(str(entry.get("cwd") or HERMES)))
+                cwd = cwd if cwd.is_absolute() else HERMES / cwd
+                parameters = StdioServerParameters(
+                    command=expand(entry["command"]), args=[expand(value) for value in entry.get("args", [])],
+                    env=env, cwd=str(cwd),
+                )
+                streams = await stack.enter_async_context(stdio_client(parameters))
+            session = await stack.enter_async_context(ClientSession(streams[0], streams[1]))
+            await session.initialize()
+            tools = await session.list_tools()
+            tool = next((tool for tool in tools.tools if tool.name == probe["tool"]), None)
+            # Legacy Wiki.js adapters predate MCP annotations. Only their exact
+            # page-read operation has a name-based compatibility allowance.
+            if tool is None or not (
+                tool.name == "wiki_get_page_by_path"
+                or (tool.model_dump(by_alias=True).get("annotations") or {}).get("readOnlyHint") is True
+            ):
+                return False
+            answer = await session.call_tool(tool.name, probe["arguments"])
+            result = answer.model_dump(by_alias=True)
+            text = any(
+                isinstance(block, dict) and block.get("type") == "text"
+                and isinstance(block.get("text"), str) and block["text"].strip()
+                for block in result.get("content") or []
+            )
+            return not result.get("isError", False) and bool(text or result.get("structuredContent"))
+
+    try:
+        success = asyncio.run(asyncio.wait_for(read(), timeout=45))
+    except Exception:
+        success = False
+    if success:
+        print("principal-brain-read-ok")
+    raise SystemExit(0 if success else 1)
+
+
+def _serves_brain(tools):
+    """Same as native-agent-continuity.serves_brain (deployed separately)."""
+    return bool(tools) and ({"get_page", "search"} <= set(tools) or tools == ["gbrain_status", "lock_held"])
+
+
+def _probe_brain_mcp(entry, base, timeout = 60):
+    """Launch a stdio MCP entry exactly as configured and return its tool names.
+
+    Waits for each reply before the next message and closes stdin last, as a gateway does. Returns None when the process
+    cannot start, times out, or answers without a tool list. Same as native-agent-continuity.probe_brain_mcp (deployed separately).
+    """
+    command = str(entry.get("command") or "")
+    args = [str(value) for value in (entry.get("args") or [])]
+    env = os.environ.copy()
+    if isinstance(entry.get("env"), dict):
+        env.update({str(key): str(value) for key, value in entry["env"].items()})
+    cwd = Path(os.path.expanduser(str(entry.get("cwd") or base)))
+    cwd = cwd if cwd.is_absolute() else base / cwd
+    initialize = {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2024-11-05", "capabilities": {},
+        "clientInfo": {"name": "botdoctor-brain-binding-probe", "version": "1"}}}
+    try:
+        proc = subprocess.Popen(
+            [command, *args], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", env=env, cwd=str(cwd) if cwd.is_dir() else None,
+        )
+    except OSError:
+        return None
+    replies = queue.Queue()
+    errors = []
+    threading.Thread(target=lambda: [replies.put(line) for line in proc.stdout], daemon=True).start()
+    threading.Thread(target=lambda: errors.extend(proc.stderr), daemon=True).start()
+    deadline = time.monotonic() + timeout
+
+    def send(message):
+        try:
+            proc.stdin.write(json.dumps(message) + "\n")
+            proc.stdin.flush()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    def reply(wanted):
+        while time.monotonic() < deadline:
+            try:
+                line = replies.get(timeout=max(0.05, min(1.0, deadline - time.monotonic())))
+            except queue.Empty:
+                if proc.poll() is not None and replies.empty():
+                    return None
+                continue
+            try:
+                message = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(message, dict) and message.get("id") == wanted:
+                return message
+        return None
+
+    tools = None
+    try:
+        if send(initialize) and reply(1) is not None:
+            send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+            if send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}):
+                answer = reply(2)
+                tools = ((answer or {}).get("result") or {}).get("tools")
+    finally:
+        try:
+            proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    if not isinstance(tools, list):
+        return None
+    names = [str(row.get("name")) for row in tools if isinstance(row, dict)]
+    # A single-writer brain already open in the live gateway's own server answers in
+    # status-only mode with reason lock_held. That proves this entry launches the real
+    # server for an existing, healthy store; any other status-mode reason is a failure.
+    if names == ["gbrain_status"] and '"reason":"lock_held"' in "".join(errors).replace(" ", ""):
+        return ["gbrain_status", "lock_held"]
+    return names
+
+
+def _brain_binding_targets_principal(entry, home, base, expected):
+    """True when an MCP entry can run and opens one of the ``expected`` GBrain stores.
+
+    A store is identified by the engine and database named in ``<GBRAIN_HOME>/.gbrain/config.json``
+    (GBRAIN_HOME, else HOME, from the entry's env), so two homes that share one database match and
+    an alternate store under the same home does not. Remote URL entries carry no verifiable store
+    identity and never satisfy the binding. Every path the entry passes must stay inside ``home``.
+    Relative values resolve against the entry's cwd (or ``base``). Same rule as native-agent-continuity.binding_targets_principal (deployed separately).
+    """
+    if entry.get("url"):
+        return False
+    cwd = Path(os.path.expanduser(str(entry.get("cwd") or base)))
+    cwd = cwd if cwd.is_absolute() else base / cwd
+
+    def resolve(value):
+        text = os.path.expanduser(str(value))
+        if os.path.isabs(text):
+            return Path(text).resolve()
+        if "/" in text or "\\" in text or text.startswith("."):
+            return (cwd / text).resolve()
+        return None
+
+    command = str(entry.get("command") or "")
+    if not command:
+        return False
+    command_path = resolve(command)
+    if command_path is None:
+        if shutil.which(command) is None:
+            return False
+    elif not (command_path.is_file() and os.access(command_path, os.X_OK)):
+        return False
+    root = Path(home).resolve()
+    env = entry.get("env")
+    env = env if isinstance(env, dict) else {}
+    for value in [*(entry.get("args") or []), *env.values()]:
+        path = resolve(value)
+        if path is not None and not path.is_relative_to(root):
+            return False
+    store_home = resolve(env.get("GBRAIN_HOME") or env.get("HOME") or "")
+    # API-only named profiles may own a packaged Brain adapter rather than
+    # the Unix account's local GBrain database. Its executable source must be
+    # profile-local; the caller still requires actual search/get_page tools.
+    if api_only_profile() and store_home is None:
+        package = (base / "mcp-servers").resolve()
+        arguments = [resolve(value) for value in entry.get("args") or []]
+        return (package.is_relative_to(base.resolve())
+                and all(path is None or path.is_relative_to(base.resolve()) for path in arguments)
+                and any(path is not None and path.is_relative_to(package)
+                        and path.suffix == ".py" and path.is_file() for path in arguments))
+    if store_home is None or not store_home.is_relative_to(root):
+        return False
+    wanted = [Path(path).resolve() for path in expected]
+    if store_home in wanted:
+        return True
+    identity = _brain_store_identity(store_home)
+    return identity is not None and identity in {_brain_store_identity(path) for path in wanted}
+
+
+def _brain_store_identity(gbrain_home):
+    """(engine, database) from a GBrain home's config, or None when it has no readable config."""
+    config_dir = Path(gbrain_home) / ".gbrain"
+    try:
+        config = json.loads((config_dir / "config.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(config, dict):
+        return None
+    if config.get("database_url"):
+        return (str(config.get("engine") or ""), "url", str(config["database_url"]))
+    if config.get("database_path"):
+        db = Path(os.path.expanduser(str(config["database_path"])))
+        return (str(config.get("engine") or ""), "path", str((db if db.is_absolute() else config_dir / db).resolve()))
+    return None
+
+
 
 
 def check_advertised_tool_env():
@@ -1673,13 +2254,25 @@ def check_advertised_tool_env():
         and not _keychain_has_env_key(k)
     ]
     gateway_present_keys = (
-        _gateway_env_receipt_present_keys(text.encode("utf-8"))
+        _gateway_env_present_keys()
         if unresolved
         else frozenset()
     )
     missing = [key for key in unresolved if key not in gateway_present_keys]
     required_missing = [key for key in missing if key not in OPTIONAL_CAPABILITY_ENV_KEYS]
     optional_missing = [key for key in missing if key in OPTIONAL_CAPABILITY_ENV_KEYS]
+    if optional_missing:
+        try:
+            import yaml
+            servers = (yaml.safe_load(text) or {}).get("mcp_servers") or {}
+            for key in optional_missing[:]:
+                consumers = [server for server in servers.values() if isinstance(server, dict)
+                             and "${" + key + "}" in str(server.get("env") or {})]
+                if key in KEYLESS_MCP_ENV_ARGS and consumers and all(
+                    server.get("args") == KEYLESS_MCP_ENV_ARGS[key] for server in consumers):
+                    optional_missing.remove(key)
+        except (ImportError, ValueError, AttributeError):
+            pass
     status = "fail" if required_missing else ("warn" if optional_missing else "pass")
     return {
         "name": "advertised_tool_env",
@@ -1691,32 +2284,16 @@ def check_advertised_tool_env():
     }
 
 
-def check_credential_friction_recent():
-    try:
-        health = _gateway_state_transaction()
-        count = health["credential_tool_errors"]
-        if type(count) is not int or count < 0:
-            raise ValueError("invalid credential friction evidence")
-        return {"name": "credential_friction_recent", "status": "fail" if count else "pass",
-                "detail": f"backend=gateway_api explicit_tool_errors={count} window_hours=24"}
-    except Exception as error:
-        return {"name": "credential_friction_recent", "status": "fail",
-                "detail": f"{type(error).__name__}: gateway transaction evidence unavailable"}
 
 
 CHECK_METADATA = {
-    "topic_session_bindings": {
-        "title": "Topic/session binding contract drift",
-        "severity": "P2",
-        "fix_class": "topic_binding_contract",
-        "recommended_action": "Verify topic mode schema and per-topic session binding writer.",
-    },
-    "credential_friction_recent": {
-        "title": "Recent credential friction surfaced to user",
-        "severity": "P2",
-        "fix_class": "auth_connection_classification",
+    "gateway_brain_binding": {
+        "title": "Agent cannot reach its own brain",
+        "severity": "P1",
+        "fix_class": "gateway_brain_binding",
         "recommended_action": (
-            "Classify whether the missing credential is expected, a Composio connection gap, or stale tool advertising."
+            "Run native-agent-continuity reconcile --force, or add/enable mcp_servers.gbrain for this "
+            "principal's brain; the gateway hot-reconciles MCP config without a restart."
         ),
     },
     "advertised_tool_env": {
@@ -1788,6 +2365,15 @@ def enrich_check(check):
 
 def check_disk():
     try:
+        helper = Path(__file__).with_name("hermes-host-steward.py")
+        if not helper.is_file():
+            owner = HERMES.parent.parent if HERMES.parent.name == "profiles" else HERMES
+            helper = owner / "bin/hermes-host-steward.py"
+        policy = runpy.run_path(str(helper))["storage_thresholds"](HERMES)
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
+        return {"name": "disk", "status": "fail",
+                "detail": f"storage policy unavailable: {type(exc).__name__}: {str(exc)[:100]}"}
+    try:
         usage = shutil.disk_usage(HERMES)
         if usage.total <= 0:
             raise ValueError("disk total is zero")
@@ -1801,11 +2387,11 @@ def check_disk():
         }
     if (
         pct >= 95
-        or free_bytes < DISK_FAIL_FREE_BYTES
-        or (pct >= DISK_FAIL_PERCENT and free_bytes < DISK_WARN_FREE_BYTES)
+        or free_bytes < policy["HERMES_DISK_FAIL_FREE_BYTES"]
+        or (pct >= policy["HERMES_DISK_FAIL_PERCENT"] and free_bytes < policy["HERMES_DISK_WARN_FREE_BYTES"])
     ):
         status = "fail"
-    elif pct >= DISK_WARN_PERCENT or free_bytes < DISK_WARN_FREE_BYTES:
+    elif (pct >= policy["HERMES_DISK_WARN_PERCENT"] and free_bytes < 2 * policy["HERMES_DISK_WARN_FREE_BYTES"]) or free_bytes < policy["HERMES_DISK_WARN_FREE_BYTES"]:
         status = "warn"
     else:
         status = "pass"
@@ -1817,10 +2403,10 @@ def check_disk():
         "used_bytes": int(usage.used),
         "free_bytes": free_bytes,
         "used_pct": pct,
-        "warn_percent": DISK_WARN_PERCENT,
-        "fail_percent": DISK_FAIL_PERCENT,
-        "warn_free_bytes": DISK_WARN_FREE_BYTES,
-        "fail_free_bytes": DISK_FAIL_FREE_BYTES,
+        "warn_percent": policy["HERMES_DISK_WARN_PERCENT"],
+        "fail_percent": policy["HERMES_DISK_FAIL_PERCENT"],
+        "warn_free_bytes": policy["HERMES_DISK_WARN_FREE_BYTES"],
+        "fail_free_bytes": policy["HERMES_DISK_FAIL_FREE_BYTES"],
     }
 
 
@@ -1828,6 +2414,8 @@ def _gateway_resource_metrics(pid):
     metrics: dict = {
         "open_descriptors": None,
         "state_db_handles": None,
+        "max_state_db_handles": None,
+        "state_db_count": None,
         "deleted_state_db_handles": None,
         "deleted_state_db_targets": [],
         "descriptor_inspection_error": None,
@@ -1839,6 +2427,7 @@ def _gateway_resource_metrics(pid):
             descriptors = list(proc_fd.iterdir())
             metrics["open_descriptors"] = len(descriptors)
             state_handles = 0
+            state_counts = {}
             deleted_targets = []
             for fd in descriptors:
                 try:
@@ -1851,9 +2440,13 @@ def _gateway_resource_metrics(pid):
                     continue
                 if re.search(r"/state\.db(?:-(?:wal|shm))?(?: \(deleted\))?$", target):
                     state_handles += 1
+                    database = re.sub(r"-(?:wal|shm)$", "", target.removesuffix(" (deleted)"))
+                    state_counts[database] = state_counts.get(database, 0) + 1
                     if target.endswith(" (deleted)"):
                         deleted_targets.append(target)
             metrics["state_db_handles"] = state_handles
+            metrics["max_state_db_handles"] = max(state_counts.values(), default=0)
+            metrics["state_db_count"] = len(state_counts)
             metrics["deleted_state_db_handles"] = len(deleted_targets)
             metrics["deleted_state_db_targets"] = sorted(deleted_targets)
         except OSError as exc:
@@ -1867,9 +2460,14 @@ def _gateway_resource_metrics(pid):
                 if len(parts) > 3 and re.fullmatch(r"\d+[A-Za-z]*", parts[3]):
                     lines.append(parts)
             metrics["open_descriptors"] = len(lines)
-            metrics["state_db_handles"] = sum(
-                bool(re.search(r"/state\.db(?:-(?:wal|shm))?$", parts[-1])) for parts in lines
-            )
+            state_counts = {}
+            for parts in lines:
+                if re.search(r"/state\.db(?:-(?:wal|shm))?$", parts[-1]):
+                    database = re.sub(r"-(?:wal|shm)$", "", parts[-1])
+                    state_counts[database] = state_counts.get(database, 0) + 1
+            metrics["state_db_handles"] = sum(state_counts.values())
+            metrics["max_state_db_handles"] = max(state_counts.values(), default=0)
+            metrics["state_db_count"] = len(state_counts)
     elif os.name == "nt":
         p = run(
             [
@@ -1918,6 +2516,9 @@ def check_gateway_resource_pressure():
     )
     fd = metrics.get("open_descriptors")
     state_handles = metrics.get("state_db_handles")
+    per_database_handles = metrics.get("max_state_db_handles")
+    if per_database_handles is None:
+        per_database_handles = state_handles
     deleted_state_handles = metrics.get("deleted_state_db_handles")
     rss = metrics.get("rss_bytes")
     same_process = prior_check.get("gateway_pid") == pid
@@ -1931,15 +2532,21 @@ def check_gateway_resource_pressure():
         if (same_process and isinstance(state_handles, int) and isinstance(prior_check.get("state_db_handles"), int))
         else None
     )
+    fd_pressure = fd
+    database_count = metrics.get("state_db_count")
+    if (isinstance(fd, int) and isinstance(database_count, int) and database_count > 1
+            and isinstance(state_handles, int) and isinstance(per_database_handles, int)
+            and per_database_handles < GATEWAY_STATE_DB_HANDLE_WARN):
+        fd_pressure = fd - state_handles + per_database_handles
     fail = (
         (isinstance(fd, int) and fd >= GATEWAY_FD_FAIL)
-        or (isinstance(state_handles, int) and state_handles >= GATEWAY_STATE_DB_HANDLE_FAIL)
+        or (isinstance(per_database_handles, int) and per_database_handles >= GATEWAY_STATE_DB_HANDLE_FAIL)
         or (isinstance(deleted_state_handles, int) and deleted_state_handles > 0)
         or (isinstance(rss, int) and rss >= GATEWAY_RSS_FAIL_BYTES)
     )
     warn = (
-        (isinstance(fd, int) and fd >= GATEWAY_FD_WARN)
-        or (isinstance(state_handles, int) and state_handles >= GATEWAY_STATE_DB_HANDLE_WARN)
+        (isinstance(fd_pressure, int) and fd_pressure >= GATEWAY_FD_WARN)
+        or (isinstance(per_database_handles, int) and per_database_handles >= GATEWAY_STATE_DB_HANDLE_WARN)
         or (isinstance(rss, int) and rss >= GATEWAY_RSS_WARN_BYTES)
         or (isinstance(fd_growth, int) and fd_growth >= 32)
         or (isinstance(state_growth, int) and state_growth >= 8)
@@ -1951,11 +2558,13 @@ def check_gateway_resource_pressure():
         "status": "fail" if fail else ("warn" if warn else "pass"),
         "severity": "P1" if deleted_state_handles else "P2",
         "detail": (
-            f"pid={pid} open_descriptors={fd} state_db_handles={state_handles} "
+            f"pid={pid} open_descriptors={fd} descriptor_pressure={fd_pressure} state_db_handles={state_handles} "
+            f"max_state_db_handles={per_database_handles} state_db_count={metrics.get('state_db_count')} "
             f"deleted_state_db_handles={deleted_state_handles} "
             f"rss_bytes={rss} fd_growth={fd_growth} state_db_growth={state_growth}"
         ),
         "gateway_pid": pid,
+        "descriptor_pressure": fd_pressure,
         **metrics,
         "fd_growth": fd_growth,
         "state_db_growth": state_growth,
@@ -2359,11 +2968,16 @@ def check_host_capacity():
         isinstance(swap_out_bytes_per_minute, (int, float))
         and swap_out_bytes_per_minute >= HOST_SWAP_ACTIVE_WARN_BYTES_PER_MINUTE
     )
-    swap_allocated_warn = (
+    swap_allocation_high = (
         swap_used_pct is not None and swap_used_pct >= HOST_SWAP_ALLOCATED_WARN_PERCENT
     )
+    # macOS retains elastic swap after pressure subsides; allocation alone is not current pressure.
+    swap_allocated_warn = swap_allocation_high and (
+        sys.platform != "darwin" or virtual_free_pct is None
+        or virtual_free_pct < HOST_VIRTUAL_FREE_WARN_PERCENT
+    )
     prior_swap_used_pct = prior_check.get("swap_used_pct")
-    if swap_allocated_warn:
+    if swap_allocation_high:
         prior_allocation_observations = prior_check.get("swap_allocation_observations")
         swap_allocation_observations = (
             min(
@@ -2401,7 +3015,6 @@ def check_host_capacity():
             and process_count > HOST_PROCESS_WARN
         )
         or powershell_count > HOST_POWERSHELL_WARN
-        or int(metrics.get("ssh_session_count") or 0) > HOST_SSH_SESSION_WARN
         or (isinstance(process_growth, int) and process_growth >= 100)
         or (isinstance(powershell_growth, int) and powershell_growth >= 10)
         or swap_active_warn
@@ -2450,7 +3063,7 @@ def check_host_capacity():
 
 
 def check_host_steward():
-    """Run the ownership reconciler and expose only bounded lease counts."""
+    """Observe ownership without starting maintenance inside a health probe."""
     steward_home = HERMES
     steward = steward_home / "bin/hermes-host-steward.py"
     # Named profiles share the host owner's lease registry and steward.
@@ -2469,8 +3082,7 @@ def check_host_steward():
             str(steward),
             "--hermes-home",
             str(steward_home),
-            "reconcile",
-            "--apply",
+            "snapshot",
             "--retention-home",
             str(HERMES),
         ],
@@ -2482,7 +3094,7 @@ def check_host_steward():
         return {
             "name": "host_steward",
             "status": "fail",
-            "detail": f"invalid reconcile receipt rc={result.returncode}",
+            "detail": f"invalid host resource receipt rc={result.returncode}; error={str(getattr(result, 'stderr', '') or '').strip()[:160]}",
         }
     counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
     results = payload.get("results") if isinstance(payload.get("results"), list) else []
@@ -2621,6 +3233,8 @@ def main():
         help="Skip the recursive reconciler check when invoked by the reconciler itself.",
     )
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--scope", choices=("gateway", "host", "on-demand"), default="gateway",
+                    help="Select the actual runtime lifecycle; host and on-demand checks do not qualify a Golden gateway.")
     args = ap.parse_args()
     checks = []
     check_functions = [
@@ -2630,14 +3244,12 @@ def main():
         check_runtime_release_identity,
         check_active_client_capabilities,
         check_local_brain,
-        check_topic_session_bindings,
+        check_gateway_brain_binding,
         check_advertised_tool_env,
-        check_credential_friction_recent,
         check_telegram_transcript_hook,
         check_immersion_plugin,
         check_injected_shared_rules,
         check_immersion_quality,
-        check_telegram_organic_checkpoints,
         check_agent_probe,
         check_session_store_errors,
         check_logs,
@@ -2645,7 +3257,6 @@ def main():
         check_tool_readiness,
         check_image_quality_surface,
         check_document_visual_delivery,
-        check_cron_toolset_preflight,
         check_canary_reconciler,
         check_disk_retention,
         check_disk,
@@ -2653,7 +3264,11 @@ def main():
         check_host_capacity,
         check_host_steward,
     ]
-    if args.skip_canary_reconciler:
+    if args.scope == "host":
+        check_functions = [check_disk_retention, check_disk, check_host_capacity]
+    elif args.scope == "on-demand":
+        check_functions = [check_config, check_on_demand_runtime, check_workspace_write, check_disk, check_host_capacity]
+    if args.skip_canary_reconciler and check_canary_reconciler in check_functions:
         check_functions.remove(check_canary_reconciler)
     for fn in check_functions:
         try:
@@ -2676,8 +3291,9 @@ def main():
         "hermes_home": str(HERMES),
         "host": (os.uname().nodename if hasattr(os, "uname") else os.environ.get("COMPUTERNAME", "unknown")),
         "checked_at": iso(),
-        "gateway_runtime": gateway_runtime_binding(),
-        "runtime_release": runtime_release_identity(),
+        "scope": args.scope,
+        "gateway_runtime": gateway_runtime_binding() if args.scope == "gateway" else {},
+        "runtime_release": runtime_release_identity() if args.scope == "gateway" else {},
         "machine_profile": build_machine_profile(checks),
         "status": "fail" if failures else "pass",
         "checks": checks,

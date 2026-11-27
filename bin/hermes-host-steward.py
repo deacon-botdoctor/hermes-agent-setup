@@ -9,7 +9,12 @@ The external interface is deliberately small:
 * snapshot reports bounded ownership, capacity and storage health without private content.
 
 Unknown and interactive resources are inventory only.  They are never mutated.
-Storage observes the existing retention receipt; it does not add deletion authority.
+Storage uses the existing retention owner; unknown files remain inventory only.
+
+Linux browser opt-in: AGENT_BROWSER_APPARMOR_PROFILE=brave-browser-stable
+uses an owned transient service for the root-owned headless Brave executable.
+The vendor profile is entered before no_new_privs; sandbox-disable flags are refused.
+Other commands and unconfigured launchers retain their existing launch path.
 """
 from __future__ import annotations
 
@@ -23,9 +28,12 @@ import math
 import os
 import re
 import select
+import shlex
 import shutil
 import signal
+import socket
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -33,14 +41,24 @@ import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 SCHEMA = "hermes-host-steward/v1"
+RETENTION_COMPLETED = 0
+RETENTION_CAPACITY_BLOCKED = 2
+RETENTION_LEASE_DEFERRED = 75
+RETENTION_EXPECTED_EXIT_CODES = {
+    RETENTION_COMPLETED, RETENTION_CAPACITY_BLOCKED, RETENTION_LEASE_DEFERRED,
+}
 MIN_TTL_SECONDS = 60
 MAX_TTL_SECONDS = 30 * 86400
 DEFAULT_TTL_SECONDS = 4 * 3600
 STALE_OBSERVATIONS_REQUIRED = 2
+# Windows retries a refused loopback connect for about 2 s before failing.
+BROWSER_GONE_CONNECT_SECONDS = 6
+# How long a Windows run waits for another Host Steward run to release a lock.
+WINDOWS_LOCK_WAIT_SECONDS = 300
 MIN_STALE_OBSERVATION_INTERVAL_SECONDS = 300
 MAX_RECONCILE_LEASES = 3
 MAX_RECONCILE_INTENTS = 3
@@ -157,6 +175,7 @@ def _registry_lock(home: Path, filename: str = "registry.lock"):
         | getattr(os, "O_NOFOLLOW", 0),
         0o600,
     )
+    locked = False
     try:
         if hasattr(os, "fchmod"):
             os.fchmod(descriptor, 0o600)
@@ -165,24 +184,41 @@ def _registry_lock(home: Path, filename: str = "registry.lock"):
 
             if os.fstat(descriptor).st_size == 0:
                 os.write(descriptor, b"0")
-            os.lseek(descriptor, 0, os.SEEK_SET)
-            msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)
+            # msvcrt.LK_LOCK gives up after about 10 s, while POSIX flock waits.
+            # Wait like POSIX, but bounded, so a concurrent scheduled run does
+            # not fail this one.
+            deadline = time.monotonic() + WINDOWS_LOCK_WAIT_SECONDS
+            while True:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                try:
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(
+                            f"Host Steward lock busy for {WINDOWS_LOCK_WAIT_SECONDS}s: {lock_path.name}"
+                        )
+                    time.sleep(0.25)
         else:
             import fcntl
 
             fcntl.flock(descriptor, fcntl.LOCK_EX)
+        locked = True
         yield
     finally:
         try:
-            if os.name == "nt":
-                import msvcrt
+            # Unlock only a lock this call holds. Unlocking an unheld region on
+            # Windows raises PermissionError and hides the real failure.
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
 
-                os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
+                    os.lseek(descriptor, 0, os.SEEK_SET)
+                    msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
 
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    fcntl.flock(descriptor, fcntl.LOCK_UN)
         finally:
             os.close(descriptor)
 
@@ -765,6 +801,50 @@ def _browser_target_present(endpoint: str, target_id: str) -> bool | None:
     )
 
 
+def _browser_endpoint_gone(endpoint: str) -> bool:
+    """True only when no DevTools browser can still own targets at ``endpoint``.
+
+    A refused loopback connection means nothing listens on the port. Windows
+    retries a refused loopback SYN for about two seconds, longer than the
+    general two-second request timeout, so this probe connects on its own with a
+    longer deadline. A listener that answers ``/json/version`` without a
+    DevTools ``Browser`` field is an unrelated process that reused the port after
+    the browser exited. Timeouts and other errors stay unknown, so a busy or
+    restarting browser is never treated as gone.
+    """
+    try:
+        port = urllib.parse.urlparse(_normalize_endpoint(endpoint)).port
+    except ValueError:
+        return False
+    if port is None:
+        return False
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.settimeout(BROWSER_GONE_CONNECT_SECONDS)
+    try:
+        probe.connect(("127.0.0.1", port))
+    except ConnectionRefusedError:
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+    try:
+        raw = _loopback_request(endpoint, "/json/version")
+    except LoopbackConnectError as exc:
+        return isinstance(exc.__cause__, ConnectionRefusedError)
+    except TimeoutError:
+        return False
+    except OSError as exc:
+        return str(exc).startswith("loopback endpoint returned HTTP ")
+    except Exception:
+        return False
+    try:
+        value = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError:
+        return True
+    return not (isinstance(value, dict) and isinstance(value.get("Browser"), str) and value["Browser"])
+
+
 def _lease_path(home: Path, lease_id: str) -> Path:
     return _lease_dir(home) / f"{lease_id}.json"
 
@@ -1032,6 +1112,154 @@ def register_process(
     )
 
 
+def _browser_apparmor_profile(command: list[str]) -> str:
+    profile = os.environ.get("AGENT_BROWSER_APPARMOR_PROFILE", "")
+    browser = Path("/opt/brave.com/brave/brave")
+    if not profile or not sys.platform.startswith("linux") or Path(command[0]).resolve() != browser:
+        return ""
+    if profile != "brave-browser-stable":
+        raise ValueError("unsupported browser AppArmor profile")
+    forbidden = {"--no-sandbox", "--disable-setuid-sandbox", "--disable-namespace-sandbox",
+                 "--disable-seccomp-filter-sandbox", "--disable-gpu-sandbox", "--no-zygote",
+                 "--no-zygote-sandbox", "--single-process", "--in-process-gpu"}
+    if "--headless=new" not in command or any(arg.split("=", 1)[0] in forbidden for arg in command):
+        raise ValueError("owned browser service requires headless Chromium with its sandbox enabled")
+    for executable in (browser, Path("/usr/bin/env"), Path("/usr/bin/aa-exec"), Path("/usr/bin/setpriv")):
+        for path in (executable, *executable.parents):
+            info = path.stat()
+            if info.st_uid != 0 or info.st_mode & 0o022:
+                raise ValueError("browser service executable path is not root-owned and protected")
+    return profile
+
+
+def _browser_service_state(unit: str) -> dict[str, str]:
+    result = subprocess.run(
+        ["systemctl", "--user", "show", unit, "--property=Description,MainPID,ActiveState"],
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("browser service state is unavailable; ownership evidence retained")
+    state = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if not state.get("MainPID", "").isdigit() or "ActiveState" not in state:
+        raise RuntimeError("browser service state is incomplete; ownership evidence retained")
+    return state
+
+
+def _launch_browser_service(home: Path, *, task_id: str, command: list[str],
+                            ttl: int, protected: bool, profile: str) -> dict[str, Any]:
+    # The service establishes the vendor profile before setting no_new_privs. Its
+    # private socket gates execution until the existing process lease is durable.
+    lease = _base_lease(task_id, "process", ttl, protected)
+    unit = "hermes-browser-" + lease["lease_id"] + ".service"
+    description = "Hermes owned browser " + lease["lease_id"]
+    registered = ""
+    identity = None
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="hermes-browser-gate-") as directory:
+        endpoint = str(Path(directory) / "gate.sock")
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+            listener.bind(endpoint)
+            os.chmod(endpoint, 0o600)
+            listener.listen(1)
+            listener.settimeout(15)
+            with _registry_lock(home), _defer_termination():
+                intent = _write_intent(home, lease, {
+                    "command_sha256": hashlib.sha256("\0".join(command).encode()).hexdigest(),
+                    "systemd_unit": unit, "service_description": description,
+                })
+                try:
+                    subprocess.run([
+                        "systemd-run", "--user", "--unit=" + unit, "--collect", "--service-type=exec",
+                        "--property=Description=" + description, "--property=Restart=no",
+                        "--property=KillMode=control-group", "--property=SendSIGKILL=no",
+                        "--property=TimeoutStopSec=infinity", "--working-directory=" + os.getcwd(),
+                        "--", "/usr/bin/env", "-i", "/usr/bin/aa-exec", "-p", profile, "--",
+                        "/usr/bin/setpriv", "--no-new-privs", sys.executable,
+                        str(Path(__file__).resolve()), "__exec-gate-socket", endpoint, str(os.getpid()),
+                    ], capture_output=True, text=True, check=True, timeout=15)
+                    connection, _ = listener.accept()
+                    with connection:
+                        connection.settimeout(10)
+                        peer_pid, peer_uid, _ = struct.unpack("3i", connection.getsockopt(
+                            socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+                        state = _browser_service_state(unit)
+                        if (peer_uid != os.getuid() or state.get("Description") != description
+                                or state.get("MainPID") != str(peer_pid)):
+                            raise ValueError("browser service peer identity could not be verified")
+                        identity = _wait_process_identity(peer_pid)
+                        if identity is None or any(identity.get(key) != peer_pid for key in ("pgid", "sid")):
+                            raise ValueError("browser service is not an isolated process session")
+                        _write_intent(home, lease, identity)
+                        lease = _register_launched_process(
+                            home, task_id=task_id, pid=peer_pid, ttl=ttl, protected=protected,
+                            provenance=_LAUNCH_PROVENANCE, captured_identity=identity, registry_locked=True,
+                        )
+                        registered = str(lease["lease_id"])
+                        # Forward the caller's scrubbed environment, never the user manager's environment.
+                        message = json.dumps({"command": command, "environment": dict(os.environ)}).encode()
+                        if len(message) > 1024 * 1024:
+                            raise ValueError("browser service launch envelope exceeds its limit")
+                        connection.sendall(message)
+                        connection.shutdown(socket.SHUT_WR)
+                        if connection.recv(1) != b"1":
+                            raise ValueError("owned browser command failed to start")
+                    intent.unlink(missing_ok=True)
+                except BaseException:
+                    state = _browser_service_state(unit)
+                    if state.get("Description") == description:
+                        subprocess.run(["systemctl", "--user", "stop", unit],
+                                       capture_output=True, text=True, timeout=15)
+                        state = _browser_service_state(unit)
+                    if state["MainPID"] != "0":
+                        raise RuntimeError("browser service cleanup is pending; ownership evidence retained")
+                    intent.unlink(missing_ok=True)
+                    if registered:
+                        _lease_path(home, registered).unlink(missing_ok=True)
+                    raise
+    return {**lease, "pid": identity["pid"], "launch_mode": "systemd-apparmor"}
+
+
+def _exec_gate_socket(argv: list[str]) -> int:
+    if len(argv) != 2:
+        return 125
+    endpoint = Path(argv[0])
+    try:
+        expected_pid = int(argv[1])
+        if expected_pid < 2:
+            return 125
+        parent = endpoint.parent.stat()
+        if (not endpoint.is_absolute() or parent.st_uid != os.getuid()
+                or stat.S_IMODE(parent.st_mode) != 0o700 or endpoint.parent.is_symlink()):
+            return 125
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(15)
+            connection.connect(str(endpoint))
+            peer_pid, peer_uid, _ = struct.unpack("3i", connection.getsockopt(
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")))
+            if peer_pid != expected_pid or peer_uid != os.getuid():
+                return 125
+            chunks = []
+            total = 0
+            while True:
+                chunk = connection.recv(65536)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 1024 * 1024:
+                    return 125
+                chunks.append(chunk)
+            payload = json.loads(b"".join(chunks))
+            environment = payload.get("environment") if isinstance(payload, dict) else None
+            if not isinstance(environment, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in environment.items()
+            ):
+                return 125
+            connection.settimeout(None)
+            return _exec_gate_command(payload.get("command"), connection.detach(), environment)
+    except (OSError, ValueError, TypeError):
+        return 125
+
+
 def launch_process(
     home: Path,
     *,
@@ -1049,6 +1277,10 @@ def launch_process(
         raise ValueError("launch-process requires a command after --")
     _validate_foreground_command(command)
     ttl = _ttl(ttl)
+    profile = _browser_apparmor_profile(command)
+    if profile:
+        return _launch_browser_service(home, task_id=task_id, command=command,
+                                       ttl=ttl, protected=protected, profile=profile)
     process: subprocess.Popen[Any] | None = None
     read_fd = -1
     write_fd = -1
@@ -1159,6 +1391,10 @@ def _exec_gate(argv: list[str]) -> int:
         command = json.loads(b"".join(chunks).decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
         return 125
+    return _exec_gate_command(command, status_descriptor)
+
+
+def _exec_gate_command(command, status_descriptor: int, environment=None) -> int:
     if not isinstance(command, list) or not command or not all(
         isinstance(item, str) and item for item in command
     ):
@@ -1166,6 +1402,7 @@ def _exec_gate(argv: list[str]) -> int:
     try:
         child = subprocess.Popen(
             command,
+            env=environment,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1240,18 +1477,27 @@ def create_browser_tab(
     endpoint: str,
     ttl: int,
     protected: bool,
+    native_browser: bool = False,
+    generation: str = "",
+    native_session: str = "",
+    create_target: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     endpoint = _normalize_endpoint(endpoint)
     ttl = _ttl(ttl)
     target_id = ""
     lease = _base_lease(task_id, "browser_tab", ttl, protected)
     with _registry_lock(home):
-        intent_path = _write_intent(home, lease, {"endpoint": endpoint})
+        resource = {"endpoint": endpoint}
+        if native_browser:
+            resource.update(native_browser=True, generation=generation, native_session=native_session, children={})
+        intent_path = _write_intent(home, lease, resource)
         request_attempted = False
         with _defer_termination():
             try:
                 request_attempted = True
-                created = json.loads(
+                # The native supervisor creates background tabs over its existing
+                # CDP transport. The durable intent above still precedes that write.
+                created = create_target() if create_target is not None else json.loads(
                     _loopback_request(
                         endpoint, "/json/new?about%3Ablank", method="PUT"
                     ).decode("utf-8", "replace")
@@ -1261,7 +1507,7 @@ def create_browser_tab(
                 target_id = str(created.get("id") or "")
                 if not TARGET_ID_RE.fullmatch(target_id):
                     raise ValueError("browser target creation returned an invalid target id")
-                resource = {"endpoint": endpoint, "target_id": target_id}
+                resource["target_id"] = target_id
                 _write_intent(home, lease, resource)
                 lease["resource"] = resource
                 _atomic_json(_lease_path(home, lease["lease_id"]), lease)
@@ -1673,6 +1919,22 @@ def renew(home: Path, *, task_id: str, ttl: int) -> dict[str, Any]:
         return _renew(home, task_id=task_id, ttl=ttl)
 
 
+def set_browser_process_hold(home: Path, *, lease_id: str, held: bool) -> None:
+    """Protect an exact native browser process owner without losing its lease."""
+    if LEASE_ID_RE.fullmatch(lease_id) is None:
+        raise ValueError("invalid lease id")
+    with _registry_lock(home):
+        path = _lease_path(home, lease_id)
+        row = _read_json(path)
+        if not row or row.get("kind") != "process" or not str(row.get("task_id", "")).startswith(("browser:", "browser-lane:")):
+            raise ValueError("Native browser process lease is required")
+        row["resource"]["native_browser"] = True
+        row["protected"] = bool(held)
+        row["expires_epoch"] = epoch_now() + 300
+        row["stale_observations"] = 0
+        _atomic_json(path, row)
+
+
 def renew_lease(home: Path, *, lease_id: str, ttl: int) -> dict[str, Any]:
     if LEASE_ID_RE.fullmatch(lease_id) is None:
         raise ValueError("invalid lease id")
@@ -1737,6 +1999,31 @@ def _release_browser_tab(lease: dict[str, Any], apply: bool) -> dict[str, Any]:
     if lease.get("protected"):
         return {"outcome": "preserved"}
     resource = lease.get("resource") or {}
+    children = resource.get("children", {})
+    if children:
+        # Native supervisor persists only observed opener descendants. Validate
+        # the complete tree before disposing any resource. No URL/age adoption.
+        root = resource.get("target_id")
+        proved = {root}
+        pending = dict(children) if isinstance(children, dict) else {}
+        if not isinstance(children, dict) or any(
+            not isinstance(target, str) or not TARGET_ID_RE.fullmatch(target)
+            or not isinstance(parent, str) or target == root
+            for target, parent in pending.items()
+        ):
+            return {"outcome": "blocked", "reason": "invalid_popup_tree"}
+        while pending:
+            admitted = [target for target, parent in pending.items() if parent in proved]
+            if not admitted or any(not isinstance(target, str) or not TARGET_ID_RE.fullmatch(target) for target in admitted):
+                return {"outcome": "blocked", "reason": "invalid_popup_tree"}
+            proved.update(admitted)
+            for target in admitted:
+                pending.pop(target)
+        for target in reversed(list(children)):
+            child = {**lease, "resource": {"endpoint": resource.get("endpoint"), "target_id": target}}
+            result = _release_browser_tab(child, apply)
+            if result["outcome"] not in {"released", "already_gone", "would_release"}:
+                return result
     try:
         endpoint = _normalize_endpoint(str(resource.get("endpoint") or ""))
     except ValueError:
@@ -1746,6 +2033,9 @@ def _release_browser_tab(lease: dict[str, Any], apply: bool) -> dict[str, Any]:
     if present is False:
         return {"outcome": "already_gone"}
     if present is None:
+        if _browser_endpoint_gone(endpoint):
+            # The owning browser exited, so its targets no longer exist.
+            return {"outcome": "already_gone", "reason": "browser_endpoint_gone"}
         return {"outcome": "failed", "reason": "endpoint_unavailable"}
     if not apply:
         return {"outcome": "would_release"}
@@ -1921,6 +2211,39 @@ def _process_census() -> dict[str, int]:
     }
 
 
+def _native_registry_ownership(
+    row: dict[str, Any], current: dict[str, Any] | None,
+    leases: list[dict[str, Any]],
+) -> bool:
+    """Recognize native Linux checkpoints only through real steward custody.
+
+    Native ProcessRegistry no longer persists the optional Golden scope fields.
+    Do not relabel its rows: require the native kernel start ticks and an exact
+    task/identity-bound lease created by register-process's parent/cgroup gate.
+    """
+    started = row.get("host_start_time")
+    task_id = row.get("task_id")
+    return bool(
+        sys.platform.startswith("linux")
+        and "host_steward_scope" not in row
+        and row.get("pid_scope") == "host"
+        and _plain_int(started, minimum=1)
+        and isinstance(task_id, str) and TASK_ID_RE.fullmatch(task_id)
+        and isinstance(row.get("session_id"), str)
+        and re.fullmatch(r"proc_[a-z0-9]+", row["session_id"])
+        and current is not None
+        and current.get("uid") == os.getuid()
+        and str(current.get("birth_id", "")).startswith("linux:")
+        and str(current["birth_id"]).rsplit(":", 1)[-1] == str(started)
+        and any(
+            lease.get("kind") == "process"
+            and lease.get("task_id") == task_id
+            and _fingerprint_matches(lease.get("resource") or {}, current)
+            for lease in leases
+        )
+    )
+
+
 def _process_registry_coverage(
     home: Path, leases: list[tuple[Path, dict[str, Any]]]
 ) -> dict[str, int | str]:
@@ -1949,9 +2272,6 @@ def _process_registry_coverage(
         ownership_scope = row.get("host_steward_scope", "legacy")
         if ownership_scope == "user":
             continue
-        if ownership_scope != "managed":
-            invalid += 1
-            continue
         pid = row.get("pid")
         task_id = (
             row.get("task_id")
@@ -1967,6 +2287,11 @@ def _process_registry_coverage(
             invalid += 1
             continue
         current = process_identity(pid)
+        if ownership_scope != "managed" and not _native_registry_ownership(
+            row, current, process_leases
+        ):
+            invalid += 1
+            continue
         if current is None:
             continue
         known += 1
@@ -2006,6 +2331,7 @@ def _process_registry_manages_lease(
     if not isinstance(rows, list) or len(rows) > 128:
         return None
     expected = lease.get("resource") or {}
+    process_leases = [item for _path, item in load_leases(home)[0]]
     for row in rows:
         if not isinstance(row, dict):
             return None
@@ -2014,8 +2340,6 @@ def _process_registry_manages_lease(
         scope = row.get("host_steward_scope")
         if scope == "user":
             continue
-        if scope != "managed":
-            return None
         task_id = (
             row.get("task_id")
             or row.get("session_key")
@@ -2028,9 +2352,13 @@ def _process_registry_manages_lease(
             or not _plain_int(row.get("pid"), minimum=2)
         ):
             return None
+        current = process_identity(int(row["pid"]))
+        if scope != "managed" and not _native_registry_ownership(
+            row, current, process_leases
+        ):
+            return None
         if task_id != lease.get("task_id"):
             continue
-        current = process_identity(int(row["pid"]))
         if current is not None and _fingerprint_matches(expected, current):
             return True
     return False
@@ -2078,6 +2406,71 @@ def _storage_headroom(home: Path, used_pct: int | None) -> dict[str, Any] | None
     return headroom
 
 
+def storage_thresholds(home: Path) -> dict[str, int]:
+    defaults = {"HERMES_DISK_WARN_PERCENT": 85, "HERMES_DISK_FAIL_PERCENT": 92,
+                "HERMES_DISK_WARN_FREE_BYTES": 15 * 1024**3,
+                "HERMES_DISK_FAIL_FREE_BYTES": 5 * 1024**3}
+    values = {key: os.environ.get(key, default) for key, default in defaults.items()}
+    unit_roots = (Path(os.environ.get("XDG_CONFIG_HOME", str(Path.home() / ".config"))) / "systemd/user",
+                  Path("/etc/systemd/user"), Path("/usr/local/lib/systemd/user"), Path("/usr/lib/systemd/user"))
+    native_units = sys.platform == "linux" and any(
+        next(root.glob("hermes-host-steward*.service"), None) is not None for root in unit_roots)
+    if native_units:
+        if not shutil.which("systemctl"):
+            raise ValueError("native storage policy discovery unavailable")
+        runtime_dir = f"/run/user/{os.geteuid()}"
+        native_env = {**os.environ, "XDG_RUNTIME_DIR": runtime_dir,
+                      "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime_dir}/bus"}
+        listing = subprocess.run(
+            ["systemctl", "--user", "list-unit-files", "hermes-host-steward*.service", "--no-legend", "--no-pager"],
+            capture_output=True, text=True, timeout=10, check=False, env=native_env)
+        if listing.returncode:
+            raise ValueError("native storage policy discovery failed")
+        units = [line.split()[0] for line in listing.stdout.splitlines() if line.strip()]
+        environment_text = ""
+        if units:
+            result = subprocess.run(
+                ["systemctl", "--user", "show", *units,
+                 "--property=Environment", "--property=EnvironmentFiles", "--property=InvocationID", "--property=Id"],
+                capture_output=True, text=True, timeout=10, check=False, env=native_env)
+            if result.returncode:
+                raise ValueError("native storage policy discovery failed")
+            environment_text = result.stdout
+        # Only the steward process owns its effective environment; profile selfcheck children rediscover policy.
+        invocation = os.environ.get("INVOCATION_ID")
+        if (invocation and f"InvocationID={invocation}" in environment_text.splitlines()
+                and Path(sys.argv[0]).resolve() == Path(__file__).resolve()
+                and home.resolve() == Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes"))).resolve()):
+            environment_text = ""
+        homes = [home.resolve()]
+        if home.parent.name == "profiles" and home.stat().st_dev == home.parent.parent.stat().st_dev:
+            homes.append(home.parent.parent.resolve())
+        policies = {owner: [] for owner in homes}
+        for block in environment_text.strip().split("\n\n"):
+            fields = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            environment = dict(item.split("=", 1) for item in shlex.split(fields.get("Environment", "")) if "=" in item)
+            # EnvironmentFiles can override even inline HERMES_HOME, so ownership is unresolved.
+            if fields.get("EnvironmentFiles", "").strip():
+                raise ValueError("native storage EnvironmentFile policy requires effective environment")
+            configured_home = environment.get("HERMES_HOME")
+            if configured_home:
+                owner = Path(configured_home).expanduser().resolve()
+                if owner in policies:
+                    policies[owner].append({key: int(environment.get(key, default)) for key, default in defaults.items()})
+        for owner in homes:
+            matches = policies[owner]
+            if matches:
+                if any(policy != matches[0] for policy in matches[1:]):
+                    raise ValueError("conflicting native storage policies")
+                values = matches[0]
+                break
+    thresholds = {key: int(value) for key, value in values.items()}
+    if not (0 < thresholds["HERMES_DISK_WARN_PERCENT"] <= thresholds["HERMES_DISK_FAIL_PERCENT"] <= 100
+            and 0 <= thresholds["HERMES_DISK_FAIL_FREE_BYTES"] <= thresholds["HERMES_DISK_WARN_FREE_BYTES"]):
+        raise ValueError("invalid storage thresholds")
+    return thresholds
+
+
 def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict[str, Any]:
     """Observe volume pressure and the existing retention owner, without scanning files."""
     storage: dict[str, Any] = {
@@ -2088,10 +2481,11 @@ def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict
     }
     try:
         usage = shutil.disk_usage(home)
-        warn_pct = int(os.environ.get("HERMES_DISK_WARN_PERCENT", "85"))
-        fail_pct = int(os.environ.get("HERMES_DISK_FAIL_PERCENT", "92"))
-        warn_free = int(os.environ.get("HERMES_DISK_WARN_FREE_BYTES", str(15 * 1024**3)))
-        fail_free = int(os.environ.get("HERMES_DISK_FAIL_FREE_BYTES", str(5 * 1024**3)))
+        policy = storage_thresholds(home)
+        warn_pct = policy["HERMES_DISK_WARN_PERCENT"]
+        fail_pct = policy["HERMES_DISK_FAIL_PERCENT"]
+        warn_free = policy["HERMES_DISK_WARN_FREE_BYTES"]
+        fail_free = policy["HERMES_DISK_FAIL_FREE_BYTES"]
         if not (0 < warn_pct <= fail_pct <= 100 and 0 <= fail_free <= warn_free
                 and usage.total > 0 and 0 <= usage.free <= usage.total
                 and 0 <= usage.used <= usage.total):
@@ -2101,11 +2495,11 @@ def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict
         pressure = "pass"
         if pct >= 95 or usage.free < fail_free or (pct >= fail_pct and usage.free < warn_free):
             pressure = "fail"
-        elif pct >= warn_pct or usage.free < warn_free:
+        elif (pct >= warn_pct and usage.free < 2 * warn_free) or usage.free < warn_free:
             pressure = "warn"
         storage.update(total_bytes=usage.total, used_bytes=usage.used,
-                       free_bytes=usage.free, used_pct=pct, pressure_status=pressure)
-    except (OSError, ValueError):
+                       free_bytes=usage.free, used_pct=pct, pressure_status=pressure, thresholds=policy)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         pass
 
     headroom = _storage_headroom(home, storage["used_pct"])
@@ -2161,6 +2555,10 @@ def _storage_snapshot(home: Path, *, retention_home: Path | None = None) -> dict
                 if not isinstance(roots, list) or any(not isinstance(root, str) for root in roots):
                     raise ValueError("invalid retention protection")
                 protected.update(roots)
+            if isinstance(receipt.get("headroom"), dict):
+                storage["free_space_target"] = {key: value for key, value in receipt["headroom"].items() if key != "samples"}
+                storage["consumer_discovery"] = receipt.get("discovery")
+                storage["retained_decisions"] = receipt.get("retained_decisions", [])
             retention.update(
                 status="stale" if age > 172800 else ("error" if errors else receipt["status"]),
                 checked_at=checked, age_seconds=max(0, age), mode=receipt["mode"],
@@ -2352,7 +2750,8 @@ def finish(home: Path, *, task_id: str, apply: bool) -> dict[str, Any]:
         return _finish(home, task_id=task_id, apply=apply)
 
 
-def release_lease(home: Path, *, lease_id: str, apply: bool) -> dict[str, Any]:
+def release_lease(home: Path, *, lease_id: str, apply: bool,
+                  dispose_browser_targets: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
     """Release exactly one birth-bound resource lease."""
     if LEASE_ID_RE.fullmatch(lease_id) is None:
         raise ValueError("invalid lease id")
@@ -2367,8 +2766,19 @@ def release_lease(home: Path, *, lease_id: str, apply: bool) -> dict[str, Any]:
                 result = {"outcome": "already_gone"}
             else:
                 path, lease = match
-                result = _release(lease, apply)
-                if apply and result["outcome"] in {"released", "already_gone", "preserved"}:
+                if dispose_browser_targets is not None:
+                    if lease.get("kind") != "browser_tab" or not lease.get("resource", {}).get("native_browser"):
+                        raise ValueError("Native browser tab lease is required")
+                    if apply and not lease.get("protected"):
+                        # Keep the lease until the native transport confirms disposal.
+                        dispose_browser_targets(lease["resource"])
+                        result = {"outcome": "released"}
+                    else:
+                        result = {"outcome": "preserved" if lease.get("protected") else "would_release"}
+                else:
+                    result = _release(lease, apply)
+                if apply and (result["outcome"] in {"released", "already_gone"}
+                              or result["outcome"] == "preserved" and not lease.get("resource", {}).get("native_browser")):
                     path.unlink(missing_ok=True)
         payload = _snapshot_payload(home)
         payload.update(
@@ -2444,9 +2854,97 @@ def _finish(home: Path, *, task_id: str, apply: bool) -> dict[str, Any]:
     return _write_receipt(home, payload)
 
 
+def _refresh_host_health(home: Path) -> list[dict[str, Any]]:
+    config = home / "config/host-steward-health.json"
+    if not config.exists():
+        return []
+    if config.is_symlink() or config.stat().st_size > 16384:
+        raise ValueError("unsafe host health configuration")
+    policy = json.loads(config.read_text())
+    if not isinstance(policy, dict):
+        raise ValueError("invalid host health configuration")
+    profiles = policy.get("on_demand_profiles")
+    if (policy.get("schema_version") != 1 or not isinstance(profiles, list) or len(profiles) > 8
+            or any(not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+", name)
+                   for name in profiles) or len(set(profiles)) != len(profiles)):
+        raise ValueError("invalid host health configuration")
+    jobs = []
+    if not (home / "config/host-steward-retention.json").is_file():
+        jobs.append((home, "retention", ["hermes-disk-retention.py", "--hermes-home", str(home),
+                                         "--preserve-all", "--json"]))
+    jobs.append((home, "host", ["hermes-local-selfcheck.py", "--scope", "host", "--json"]))
+    for name in profiles:
+        profile = home / "profiles" / name
+        if ((home / "profiles").is_symlink() or profile.is_symlink() or not profile.is_dir()
+                or profile.resolve().parent != (home / "profiles").resolve()):
+            raise ValueError("on-demand health profile is missing or unsafe")
+        jobs.append((profile, "on-demand", ["hermes-local-selfcheck.py", "--scope", "on-demand",
+                                    "--agent-id", name, "--agent-name", name, "--json"]))
+    results = []
+    for target, label, command in jobs:
+        command[0] = str(Path(__file__).with_name(command[0]))
+        retention = label == "retention"
+        scope = label
+        receipt_path = target / "state" / ("disk-retention-last.json" if retention else "local-selfcheck-latest.json")
+        result = {"target": str(target), "scope": scope, "owner": "host_steward",
+                  "receipt": str(receipt_path), "verified": False}
+        started = epoch_now()
+        try:
+            proc = subprocess.run([sys.executable, *command], capture_output=True, text=True,
+                                  env={**os.environ, "HERMES_HOME": str(target)}, timeout=180, check=False)
+            result["exit_code"] = proc.returncode
+            if receipt_path.is_symlink() or receipt_path.stat().st_size > MAX_STORAGE_RECEIPT_BYTES:
+                raise ValueError("unsafe health receipt")
+            receipt = json.loads(receipt_path.read_text())
+            stamp = datetime.fromisoformat(str(receipt.get("checked_at")).replace("Z", "+00:00"))
+            if (stamp.tzinfo is None or not started - 1 <= stamp.timestamp() <= epoch_now() + 5
+                    or Path(str(receipt.get("hermes_home"))).resolve() != target.resolve()
+                    or receipt.get("status") not in {"pass", "warn", "fail", "block", "error"}
+                    or (retention and receipt.get("kind") != "hermes_disk_retention")
+                    or (not retention and receipt.get("scope") != scope)):
+                raise ValueError("health receipt does not match this refresh")
+            result.update(verified=True, checked_at=receipt["checked_at"], status=receipt["status"])
+        except (OSError, ValueError, TypeError, AttributeError, subprocess.SubprocessError) as exc:
+            result.update(exit_code=1, error=type(exc).__name__)
+        results.append(result)
+    return results
+
+
 def reconcile(home: Path, *, apply: bool, retention_home: Path | None = None) -> dict[str, Any]:
+    owner = home if retention_home is None else retention_home
+    retention_result = None
+    if (owner / "config/host-steward-retention.json").is_file():
+        command = [sys.executable, str(Path(__file__).with_name("hermes-disk-retention.py")),
+                   "--home", str(Path.home()), "--hermes-home", str(owner), "--json"]
+        if apply:
+            command.append("--apply")
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=480, check=False)
+            retention_result = {"exit_code": result.returncode, "output": result.stdout[-4000:],
+                                "error": result.stderr[-2000:]}
+        except (OSError, subprocess.SubprocessError) as exc:
+            retention_result = {"exit_code": 1, "error": str(exc)}
     with _registry_lock(home, "operation.lock"):
-        return _reconcile(home, apply=apply, retention_home=retention_home)
+        health_results = []
+        if apply:
+            try:
+                health_results = _refresh_host_health(owner)
+            except (OSError, ValueError, TypeError, subprocess.SubprocessError) as exc:
+                health_results = [{"target": str(owner), "owner": "host_steward",
+                                   "verified": False, "exit_code": 1, "error": type(exc).__name__}]
+        payload = _reconcile(home, apply=apply, retention_home=retention_home)
+        if health_results:
+            payload["health_execution"] = health_results
+            if any(not result["verified"] or result["exit_code"] != 0 for result in health_results):
+                payload["status"] = "fail"
+                _add_failure_cause(payload, "host_health_execution")
+        if retention_result is not None:
+            payload["retention_execution"] = retention_result
+            if retention_result["exit_code"] not in RETENTION_EXPECTED_EXIT_CODES:
+                payload["status"] = "fail"
+                _add_failure_cause(payload, "storage_retention_execution")
+            return _write_receipt(home, payload)
+        return _write_receipt(home, payload) if health_results else payload
 
 
 def _reconcile(home: Path, *, apply: bool, retention_home: Path | None = None) -> dict[str, Any]:
@@ -2716,6 +3214,8 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] == "__exec-gate":
         return _exec_gate(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "__exec-gate-socket":
+        return _exec_gate_socket(raw_argv[1:])
     args = _parser().parse_args(raw_argv)
     home = _home(args.hermes_home)
     try:
@@ -2762,6 +3262,16 @@ def main(argv: list[str] | None = None) -> int:
         else:
             payload = snapshot(home, retention_home=args.retention_home)
         print(json.dumps(payload, indent=2, sort_keys=True))
+        # Renewal succeeded even when the separate host capacity check is red.
+        # Preserve that failing health payload and all actual ownership errors.
+        renewed_with_capacity_warning = (
+            args.operation == "renew-lease"
+            and payload.get("renewed") == 1
+            and payload.get("status") == "fail"
+            and payload.get("failure_causes") == ["host_capacity_pressure"]
+        )
+        if renewed_with_capacity_warning:
+            return 0
         return 2 if payload.get("status") in {"fail", "invalid", "error"} else 0
     except (ValueError, RuntimeError) as exc:
         print(json.dumps({"schema": SCHEMA, "status": "error", "error": str(exc)}))

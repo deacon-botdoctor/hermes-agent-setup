@@ -373,6 +373,16 @@ def read_config(home: Path):
                 cfg[m.group(1)] = m.group(2).strip().strip('"').strip("'")
     except Exception:
         pass
+    import yaml
+
+    try:
+        payload = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        enabled = payload.get("auxiliary", {}).get("background_review", {}).get("enabled")
+        cfg["auxiliary"] = {"background_review": {"enabled": enabled is True}}
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, AttributeError, yaml.YAMLError):
+        raise ValueError("Cannot read automatic reflection policy from config.yaml") from None
     return cfg
 
 
@@ -1123,10 +1133,17 @@ def main():
     args = ap.parse_args()
 
     home = Path(args.home).expanduser() if args.home else default_home()
+    try:
+        cfg = read_config(home)
+    except ValueError as exc:
+        print(json.dumps({"status": "error", "reason": str(exc)}), file=sys.stderr)
+        return 1
+    if not args.no_model and cfg.get("auxiliary", {}).get("background_review", {}).get("enabled") is not True:
+        print(json.dumps({"status": "skipped", "reason": "automatic reflection disabled"}))
+        return 0
     global HERMES_CLI
     HERMES_CLI = find_hermes_cli(home)
     py = find_python(home)
-    cfg = read_config(home)
 
     # derive a stable agent_id from agent_name when config omits it
     if not cfg.get("agent_id"):

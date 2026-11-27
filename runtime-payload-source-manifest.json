@@ -1,50 +1,56 @@
 {
-  "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
+  "canonical_upstream_sha": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "components": {
     "baseline_wiring": {
       "component": "baseline_wiring",
-      "digest": "5d8581742b832046920f70e5c121d33475314cd59b1bd6f6688d5517ffa1b9d0",
+      "digest": "e557f5c5ee7af6721ebd9fa2a622d9b584e0d5670f3db4163d06adb43d4b2207",
       "excluded_paths": [],
-      "file_count": 52,
+      "file_count": 106,
       "files": [
         {
-          "blob": "06357d511e8454e7001bcd5cb1f75cbbcd933d6f",
+          "blob": "a28dace4d7c4ecd9a720631dfedc4bbb2e41b18e",
+          "mode": "100755",
+          "path": "bin/capability-state-report",
+          "type": "blob"
+        },
+        {
+          "blob": "6acebb52160a442f0175612ceb62fe669af881c8",
           "mode": "100755",
           "path": "bin/composio-remote-mcp-verify.py",
           "type": "blob"
         },
         {
-          "blob": "833598a7a21f22d36f30328eb171587a8e33b45d",
+          "blob": "b064146d3be170aefa7230b86d858a6f0622bc9b",
           "mode": "100755",
           "path": "bin/composio-remote-mcp-with-env.sh",
           "type": "blob"
         },
         {
-          "blob": "9a6185729295274cb28aacc6eeff9ffd05559615",
+          "blob": "6913e8146e1b5a1acac140144faff3678097f52e",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.ps1",
           "type": "blob"
         },
         {
-          "blob": "4742d8f3d55ac6dd4bb7215be952d1778af29df8",
+          "blob": "deea3e59904469831b3b177f946bd7663a12bafa",
           "mode": "100755",
           "path": "bin/hermes-canary-reconciler.py",
           "type": "blob"
         },
         {
-          "blob": "7f46e5c66077217ceced743f6acd837994b7542a",
+          "blob": "523e90adf31f54755c524a1d74e8210d42c436b5",
           "mode": "100755",
-          "path": "bin/hermes-cron-toolset-preflight.py",
+          "path": "bin/hermes-disk-monitor.sh",
           "type": "blob"
         },
         {
-          "blob": "bb0a7e1a08e3b26f18fe386ae3948c3299a30420",
+          "blob": "c34177ee7e27bfcb7eaeb88223fbf26c0e6ebeea",
           "mode": "100644",
           "path": "bin/hermes-disk-retention.py",
           "type": "blob"
         },
         {
-          "blob": "53a62a6b91a7d3833aad95c253eda04b264d4bdd",
+          "blob": "b53be8de7e027253a8f54f0cb88791e5d51790c3",
           "mode": "100644",
           "path": "bin/hermes-fileprovider-online-only.swift",
           "type": "blob"
@@ -56,31 +62,37 @@
           "type": "blob"
         },
         {
-          "blob": "e84f32eb603b438362156bd17f7f6cb83ab71a94",
+          "blob": "7d35a6adbc5a04f5ed13a95df465789dc4d7dd06",
           "mode": "100755",
           "path": "bin/hermes-host-steward.py",
           "type": "blob"
         },
         {
-          "blob": "d78f164ee0a28858289850f84948ded808cba5dc",
+          "blob": "eafb3d340404f5dbc8b932e19a4beb59e8ca0305",
           "mode": "100755",
           "path": "bin/hermes-local-selfcheck.py",
           "type": "blob"
         },
         {
-          "blob": "22a762937d25ca147e5f38d3694766eb430c7f5b",
+          "blob": "03b1c785620f1f97bfc9917c684d74af902cfaf6",
+          "mode": "100755",
+          "path": "bin/hermes-session-cleanup.sh",
+          "type": "blob"
+        },
+        {
+          "blob": "bb4889036f0d4bbfc213ae0462b8505144bba765",
           "mode": "100644",
           "path": "bin/hermes-windows-capacity-containment.ps1",
           "type": "blob"
         },
         {
-          "blob": "5a57c8af3bb67ec97b758bb92d8491504bcca623",
+          "blob": "6bbd5df4c38e2980b144653150781116914bc173",
           "mode": "100755",
           "path": "bin/tool-readiness-probe.py",
           "type": "blob"
         },
         {
-          "blob": "91e3c709d5cf95f82c8c1a679de06975b1cc6b5a",
+          "blob": "fc46ab6f507033637e6d54177aa29809c3a503e4",
           "mode": "100644",
           "path": "installers.yaml",
           "type": "blob"
@@ -110,13 +122,13 @@
           "type": "blob"
         },
         {
-          "blob": "456e376d2e43176b2fc40a40f64cced345b44bb7",
+          "blob": "d2df9ac73a147401959b4d6d03910808c8cbe21d",
           "mode": "100644",
           "path": "kit/bin/client-selfheal-heartbeat.ps1",
           "type": "blob"
         },
         {
-          "blob": "ac49abf156f1ad3c41d140d0b4bba19bf73990c6",
+          "blob": "5624771c1df0b4c091d9210abc6802b9503a2f29",
           "mode": "100755",
           "path": "kit/bin/client-selfheal-heartbeat.sh",
           "type": "blob"
@@ -146,19 +158,25 @@
           "type": "blob"
         },
         {
-          "blob": "79a04542e454b3eecf5a0d0f1ea715cf45544931",
+          "blob": "2666ad0fda0476b88653e61a0af6667fcc1d0be4",
           "mode": "100755",
           "path": "kit/bin/ensure-cua-driver.py",
           "type": "blob"
         },
         {
-          "blob": "6367e49eb8cf1d63a3dbf3d5b3d1240c62fa7bb8",
+          "blob": "c23a1834ca3979f6838abfa927eba4df5e4304e4",
           "mode": "100644",
           "path": "kit/bin/ensure-gateway-watchdog.py",
           "type": "blob"
         },
         {
-          "blob": "e3a7af98d33ca7f022969bfba9e7654d66ba62a9",
+          "blob": "8d99cddeac34664f43ef1209aaeb3db26c1e0fe8",
+          "mode": "100644",
+          "path": "kit/bin/ensure-printing-press.py",
+          "type": "blob"
+        },
+        {
+          "blob": "3f5ea2f61c2b96f5739370abf092fe1d0d51073a",
           "mode": "100644",
           "path": "kit/bin/gateway-health-probe.ps1",
           "type": "blob"
@@ -170,13 +188,13 @@
           "type": "blob"
         },
         {
-          "blob": "85331b830067c124184ca6d3f661410f243b89b2",
+          "blob": "38f312c3829565778b16def74a2ec0bc0a8e53fa",
           "mode": "100644",
           "path": "kit/bin/hermes-gateway-watchdog-client.py",
           "type": "blob"
         },
         {
-          "blob": "abddc9b396033c03c9a86685d5043c5293640fb3",
+          "blob": "f65d468338b93eae91147aca2ac289e9e3c2e69b",
           "mode": "100755",
           "path": "kit/bin/hermes-safe-restart.sh",
           "type": "blob"
@@ -188,7 +206,7 @@
           "type": "blob"
         },
         {
-          "blob": "a2ad8f211e37fa79422354074f81975e0d9d4d3c",
+          "blob": "4886339c6a48c0d675ef6f949f2ff35884aa90c9",
           "mode": "100755",
           "path": "kit/bin/native-agent-continuity.py",
           "type": "blob"
@@ -212,13 +230,13 @@
           "type": "blob"
         },
         {
-          "blob": "cf644726702a674e58a49df46acff497880ffb92",
+          "blob": "0c34d1cb0cd2ed13135a8eed0959b7dead93e1f6",
           "mode": "100755",
           "path": "kit/bin/operator-handoff.py",
           "type": "blob"
         },
         {
-          "blob": "ad7354518e67bf5fb00e69c7bd9ea85af499946d",
+          "blob": "658dfb5aa88530f701d5d9ca5c7a31cc9a0de3a8",
           "mode": "100644",
           "path": "kit/bin/operator-status.py",
           "type": "blob"
@@ -230,13 +248,13 @@
           "type": "blob"
         },
         {
-          "blob": "74d873acb6e3fec39baa83a147f1738d405d6879",
+          "blob": "17073882bca3e6b8d1da6a25d89c1a721b561db3",
           "mode": "100755",
           "path": "kit/bin/probe-client-health.py",
           "type": "blob"
         },
         {
-          "blob": "f08ded487e3be38982e1d405f6ef34abc737bef0",
+          "blob": "112909e8b5e2a08a33e1a22e09f90f5bf078d65e",
           "mode": "100755",
           "path": "kit/bin/retire-legacy-memory-surfaces.py",
           "type": "blob"
@@ -266,7 +284,7 @@
           "type": "blob"
         },
         {
-          "blob": "c1543ff74aee8ba20d6e4ca666cf463a3406df0e",
+          "blob": "9228a738eb110b9d39af110a056c5994a84b1c99",
           "mode": "100644",
           "path": "kit/bin/telegram-watchdog-depth-probe.ps1",
           "type": "blob"
@@ -278,7 +296,7 @@
           "type": "blob"
         },
         {
-          "blob": "5fb7490b9027f43b0ed672a7e3da6c8a58dc9b2c",
+          "blob": "263501aa7045d37249b7be6a5692b3a601495434",
           "mode": "100644",
           "path": "kit/bin/telegram_delivery_history.py",
           "type": "blob"
@@ -302,9 +320,9 @@
           "type": "blob"
         },
         {
-          "blob": "351005e852296932b76e8016047164c0e11357bd",
+          "blob": "1defcf10965f7a4765556a5ef300677fa9d2b69e",
           "mode": "100644",
-          "path": "kit/config/cua-driver-release-v1.json",
+          "path": "kit/config/injected-rule-hashes.json",
           "type": "blob"
         },
         {
@@ -314,20 +332,333 @@
           "type": "blob"
         },
         {
+          "blob": "d98d9874982d3bd4743ae0bc27cbe5e7ae66f9ea",
+          "mode": "100644",
+          "path": "kit/config/printing-press-release-v1.json",
+          "type": "blob"
+        },
+        {
           "blob": "8ca4d8350b6eb53065ba1ef4158fcf0fc1e6cedf",
           "mode": "100644",
           "path": "kit/config/pylock.browser-use-cli-v1.toml",
           "type": "blob"
+        },
+        {
+          "blob": "d5c870d030b7564932a7a135a8a288fcf7fa870d",
+          "mode": "100644",
+          "path": "kit/patches/printing-press-no-tests.patch",
+          "type": "blob"
+        },
+        {
+          "blob": "7731309b6105ffafc750a51cec8e21a3c6ebc36c",
+          "mode": "100644",
+          "path": "shared-rules/printing-press.md",
+          "type": "blob"
+        },
+        {
+          "blob": "86ac05d90b917326363d5f2555476982898554b9",
+          "mode": "100644",
+          "path": "skills/printing-press/LICENSE",
+          "type": "blob"
+        },
+        {
+          "blob": "4753df8b1a2cb7035bab20e7d6a7f0eaa1ad492a",
+          "mode": "100644",
+          "path": "skills/printing-press/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "691510ca5c3585e33ba65b2d07ca53e813a268fc",
+          "mode": "100644",
+          "path": "skills/printing-press/UPSTREAM.json",
+          "type": "blob"
+        },
+        {
+          "blob": "417927baa8afe96e27c2379867a340a94e2faf8e",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/01-preflight.md",
+          "type": "blob"
+        },
+        {
+          "blob": "0f153e518b5ac05d613306209eb0372c9486d605",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/02-run-initialization.md",
+          "type": "blob"
+        },
+        {
+          "blob": "518bad1c87e26f4313560acc683f422eee500681",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/03-resolve-and-reuse.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c830df7f417f6fdc59f074f83ba40e954a88d909",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/04-research-brief.md",
+          "type": "blob"
+        },
+        {
+          "blob": "fc43f1f29ca758313c53496732736e49884878e0",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/05-pre-browser-sniff-auth-intelligence.md",
+          "type": "blob"
+        },
+        {
+          "blob": "85ef3bcdf548a7ef68f4434540237902a23c9fa2",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/06-browser-sniff-gate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "aecb37903dbe35f13433dd5a44eb88d8af0d5153",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/07-crowd-sniff-gate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e08bc033e85fa6cc928d8f7f760988092b4b6655",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/08-ecosystem-absorb-gate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "012b0fcfdc215dad7b8e710b4195f03d4077ed7c",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/09-api-reachability-gate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f20e13bcb4a507bdc9a8fd036b109fcee1bfd745",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/10-generate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "819f443f920844a4ac1d6f6baf4c783f2ec4dabc",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/11-build-the-goat.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9d6b6f561ae66b64bf369f598512652491b0e815",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/12-shipcheck.md",
+          "type": "blob"
+        },
+        {
+          "blob": "920d8e35f49abb94040d6adfe226f04a2ef8a669",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/13-sync-param-drop-gate.md",
+          "type": "blob"
+        },
+        {
+          "blob": "dde884ab65bc0c29059c07e3ae63e03b8d89c7d2",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/14-agentic-skill-review.md",
+          "type": "blob"
+        },
+        {
+          "blob": "030398e4c73404993e6cd7dc4362142bbd302c0f",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/15-readme-skill-agents-correctness-audit.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7eb0c4048bb788e337b7e2e0fa5c1017b73ac4af",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/16-agentic-output-review.md",
+          "type": "blob"
+        },
+        {
+          "blob": "76fdcc5ca15e7fc927714a41c601891d9d8278b6",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/17-local-code-review.md",
+          "type": "blob"
+        },
+        {
+          "blob": "9ec9b90b62456a597330cd3ef2d26faafb3e8b89",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/18-dogfood-testing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "6804c39089723032b1d715a92a7b93112c229cc8",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/19-polish.md",
+          "type": "blob"
+        },
+        {
+          "blob": "46baa7cbecc7cf093280570eb8f3277824c1298e",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/20-promote-and-archive.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a58195a7e0f3e02bf5f6b6904cbd1f5b9f3fe14b",
+          "mode": "100644",
+          "path": "skills/printing-press/phases/21-next-steps.md",
+          "type": "blob"
+        },
+        {
+          "blob": "bad06d9de6aa9c52c6873f7df01feb1c861cc106",
+          "mode": "100644",
+          "path": "skills/printing-press/references/absorb-scoring.md",
+          "type": "blob"
+        },
+        {
+          "blob": "953839765d9d2b1b1c359770d0b37ec89f805d72",
+          "mode": "100644",
+          "path": "skills/printing-press/references/aggregator-pattern.md",
+          "type": "blob"
+        },
+        {
+          "blob": "e61efb45e4a1bbcab5ab7a7fc6296e4c380f55a6",
+          "mode": "100644",
+          "path": "skills/printing-press/references/auth-companion.md",
+          "type": "blob"
+        },
+        {
+          "blob": "41e9e7725f1ae26b8fe99fc22d189dea8ec4bc1c",
+          "mode": "100644",
+          "path": "skills/printing-press/references/browser-sniff-capture.md",
+          "type": "blob"
+        },
+        {
+          "blob": "cf79e6be680a57d5a67d68e2435cf6d836342e17",
+          "mode": "100644",
+          "path": "skills/printing-press/references/codex-delegation.md",
+          "type": "blob"
+        },
+        {
+          "blob": "81c29d84aa5f38aedc02278d657bafa08884f5a9",
+          "mode": "100644",
+          "path": "skills/printing-press/references/crowd-sniff.md",
+          "type": "blob"
+        },
+        {
+          "blob": "92ed5f9bb0492654060235c99abdb1e310a643f9",
+          "mode": "100644",
+          "path": "skills/printing-press/references/deepwiki-research.md",
+          "type": "blob"
+        },
+        {
+          "blob": "11641a6aef4325af02816d68305115bea5777822",
+          "mode": "100644",
+          "path": "skills/printing-press/references/device-sniff-ble.md",
+          "type": "blob"
+        },
+        {
+          "blob": "aeaccaa45361074d671240d9a8caa887125d6eda",
+          "mode": "100644",
+          "path": "skills/printing-press/references/dogfood-testing.md",
+          "type": "blob"
+        },
+        {
+          "blob": "7feac5aea27b477a7a468dfade61704c34f79259",
+          "mode": "100644",
+          "path": "skills/printing-press/references/fetch-docs.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f086b62811d753a201293615849cce6068ec2460",
+          "mode": "100755",
+          "path": "skills/printing-press/references/fetch-docs.sh",
+          "type": "blob"
+        },
+        {
+          "blob": "8412186a7b85a0e8d9ccfaca7e0ddc49581cb42c",
+          "mode": "100644",
+          "path": "skills/printing-press/references/fleet-contract.md",
+          "type": "blob"
+        },
+        {
+          "blob": "004346f66a2104ba9b1af70ca0b22d1eefa5f5d5",
+          "mode": "100644",
+          "path": "skills/printing-press/references/known-specs.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8fb2297dd72d93a6559e48fbfffca43e063c8898",
+          "mode": "100644",
+          "path": "skills/printing-press/references/noi-examples.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2d1997b4527628f95c9f19a105726389bd61ba47",
+          "mode": "100644",
+          "path": "skills/printing-press/references/novel-features-subagent.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2ba3986d05f55d98bb2168e3ad434da5112970e6",
+          "mode": "100644",
+          "path": "skills/printing-press/references/oauth2-pkce-cli-checklist.md",
+          "type": "blob"
+        },
+        {
+          "blob": "a0c502fe717833d6d67db5d2887f14b4f242a215",
+          "mode": "100644",
+          "path": "skills/printing-press/references/per-source-rate-limiting.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f1c4a6090bdac4a8232cae728bed605d53563240",
+          "mode": "100644",
+          "path": "skills/printing-press/references/phase-receipts.md",
+          "type": "blob"
+        },
+        {
+          "blob": "2ff16c0627d7bc5948455733abafada5b402c8fb",
+          "mode": "100644",
+          "path": "skills/printing-press/references/run-resolution.md",
+          "type": "blob"
+        },
+        {
+          "blob": "f327c12b074d9ee11622580747b2f4dff9b704fc",
+          "mode": "100644",
+          "path": "skills/printing-press/references/scorecard-patterns.md",
+          "type": "blob"
+        },
+        {
+          "blob": "72a92703f1b51a53d81c9c2b4b3b7f3260010443",
+          "mode": "100644",
+          "path": "skills/printing-press/references/secret-protection.md",
+          "type": "blob"
+        },
+        {
+          "blob": "c65723dff9cb68f38a18cba6e862918c670bd009",
+          "mode": "100644",
+          "path": "skills/printing-press/references/setup-checks.md",
+          "type": "blob"
+        },
+        {
+          "blob": "61843588d7cbd0631df8edd67000c27be0144a04",
+          "mode": "100644",
+          "path": "skills/printing-press/references/spec-format.md",
+          "type": "blob"
+        },
+        {
+          "blob": "8b6e10309be06af2a2fb0dd7e32312111c60acf7",
+          "mode": "100644",
+          "path": "skills/printing-press/references/ws-primary-pattern.md",
+          "type": "blob"
         }
       ],
       "paths": [
+        "bin/capability-state-report",
+        "kit/patches/printing-press-no-tests.patch",
+        "shared-rules/printing-press.md",
+        "skills/printing-press",
         "bin/gbrain-enable-embeddings.py",
         "bin/hermes-canary-reconciler.py",
         "bin/hermes-canary-reconciler.ps1",
         "bin/hermes-cron-toolset-preflight.py",
         "bin/hermes-disk-retention.py",
+        "bin/hermes-disk-monitor.sh",
+        "bin/hermes-session-cleanup.sh",
         "bin/hermes-fileprovider-online-only.swift",
         "bin/hermes-local-selfcheck.py",
+        "kit/config/injected-rule-hashes.json",
         "bin/hermes-windows-capacity-containment.ps1",
         "bin/hermes-host-hygiene.py",
         "bin/hermes-host-steward.py",
@@ -340,6 +671,7 @@
         "kit/bin/check-sqlite-wal.py",
         "kit/bin/client-selfheal-heartbeat.ps1",
         "kit/bin/client-selfheal-heartbeat.sh",
+        "kit/bin/ensure-printing-press.py",
         "kit/bin/ensure-cua-driver.py",
         "kit/bin/ensure-browser-use-cli.py",
         "kit/bin/ensure-agent-browser.py",
@@ -370,7 +702,7 @@
         "kit/bin/retire-legacy-memory-surfaces.py",
         "kit/bin/start-hermes.ps1",
         "kit/bin/start-hermes.sh",
-        "kit/config/cua-driver-release-v1.json",
+        "kit/config/printing-press-release-v1.json",
         "kit/config/browser-use-cli-release-v1.json",
         "kit/config/agent-browser-release-v1.json",
         "kit/config/pylock.browser-use-cli-v1.toml",
@@ -379,9 +711,9 @@
     },
     "runtime_payload": {
       "component": "runtime_payload",
-      "digest": "7c9738d8c51c799b36b71d30f17f953659cc369d5815cbfc7854f7a6e63c0e1f",
+      "digest": "4064f6715751bbc9bb37adb7c436ae895eab6fb573ee463d95eaac7d31214bf1",
       "excluded_paths": [],
-      "file_count": 772,
+      "file_count": 720,
       "files": [
         {
           "blob": "b685bf9d30e209e8e4b7decf2d556fc3da8c85ac",
@@ -402,13 +734,13 @@
           "type": "blob"
         },
         {
-          "blob": "7b62de996c4f73d91e7af15535c3e56547f96e81",
+          "blob": "55eea197dba30117a88a2efeb5e2b796f7d9ab30",
           "mode": "100755",
           "path": "bin/dream.py",
           "type": "blob"
         },
         {
-          "blob": "770c1b20bbc9f512e2e6657aad799cc7cf83a576",
+          "blob": "bdada42b630dfb8c6b40b4d07b3838d03b240f20",
           "mode": "100755",
           "path": "bin/dream_consolidate.py",
           "type": "blob"
@@ -420,9 +752,15 @@
           "type": "blob"
         },
         {
-          "blob": "afc2ca82f35784c02355a743240834ca31b2b3c7",
+          "blob": "a516eb86a886f366f017396b10c294ece20d6130",
           "mode": "100755",
           "path": "bin/hermes-client-day-review",
+          "type": "blob"
+        },
+        {
+          "blob": "529521d89db72e86aa274b197e42548c45742ef7",
+          "mode": "100644",
+          "path": "bin/hermes-nightly-dream-cycle.py",
           "type": "blob"
         },
         {
@@ -432,7 +770,7 @@
           "type": "blob"
         },
         {
-          "blob": "c5ff57f9fe73fd6600edde6af76bd718b050fb3c",
+          "blob": "1ec8c237a0abc8909623263fafcbe89c10076716",
           "mode": "100755",
           "path": "bin/hermes-self-reflect.py",
           "type": "blob"
@@ -462,31 +800,55 @@
           "type": "blob"
         },
         {
+          "blob": "a4fac4d663da3bf2778daf16020251dc7986b4ae",
+          "mode": "100644",
+          "path": "bin/operator_native_llm.py",
+          "type": "blob"
+        },
+        {
           "blob": "daf679e8c53698423f481d79c7d24aeaa5cb1852",
           "mode": "100755",
           "path": "bin/papercut_inbox.py",
           "type": "blob"
         },
         {
-          "blob": "de34493f7e62c76afd7645c45401b5b4d5b64e12",
+          "blob": "e5e66524ac0e8f994a87296ab69fb823fe19090b",
           "mode": "100755",
           "path": "bin/registry-sync.py",
           "type": "blob"
         },
         {
-          "blob": "555e18456af96176442a6a930515ed30f5d74427",
+          "blob": "2648acc3e4b38e7130ce951908a462d7da6e9b34",
           "mode": "100755",
           "path": "bin/self-improvement-trigger.py",
           "type": "blob"
         },
         {
-          "blob": "ac22af4febbe51107fcfbbccd4f71da2b2c4cda2",
+          "blob": "58b9a449a1cb600c07a4b60703a1c832f733db72",
           "mode": "100755",
-          "path": "bin/tasks",
+          "path": "bin/self_editing_v2_acceptance.py",
           "type": "blob"
         },
         {
-          "blob": "17bbf0a94ecd9c2a3921aaa0c733951268418a77",
+          "blob": "69ec0b234d5111b8484f511f2a9a354160631cad",
+          "mode": "100755",
+          "path": "bin/self_editing_v2_archive.py",
+          "type": "blob"
+        },
+        {
+          "blob": "63412ebed1040e5348c88e41947ab20899284e44",
+          "mode": "100755",
+          "path": "bin/self_editing_v2_lifecycle.py",
+          "type": "blob"
+        },
+        {
+          "blob": "1efb92c470bea42eb7eb6e49d6a0a8ceae361a70",
+          "mode": "100755",
+          "path": "bin/self_editing_v2_promotion.py",
+          "type": "blob"
+        },
+        {
+          "blob": "84f14998c326ea926821ec8c404c7f1f481d260a",
           "mode": "100755",
           "path": "bin/telegram-send-artifact",
           "type": "blob"
@@ -522,18 +884,6 @@
           "type": "blob"
         },
         {
-          "blob": "de838f2d200bff3845ecc36a439f4f8bc02e580c",
-          "mode": "100644",
-          "path": "hooks/telegram-transcript/HOOK.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "8fe9f4d1c0456a82a951cc2ca2a6e10a1217e284",
-          "mode": "100644",
-          "path": "hooks/telegram-transcript/handler.py",
-          "type": "blob"
-        },
-        {
           "blob": "bf601e1f87be059a522d178377ea11bf7ad66696",
           "mode": "100755",
           "path": "kit/bin/email_triage.py",
@@ -546,13 +896,13 @@
           "type": "blob"
         },
         {
-          "blob": "0997b3b845083723e7fb489eab3670bf456b3086",
+          "blob": "f4f0debb625a62c4b5fada821b516a193d8e7992",
           "mode": "100644",
           "path": "kit/bin/grok-x-research.py",
           "type": "blob"
         },
         {
-          "blob": "e2fbcd833f8d0d4df64cdf6643b6126c83c4c095",
+          "blob": "4b92c8a9cd1d24a833fc3c810b6019d9325d5cb7",
           "mode": "100755",
           "path": "kit/bin/papercut.py",
           "type": "blob"
@@ -564,7 +914,7 @@
           "type": "blob"
         },
         {
-          "blob": "5fb7490b9027f43b0ed672a7e3da6c8a58dc9b2c",
+          "blob": "263501aa7045d37249b7be6a5692b3a601495434",
           "mode": "100644",
           "path": "kit/bin/telegram_delivery_history.py",
           "type": "blob"
@@ -585,6 +935,12 @@
           "blob": "0c94563c7ef51534f870869e2386a7adf52f71e5",
           "mode": "100644",
           "path": "kit/config/browser-use-cli-release-v1.json",
+          "type": "blob"
+        },
+        {
+          "blob": "95bd8f048de937b65f5ebf176e568a8f65d557e8",
+          "mode": "100644",
+          "path": "kit/config/cua-driver-release-v1.json",
           "type": "blob"
         },
         {
@@ -618,7 +974,7 @@
           "type": "blob"
         },
         {
-          "blob": "82480e6912fd3ceb950bba347681ea1509819397",
+          "blob": "e144a349460a76f666e2ce46d3d7b9438c7c7414",
           "mode": "100755",
           "path": "mcp-servers/browser/server.py",
           "type": "blob"
@@ -684,7 +1040,7 @@
           "type": "blob"
         },
         {
-          "blob": "d760ec768caeeb46d3eb136990f5a8f585e21838",
+          "blob": "91584eb0a1f291c3d391e04b7d5ece80a407ebee",
           "mode": "100644",
           "path": "mcp-servers/pdf/src/pdf_mcp/server.py",
           "type": "blob"
@@ -738,7 +1094,7 @@
           "type": "blob"
         },
         {
-          "blob": "b0bb3f185e3faa59f6e1f8b3fffcc5520562bacb",
+          "blob": "4fc472888865b463e06dc0528fcb900a7dab6953",
           "mode": "100644",
           "path": "mcp-servers/search/src/search_mcp/server.py",
           "type": "blob"
@@ -780,7 +1136,7 @@
           "type": "blob"
         },
         {
-          "blob": "bc703c1ba9e61ac4caca9f334cb2c831bd35d579",
+          "blob": "feb111a765bf87574bc0f28f0394a1f0ff4944ae",
           "mode": "100644",
           "path": "mcp-servers/web-search/src/web_search_mcp/server.py",
           "type": "blob"
@@ -798,27 +1154,9 @@
           "type": "blob"
         },
         {
-          "blob": "a6faae06faf1f8183e8273c1de096f4e86fedf5a",
+          "blob": "89956c4ca70ce30125a16764c6ac6e01a72261f7",
           "mode": "100644",
           "path": "patches/apply-all-patches.py",
-          "type": "blob"
-        },
-        {
-          "blob": "aacc8dd985f9dfccfe99c95a98402d6f0c2cf8b7",
-          "mode": "100755",
-          "path": "patches/apply-session-search-current-topic.py",
-          "type": "blob"
-        },
-        {
-          "blob": "fc02593aae7ebddf29c79e9721b1b40113764197",
-          "mode": "100755",
-          "path": "patches/apply-skill-index-allowlist.py",
-          "type": "blob"
-        },
-        {
-          "blob": "a75a2b95358f6ce28602141219ba13bed453c51c",
-          "mode": "100644",
-          "path": "patches/apply-telegram-immediate-typing-receipt.py",
           "type": "blob"
         },
         {
@@ -828,261 +1166,57 @@
           "type": "blob"
         },
         {
-          "blob": "a5f5de892c21db7289fc0bbfe364014a65172497",
+          "blob": "8fd8a68dd4a409d706e220168ee054fb4fd6497c",
+          "mode": "100644",
+          "path": "patches/modules/acp_edit_approval_outcomes_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "49317b5d218b0f5f534a4ed91886f96170658a49",
+          "mode": "100644",
+          "path": "patches/modules/anthropic_403_pool_rotation_v1.py",
+          "type": "blob"
+        },
+        {
+          "blob": "c0a498196e2032c693bd0b1a91fa5b9f53e340a0",
           "mode": "100644",
           "path": "patches/modules/assembled_runtime_contract.py",
           "type": "blob"
         },
         {
-          "blob": "af6c7c64dc949a80c91478173bc1bf64257b0730",
+          "blob": "bf6c9141afc0292a5a226272c49055ef67637fe6",
           "mode": "100644",
-          "path": "patches/modules/auto_resume_contextual_reset_v1.py",
+          "path": "patches/modules/broker_codex_jobs_v1.py",
           "type": "blob"
         },
         {
-          "blob": "997d49f723c41653ccf5a41c2f5f8316399b7853",
+          "blob": "fd8ea338d216316fc189d27568f4c8a06e8eddc0",
           "mode": "100644",
-          "path": "patches/modules/codex_401_paid_fallback_circuit_v1.py",
+          "path": "patches/modules/broker_oauth_pool_resync_v1.py",
           "type": "blob"
         },
         {
-          "blob": "b2495b759beb9e39046f9648c6d74633b10a1fd7",
+          "blob": "1b23b631d7260a48f4753b79a2f93af9864df943",
           "mode": "100644",
-          "path": "patches/modules/codex_refresh_transport_fallback_v1.py",
+          "path": "patches/modules/conditional_api_admission_v1.py",
           "type": "blob"
         },
         {
-          "blob": "a0a59e65d61b31c6eb748ef0a47fc8bc8543347a",
+          "blob": "3ec49cef9ff197216d00b3cf2ff443261d4ecc94",
           "mode": "100644",
-          "path": "patches/modules/codex_strict_structured_output_v1.py",
+          "path": "patches/modules/gateway_progress_renderer_v1.py",
           "type": "blob"
         },
         {
-          "blob": "0e58edf4023693077ad7587e321b1e03af092933",
+          "blob": "024500d533893ddaae4baca439cef6fa3b306b04",
           "mode": "100644",
-          "path": "patches/modules/cron_completion_reporter_v1.py",
+          "path": "patches/modules/native_cua_lock_v1.py",
           "type": "blob"
         },
         {
-          "blob": "25e4a6e383232a284045302b622687e2b776e6a9",
+          "blob": "63496bffbffdcd44f203eaf0cd5366f812a958ef",
           "mode": "100644",
-          "path": "patches/modules/cron_operator_delivery_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "588896aa05d3df75b9ddc6d80fa7a38998d1536f",
-          "mode": "100644",
-          "path": "patches/modules/cron_progress_job_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "fa05f3748cee42edd4ac26670db91007acf62042",
-          "mode": "100644",
-          "path": "patches/modules/cron_silent_mutation_footer_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "f2b75b918e188a2d911bf3ba9c0c9be76f64bf15",
-          "mode": "100644",
-          "path": "patches/modules/cua_gateway_shutdown_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "17cb8ead0f434dd280bad5566ff812221ce56c7d",
-          "mode": "100644",
-          "path": "patches/modules/cua_linux_ax_walk_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "a8f74770466ba7b653c088ed936b004169ab7683",
-          "mode": "100644",
-          "path": "patches/modules/cua_macos_app_identity_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "8779e5f01d0d5aa63bbb0c3d133d7cfdefab7db2",
-          "mode": "100644",
-          "path": "patches/modules/cua_service_session_mode_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "cfe04f8133a4a0970b27354c42deb69ea0596e21",
-          "mode": "100644",
-          "path": "patches/modules/cua_token_only_actions_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0323274eebf6cfda28c1f7eb68f2f6f566522c72",
-          "mode": "100644",
-          "path": "patches/modules/curator_safety_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "a87fd6e0e6dcc2da390436f37bb3f172ae8d29c3",
-          "mode": "100644",
-          "path": "patches/modules/durable_delivery_history_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1edeb9c91e4d0b19209324396c2230b7f3c637a6",
-          "mode": "100644",
-          "path": "patches/modules/durable_drain_inbox_carrier_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "e9fbd8862c44956414a86be472348e9a4b7e4ab0",
-          "mode": "100644",
-          "path": "patches/modules/fallback_chain_restart_bound_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "b248c3bdb9067e2fb91989213e62835d0006db2f",
-          "mode": "100644",
-          "path": "patches/modules/gateway_capability_env_presence_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "268915d92a9a2b6f0a25db0bdd4d87e799a38b96",
-          "mode": "100644",
-          "path": "patches/modules/gateway_runtime_root_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "91a98210cc9138801d38cedb79c89d8a3956ce29",
-          "mode": "100644",
-          "path": "patches/modules/gateway_service_binding_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "ae05017a1a66fcb6a9a9bb62fadf0809ea7b62ad",
-          "mode": "100644",
-          "path": "patches/modules/golden_rebuild_20261004.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0a3daf8a94bc6ea5e6dbdf1138dd421d1bd16b1a",
-          "mode": "100644",
-          "path": "patches/modules/grok47_reasoning_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "faa89cbe3c089ad20525e42bd9a71c867a537074",
-          "mode": "100644",
-          "path": "patches/modules/grok_46_x_search_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "cc2fc0b1e26243909d22f5bea1863d83883e613b",
-          "mode": "100644",
-          "path": "patches/modules/host_steward_native_browser_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "76af4310688889c5eb18e4dd889d0a5ee33c9c1a",
-          "mode": "100644",
-          "path": "patches/modules/host_steward_runtime_ownership_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7ae67dcfa3aca7f2fa6aa767bb792014dff724c3",
-          "mode": "100644",
-          "path": "patches/modules/human_auth_handoff_callbacks_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "cd6d20320b643ab58dd770703fb1521fc12b13a8",
-          "mode": "100644",
-          "path": "patches/modules/human_auth_handoff_computer_use_v0.py",
-          "type": "blob"
-        },
-        {
-          "blob": "1e182e761c3947c37cc935e16cfb7992fea026e5",
-          "mode": "100644",
-          "path": "patches/modules/idle_compaction_clock_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "aef643803068508e99bd38f2546c92f2ff6250e2",
-          "mode": "100644",
-          "path": "patches/modules/inactivity_fresh_worker_recovery_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "5337ecce92f37368285f2ed5709e8fa07dd4fa26",
-          "mode": "100644",
-          "path": "patches/modules/kanban_delegated_progress_checkpoints_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "68750d39578f17288f986f7b987be17f50d93637",
-          "mode": "100644",
-          "path": "patches/modules/lean_agent_loop_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c12e699c804b68823cdd31083e793bddc75e386d",
-          "mode": "100755",
-          "path": "patches/modules/llm_attempt_receipts_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "f9b7bd0959dac408edc78ea5725b769e14b258cf",
-          "mode": "100644",
-          "path": "patches/modules/macos_protected_search_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "114091f15da281b9f0c5620a80b8d93615ab3302",
-          "mode": "100644",
-          "path": "patches/modules/mcp_in_turn_refresh_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "6730190dc65eaf907ce6d5461240a005a7bc5cc7",
-          "mode": "100644",
-          "path": "patches/modules/mcp_legacy_alias_dispatch_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "f953c5d11603ebe46fa9af7410c4a3aa7004ce3a",
-          "mode": "100644",
-          "path": "patches/modules/media_same_path_resend_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "443a5ceb34dc532e7ef76a454553473e69c78188",
-          "mode": "100644",
-          "path": "patches/modules/memory_promotion_scope_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "90d8112d51924170897b80572e6fc45b7ca16c50",
-          "mode": "100644",
-          "path": "patches/modules/native_browser_use_safety_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "db80dd2063aeb9559ff4a148f695c50936d168ac",
-          "mode": "100644",
-          "path": "patches/modules/oneshot_cron_provenance_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0bf6480115ed6e70195751f7f652ba999d10d69e",
-          "mode": "100644",
-          "path": "patches/modules/platform_delivery_drain_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "0ac810c223c5ad40c4af320b5a6a33c8254bf502",
-          "mode": "100644",
-          "path": "patches/modules/pm_first_selection_preserve_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c21fffc04ef6acaa9c6113e56e55b39081a0b466",
-          "mode": "100644",
-          "path": "patches/modules/pm_read_only_install_state_v1.py",
+          "path": "patches/modules/native_external_screen_v1.py",
           "type": "blob"
         },
         {
@@ -1092,273 +1226,177 @@
           "type": "blob"
         },
         {
-          "blob": "46ee4e1aa0bfa4bbde9d680dee73910e321d1c89",
-          "mode": "100644",
-          "path": "patches/modules/restart_interruption_checkin_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "8eabc4737ae7bdff8bc1ff82a508a779e4b65a27",
-          "mode": "100644",
-          "path": "patches/modules/runtime_env_config_authority_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "919357296ffa06d813d07b1d2d3ad51eabc3ce62",
-          "mode": "100644",
-          "path": "patches/modules/runtime_performance_events_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "36344f25e63eb615d87cccd757feb287ccf54b07",
-          "mode": "100644",
-          "path": "patches/modules/session_retention_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "52eef012a13592b26f76e2f74c9f0b48357206ee",
+          "blob": "cdc47daad4838c8fbe94386036263f22177e3828",
           "mode": "100644",
           "path": "patches/modules/session_url_storage_redaction_v1.py",
           "type": "blob"
         },
         {
-          "blob": "ff1f8069e7d432f7853d75de8be76d3594c67c32",
+          "blob": "db05b1c8c0b56b618d2f69f31a1f74088b716043",
           "mode": "100644",
-          "path": "patches/modules/silent_context_lifecycle_v1.py",
+          "path": "patches/modules/subscription_rollover_v1.py",
           "type": "blob"
         },
         {
-          "blob": "a4657791c42bcca1bcd7665f352f90583e44dbb1",
+          "blob": "bdb1817ebe312b1f2a832c7e7628ec23bb27a8aa",
           "mode": "100644",
-          "path": "patches/modules/sqlite_safe_journal_policy_v1.py",
+          "path": "patches/payloads/broker-codex-jobs-v1/broker_codex_cli.py",
           "type": "blob"
         },
         {
-          "blob": "dca5955211b216be5d7f647f418e16b761b5833d",
+          "blob": "55c71300048bd3d245b3285fe716a26062204db5",
           "mode": "100644",
-          "path": "patches/modules/state_db_descriptor_lifecycle_v1.py",
+          "path": "patches/payloads/broker-codex-jobs-v1/broker_codex_cli_bootstrap.py",
           "type": "blob"
         },
         {
-          "blob": "2c6f17ebab28d6fdcb44717c1d2ce319cc19874a",
+          "blob": "d2d471e7bbe9bec71513b873dee70db0302c98ce",
           "mode": "100644",
-          "path": "patches/modules/state_transaction_health_v1.py",
+          "path": "patches/payloads/broker-codex-jobs-v1/broker_codex_history.py",
           "type": "blob"
         },
         {
-          "blob": "668b612fd27ff17ed70fe183f93c0cea94e3aacf",
+          "blob": "941ee0d599ce57289cd3d9784dfe2dc21371412a",
           "mode": "100644",
-          "path": "patches/modules/telegram_commentary_capture_v3.py",
+          "path": "patches/payloads/broker-codex-jobs-v1/broker_codex_jobs.py",
           "type": "blob"
         },
         {
-          "blob": "65b70c2ad89538de89a9e1ebfb68b92d6ee308bd",
-          "mode": "100755",
-          "path": "patches/modules/telegram_dm_topic_recovery_root_guard_v1.py",
+          "blob": "2b58818fcac7c05e82712eaf9a0a75438f5d7ebf",
+          "mode": "100644",
+          "path": "patches/payloads/broker-codex-jobs-v1/codex",
           "type": "blob"
         },
         {
-          "blob": "04f75f70e65fd4c6034fa88b7da75df2b7e996a8",
+          "blob": "71354a19d231b8de94d1140f74b6a3e08169ff36",
           "mode": "100644",
-          "path": "patches/modules/telegram_fresh_topic_continuity_v1.py",
+          "path": "patches/payloads/broker-codex-jobs-v1/codex.cmd",
           "type": "blob"
         },
         {
-          "blob": "f897e99fb9821e004f82d943be84bfc2a28ee4c9",
+          "blob": "5b05252e49f5b886b551f8aafd0016d4d07b70da",
           "mode": "100644",
-          "path": "patches/modules/telegram_media_download_retry_v1.py",
+          "path": "patches/payloads/conditional-api-admission-v1/auth_codex_snapshot.py",
           "type": "blob"
         },
         {
-          "blob": "2d929b0dfdf8d4d59703ea08c79ea20d2bc4f10d",
+          "blob": "ca447b40dc7b08f6c7f6533206b4d954090283c4",
           "mode": "100644",
-          "path": "patches/modules/telegram_organic_long_running_checkpoints_v1.py",
+          "path": "patches/payloads/conditional-api-admission-v1/conditional_snapshot_policy.py",
           "type": "blob"
         },
         {
-          "blob": "62d852b057cd4bcf7cbc1c1dcd26868adecb08ee",
+          "blob": "39a54edbba50c24e202c91d39ff527910374ad0f",
           "mode": "100644",
-          "path": "patches/modules/telegram_organic_long_running_checkpoints_v2.py",
+          "path": "patches/payloads/conditional-api-admission-v1/session_conditional_api.py",
           "type": "blob"
         },
         {
-          "blob": "49a68a1ed6a9c1515be720ef97ef818d7cacb99d",
+          "blob": "c8da149b255bc51a7f9650334dea6f34ea55d56c",
           "mode": "100644",
-          "path": "patches/modules/telegram_organic_long_running_checkpoints_v3.py",
+          "path": "patches/payloads/native-external-screen-v1/edits.json",
           "type": "blob"
         },
         {
-          "blob": "4f486ee3c2e52a123a1f97cb3056b51468e748b8",
+          "blob": "38c762d3a3b91b3aa76633eba674a03337de001d",
           "mode": "100644",
-          "path": "patches/modules/telegram_poll_liveness_writer_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/inventory.json",
           "type": "blob"
         },
         {
-          "blob": "a4e528c64d60bd88d0571f156537630bca396f84",
+          "blob": "f253f4ed96a6aa2dd7b924017693266c8b89b202",
           "mode": "100644",
-          "path": "patches/modules/telegram_progress_cleanup_success_gate_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/hermes_cli/web_routers/display_external.py",
           "type": "blob"
         },
         {
-          "blob": "da67c87f463a36ff27a4ad56b6784fe9777f60dc",
+          "blob": "2a16e8b9972850d67f778694063df69fbee7d229",
           "mode": "100644",
-          "path": "patches/modules/telegram_transaction_canary_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/README.md",
           "type": "blob"
         },
         {
-          "blob": "f3543ddb1e4208cf620f5dec5f117ebfb293ab80",
+          "blob": "7dc51b4ac5c266ee1d82fdc72aed333ca61e67f1",
           "mode": "100644",
-          "path": "patches/modules/tool_guardrail_answer_carrier_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "627c4b3f9b459d0c553b5113011d8e3106b89506",
+          "blob": "bf93dc9481665c2bb592a2f67afd816fdf43846d",
           "mode": "100644",
-          "path": "patches/modules/voice_memo_single_delivery_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/backend.py",
           "type": "blob"
         },
         {
-          "blob": "124f74521723b4657bb3df3c524241527d16310a",
+          "blob": "37a57d088c61b0c4512c0631b29a3a8bf28f821a",
           "mode": "100644",
-          "path": "patches/modules/windows_gateway_task_identity_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/common.py",
           "type": "blob"
         },
         {
-          "blob": "0ea39b036bfe92c689013b6543bf32802c9efcb0",
+          "blob": "57ad6d08faebab7b5ad4ebdf2a182ba747eb9935",
           "mode": "100644",
-          "path": "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/plugin.yaml",
           "type": "blob"
         },
         {
-          "blob": "602c8fd46311e06c2e4ae682f23e767e99b9d3b8",
+          "blob": "2c73a13b0cf5d659fb02ec2c21aac5e165658a47",
           "mode": "100644",
-          "path": "patches/modules/xai_oauth_pricing_v1.py",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/requirements.txt",
           "type": "blob"
         },
         {
-          "blob": "cb8810d4621610da46e24d26f465b45032d1d401",
+          "blob": "f7fefa22e9f9bb2a536289462ee53a378d431fdd",
           "mode": "100644",
-          "path": "patches/payloads/cua-gateway-shutdown-v1/gateway_shutdown_test.py.inc",
+          "path": "patches/payloads/native-external-screen-v1/new/plugins/computer_use/wayvnc/rfb_worker.py",
           "type": "blob"
         },
         {
-          "blob": "9b726f3053b5e50bda5b22f836277eb0df45f0b4",
+          "blob": "dc49a601cf5152e8960f9248548f32908a5c1a60",
           "mode": "100644",
-          "path": "patches/payloads/curator-safety-v1/manifest.json",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/baseline.py",
           "type": "blob"
         },
         {
-          "blob": "94fe726e32bb5f6d2df56c01ac80da83938e943e",
+          "blob": "8272bc167f7efd32e88433f85c7d271fc71406d0",
           "mode": "100644",
-          "path": "patches/payloads/curator-safety-v1/native.patch",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/external.py",
           "type": "blob"
         },
         {
-          "blob": "35e8ec451999e1ce590316323047e5566c970d96",
+          "blob": "f7fab7a8078819682259c71fe1199310afa44d88",
           "mode": "100644",
-          "path": "patches/payloads/durable-delivery-history-v1/state_method.py.inc",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/generation.py",
           "type": "blob"
         },
         {
-          "blob": "108c3a415a9f136bf2e6c079759025f352590618",
+          "blob": "a342ffefa548374efc1177cac497e4a9fcd14fe1",
           "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-d363-v1/manifest.json",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/lease_external.py",
           "type": "blob"
         },
         {
-          "blob": "c4d89333b9ffc7e48883e07683a4bfac5f9e68c8",
+          "blob": "78e59b7e37538434a6d6d755e8f67b0cf688d263",
           "mode": "100644",
-          "path": "patches/payloads/durable-drain-inbox-d363-v1/native-durable-drain.patch",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/origin.py",
           "type": "blob"
         },
         {
-          "blob": "ba5e5b68d830fd22fc3f9ebfd5dcf1ab2486a9ce",
+          "blob": "4f991d311ef5b0ab46452a408ed715b9b60e9280",
           "mode": "100644",
-          "path": "patches/payloads/golden-rebuild-20261004/manifest.json",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/participants.py",
           "type": "blob"
         },
         {
-          "blob": "db23e370e7c7f163a977154fdbb3cb373d667c96",
+          "blob": "495042895f61e80467e4c5c8676a3be60dffea9f",
           "mode": "100644",
-          "path": "patches/payloads/golden-rebuild-20261004/native.patch",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/recovery.py",
           "type": "blob"
         },
         {
-          "blob": "2fa878f45b6022a29a66f1f08e45c08842b26cbf",
+          "blob": "677b7b9e54e342fb7bf1f2eccb2376fb3f3967a0",
           "mode": "100644",
-          "path": "patches/payloads/human-auth-handoff-computer-use-v0/d363_native_tests.py",
-          "type": "blob"
-        },
-        {
-          "blob": "342dcfbedc7e6e2923fb3853dd079a1abd40f19f",
-          "mode": "100644",
-          "path": "patches/payloads/human-auth-handoff-computer-use-v0/d363_safety.py",
-          "type": "blob"
-        },
-        {
-          "blob": "88029f8c04846658d7bb6f10ff38b183934ebbe0",
-          "mode": "100644",
-          "path": "patches/payloads/human-auth-handoff-computer-use-v0/d363_test_updates.json",
-          "type": "blob"
-        },
-        {
-          "blob": "08bcbbf5e276fe6abff8821ba5219f2e58394690",
-          "mode": "100644",
-          "path": "patches/payloads/idle-compaction-clock-v1/idle_compaction_clock.py",
-          "type": "blob"
-        },
-        {
-          "blob": "e7ecf54f9bce37e3af5b6ad2b4a519f83b16b23d",
-          "mode": "100644",
-          "path": "patches/payloads/llm-attempt-receipts-v1/agent/llm_attempt_receipts.py",
-          "type": "blob"
-        },
-        {
-          "blob": "3fe9506ecea34853f8c7bb09099274ebe127e7d5",
-          "mode": "100644",
-          "path": "patches/payloads/llm-attempt-receipts-v1/open_todo_stop_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "73d2ea5ba302d20a4eb9148b01d0aa09db464962",
-          "mode": "100644",
-          "path": "patches/payloads/llm-attempt-receipts-v1/outcome_stop_guard_v1.py",
-          "type": "blob"
-        },
-        {
-          "blob": "d8d257d9e16b26daf4c2e7b2b320a68c5efb8d45",
-          "mode": "100644",
-          "path": "patches/payloads/runtime-performance-events-v1/agent/runtime_performance_events.py",
-          "type": "blob"
-        },
-        {
-          "blob": "ddab231f503718341dd9d58dd6687a527890b0f2",
-          "mode": "100644",
-          "path": "patches/payloads/session-search-current-topic-v2/golden_topic_recall.py",
-          "type": "blob"
-        },
-        {
-          "blob": "227369ccd74455e38f6af7226d6f148bffe628f4",
-          "mode": "100644",
-          "path": "patches/payloads/silent-context-lifecycle-d363-v1/manifest.json",
-          "type": "blob"
-        },
-        {
-          "blob": "1719ccb5b355a9db79850f5917cf08bef64bc21e",
-          "mode": "100644",
-          "path": "patches/payloads/silent-context-lifecycle-d363-v1/native.patch",
-          "type": "blob"
-        },
-        {
-          "blob": "943954ef280b7a1c7d5930987c1b779809d9268f",
-          "mode": "100644",
-          "path": "patches/payloads/state-transaction-health/gateway/state_transaction_health.py",
-          "type": "blob"
-        },
-        {
-          "blob": "933097c463fc85b563151e0fcef9b34c3a487ef9",
-          "mode": "100644",
-          "path": "patches/payloads/telegram-transaction-canary/gateway/telegram_transaction_ledger.py",
+          "path": "patches/payloads/native-external-screen-v1/new/tools/bot_desktop/retirement.py",
           "type": "blob"
         },
         {
@@ -1368,13 +1406,13 @@
           "type": "blob"
         },
         {
-          "blob": "39c010296f55e205229347fe3a1742245884812b",
+          "blob": "52df290d50b3edfd106ea36d17b6a8090ccef595",
           "mode": "100644",
           "path": "patches/registry.yaml",
           "type": "blob"
         },
         {
-          "blob": "cc63043af3fbc53fe1a224fa79fcb458d25412aa",
+          "blob": "da78a2166a18b79268099e6a6f98ec7c45244081",
           "mode": "100644",
           "path": "plugins/botdoctor-immersion/__init__.py",
           "type": "blob"
@@ -1392,39 +1430,21 @@
           "type": "blob"
         },
         {
-          "blob": "01aa73f59920f3ca7be2bf218c5864ecfa8399bb",
+          "blob": "352c693a65de6e42ca98dfe5dfa6bf5d87dbf68e",
           "mode": "100644",
-          "path": "plugins/composio-onboarding/__init__.py",
+          "path": "plugins/botdoctor-telegram/README.md",
           "type": "blob"
         },
         {
-          "blob": "18345efc86bccc364b33317d245cb41f88e327c1",
+          "blob": "e9846d895706e418fc85cc30c7b83c05dbfd986b",
           "mode": "100644",
-          "path": "plugins/composio-onboarding/command.py",
+          "path": "plugins/botdoctor-telegram/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "4c90a4f4e7661d2cc3dde911e6a0f64d8d6e2944",
+          "blob": "baf81a6d0bbd5563a173a71a9848624190bfc9ea",
           "mode": "100644",
-          "path": "plugins/composio-onboarding/core.py",
-          "type": "blob"
-        },
-        {
-          "blob": "e02d8776bb5bda82cf9bdd5f4b6e9e594c8d6673",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "de7ecdded6df94e7eae60ebb5fb54ad7e215567c",
-          "mode": "100644",
-          "path": "plugins/composio-onboarding/redaction.py",
-          "type": "blob"
-        },
-        {
-          "blob": "8999c29c9ac7a75bb2d2d038b482e61ec7005f96",
-          "mode": "100644",
-          "path": "plugins/mcp-on-demand-control/README.md",
+          "path": "plugins/botdoctor-telegram/plugin.yaml",
           "type": "blob"
         },
         {
@@ -1434,19 +1454,19 @@
           "type": "blob"
         },
         {
-          "blob": "64cd50c83bb95f720a421f2c644a0f514ae6d531",
+          "blob": "d0cd7cebf931e107642b04ea1bcf6e2f61d3fa30",
           "mode": "100644",
           "path": "plugins/mcp-on-demand-control/control.py",
           "type": "blob"
         },
         {
-          "blob": "d47a6c0ed7a5cd8fe78dc596a2ba77faa0f83b8c",
+          "blob": "2bf610e13c4075727d8d42c16b1931390fbcc27d",
           "mode": "100644",
           "path": "plugins/mcp-on-demand-control/plugin.yaml",
           "type": "blob"
         },
         {
-          "blob": "725362e06e84c63fb446f00e7207185997567bb3",
+          "blob": "061f136c05756e1afec5bcb6b2dda9bbf31d1ad5",
           "mode": "100644",
           "path": "plugins/mcp-on-demand-control/registration.py",
           "type": "blob"
@@ -1470,103 +1490,61 @@
           "type": "blob"
         },
         {
-          "blob": "0f7042806a96c6aaf30836db038080d963a98996",
+          "blob": "2a16e8b9972850d67f778694063df69fbee7d229",
           "mode": "100644",
-          "path": "plugins/skill-category-recovery/__init__.py",
+          "path": "plugins/wayvnc/README.md",
           "type": "blob"
         },
         {
-          "blob": "24e25913ca1ff9d949139ec88a4bf9ed016af145",
+          "blob": "7dc51b4ac5c266ee1d82fdc72aed333ca61e67f1",
           "mode": "100644",
-          "path": "plugins/skill-category-recovery/plugin.yaml",
+          "path": "plugins/wayvnc/__init__.py",
           "type": "blob"
         },
         {
-          "blob": "242287738b0c3baf0b3ae79e35ad7c78f8f39bcb",
+          "blob": "bf93dc9481665c2bb592a2f67afd816fdf43846d",
           "mode": "100644",
-          "path": "plugins/task-ledger/__init__.py",
+          "path": "plugins/wayvnc/backend.py",
           "type": "blob"
         },
         {
-          "blob": "dc84c836b89d6c633ba47701c38ba84e787b5150",
+          "blob": "37a57d088c61b0c4512c0631b29a3a8bf28f821a",
           "mode": "100644",
-          "path": "plugins/task-ledger/plugin.yaml",
+          "path": "plugins/wayvnc/common.py",
           "type": "blob"
         },
         {
-          "blob": "c6a41b800b3c8367769ca0e6b964ec2cec326d2e",
+          "blob": "57ad6d08faebab7b5ad4ebdf2a182ba747eb9935",
           "mode": "100644",
-          "path": "plugins/task-ledger/tools.py",
+          "path": "plugins/wayvnc/plugin.yaml",
           "type": "blob"
         },
         {
-          "blob": "324adaa6f53889bda98260f1524c12b159da970e",
+          "blob": "2c73a13b0cf5d659fb02ec2c21aac5e165658a47",
           "mode": "100644",
-          "path": "plugins/telegram-email-card-qa/__init__.py",
+          "path": "plugins/wayvnc/requirements.txt",
           "type": "blob"
         },
         {
-          "blob": "96813a4caf1a106b181db827a5f6b707e912a007",
+          "blob": "f7fefa22e9f9bb2a536289462ee53a378d431fdd",
           "mode": "100644",
-          "path": "plugins/telegram-email-card-qa/plugin.yaml",
+          "path": "plugins/wayvnc/rfb_worker.py",
           "type": "blob"
         },
         {
-          "blob": "773780455de1b7b03198811ec68fff16a01dd029",
-          "mode": "100755",
-          "path": "plugins/telegram-email-card-qa/telegram_email_card_lint.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c28cc61341364ffcfd6b6faa3520792be35ba64a",
-          "mode": "100644",
-          "path": "plugins/telegram-topic-post/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "c23652040dc1470269d29f085e0641db1e056095",
-          "mode": "100644",
-          "path": "plugins/telegram-topic-post/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "8671376d1b9b54314e6046ee0d91505e229e6b2b",
-          "mode": "100644",
-          "path": "plugins/telegram-topic-post/tools.py",
-          "type": "blob"
-        },
-        {
-          "blob": "2c94577240494e5be1f20576dd4648702a21d724",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/__init__.py",
-          "type": "blob"
-        },
-        {
-          "blob": "7ceb2f2078f25b39f45359799bf8857204f6f264",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/plugin.yaml",
-          "type": "blob"
-        },
-        {
-          "blob": "0be12367f3346fb78e3dfd5e568ec9cabc8daba1",
-          "mode": "100644",
-          "path": "plugins/telegram-transcript/tools.py",
-          "type": "blob"
-        },
-        {
-          "blob": "399522e688d824da27b8d5f99e6f26aa2c132c0c",
+          "blob": "b2ba0d5d94c0d1ca9178431740c46236586947bd",
           "mode": "100644",
           "path": "scripts/merge-shared-defaults.py",
           "type": "blob"
         },
         {
-          "blob": "0ecf8c5e44d3182ab214d1153ca74e1e609b6082",
+          "blob": "eefce4ae653e08d715302f3ae72b1dd013aca921",
           "mode": "100644",
           "path": "shared-defaults/README.md",
           "type": "blob"
         },
         {
-          "blob": "02cc54f5f8a5597d6426529b820f83d0dcb02a80",
+          "blob": "2ce620e326dea5c657c5133de528beca1fb3656a",
           "mode": "100644",
           "path": "shared-defaults/config-client-quiet-display.yaml",
           "type": "blob"
@@ -1578,15 +1556,15 @@
           "type": "blob"
         },
         {
-          "blob": "31a371c41e27c1956e65fe38b415eac9f15e1f6e",
+          "blob": "f49483f240c01aebad05235e62df60c4cc5c775e",
           "mode": "100644",
-          "path": "shared-defaults/config-mcp-on-demand-control.yaml",
+          "path": "shared-defaults/config-fleet-consistency-baseline.yaml",
           "type": "blob"
         },
         {
-          "blob": "d55e72effc423fdc31d2a847546ce10db4cf231d",
+          "blob": "cf7b88fb7f0990872b826afbb38c18ecd3c16012",
           "mode": "100644",
-          "path": "shared-defaults/config-model-autonomy.yaml",
+          "path": "shared-defaults/config-mcp-on-demand-control.yaml",
           "type": "blob"
         },
         {
@@ -1596,49 +1574,79 @@
           "type": "blob"
         },
         {
-          "blob": "dbbdfa4ce4b4736d01ebc4d9bc869ec2e41ff4b3",
+          "blob": "09f67e2276678d22be4d29291d9ceea4c01b437d",
           "mode": "100644",
-          "path": "shared-defaults/config-native-tool-search.yaml",
+          "path": "shared-defaults/config-native-skill-approval.yaml",
           "type": "blob"
         },
         {
-          "blob": "f9f0b6a54470b78245a4b8f216e52adc3303b651",
+          "blob": "9a1083b9040f057625cdd094e94016fd0d63a874",
+          "mode": "100644",
+          "path": "shared-defaults/config-single-model-routing.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "b6199d63c7aac8e2c463bc7a19dd6667dc61f967",
           "mode": "100644",
           "path": "shared-defaults/config-subscription-failover.yaml",
           "type": "blob"
         },
         {
-          "blob": "d3129069b05df59ed9bc16b89269221445cc5d50",
+          "blob": "c30b3acd3970a56fa1bfc0e6aeed7d7a6e644b60",
           "mode": "100644",
-          "path": "shared-defaults/config-telegram-organic-checkpoints.yaml",
+          "path": "shared-defaults/config-telegram-plain-updates.yaml",
           "type": "blob"
         },
         {
-          "blob": "68445885e58b776a8f9a4a7c2d0a239d401bdf2f",
+          "blob": "db19f2d0a8a7257162dd18593ddc5b8e53064549",
           "mode": "100644",
           "path": "shared-defaults/config-telegram-surface.yaml",
           "type": "blob"
         },
         {
-          "blob": "0e216e94346132110288afa2c82cc4be27d30140",
+          "blob": "b0dac701851e7188d34c5e537aa6efde3f8c2ce1",
           "mode": "100644",
           "path": "shared-defaults/config-x-search.yaml",
           "type": "blob"
         },
         {
-          "blob": "a098aa021653a45ba4b14b19c13f00cbc03a3fad",
+          "blob": "c8f8c437a7901e5ab2054afa0f5fae5f1957934b",
+          "mode": "100644",
+          "path": "shared-defaults/fleet-exemptions.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "cd3e2f0ffa5838ac90c12667f1b4e0d8354016c4",
+          "mode": "100644",
+          "path": "shared-defaults/retired-inert-keys-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "f2751e7ac46b61282b494ded6bf357e121406809",
+          "mode": "100644",
+          "path": "shared-defaults/retired-legacy-overrides-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "e60ed6646cfe04f43af6b9b8c46d58c95922aed7",
+          "mode": "100644",
+          "path": "shared-defaults/retired-model-routing-v1.yaml",
+          "type": "blob"
+        },
+        {
+          "blob": "7264b8f329b23291540ec3820fc31e6c3e71c581",
           "mode": "100644",
           "path": "shared-defaults/retired-policy-defaults-v1.yaml",
           "type": "blob"
         },
         {
-          "blob": "33a039481bb2436a28f27448decce1bf178846b3",
+          "blob": "71253a0842b01276bac71070cabac33c4364e8f2",
           "mode": "100644",
           "path": "shared-defaults/skill-catalog-index.json",
           "type": "blob"
         },
         {
-          "blob": "64c6159aedb2fcb2c54bd985036a61bfbb89490b",
+          "blob": "5b7fee42afcaee7981bbd6d928208450b1361fb9",
           "mode": "100644",
           "path": "shared-rules/browser-piloting.md",
           "type": "blob"
@@ -1650,7 +1658,7 @@
           "type": "blob"
         },
         {
-          "blob": "76724b3d8146d2aea7761f1ec1b8acf4e0119158",
+          "blob": "60532158d62182775f46cdd41086d0d8d65d8507",
           "mode": "100644",
           "path": "shared-rules/capability-discovery.md",
           "type": "blob"
@@ -1662,7 +1670,7 @@
           "type": "blob"
         },
         {
-          "blob": "bfe69464025b1f3aec3329aea38fa9c74dd8ef6d",
+          "blob": "ad5e4219dacf7cc41d98d7afa3338fb751dc74cd",
           "mode": "100644",
           "path": "shared-rules/content-policy.md",
           "type": "blob"
@@ -1674,7 +1682,7 @@
           "type": "blob"
         },
         {
-          "blob": "0bf6141cc9017c158c028c639f80e1d6b92b8e20",
+          "blob": "4aa039d6bc7fa942503e4b52eab1ce3b506fe4f0",
           "mode": "100644",
           "path": "shared-rules/execution-bias.md",
           "type": "blob"
@@ -1698,7 +1706,7 @@
           "type": "blob"
         },
         {
-          "blob": "3544eea07ea597d0d8f07d20abe1e30d844916e3",
+          "blob": "132a5eab5c8f42f95479b0a88d22f5d2c0449c87",
           "mode": "100644",
           "path": "shared-rules/knowledge-routing.md",
           "type": "blob"
@@ -1710,13 +1718,13 @@
           "type": "blob"
         },
         {
-          "blob": "a5777cdfb7b3d3b30540d590c4edeaa801ee64d1",
+          "blob": "1fffaa65a75ac6b433a9b886cc57c3af0c5994dd",
           "mode": "100644",
           "path": "shared-rules/machine-capability.md",
           "type": "blob"
         },
         {
-          "blob": "36b66da34eae1e264ecbecaf1be39424ca89bc29",
+          "blob": "f280469c26c5329b397153f13a5e18d0dd4b0ed0",
           "mode": "100644",
           "path": "shared-rules/operator-duty.md",
           "type": "blob"
@@ -1740,7 +1748,7 @@
           "type": "blob"
         },
         {
-          "blob": "0008064cb3cb5996965b1bb83845b07c2a234758",
+          "blob": "e2188e52ef7da92ddcc9ff8dc3693422d64b337c",
           "mode": "100644",
           "path": "shared-rules/truth-over-comfort.md",
           "type": "blob"
@@ -2856,7 +2864,7 @@
           "type": "blob"
         },
         {
-          "blob": "e13211676fdc1ccd01c62cfed286e16238ccb409",
+          "blob": "69b0501391aeb04ea642ddca89a4ed3114de6ecc",
           "mode": "100644",
           "path": "skills/creative/hyperframes-creative/UPSTREAM.json",
           "type": "blob"
@@ -3246,7 +3254,7 @@
           "type": "blob"
         },
         {
-          "blob": "e39459f222ecc7a6035207812c1eef5f4499788e",
+          "blob": "e86e93ffe0d52c237b6b39a148963ccdd064090e",
           "mode": "100644",
           "path": "skills/creative/hyperframes-creative/references/house-style.md",
           "type": "blob"
@@ -4866,7 +4874,7 @@
           "type": "blob"
         },
         {
-          "blob": "a9c6e0a713fd504de1ff2c6845155bda8a4099fb",
+          "blob": "5e8fec1b28c77dfaa3d690cd6354d3b24c503143",
           "mode": "100644",
           "path": "skills/curated/jev-review/USAGE.md",
           "type": "blob"
@@ -4893,6 +4901,12 @@
           "blob": "bb287483608224efb615cb5c689cbe07cf00d5e4",
           "mode": "100644",
           "path": "skills/curated/jev-review/tests/test_jev.py",
+          "type": "blob"
+        },
+        {
+          "blob": "684aac4d2d0bb24dae5c417af4db652aa6ee2872",
+          "mode": "100644",
+          "path": "skills/curated/news-watch/SKILL.md",
           "type": "blob"
         },
         {
@@ -4932,6 +4946,12 @@
           "type": "blob"
         },
         {
+          "blob": "46f91430ae0a57d6375a971b1706ddcbb49c135f",
+          "mode": "100644",
+          "path": "skills/datapatriot/SKILL.md",
+          "type": "blob"
+        },
+        {
           "blob": "5a778d933348d1c8990d6d60aeb8076b7cfbe0f3",
           "mode": "100644",
           "path": "skills/fleet/email-card-qa/SKILL.md",
@@ -4950,7 +4970,7 @@
           "type": "blob"
         },
         {
-          "blob": "122ca417ba074fba8cc20189378875093ad687ae",
+          "blob": "1d401c7714b45cdbed40024ab5230721e7cae9d6",
           "mode": "100644",
           "path": "skills/fleet/golden-visual-qa/SKILL.md",
           "type": "blob"
@@ -4968,25 +4988,25 @@
           "type": "blob"
         },
         {
-          "blob": "b8b661e8eff238fe8db3e4d846c9332bcdd4ad4e",
-          "mode": "100644",
-          "path": "skills/fleet/grok-x-research/SKILL.md",
-          "type": "blob"
-        },
-        {
-          "blob": "a1c3c83c7312a5ff67e9cd1eb78d1215a583d3ac",
+          "blob": "6f274ab72d54de5ed479e52cb45cfde2ee6f8715",
           "mode": "100644",
           "path": "skills/fleet/nightly-client-reflection-default/SKILL.md",
           "type": "blob"
         },
         {
-          "blob": "9ae88e31784499a3304b31f2a4ea5a7d13e3254c",
+          "blob": "0fe94a5c8bac832bc807ca04a2e3be5d78b173dc",
           "mode": "100644",
           "path": "skills/fleet/papercuts/SKILL.md",
           "type": "blob"
         },
         {
-          "blob": "27198ef13316397e4890bafb4b51fac828acd97f",
+          "blob": "428133f70b8118e12b6aac23749e1a1812576907",
+          "mode": "100644",
+          "path": "skills/fleet/x-research/SKILL.md",
+          "type": "blob"
+        },
+        {
+          "blob": "36e48e607b30646fea8eb60c52ce2df1427df572",
           "mode": "100644",
           "path": "skills/internal/capability-scout/SKILL.md",
           "type": "blob"
@@ -5010,7 +5030,7 @@
           "type": "blob"
         },
         {
-          "blob": "a81ef4c2899926a3a369938ef59ce7d22cafecbf",
+          "blob": "6f68f7136b6ab8bd118204714aa9bf2bed16b797",
           "mode": "100644",
           "path": "upstream.lock",
           "type": "blob"
@@ -5022,6 +5042,8 @@
         "bin/dream.py",
         "bin/dream_consolidate.py",
         "bin/native_memory_limits.py",
+        "bin/operator_native_llm.py",
+        "bin/hermes-nightly-dream-cycle.py",
         "bin/golden-visual-qa",
         "bin/hermes-client-day-review",
         "bin/human_auth_handoff.py",
@@ -5037,6 +5059,10 @@
         "bin/papercut_inbox.py",
         "bin/registry-sync.py",
         "bin/self-improvement-trigger.py",
+        "bin/self_editing_v2_acceptance.py",
+        "bin/self_editing_v2_archive.py",
+        "bin/self_editing_v2_lifecycle.py",
+        "bin/self_editing_v2_promotion.py",
         "bin/telegram-transaction-canary.py",
         "hooks/gbrain-capture",
         "hooks/open-loop-detector",
@@ -5079,6 +5105,7 @@
         "patches/modules/codex_refresh_transport_fallback_v1.py",
         "patches/modules/codex_strict_structured_output_v1.py",
         "patches/modules/clarify_prose_deadlock_guard_v1.py",
+        "patches/modules/macos_process_cleanup_v1.py",
         "patches/modules/context_compaction_postconditions_v1.py",
         "patches/modules/auto_resume_contextual_reset_v1.py",
         "patches/modules/cron_scheduler_can_dispatch_compat_v1.py",
@@ -5122,13 +5149,13 @@
         "patches/modules/mcp_stdio_liveness_recovery_v1.py",
         "patches/modules/macos_protected_search_guard_v1.py",
         "patches/modules/native_browser_use_safety_v1.py",
+        "patches/modules/browser_named_connections_v1.py",
         "kit/bin/ensure-browser-use-cli.py",
         "kit/config/browser-use-cli-release-v1.json",
         "patches/modules/pdf_release_receipt_gate_v1.py",
         "patches/modules/intent_ack_progressive_v1.py",
         "patches/modules/inactivity_fresh_worker_recovery_v1.py",
         "patches/modules/lean_agent_loop_v1.py",
-        "patches/modules/kanban_delegated_progress_checkpoints_v1.py",
         "patches/modules/lifecycle_guard_invalid_path_v1.py",
         "patches/modules/gbrain_context_v1.py",
         "patches/modules/memory_promotion_scope_v1.py",
@@ -5137,6 +5164,10 @@
         "patches/payloads/gbrain-context-v1",
         "patches/modules/registry_loader.py",
         "patches/modules/session_url_storage_redaction_v1.py",
+        "patches/modules/acp_edit_approval_outcomes_v1.py",
+        "patches/modules/subscription_rollover_v1.py",
+        "patches/modules/broker_oauth_pool_resync_v1.py",
+        "patches/modules/anthropic_403_pool_rotation_v1.py",
         "patches/modules/restart_interruption_checkin_v1.py",
         "patches/modules/runtime_env_config_authority_v1.py",
         "patches/modules/gateway_capability_env_presence_v1.py",
@@ -5158,12 +5189,13 @@
         "patches/modules/telegram_progress_cleanup_success_gate_v1.py",
         "patches/modules/telegram_transaction_canary_v1.py",
         "patches/modules/state_transaction_health_v1.py",
+        "patches/modules/state_diagnostic_index_v1.py",
         "patches/modules/tool_guardrail_answer_carrier_v1.py",
+        "patches/modules/turn_finalizer_exit_reason_v1.py",
         "patches/modules/windows_gateway_task_identity_v1.py",
         "patches/modules/gpt6_reasoning_efforts_v1.py",
         "patches/modules/grok47_reasoning_v1.py",
         "patches/modules/cron_silent_mutation_footer_v1.py",
-        "patches/modules/cron_progress_job_guard_v1.py",
         "patches/modules/fallback_chain_restart_bound_v1.py",
         "patches/modules/pm_read_only_install_state_v1.py",
         "patches/modules/xai_deferred_tool_bridge_guard_v1.py",
@@ -5187,6 +5219,17 @@
         "plugins/goal-ops",
         "plugins/goal-spine",
         "plugins/plaud-goal-intake",
+        "plugins/botdoctor-telegram",
+        "patches/modules/native_external_screen_v1.py",
+        "patches/payloads/native-external-screen-v1",
+        "plugins/wayvnc",
+        "patches/modules/gateway_progress_renderer_v1.py",
+        "patches/modules/broker_codex_jobs_v1.py",
+        "patches/modules/native_cua_lock_v1.py",
+        "kit/config/cua-driver-release-v1.json",
+        "patches/payloads/broker-codex-jobs-v1",
+        "patches/modules/conditional_api_admission_v1.py",
+        "patches/payloads/conditional-api-admission-v1",
         "plugins/botdoctor-immersion",
         "plugins/composio-onboarding",
         "plugins/mcp-on-demand-control",
@@ -5194,6 +5237,7 @@
         "plugins/task-ledger",
         "plugins/telegram-email-card-qa",
         "plugins/skill-category-recovery",
+        "plugins/session-topic-recall",
         "plugins/telegram-topic-post",
         "plugins/telegram-transcript",
         "scripts/merge-shared-defaults.py",
@@ -5225,8 +5269,9 @@
         "skills/fleet/nightly-client-reflection-default",
         "skills/fleet/papercuts",
         "skills/fleet/golden-computer-use-v2",
-        "skills/fleet/grok-x-research",
+        "skills/fleet/x-research",
         "skills/fleet/golden-visual-qa",
+        "skills/datapatriot/SKILL.md",
         "skills/internal/capability-scout",
         "skills/internal/creative-output-escalation",
         "skills/internal/self-improvement-loop-gates",
@@ -5234,6 +5279,7 @@
         "skills/creative",
         "skills/curated/jev-review",
         "skills/curated/cua-s1-forms",
+        "skills/curated/news-watch/SKILL.md",
         "skills/curated/visual-reference-library/SKILL.md",
         "skills/curated/visual-reference-library/registry.jsonl",
         "skills/curated/visual-reference-library/schema.json",
@@ -5244,29 +5290,34 @@
       ]
     }
   },
-  "deployment_digest": "204ff78409d9a9e237c7d7d5e523659d3301a1bcf7aad1578798c6480cefc50a",
-  "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
+  "deployment_digest": "cea91b19c8759e8b85b97a9aa73039d999a9e7c23f8cf16f3ac5ee28764b62e5",
+  "golden_sha": "0e9165b3fc38a7514b11a7f1d579fd01d14db54e",
   "kind": "golden_runtime_payload_manifest",
   "runtime_fingerprint": {
-    "digest": "a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0",
+    "digest": "ec69a5a346f5e8deae73d562d643238f56466554c059d728dcb942f92f0f6076",
     "exact_assembly": true,
     "excluded_state_or_artifacts": [],
-    "expected_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
-    "file_count": 340,
+    "expected_upstream_sha": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+    "file_count": 142,
     "files": {
-      ".golden-runtime-carriers/curator-safety-v1.json": {
+      "acp_adapter/edit_approval.py": {
         "mode": "100644",
-        "sha256": "3151b8a2e5dee314df22b312fd85051b909bada9ac69fa5181518d29b30edcbe",
+        "sha256": "808f6ba6defb088204ae8d38eb7ea6fdebc1a0daefc0462efcd1749059a861ea",
         "type": "blob"
       },
-      ".golden-runtime-carriers/golden-rebuild-20261004.json": {
+      "acp_adapter/gateway_server.py": {
         "mode": "100644",
-        "sha256": "a361c6f260fcc68d3a659906fbba9e00f6820d8bff04aa172db3b3f47ca5637e",
+        "sha256": "e9ba24dcedf870cc24d5f8e7559fb317975462ba36406ca866a8a025f4246f18",
         "type": "blob"
       },
-      ".golden-runtime-carriers/tool-guardrail-answer-current-v1.json": {
+      "acp_adapter/server.py": {
         "mode": "100644",
-        "sha256": "76098ba3a98a562db39ee3a6613f6e7eaa1d9c5192bbcecaf4f95769fc53c5e7",
+        "sha256": "b39a23f534f5d98467895de6407acede55440424364c065674f5c1ab10a2b48e",
+        "type": "blob"
+      },
+      "acp_adapter/session.py": {
+        "mode": "100644",
+        "sha256": "ab8f02d31f944ca5638bf5d2519622a8b69782838ff524db134dd30817c6d5b1",
         "type": "blob"
       },
       "activate.ps1": {
@@ -5276,292 +5327,192 @@
       },
       "agent/agent_init.py": {
         "mode": "100644",
-        "sha256": "8303140693402f75677dfd0fb622aa9125a221120a93574b430e41e51e6106f8",
+        "sha256": "fe1182b3c8313edf546b6968c71e4bd6dc698dfd7bb6312981b16d560d23c060",
         "type": "blob"
       },
       "agent/agent_runtime_helpers.py": {
         "mode": "100644",
-        "sha256": "ff49ede811a731d68235926839af5a81f859dbdc7e2b34ff27261502d85ccc1d",
+        "sha256": "f55e4093c93d74235b0108ab14ea5084bc138c79203bc002a7edd2b364061630",
+        "type": "blob"
+      },
+      "agent/anthropic_credentials.py": {
+        "mode": "100644",
+        "sha256": "af305ab44b8e057dabbce894e9370575bafcf08f06d94b7bf8578758c4487d9f",
         "type": "blob"
       },
       "agent/auxiliary_client.py": {
         "mode": "100644",
-        "sha256": "a26cf4722a4a751a0ab32c1329000d44268807337a7a4b2beae022970aee30a8",
+        "sha256": "6c3a324d8d579709f041884ed8776aeaa895c59667b00883279541689ef1939f",
         "type": "blob"
       },
-      "agent/background_review.py": {
+      "agent/broker_cli_bin/codex": {
+        "mode": "100755",
+        "sha256": "d4b80eace558380dec806dcd0d7489f24342ac183a466edc6d1cd810a8179cd6",
+        "type": "blob"
+      },
+      "agent/broker_cli_bin/codex.cmd": {
         "mode": "100644",
-        "sha256": "fda5f68a293cb2e3da7a4b6b05e691397cefaab3da30289be0a3be3e13f27960",
+        "sha256": "28de0edd8e63dd09d6c96c643bb38e9ee0433ef897f7d078b090892817e8cdf1",
+        "type": "blob"
+      },
+      "agent/broker_codex_cli.py": {
+        "mode": "100644",
+        "sha256": "775059e620fde5afa8dbf7cebf9c847c0ab70abdd6557b04a12d0c4c04e68f50",
+        "type": "blob"
+      },
+      "agent/broker_codex_cli_bootstrap.py": {
+        "mode": "100644",
+        "sha256": "410dfb0be9a7f19b2297abfc7ebcdd9cacb013328f7e86b681c3bcb79b0dbf9b",
+        "type": "blob"
+      },
+      "agent/broker_codex_history.py": {
+        "mode": "100644",
+        "sha256": "bdda6865c1489ead57fa204de3af4f579cef7e096fd5817a702f6a5f4f4b26c5",
+        "type": "blob"
+      },
+      "agent/broker_codex_jobs.py": {
+        "mode": "100644",
+        "sha256": "a8aec18282bbefe36e57baad59a59cedfd74a8fa90b90c2894687cc5fd9b2972",
         "type": "blob"
       },
       "agent/chat_completion_helpers.py": {
         "mode": "100644",
-        "sha256": "48ef31beeeb6788d2aa7ae1525efb562939de5cb07921da35f37c00f4cffc3dd",
+        "sha256": "52cfa20b1d2479d4e1b7a3b6bf2d77b1a2cb7be82b9657efbc81f5e14108e414",
         "type": "blob"
       },
-      "agent/codex_401_circuit.py": {
+      "agent/client_lifecycle.py": {
         "mode": "100644",
-        "sha256": "2be64e66ee71b1ef10f38f13e253df6a0b0d9913b86f1e8e3138eb13c013dc04",
+        "sha256": "9753d863470a229d52e9ad8185154c948b2d0ee2e9c7daad78080f8052c64b9c",
+        "type": "blob"
+      },
+      "agent/codex_headers.py": {
+        "mode": "100644",
+        "sha256": "f38a7ee8765b98935345b0b79589e1d5d37ee632d4ef75f2c68274fb941fd7da",
         "type": "blob"
       },
       "agent/codex_runtime.py": {
         "mode": "100644",
-        "sha256": "feb7340daedc5212b0298afafa4a53442365cd5fe464ea848ac9cc013f719a61",
+        "sha256": "98b439f3f2340d9b6fa2faec0632a5b22e3b184bd85374f62649ec257d99db8e",
         "type": "blob"
       },
-      "agent/context_compressor.py": {
+      "agent/conditional_snapshot_policy.py": {
         "mode": "100644",
-        "sha256": "35798fe46d24eaf5098d2a8a320b1da168570a5e400194ca1f5e9179097744f0",
-        "type": "blob"
-      },
-      "agent/conversation_compression.py": {
-        "mode": "100644",
-        "sha256": "70dc6570e7960fea80c2a6e3345fd73f828ac395f59839f47125099f61835df4",
+        "sha256": "724941abfa96ae5224e4de0945b95a81b6d2c4db0467ba672bbb0944e3f1abd7",
         "type": "blob"
       },
       "agent/conversation_loop.py": {
         "mode": "100644",
-        "sha256": "9ed5a80faad87bdb0ff6135c370374a0d55b57ecd88baad117d04e12cc686fed",
+        "sha256": "9df9249d66b2dedcb239888adcc3726305bc48de965a361de21fef2a53d5fa64",
+        "type": "blob"
+      },
+      "agent/credential_auth_recovery.py": {
+        "mode": "100644",
+        "sha256": "6a5f10459a9574201f2836f960d8fa768fdb96025d80738adc6300a47069c279",
         "type": "blob"
       },
       "agent/credential_pool.py": {
         "mode": "100644",
-        "sha256": "53a08db1ad0cbf479425795dcd4fcfbeb66d0dfc62056dc38afceb22b2d9aced",
+        "sha256": "fef7248028a0590a09c20221f7fdef32983b42ab5760f6b3e4bd906c70c6ab05",
         "type": "blob"
       },
-      "agent/curator.py": {
+      "agent/credential_pool_model_cooldowns.py": {
         "mode": "100644",
-        "sha256": "864515586ec15e1fba86644e0193a67a55f65f8b8cb13686b37c7cc9968e4752",
+        "sha256": "45206b8406501e3fadf85db5b9329970806b88d3833f726ed9f9eb403c8d1a2d",
         "type": "blob"
       },
-      "agent/display.py": {
+      "agent/credential_sources.py": {
         "mode": "100644",
-        "sha256": "b4c1d88e53a3cbe134e91b8220758ff96d73354ab180c1910a1a4698021b94b1",
+        "sha256": "1caf3328ad8480820fb948d5675586a47ffc9d031b82a0efca3c2685d1f1f333",
         "type": "blob"
       },
-      "agent/durable_integration.py": {
+      "agent/error_classifier.py": {
         "mode": "100644",
-        "sha256": "ba597ff09d200dfbbea636f82fb7a32fa77f8eb76746ff5efab17058f0ec0baa",
-        "type": "blob"
-      },
-      "agent/durable_resume.py": {
-        "mode": "100644",
-        "sha256": "60dfaec8af47f6ec4813212a8e855dbd27270a2e8bdd206364598b9f554e6d2a",
-        "type": "blob"
-      },
-      "agent/durable_runtime.py": {
-        "mode": "100644",
-        "sha256": "4d547d62d528bb158cd8e2dd1506afa4a71e25f93b4d05e540e0b428bb7af657",
-        "type": "blob"
-      },
-      "agent/durable_schema_stage_b.py": {
-        "mode": "100644",
-        "sha256": "f513c44c9ceea2701980be0f20f2e81f7c38a9a2152db59319384bb1b55eb969",
-        "type": "blob"
-      },
-      "agent/durable_state.py": {
-        "mode": "100644",
-        "sha256": "51fdc2709ee3c9feb448b45fc9b1ca08edb475f22e6e7ff3d1a4604f2c14e33b",
-        "type": "blob"
-      },
-      "agent/error_classification.py": {
-        "mode": "100644",
-        "sha256": "186c23473cb9652194ae34c7fde5387a75af93ead206a281693a8e005b774d51",
+        "sha256": "442f55eada0a336a0d1e7e0d3afd74f1d06a340a20fcf384a60e1f883ce9d1f7",
         "type": "blob"
       },
       "agent/fallback_cooldown.py": {
         "mode": "100644",
-        "sha256": "71c78950a5b9eab234656fc3169f7de3f140bf3be6853a22188a71295f7fb056",
-        "type": "blob"
-      },
-      "agent/fast_answers.py": {
-        "mode": "100644",
-        "sha256": "9aeb63933a1e06ebc36540b2245c77eda46149fc5e4334455bf5e46e3a304041",
-        "type": "blob"
-      },
-      "agent/idempotency.py": {
-        "mode": "100644",
-        "sha256": "033df0dcd9ba25241fc6190817632a84de2f28ab653a1176672ce49f2d763460",
-        "type": "blob"
-      },
-      "agent/idle_compaction_clock.py": {
-        "mode": "100644",
-        "sha256": "159b570a7f6d21a3ca33657df0c7c060e8d330045eefb1f42db0ff9beccf7b69",
-        "type": "blob"
-      },
-      "agent/legacy_durability_bridge.py": {
-        "mode": "100644",
-        "sha256": "6f8b8e1bb40aa7b35923bceaf2bc0dc34556f530a182df58cbf752077866287a",
-        "type": "blob"
-      },
-      "agent/llm_attempt_receipts.py": {
-        "mode": "100644",
-        "sha256": "dae9dfac71b8304bb6b2e268236d214d7b4adb6ea06ef79444c2f3c96b25079e",
-        "type": "blob"
-      },
-      "agent/model_metadata.py": {
-        "mode": "100644",
-        "sha256": "49c02b1b5676c18c85879ff6d2799677a0c91c34135a978db64feaad075d15ec",
-        "type": "blob"
-      },
-      "agent/open_todo_stop.py": {
-        "mode": "100644",
-        "sha256": "f586e5f0fd1fca72e035e62bb604802d926c436a1a86ab31c6b55aa598d08369",
-        "type": "blob"
-      },
-      "agent/operator_prompt_floor.py": {
-        "mode": "100644",
-        "sha256": "8c4c933b7072e95cdf081ee18fb231c995c6a50856ec3ee278c8d4e9fe92959c",
-        "type": "blob"
-      },
-      "agent/outcome_stop.py": {
-        "mode": "100644",
-        "sha256": "a6ff320e58ebeb63be015b95d90467792f1b4b7628115d703ed57b108be43aac",
+        "sha256": "53713c6dd59a37c3cdfc967655e1976536fa5f6533cbf0ceb1918d432bbbe06f",
         "type": "blob"
       },
       "agent/prompt_builder.py": {
         "mode": "100644",
-        "sha256": "fee1f5f7a7659635f6720133fe18a1c3523a7d25384082b78390f8a2aeac645f",
+        "sha256": "2317f124b28ae898e46ece25735b0ff66c0ad1f42074b32b8fbfc9b31fddce58",
         "type": "blob"
       },
       "agent/redact.py": {
         "mode": "100644",
-        "sha256": "08950ae5943f9df281086f556617e6adf1a9adbabf5accc6f4551786f02aae2b",
+        "sha256": "6a38a5006f52ae99bec585df92121cd7d82e32d45e2479a124b5e5e2b9f7825d",
         "type": "blob"
       },
-      "agent/runtime_performance_events.py": {
+      "agent/relay_llm.py": {
         "mode": "100644",
-        "sha256": "0ba27355b3645c686d01d8ec6a7084c98380906623ce6334142847b40e5a0024",
+        "sha256": "19b2bbc94b22d56452d0523c94a894d77477a2f0aa2680f1fe64e5d8c29de960",
         "type": "blob"
       },
-      "agent/session_persistence.py": {
+      "agent/route_binding.py": {
         "mode": "100644",
-        "sha256": "57e235d34dc2d4ff7ed61902779f73da85dcc0ca6bd66c0813d3b711de82f6b3",
+        "sha256": "1ab1e4f9d8de77d68d0ad52410b6a970e2a8fb32ffd26d47b1236192287d3fc2",
         "type": "blob"
       },
-      "agent/stage_b_hooks.py": {
+      "agent/stream_delivery.py": {
         "mode": "100644",
-        "sha256": "9eece4100f2bea107d79126e0545919bd8891f17adbe705df3597b687467c0fd",
-        "type": "blob"
-      },
-      "agent/stage_c_promises.py": {
-        "mode": "100644",
-        "sha256": "555f9bf96c8f2d1311f1ab098c3af317ae087aa614dcb41c71e66cf5adcacb89",
-        "type": "blob"
-      },
-      "agent/state_migrations.py": {
-        "mode": "100644",
-        "sha256": "21f9a14b46fe63d708fbb94ab7f247869a862d5a626909462724c982efd0c608",
-        "type": "blob"
-      },
-      "agent/system_prompt.py": {
-        "mode": "100644",
-        "sha256": "2f0ac3f1ee7e49e2f6ff78e0d9c4b466095a3d83be15dbcf08df05e66642349b",
-        "type": "blob"
-      },
-      "agent/tool_dispatch_helpers.py": {
-        "mode": "100644",
-        "sha256": "b976a2a1b660074e44d8495bd8519c4986c3fe35780d58dcca575e114bb1f80d",
+        "sha256": "b4d6a9d69f8dd16a71c129f0ff14e9403cef8f89bc65e5b6bc1e8aa9bb5f35c0",
         "type": "blob"
       },
       "agent/tool_executor.py": {
         "mode": "100644",
-        "sha256": "b60ee7efe87eadb3cbd2ed06f139f9607f3db199662cc12a52fee4d282a9e7ae",
-        "type": "blob"
-      },
-      "agent/tool_guardrails.py": {
-        "mode": "100644",
-        "sha256": "e31118413d0508e36531a89efd55122a13c94633cf405d130327247dacc68415",
-        "type": "blob"
-      },
-      "agent/transports/chat_completions.py": {
-        "mode": "100644",
-        "sha256": "a601d68f1e9afa612e22548eaca2ffc3596c921a3c9d94c734108683fcd64184",
-        "type": "blob"
-      },
-      "agent/transports/codex.py": {
-        "mode": "100644",
-        "sha256": "0846b0683fd50fc96e852db6a626df75141fbca13d0108bce33d4e69d12a723b",
+        "sha256": "9c34f3bb9bd5e789fcf7d2bdae775405314af5176bfa3fc361d71e87bd38d1ac",
         "type": "blob"
       },
       "agent/turn_api_call.py": {
         "mode": "100644",
-        "sha256": "2b2d2237e2df1cd3f3458fe4b21e797cdadc0c9ae95166a446d4b9dfe937232a",
+        "sha256": "6d341938a640ee0bedc988d8981a7399f8eea76dd1f956527f8030be0e0687c1",
         "type": "blob"
       },
       "agent/turn_api_error.py": {
         "mode": "100644",
-        "sha256": "fe494f5538f8232852a865c82d42db93c5ff4f8d4ecd77ba86df79cbbd9ee094",
+        "sha256": "b7f418d5ebb2c08354ea45c2032d1c84fac0c6b196b88aa6dd45b156cf723013",
+        "type": "blob"
+      },
+      "agent/turn_api_request.py": {
+        "mode": "100644",
+        "sha256": "c0171d300cc63e9915f38299dd874ca77dca0e9ba7fd4fe2cd51a4fc537fe0b0",
         "type": "blob"
       },
       "agent/turn_context.py": {
         "mode": "100644",
-        "sha256": "e6437fd669c5335ada239e1cb9e8b3d5026ccc707636da03466d5868707d825f",
-        "type": "blob"
-      },
-      "agent/turn_context_compaction.py": {
-        "mode": "100644",
-        "sha256": "d1a4d33892e66d83e5bab19a82183249eeb6e252bfd386b0b06b7c69ba0ec0d9",
+        "sha256": "b66a2c579c09385fbaeae4b4eccb71c189dbbd9876f9ca1e9046fe0e2f761cc0",
         "type": "blob"
       },
       "agent/turn_facade.py": {
         "mode": "100644",
-        "sha256": "4c50f1882b80fd4b58590f3934bc803c62e54e1f66a747893b574b96fb260c74",
-        "type": "blob"
-      },
-      "agent/turn_final_response.py": {
-        "mode": "100644",
-        "sha256": "a94a8476506bad901d8029eb47eb566f13d005db5b85f47ce422cbd7332f1fdd",
-        "type": "blob"
-      },
-      "agent/turn_finalizer.py": {
-        "mode": "100644",
-        "sha256": "94e09b71f388ec615e50de793b54c27fb696dfdf9c6f09c5a01f60651c4a44d9",
-        "type": "blob"
-      },
-      "agent/turn_iteration_prep.py": {
-        "mode": "100644",
-        "sha256": "979845a514ea0a0fb8323f5888a9999ec5108a77ea80fa60d61c5b35c2f1b541",
+        "sha256": "7bd6c15549f7af0bfa55f5d00b6c86de358518c69c0e80766c3ac8cd6783fa4c",
         "type": "blob"
       },
       "agent/turn_recovery.py": {
         "mode": "100644",
-        "sha256": "00800cb455f8ebd7196e51f8afdcc79bcdab09cc312a7b1e46de5dd8c45fa3a4",
+        "sha256": "b232d81f1c41d2738bc6edb07caf9b5e0e8350593cb0ff80a4677a108a28e99d",
         "type": "blob"
       },
       "agent/turn_request_assembly.py": {
         "mode": "100644",
-        "sha256": "04741946cace4e628890bbe8598553173c0085c482cf9a721f5f3ab623151285",
+        "sha256": "d4ef170cdc57d5f13a8bfc50272581c6d22e472187355549d08757535f245903",
         "type": "blob"
       },
       "agent/turn_response_check.py": {
         "mode": "100644",
-        "sha256": "dd9ab2d01c7651c65e5671764803c410af678bf7731fb24c67e89a5b586711ca",
+        "sha256": "5a897af50bad36c48bcdf402d03222b0bef88ae644d4d0a00b777e169a812130",
         "type": "blob"
       },
-      "agent/turn_stop_gates.py": {
+      "agent/turn_retry_state.py": {
         "mode": "100644",
-        "sha256": "054064fb4f44fcad998678cc07556f4f160a24cfd0abe65895ba969384e85b7c",
-        "type": "blob"
-      },
-      "agent/turn_tool_round.py": {
-        "mode": "100644",
-        "sha256": "65900d982b51fe2967a75fa1c9e81842ebf7cdf79f84ea4c55c5ad3b0744dd29",
-        "type": "blob"
-      },
-      "agent/turn_truncation.py": {
-        "mode": "100644",
-        "sha256": "2b60378050a2d9c36caacf9ef7a6876eca89e05b5a254ae1761e9852bb4d8468",
-        "type": "blob"
-      },
-      "agent/usage_pricing.py": {
-        "mode": "100644",
-        "sha256": "3cd28e88c0da03d72eba6e02d090133002d67765b5a71ed16891ff0763fe2b49",
+        "sha256": "1d8c5ab39183e126470c2226151a7e2e07799e21c994a175502e56507c5c6114",
         "type": "blob"
       },
       "apps/desktop/scripts/update-relaunch-waiter.ps1": {
         "mode": "100644",
-        "sha256": "e1753dd76c813f5037a0ebae2b360d51842daa7dfe0af6068ff2a30dc97daf94",
+        "sha256": "f0fbe5d65e8344680fe7e200e68ff762b354afbdb424fc0d8940758d89631991",
         "type": "blob"
       },
       "apps/desktop/scripts/verify-signed-payloads.ps1": {
@@ -5569,44 +5520,34 @@
         "sha256": "1d93d32f77776f69f26997fc91a5ed02d9e1b9f8fd194a6940b5e098a7c32055",
         "type": "blob"
       },
-      "cli-config.yaml.example": {
+      "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx": {
         "mode": "100644",
-        "sha256": "e1f524111dd796605f43397548ed497abc88106175b43a79a5054b06e10d9aac",
+        "sha256": "e07b1387f0fe5e408e1cfab9c34ec7de403b236ea71829608769201cae57dd98",
         "type": "blob"
       },
-      "cron/completion_reporter.py": {
+      "apps/desktop/src/plugins/hermes-bots/screen-pane.tsx": {
         "mode": "100644",
-        "sha256": "39e0aeea2da84f1f93e6c488b58e987213ed03c3005f87c49218f2561a178a32",
+        "sha256": "253201492874460ce61c47b78d5b2a1bb640ebb7c5757825c2a2b8bff6210cbd",
         "type": "blob"
       },
-      "cron/executions.py": {
+      "apps/desktop/src/plugins/hermes-bots/screen-portal.tsx": {
         "mode": "100644",
-        "sha256": "fd7551e4c70c9580de704f2a4887cc7828220adea43e1d28d52ca39a4586616a",
+        "sha256": "0b9d0ad4f772bbbff9b7d1df717f6d1f1b843f380f5f503d897044aa7eff12aa",
         "type": "blob"
       },
-      "cron/jobs.py": {
+      "apps/desktop/src/plugins/hermes-bots/screen-state.ts": {
         "mode": "100644",
-        "sha256": "7edde43bb3a7b576c0227c8614f0b4f42b04d7873a0d58006144565e49ad29ee",
+        "sha256": "544c38394a32b42ac89f37a7d449e4b7e3824321ece72894f55c2a75a946c15e",
         "type": "blob"
       },
-      "cron/scheduler.py": {
+      "apps/shared/src/gateway-contract.generated.ts": {
         "mode": "100644",
-        "sha256": "9c1c339abafcb1fa625ca5407b0c7e59739be4987f977a8c5801c5a835c66a1e",
+        "sha256": "6479557fb4f6cff2224dc4411dafb0001fa8f5045d0e10380021d2b759dfda91",
         "type": "blob"
       },
-      "cron/scheduler_delivery.py": {
+      "apps/shared/src/gateway-contract.openrpc.json": {
         "mode": "100644",
-        "sha256": "94bf2251e02c16cdd540023d337b87ae3541f2134227ae14430a563f1bca0a2e",
-        "type": "blob"
-      },
-      "cron/scheduler_prompt.py": {
-        "mode": "100644",
-        "sha256": "7839d4dacdfd7c1f068a4bd2845ff584535e0a50f4c9959e21719f6e2c1717a1",
-        "type": "blob"
-      },
-      "cron/scheduler_tick.py": {
-        "mode": "100644",
-        "sha256": "482513350d2ad3dd884789bbe714c4032ca650c1312c3fb077ac5eeb15faf7f2",
+        "sha256": "a5261fec490a46edcd94ec4dc022eeef8eac08f770ee0a233710d8841237c692",
         "type": "blob"
       },
       "evals/update_streaming/watchdog.ps1": {
@@ -5614,299 +5555,159 @@
         "sha256": "1ca2183d10e8696254a326620a727f5cd6dcb3a442997251f80d457076e12175",
         "type": "blob"
       },
-      "gateway/active_task.py": {
-        "mode": "100644",
-        "sha256": "151ad416169abda0fa5bf24e6138c963ae3f7b7ae78d7f38a88cd7cd5ad59ee1",
-        "type": "blob"
-      },
-      "gateway/client_visible_safety.py": {
-        "mode": "100644",
-        "sha256": "07462e2e640e16a7666537c0f5b23000c0375efcadd8bd8a77a0a7543f92b75f",
-        "type": "blob"
-      },
-      "gateway/delivery_history.py": {
-        "mode": "100644",
-        "sha256": "e74158de3eef9f31e902b0dae667a7d2aaafa204c80646286876d5437aae86d4",
-        "type": "blob"
-      },
-      "gateway/delivery_ledger.py": {
-        "mode": "100644",
-        "sha256": "6a6cf9e7ed31954c49aa138d880d0429476400979dface602a3f6e2e6762e8f4",
-        "type": "blob"
-      },
-      "gateway/drain_inbox.py": {
-        "mode": "100644",
-        "sha256": "69dea5d68c3a0ca869d440e144d98840094442e2d1d3aee9f73b99ca787cc68e",
-        "type": "blob"
-      },
-      "gateway/duplicate_reply_guards.py": {
-        "mode": "100644",
-        "sha256": "73709ca6dc9ea92c5620738705ab1b5aa01a56a3cc0e0d66e6ebbf9396756f63",
-        "type": "blob"
-      },
-      "gateway/kanban_watchers.py": {
-        "mode": "100644",
-        "sha256": "394bbbb40abba6f288adc179c805ca90db4d23cf51606f16d1de89b1e5123a81",
-        "type": "blob"
-      },
-      "gateway/kanban_watchers_notifier.py": {
-        "mode": "100644",
-        "sha256": "a24ec7fc10ece930afcb3f4741686acdba771553ed42f860de813a8b0deb0928",
-        "type": "blob"
-      },
-      "gateway/media_provenance.py": {
-        "mode": "100644",
-        "sha256": "094bfbb983593b1b2068b78fa6df24f2dac95a243f259269e07dc3b11f163409",
-        "type": "blob"
-      },
-      "gateway/outbound_hygiene.py": {
-        "mode": "100644",
-        "sha256": "e90e16fc1ed88c63c07a46d137e481092992ab3e16685d9747aafb18a65407f5",
-        "type": "blob"
-      },
       "gateway/platforms/api_server.py": {
         "mode": "100644",
-        "sha256": "d60451e58500d2ed7dc69adc36678f35fa179c8ad3e8217aa0150d04f25bd053",
+        "sha256": "14a1db7545d68485f133dbe7211acbdec7f5d9b9b25cece115acb23d8736a89f",
         "type": "blob"
       },
-      "gateway/platforms/base.py": {
+      "gateway/platforms/api_server_runs.py": {
         "mode": "100644",
-        "sha256": "30e545452291223d5ea6465f3f905517452ab438daed746908d2bc7036280742",
-        "type": "blob"
-      },
-      "gateway/platforms/event.py": {
-        "mode": "100644",
-        "sha256": "a3d6ba8964364e3571d207bf5b7d144bee7bd0ea136bb078f9b7fae6d7b449c7",
-        "type": "blob"
-      },
-      "gateway/platforms/whatsapp_cloud.py": {
-        "mode": "100644",
-        "sha256": "924e01785dcb13e969244708b80eff8893933ee25b962bc7f07a986c37f674bd",
-        "type": "blob"
-      },
-      "gateway/relay/adapter.py": {
-        "mode": "100644",
-        "sha256": "b884c0bdd5936497c5a98dca95eb3471294854deb54691ee34d29f1bc01df860",
+        "sha256": "173de8c875bee970321d961c198747a917065e636d6df459ee55c3925d2689a6",
         "type": "blob"
       },
       "gateway/run.py": {
         "mode": "100644",
-        "sha256": "6e739feafb46301f210cd7695f4afecff8e6e579791f23bf7357bdb492404783",
-        "type": "blob"
-      },
-      "gateway/run_adapters.py": {
-        "mode": "100644",
-        "sha256": "d04e8f38f684afdb64e01df39e9ff9c91674e3d6c4c1bb428a081be360b0f565",
-        "type": "blob"
-      },
-      "gateway/run_agent_cache.py": {
-        "mode": "100644",
-        "sha256": "ce72c4442cbe212b36608864c89ec5fd6901ad9d95632b8924bf8fab34940132",
-        "type": "blob"
-      },
-      "gateway/run_busy.py": {
-        "mode": "100644",
-        "sha256": "d296150ee06d713708386bf4d443c035ff5e3537bae17a3e61bc422389828edf",
-        "type": "blob"
-      },
-      "gateway/run_durable_drain.py": {
-        "mode": "100644",
-        "sha256": "0f8fdfb04296f6bb5fb967a7d771634fbc558d0f19bdbb655deb5ba7531f3eda",
+        "sha256": "bba202eb4363c6bf7be011c2f9f8f2645d0b11e0dd1a98927ab4b3fea989e169",
         "type": "blob"
       },
       "gateway/run_inbound.py": {
         "mode": "100644",
-        "sha256": "5a9d01bc942fb3820355bcb5b61b3796bcd718d2e90f5205d9a18934fc710a00",
-        "type": "blob"
-      },
-      "gateway/run_notifications.py": {
-        "mode": "100644",
-        "sha256": "58e84f56345278113761bef4a0077aed5bd0c9737d0d29c5e2930037a3060205",
-        "type": "blob"
-      },
-      "gateway/run_shutdown.py": {
-        "mode": "100644",
-        "sha256": "151863c354c2d351df63d74c678ba23c0c9bf988236503dca4ee19425999a294",
+        "sha256": "20bdbfb4ddab28ecd68b4b57a4d8f0257d1b35be4fee0b2d0b1a8416d5bdbf6f",
         "type": "blob"
       },
       "gateway/run_startup.py": {
         "mode": "100644",
-        "sha256": "705f6b498472ea9ebf4f9de684f41fc321b16862471e66eb6c6d5c4806e706a5",
+        "sha256": "3f626c207e29af20014018349b839ee79e649a4b58cf85309941102e6da4d875",
         "type": "blob"
       },
       "gateway/run_turn.py": {
         "mode": "100644",
-        "sha256": "7ab60a43e8e6bf1dd0e3fd0a555db9e7866250795abdb50beff7985163ae9656",
+        "sha256": "f4e1c27d5bc7c4391285cfe2db3832c4b7f48ae60657371736d0d1b799ba84bd",
         "type": "blob"
       },
-      "gateway/run_turn_runner.py": {
+      "gateway/session_api.py": {
         "mode": "100644",
-        "sha256": "0fdb190b8786e2823abdfd7e8beaa64c8fd71aa39d586fac2ff827f282e81286",
+        "sha256": "2d0839b8b529279b4737e359b487b2968a0ab4c928b64cefa09446ea3fb8607e",
         "type": "blob"
       },
-      "gateway/session.py": {
+      "gateway/session_api_turn.py": {
         "mode": "100644",
-        "sha256": "15f8a24617f705d78219ed34b70e7c2ddf5136e6253199f511a5c7177073db71",
+        "sha256": "6de631cdcf6cc6edf30e0c365ddf18a28e1ad52c3bad6fddeb9bdfe841399091",
         "type": "blob"
       },
-      "gateway/session_lifecycle.py": {
+      "gateway/session_authority.py": {
         "mode": "100644",
-        "sha256": "6c7986a6ca7133384f5548dcea1e96caec5fa7c3f967ff2553b08d54d4d0ccd4",
+        "sha256": "ae959b46350805d6610f3e8cc00627d2dadb2f3c2ba265c7a8fd785871c01b09",
         "type": "blob"
       },
-      "gateway/session_transcript.py": {
+      "gateway/session_conditional_api.py": {
         "mode": "100644",
-        "sha256": "f1be35ad697327500646a2f272ed087d2f794e0e34415ebd77ba4cd51ed25239",
+        "sha256": "8035e16222129d01dc57bf526cedf9c288ad29a796178dbbce792598917ca1fd",
         "type": "blob"
       },
-      "gateway/slash_commands.py": {
+      "gateway/session_execution.py": {
         "mode": "100644",
-        "sha256": "3165af630b19b87ea8b9adaf9c166f345688e71bbb996c0808a4695adeee8378",
+        "sha256": "9c943569898f93fdd13a980296c52a7928e4da0622291acfe43f8bd959bfa1b6",
         "type": "blob"
       },
-      "gateway/state_transaction_health.py": {
+      "gateway/session_mutations.py": {
         "mode": "100644",
-        "sha256": "9c3feccd78afa72c448564c92a609e287ea41555dee005213717039f7bcdd3b2",
+        "sha256": "9e50c22432815232bde195e217c38d1d52e218edb194147127c8f712d2ae9407",
         "type": "blob"
       },
-      "gateway/status.py": {
+      "hermes_cli/auth.py": {
         "mode": "100644",
-        "sha256": "a2e93ddf0773765aca0bc5744c81c87fae6d10a82e349f4a49561c2defe8def5",
+        "sha256": "3390b94b59ce81db49c693eeb66db96e24b6059c7e84f8b1c7fa579588d189e9",
         "type": "blob"
       },
-      "gateway/stream_consumer.py": {
+      "hermes_cli/auth_codex_snapshot.py": {
         "mode": "100644",
-        "sha256": "e41e45ff8bac578c97b807ff25cb58268ba14797201ae44d5d9ed07446d9478c",
+        "sha256": "5d77a19d2076d5230af29000657d27254afa509a230196f0f47c768522926dbd",
         "type": "blob"
       },
-      "gateway/stream_consumer_transport.py": {
+      "hermes_cli/cli_agent_setup_mixin.py": {
         "mode": "100644",
-        "sha256": "467d1ddfa8f2dadd40a156d29c32217ad845d30cf302634be322e139f46da515",
-        "type": "blob"
-      },
-      "gateway/telegram_transaction_ledger.py": {
-        "mode": "100644",
-        "sha256": "0420652d58faa730b74f3aa6382ba0dd9f94e6b3676996c8b438811d42331b60",
-        "type": "blob"
-      },
-      "gateway/topic_hygiene.py": {
-        "mode": "100644",
-        "sha256": "28718f2a46596c3d0fc1e820b9da3844876c6269f6af703f07feb5598cbf80a2",
-        "type": "blob"
-      },
-      "gateway/transcript_redaction.py": {
-        "mode": "100644",
-        "sha256": "001bf99ee83f47ce648288668915ebb69ce8b774538c52d21ab5fdffd03de6ac",
-        "type": "blob"
-      },
-      "gateway/turn_context.py": {
-        "mode": "100644",
-        "sha256": "92edf74a0b356764e4b34a22c83d7938211fc1e6fc2b311a4c0bcb661da5deb2",
-        "type": "blob"
-      },
-      "hermes_cli/_early_recovery.py": {
-        "mode": "100644",
-        "sha256": "e1aab07e1118a01cd23bca71c9f8dfce0175f9be2684e0cb07826e7146f6ce6b",
-        "type": "blob"
-      },
-      "hermes_cli/auth_codex.py": {
-        "mode": "100644",
-        "sha256": "1b307eb61b5fb608e777cd5170f0e9abc4be5d6c3b2ce995c979b5d2f4b234c7",
-        "type": "blob"
-      },
-      "hermes_cli/auth_oauth_grants.py": {
-        "mode": "100644",
-        "sha256": "1a2f7b7ed2f3a8dd1e3f13186c8da66becdbf51c6691c93ed514a5380bb5db8c",
-        "type": "blob"
-      },
-      "hermes_cli/auth_xai.py": {
-        "mode": "100644",
-        "sha256": "517fa89b14a1fdd567a4d7f42d811282603b1beaf47fb6af57c672287c148b6c",
-        "type": "blob"
-      },
-      "hermes_cli/codex_models.py": {
-        "mode": "100644",
-        "sha256": "fc968d9bd2573bf094410c1d10c9c5bcc84a6caf6fda3d2b7e9e6aa27fff38bf",
+        "sha256": "9ee4bcd8c56fd6b6ba8ddaf620a28396913371b4704e5a3797e694275033d45d",
         "type": "blob"
       },
       "hermes_cli/config_defaults.py": {
         "mode": "100644",
-        "sha256": "c8f4037414b52b1449ef6557dc2fe58ed4d5146e372f19a859be67c5886256ac",
+        "sha256": "271f84d2c41df24d21a1a20d14d312abeac16650955ca0597cad044b74b452cb",
         "type": "blob"
       },
-      "hermes_cli/env_loader.py": {
+      "hermes_cli/main.py": {
         "mode": "100644",
-        "sha256": "54427e092384f772d600eecbec5484ca471b2c44ea90c9775cff94dc1be6b5f5",
+        "sha256": "11d4079bbeab31a9847c7281daecdc2016161dd705281716360a1c2a0657ee3c",
         "type": "blob"
       },
-      "hermes_cli/gateway.py": {
+      "hermes_cli/managed_scope.py": {
         "mode": "100644",
-        "sha256": "d7084d1960c3b6e9c6901eb8752477920ce2e6ae99e80fe9d7a5cb6115ca2bc7",
+        "sha256": "e4a061d5efa6b8f334d3359e67ffb853e9eaef478fb896c0051a5d06903e0bb9",
         "type": "blob"
       },
-      "hermes_cli/gateway_launchd.py": {
+      "hermes_cli/plugin_isolation.py": {
         "mode": "100644",
-        "sha256": "d3c155d1d8497f7ef4a6510394303fd7f8b4bbe979a623e05ce841b81e5dcb3a",
+        "sha256": "d4808a3e66483ae7ca6d770a5597dc4e2e5b34e99cb0a298e7e36791f8da804c",
         "type": "blob"
       },
-      "hermes_cli/gateway_windows.py": {
+      "hermes_cli/plugins.py": {
         "mode": "100644",
-        "sha256": "b3ef533b7776482af0faf640ca11f0a0b52d8af009e205cd6690c7e6849ebcb0",
+        "sha256": "d45cb18cf91921a9df3593c73de5341fee181d3012fbb1c87159add4aabbdd4c",
         "type": "blob"
       },
-      "hermes_cli/kanban_db.py": {
+      "hermes_cli/runtime_provider.py": {
         "mode": "100644",
-        "sha256": "5ac65bcfc02977e3c399fa81d5addb16a82bc9bec2a0e9fac1c8a69d21d9e855",
+        "sha256": "c4cf9b651a56616693037cafea6c5ef57a99b85eb0e51f3de48c0725d0ee67ba",
         "type": "blob"
       },
-      "hermes_cli/kanban_db_connect.py": {
+      "hermes_cli/subcommands/computer_use_screen.py": {
         "mode": "100644",
-        "sha256": "6c73ad569af61d8ad92831c1315bf73541720f90b51f3555dcc9a57622756e6b",
+        "sha256": "63f69ba5494ca2326868d98acbe0602419bbfbca4f5f83a4e233a6d5c3f945a7",
         "type": "blob"
       },
-      "hermes_cli/kanban_db_notify.py": {
+      "hermes_cli/web_routers/display.py": {
         "mode": "100644",
-        "sha256": "c075841626c4122ce2081cc163d332a701930c2565926cfb896407d42a1570e4",
+        "sha256": "980dbecdf6b1823e40762000aeb3f548d7d61f0afb607ca2c409b2c2c5ba7207",
         "type": "blob"
       },
-      "hermes_cli/oneshot.py": {
+      "hermes_cli/web_routers/display_external.py": {
         "mode": "100644",
-        "sha256": "6c660bbfedb76832c69a42d62026e34a9b65d6d6e58f9d4d3c7c5ce2a99ed8d4",
-        "type": "blob"
-      },
-      "hermes_cli/runtime_state.py": {
-        "mode": "100644",
-        "sha256": "193b7ae3185b5de0b05caff2a8f7b683a2d1dadac76c4ee25ae57b68b1cf400a",
+        "sha256": "1c266788e3e9444314332502f8602392485929925fb9d04b1436bac7dac9b117",
         "type": "blob"
       },
       "hermes_state.py": {
         "mode": "100644",
-        "sha256": "81a91f19d8ef598a19bc990aa47ee0e54e7127b1a7310269610883712b5a7a4e",
+        "sha256": "2a619b75ea5d18b01f645fbd3a61122acfe93959f5ed2d5f800d021ae2c26250",
         "type": "blob"
       },
-      "hermes_state_maintenance.py": {
+      "hermes_state_api_content.py": {
         "mode": "100644",
-        "sha256": "a17d9af304c15c9aba6961efd93979bf766098edcad9cc8ffed262a9d6b7130a",
+        "sha256": "ea08f195d7ee8f9638e7f2b6da04f61889f4f3ce977c708910d3dcddaebf4210",
         "type": "blob"
       },
       "hermes_state_messages.py": {
         "mode": "100644",
-        "sha256": "829b4ec031c856d9407ddd3637ce63321009998a2cfeb7c4cce2186e3bcfc68a",
+        "sha256": "9b3f49935e4bdf7da1e77b4d951bc68de2bd8b963eacd584d6210a298c29e121",
         "type": "blob"
       },
-      "hermes_state_wal.py": {
+      "hermes_state_mutations.py": {
         "mode": "100644",
-        "sha256": "c087c2f235d1dfe961728f0bab8874b4d39d6fffd329fbc728c436dfa8637459",
+        "sha256": "6749c17764a55d7690ea1908df685f380fa19c80ade3425a3bf3c7b5daea451d",
         "type": "blob"
       },
-      "locales/en.yaml": {
+      "hermes_state_runtime.py": {
         "mode": "100644",
-        "sha256": "058987263576a47c2e5859880c7a6ca417b7e0033007048405f32650329071ed",
+        "sha256": "e3481b03ccfe92a0a7deb1d1cb807e34891285498f726d015509404ff5099d52",
+        "type": "blob"
+      },
+      "hermes_state_worker_lifecycle.py": {
+        "mode": "100644",
+        "sha256": "134171d8618bc3567100db1e1e5dca7edbe7e7d8911e15eb7b65a763732e6832",
         "type": "blob"
       },
       "model_tools.py": {
         "mode": "100644",
-        "sha256": "4e28a4b8132b7623dc151d3b327847083f3d5ddce09b9b539b5531718e453a48",
+        "sha256": "74f80c44fb361b7eaf7b0527b4308a110b5c1f286678f75b108a0ce066bdecbe",
         "type": "blob"
       },
       "optional-skills/software-development/ast-grep/install.ps1": {
@@ -5919,54 +5720,49 @@
         "sha256": "9a59314545cbfa5330a65285f98614b4cdcd4302da70e506884021f7e292d7a6",
         "type": "blob"
       },
-      "plugins/platforms/discord/adapter.py": {
+      "plugins/computer_use/wayvnc/README.md": {
         "mode": "100644",
-        "sha256": "35bdb478cc7dd37adbd4bde5a19505dcb8140aaaa6f97dd3ec394992807bb434",
+        "sha256": "af456fbc9ac38ef05c00b051ff2ba815e218efbe3caef804215e6e1084451eb8",
         "type": "blob"
       },
-      "plugins/platforms/feishu/adapter.py": {
+      "plugins/computer_use/wayvnc/__init__.py": {
         "mode": "100644",
-        "sha256": "139c1754781008a878a2d293511c43f82a2d6934fefa6b56025ae913f0aedff2",
+        "sha256": "6b46e603ea737e510a77ddf30481fdfd005fb4505f4ff6c8aa373075226473a0",
         "type": "blob"
       },
-      "plugins/platforms/matrix/adapter.py": {
+      "plugins/computer_use/wayvnc/backend.py": {
         "mode": "100644",
-        "sha256": "3dbb1fcde14f1d6d4df3ab4d353e2aa64884825215d86127a3c9615f7669dfc5",
+        "sha256": "9311cf525548ab7b6f07f2a1053737eccddba0c7b3aec582ebdb9f948834b7b7",
         "type": "blob"
       },
-      "plugins/platforms/slack/adapter.py": {
+      "plugins/computer_use/wayvnc/common.py": {
         "mode": "100644",
-        "sha256": "835d1f65642138e2ad075aa0891aa71d03f712cafc9d7ee741e712dd01d483fc",
+        "sha256": "f710ed46159ecf91e8e1eae6ecfd6023d6cf18a709716d869f7698fd27d6b137",
         "type": "blob"
       },
-      "plugins/platforms/teams/adapter.py": {
+      "plugins/computer_use/wayvnc/plugin.yaml": {
         "mode": "100644",
-        "sha256": "80bc49ff6065c236a4eb81350b2239c65cda1351a7b0ff7ca4b24d03ddacec2c",
+        "sha256": "8d485059d4c9c59e0ff0c097d5cdc53f40524ba7911ed2b803ab9b7abc39eb3b",
         "type": "blob"
       },
-      "plugins/platforms/telegram/adapter.py": {
+      "plugins/computer_use/wayvnc/requirements.txt": {
         "mode": "100644",
-        "sha256": "0124057ad6e16caaf2512034d9552276c64fe4f0bc5f18a3662ee5fbca75f07b",
+        "sha256": "c54b365a7fa2d5dcd691e507e2333d39ed765d07d3d604869b6368e6cfd02603",
         "type": "blob"
       },
-      "pm/install.py": {
+      "plugins/computer_use/wayvnc/rfb_worker.py": {
         "mode": "100644",
-        "sha256": "df3eeffa2fb1c79de999e2be736439b99544c296f3d953ea090518692c381188",
+        "sha256": "4cfa0b83ba229904d4137021dbd3240e625c28b0deec344ec18759183a4c8998",
         "type": "blob"
       },
       "pm/lock.json": {
         "mode": "100644",
-        "sha256": "ec62f3095abfa8d7fa9b480882c27246562ed0be8bb4329ebe90dcb09527ade6",
+        "sha256": "b969af787bc1b4b2e822b82b799979bd0b47a1e5ab83f0125a345396ef3fd86b",
         "type": "blob"
       },
-      "pyproject.toml": {
+      "scripts/build-bundle.ps1": {
         "mode": "100644",
-        "sha256": "ddd5864de6a0bc053ca5f3b1840fb76c7b2600c9afc194bb46a2ed46ad837f71",
-        "type": "blob"
-      },
-      "run_agent.py": {
-        "mode": "100644",
-        "sha256": "ed02b2a169d04a58b83b568546f9d83364e206bc34d0ac297f8856968eb593ee",
+        "sha256": "478322e3685471b8a58e6323d8171c0fb5e98119eb04ac10b9390e9935e49f9a",
         "type": "blob"
       },
       "scripts/build/windows-deps.ps1": {
@@ -5974,24 +5770,44 @@
         "sha256": "1be19c44cf9195161b51e7535287632c2f164532793cb1c5d32a25795e8f6973",
         "type": "blob"
       },
+      "scripts/ci/warm_powershell_module_cache.ps1": {
+        "mode": "100644",
+        "sha256": "2e7bcd1ac078de69474313624310d4c1bf31d6b7150ed711483582ab8c0251bf",
+        "type": "blob"
+      },
       "scripts/desktop-update.ps1": {
         "mode": "100644",
         "sha256": "63cdce628baf5022f1c851885af5289df884581f7ca7cc732a979f07893b5d9a",
         "type": "blob"
       },
+      "scripts/desktop-update/marker-claim.ps1": {
+        "mode": "100644",
+        "sha256": "43fabb7a293eba12e8044d26447952891f9a481b61e76205326de9e0b1df11cf",
+        "type": "blob"
+      },
+      "scripts/desktop-update/marker.ps1": {
+        "mode": "100644",
+        "sha256": "fd9bb4a536f0dbf37c54d1e902eef0635e2c04913dd631e91b468696ce526299",
+        "type": "blob"
+      },
       "scripts/desktop-update/runtime.ps1": {
         "mode": "100644",
-        "sha256": "3110f9c62d8a4946653fd212425d032dcfa5273bb25f68f451c06e0c43e2883c",
+        "sha256": "12a80dc8b3bae7a06d267a860d31818ae9bf6586f466a551fde6faccb4b1a37f",
+        "type": "blob"
+      },
+      "scripts/desktop-update/update-job.ps1": {
+        "mode": "100644",
+        "sha256": "a2f599925aca103b5204e6c9de44a94efa9dd0dcba0cf10af8e381e52643eda6",
         "type": "blob"
       },
       "scripts/desktop-update/windows.ps1": {
         "mode": "100644",
-        "sha256": "fb4218402affed51d01896db0c2eaa57a2dc00cb1b5f8f65acc0e9a5df80fb3a",
+        "sha256": "57aab39fe154f78b0c71e1570575a9bce96a820d786e8c39c1f8e3e42a7c7b73",
         "type": "blob"
       },
       "scripts/install.ps1": {
         "mode": "100644",
-        "sha256": "0d66ceb3d10039f04252b6eefe055ee4c6b6d13f4cb6afffa623461be834c967",
+        "sha256": "ed5769c269e001eace6a67ad07fb3a02d62e0402345bc5d963d58524b14b5115",
         "type": "blob"
       },
       "scripts/tests/test-install-ps1-longpath.ps1": {
@@ -6026,7 +5842,7 @@
       },
       "scripts/windows-build-deps.ps1": {
         "mode": "100644",
-        "sha256": "18e2e5c6d2ec0203303cd82328681be326b9191a20952a2ff0d60bae5bfd1074",
+        "sha256": "c1002f31fd7eef57cdc81ef8eb653629a4f2ca239cc937d635284d30ce6e8c4c",
         "type": "blob"
       },
       "scripts/windows_e2e_harness.ps1": {
@@ -6039,434 +5855,9 @@
         "sha256": "c8c578c0ca3d22acfd70c63879fb5880cc5571fdc1bb5bdbb1f82288e30f30e5",
         "type": "blob"
       },
-      "tests/agent/conftest.py": {
-        "mode": "100644",
-        "sha256": "9481fbb27fec36c86f57826bbe6148138e48f342c669816423f236c3eeebbff4",
-        "type": "blob"
-      },
-      "tests/agent/test_413_compression.py": {
-        "mode": "100644",
-        "sha256": "9933136fc5ce910c5b590a241ed83fb453e1fd899cd72bcea9651428f8d746dc",
-        "type": "blob"
-      },
-      "tests/agent/test_auxiliary_client.py": {
-        "mode": "100644",
-        "sha256": "0c788bd55e14d50df03622b5820e4d8d7efbbdbf7ed1f2e5e8b4dd7513f23999",
-        "type": "blob"
-      },
-      "tests/agent/test_auxiliary_structured_output.py": {
-        "mode": "100644",
-        "sha256": "5a485a8ea613b78d9ee7dd4c3180720a0520d84ded61e418a83fa94ec1380d4c",
-        "type": "blob"
-      },
-      "tests/agent/test_codex_xai_oauth_recovery.py": {
-        "mode": "100644",
-        "sha256": "1d2338743a3ef838c0e410e1c54443974e4a6ab4ffb4c4805ad4736d84244625",
-        "type": "blob"
-      },
-      "tests/agent/test_compression_budget_rearm.py": {
-        "mode": "100644",
-        "sha256": "819076ababc3b01dd09378d1b53ca93c3e597b06740bdf3fb272819233f7b0ee",
-        "type": "blob"
-      },
-      "tests/agent/test_compression_concurrent_fork.py": {
-        "mode": "100644",
-        "sha256": "015d940e36e6fa80f2e97a2dbbe424ee8aa450b8e549e6924da60e4e5deb3299",
-        "type": "blob"
-      },
-      "tests/agent/test_credential_pool_interrupt.py": {
-        "mode": "100644",
-        "sha256": "203acd546600f062abadbe4f6567346588db79186ebe2dff9271c00ee3904219",
-        "type": "blob"
-      },
-      "tests/agent/test_curator.py": {
-        "mode": "100644",
-        "sha256": "1c72e95acc20eea4517edef693608dd7184665318cdcb5f2e268cbf816d90ff2",
-        "type": "blob"
-      },
-      "tests/agent/test_durable_runtime_regressions.py": {
-        "mode": "100644",
-        "sha256": "0d54171f5fbb21d8ff9b44b3e3aa13ce2899286e2ebd23f7e98529caa14a9497",
-        "type": "blob"
-      },
-      "tests/agent/test_failed_turn_chat_copy.py": {
-        "mode": "100644",
-        "sha256": "f8e511303cd76a16e53f4f1c03700c71f1dc7605859eea61c7c8eb1cd4b7d7ec",
-        "type": "blob"
-      },
-      "tests/agent/test_fallback_api_mode_preservation.py": {
-        "mode": "100644",
-        "sha256": "a285bed17a885eb73737a6c4aa370253b7c1df37da1bf98e827188ca2e55e743",
-        "type": "blob"
-      },
-      "tests/agent/test_fallback_credential_isolation.py": {
-        "mode": "100644",
-        "sha256": "8cd60f795559740c7ef400082237c00f88542e67fc1b054b97c1f72e0ceac69b",
-        "type": "blob"
-      },
-      "tests/agent/test_fallback_reasoning_override.py": {
-        "mode": "100644",
-        "sha256": "c9f766ce24a4a59c63194d66b5688074c4829e490bf562fdc6eb64337163b85d",
-        "type": "blob"
-      },
-      "tests/agent/test_fallback_restore_codex_early_reopen.py": {
-        "mode": "100644",
-        "sha256": "f0f5cbc622706e1a8722e3cd597da7f11facb5a16b4fbfc25813a10cc0882820",
-        "type": "blob"
-      },
-      "tests/agent/test_intent_ack_continuation.py": {
-        "mode": "100644",
-        "sha256": "9e2c0fdffb2f23259a9cbeea426680dda72ed729ac6e1ed515346a4c2a320c6f",
-        "type": "blob"
-      },
-      "tests/agent/test_llamacpp_alias_managed_endpoint.py": {
-        "mode": "100644",
-        "sha256": "f5e9b08e4420f866489b3fe5fda25931e7221099fdb3ea602af1277cdfb85932",
-        "type": "blob"
-      },
-      "tests/agent/test_open_todo_stop_guard.py": {
-        "mode": "100644",
-        "sha256": "2e463ca5d0c21ba1f2efaa335a25170bbffca8d604942897712a35fff7d0877a",
-        "type": "blob"
-      },
-      "tests/agent/test_outcome_stop_guard.py": {
-        "mode": "100644",
-        "sha256": "0a942c14edb06b26fe4998b3c19fc6bb1963677abab327b3416d41f7b9588c66",
-        "type": "blob"
-      },
-      "tests/agent/test_primary_runtime_restore.py": {
-        "mode": "100644",
-        "sha256": "7950300a1f2bc8f975c8987b8ea6ddb1e3dc9434710d1c7d039ce650a9d654b0",
-        "type": "blob"
-      },
-      "tests/agent/test_reasoning_only_stop_persistence.py": {
-        "mode": "100644",
-        "sha256": "883765876721b29a9177f16e4cecd99736e4319d9fd94fea7765e9aa206da4fe",
-        "type": "blob"
-      },
-      "tests/agent/test_reset_aware_primary_restore.py": {
-        "mode": "100644",
-        "sha256": "0d59307ddfc52cb915a6766d3122301a15b50e220110a392c66009d758db7b63",
-        "type": "blob"
-      },
-      "tests/agent/test_run_agent.py": {
-        "mode": "100644",
-        "sha256": "6207c7874bf0603735ffad55df40c513863ae4886a6069496cf1ca405c503756",
-        "type": "blob"
-      },
-      "tests/agent/test_structured_output_rejection_retry.py": {
-        "mode": "100644",
-        "sha256": "26a4da6a50b7028de742f0900437f62f031870170e5ff2c7b88b6b534f18abf1",
-        "type": "blob"
-      },
-      "tests/agent/test_switch_model_reasoning_override.py": {
-        "mode": "100644",
-        "sha256": "6710b7311c261d44bf50cf2f97aef185f3a2aed0a849ed1a3b7e06424704fd05",
-        "type": "blob"
-      },
-      "tests/agent/test_system_prompt.py": {
-        "mode": "100644",
-        "sha256": "80be734912dbb33218dd4431a305ef35f4b248b9955ac0f25340c9dbc21e8938",
-        "type": "blob"
-      },
-      "tests/agent/test_tool_batch_segmentation.py": {
-        "mode": "100644",
-        "sha256": "0161bf3ae7e654ffc254ebf07468038a3742341fda46c0076eb12f4f02466382",
-        "type": "blob"
-      },
-      "tests/agent/test_tool_call_guardrail_runtime.py": {
-        "mode": "100644",
-        "sha256": "0aef5f5c9b68a81bdea1e05f4b593aa8ce68c215acedadf1db2816755dcbfd7e",
-        "type": "blob"
-      },
-      "tests/agent/test_truncated_tool_call_boost.py": {
-        "mode": "100644",
-        "sha256": "d751068b9d38674dda59fd8cb3797c3d2eeb5b63a4c742c87c68b776eda352f6",
-        "type": "blob"
-      },
-      "tests/agent/test_turn_context_overflow_warning.py": {
-        "mode": "100644",
-        "sha256": "e3fe55148defd1eea624c63da1f8009c5c9f9d4b88cee43efaf7abfc3113befb",
-        "type": "blob"
-      },
-      "tests/agent/transports/test_codex_transport.py": {
-        "mode": "100644",
-        "sha256": "18f9a8bb4f5235d5b4df4452c5b523db144ec93215042b784da3c0771391c325",
-        "type": "blob"
-      },
-      "tests/conformance/persistence/test_cell5_delivery_outbox_exactly_once.py": {
-        "mode": "100644",
-        "sha256": "823fba38e09eb54d1992b193c0a36cdda45883ff24290a4cec8f6139da9d7a03",
-        "type": "blob"
-      },
-      "tests/cron/test_cron_delivery_redaction.py": {
-        "mode": "100644",
-        "sha256": "a4652222cb8d8c49cb6700c11f25737b5277d629583ff946ce5b93a7450d9e58",
-        "type": "blob"
-      },
-      "tests/cron/test_cron_failure_deliver.py": {
-        "mode": "100644",
-        "sha256": "61358b359a9240c5ee7ef8c961aedc995f636e36d451d8c28be7c4b5aa5f050d",
-        "type": "blob"
-      },
-      "tests/cron/test_cron_incidents.py": {
-        "mode": "100644",
-        "sha256": "65acfe23b17f30d9d576fdb10ebbd897f2a5b86d9010cc8d9ca733851706d255",
-        "type": "blob"
-      },
-      "tests/cron/test_cron_incidents_resolve.py": {
-        "mode": "100644",
-        "sha256": "2a2eadd04a81d77bfc582768aa993afa42817d392ff8049cbc3315e1f806d8bc",
-        "type": "blob"
-      },
-      "tests/cron/test_cron_no_agent.py": {
-        "mode": "100644",
-        "sha256": "1244a0ae322ad86f495b12d15e966b97d83a80a90f3e1aa24e41d6453f8fddbb",
-        "type": "blob"
-      },
-      "tests/cron/test_estop.py": {
-        "mode": "100644",
-        "sha256": "3038c7781d42b1d2168cfb928e0cf33af6b10b7c70f8bc3ff8b2db61036d20b5",
-        "type": "blob"
-      },
-      "tests/cron/test_fire_claim_lost_after_delivery.py": {
-        "mode": "100644",
-        "sha256": "d3f66fd3567428362c1585617ebdb0440dbdacee78c34bdec45f9fa103ecac8f",
-        "type": "blob"
-      },
-      "tests/cron/test_run_one_job.py": {
-        "mode": "100644",
-        "sha256": "9d3153d1d4610798d7d61faf709b809205d1b9eba0a11dbad90915e429504459",
-        "type": "blob"
-      },
-      "tests/cron/test_scheduler.py": {
-        "mode": "100644",
-        "sha256": "cdced993e65f91056932c85ab072f662556f6eaa81f6a568d61b3fbf4878ce14",
-        "type": "blob"
-      },
-      "tests/cron/test_script_claim_heartbeat.py": {
-        "mode": "100644",
-        "sha256": "09dbf698a997e239f9691a72dd36305efc9824a96016934863c922c2c768f147",
-        "type": "blob"
-      },
-      "tests/cron/test_shutdown_interrupt.py": {
-        "mode": "100644",
-        "sha256": "1f34db86fa7316e3d5dec6476f02757e40ae44d50f79f7f38a7cde244e3a2f73",
-        "type": "blob"
-      },
-      "tests/cron/test_warning_execution_outcome.py": {
-        "mode": "100644",
-        "sha256": "85b66b7c28bf36a0ad22dd787bc73bd9b623de99a8054c1724bb70e1191a53d0",
-        "type": "blob"
-      },
-      "tests/gateway/relay/test_relay_prompt_ack_stream_isolation.py": {
-        "mode": "100644",
-        "sha256": "e08dc6996f2afa7ceb9671e1a255b5ab7526ca6dcd46abb46048a633294a8e54",
-        "type": "blob"
-      },
-      "tests/gateway/test_active_session_text_merge.py": {
-        "mode": "100644",
-        "sha256": "ae86244a512d06ad50e89370c2531176f2f0b1d5aabadffe3314dc2969a86a9f",
-        "type": "blob"
-      },
-      "tests/gateway/test_agent_cache.py": {
-        "mode": "100644",
-        "sha256": "62a36eb294029ca6085cc8dd336b800318257fb98b7a77a90d544d9dae4d977c",
-        "type": "blob"
-      },
-      "tests/gateway/test_auto_skill_title_input.py": {
-        "mode": "100644",
-        "sha256": "4b37e6e35267bcdf900763460e7aa3ffcfdc3ab80197027272686e57963ac32f",
-        "type": "blob"
-      },
-      "tests/gateway/test_base_topic_sessions.py": {
-        "mode": "100644",
-        "sha256": "b5d92a46d0e0bf261f9e2ffc650a123cf73ca2a2e65c64feca132d2eb9c268e1",
-        "type": "blob"
-      },
-      "tests/gateway/test_base_warning_owner_scope.py": {
-        "mode": "100644",
-        "sha256": "7f7e2482261efdd5c55a2fb5e373574593d255bfe368f4b76948fde7b0bb5393",
-        "type": "blob"
-      },
-      "tests/gateway/test_clarify_progress_leak.py": {
-        "mode": "100644",
-        "sha256": "dd99a147f3fab04f2a08e1a11aeb048813694af9a26106ed0c3269e81995245f",
-        "type": "blob"
-      },
-      "tests/gateway/test_command_bypass_active_session.py": {
-        "mode": "100644",
-        "sha256": "a9dd8a47fd032e1bf38b12a13f6eae0f75e274b144ee29a55146c7170c884789",
-        "type": "blob"
-      },
-      "tests/gateway/test_compression_failure_session_sync.py": {
-        "mode": "100644",
-        "sha256": "d8c2807a9279257e423b148a2230d4a53f54dbb42ecb42d8f89dc44a78cb5ed5",
-        "type": "blob"
-      },
-      "tests/gateway/test_conversation_scope_funnel.py": {
-        "mode": "100644",
-        "sha256": "8c4b2c6da7da4cc1199a17012ad5c5b2f0293ea6bc0ddb9d16db7bacbe4fb833",
-        "type": "blob"
-      },
-      "tests/gateway/test_custom_provider_request_overrides.py": {
-        "mode": "100644",
-        "sha256": "84e77b9b3bb1d4586b341c08e487ea54c59427813b82502dc1a4486e0e9c047c",
-        "type": "blob"
-      },
-      "tests/gateway/test_delivery_ledger.py": {
-        "mode": "100644",
-        "sha256": "e348d23227600e8b2bd005d966a41dcedf87ddaf2a275b3259853098d8f399ad",
-        "type": "blob"
-      },
-      "tests/gateway/test_discord_channel_prompts.py": {
-        "mode": "100644",
-        "sha256": "4e2dd822984c3aea5664c754252a98b8eca4e2058e6c891f3d7bb3cc2c41d206",
-        "type": "blob"
-      },
-      "tests/gateway/test_discord_view_base_parity.py": {
-        "mode": "100644",
-        "sha256": "4accaf982c1ebf26b5c4ae7162b91a432ee3824017f1dba23067d99da3abc6f5",
-        "type": "blob"
-      },
-      "tests/gateway/test_external_drain_control.py": {
-        "mode": "100644",
-        "sha256": "d068470776fc619e460b6ff5b567e60b3469bfffe00a349356a6ea737fb75ed7",
-        "type": "blob"
-      },
-      "tests/gateway/test_fast_command.py": {
-        "mode": "100644",
-        "sha256": "20bbdf8a7bdece585dccb113c4981e7d97896a344c0d22fbc1f5c4ff7279997a",
-        "type": "blob"
-      },
-      "tests/gateway/test_gateway_shutdown.py": {
-        "mode": "100644",
-        "sha256": "6dbcbdc8cb55ece39fadddc37fc2ad8d341c28042f270b4dbc928251e8b64ee6",
-        "type": "blob"
-      },
-      "tests/gateway/test_heartbeat_acceptance.py": {
-        "mode": "100644",
-        "sha256": "bda55ae5d63fbcaaccc7ab45961e9966a1c6a6f269972c0d24ddfbd1ea9809bc",
-        "type": "blob"
-      },
-      "tests/gateway/test_heartbeat_execution_ownership.py": {
-        "mode": "100644",
-        "sha256": "341e9ce286e7555f9ddbef184c16274a6a973d8c8e37e41d3d70140907277a1a",
-        "type": "blob"
-      },
-      "tests/gateway/test_media_resend_dedup.py": {
-        "mode": "100644",
-        "sha256": "342e85a5de02428443e33c2ea579f925d002a907fa137a8cda646f2c8defffa6",
-        "type": "blob"
-      },
-      "tests/gateway/test_multiplex_adapter_registry.py": {
-        "mode": "100644",
-        "sha256": "87cb89ff6bf0445aa9d701dd4ba00c28e5ec3b71b0963497a1d145b2cdedcd64",
-        "type": "blob"
-      },
-      "tests/gateway/test_multiplex_busy_input_mode.py": {
-        "mode": "100644",
-        "sha256": "6df451fab5827d11aceac9b4c2cfac47ef91e2cadda779d5bf5539ed3e7601f0",
-        "type": "blob"
-      },
-      "tests/gateway/test_normalize_empty_agent_response.py": {
-        "mode": "100644",
-        "sha256": "b3761770ad73571d97e53dbb0e3c9c7d8a170ac502b1059a45a7939216dbf8b6",
-        "type": "blob"
-      },
-      "tests/gateway/test_queued_followup_processing_hooks.py": {
-        "mode": "100644",
-        "sha256": "844ddad16168c25f13cd6ddbae2f1bc8d3d17eb97314c8739b6e12a8d8630965",
-        "type": "blob"
-      },
-      "tests/gateway/test_queued_native_image_session_key.py": {
-        "mode": "100644",
-        "sha256": "92e5364467654222b6efa4e0deb04815eaf44f64de7724c601d57ef2458b1dff",
-        "type": "blob"
-      },
-      "tests/gateway/test_reasoning_command.py": {
-        "mode": "100644",
-        "sha256": "6e577c10a2c218378a8a8b45a57b91c3bfe3df28a3671a0ad0dc607aa7e83662",
-        "type": "blob"
-      },
-      "tests/gateway/test_restart_resume_pending.py": {
-        "mode": "100644",
-        "sha256": "06337c7d2927fb066b344598b2df8c847261ce352365943ecfea8fd8ff5aacca",
-        "type": "blob"
-      },
-      "tests/gateway/test_run_cleanup_progress.py": {
-        "mode": "100644",
-        "sha256": "f45d04883d7adb87f6016a2053721f295fe5551052c369218ba0fe05e02cde64",
-        "type": "blob"
-      },
-      "tests/gateway/test_run_progress_interrupt.py": {
-        "mode": "100644",
-        "sha256": "b2120215206891b740c0b9dd32b05c6970989bbe0f840a78019f07be2036badf",
-        "type": "blob"
-      },
-      "tests/gateway/test_run_progress_topics.py": {
-        "mode": "100644",
-        "sha256": "41388b45c697375cda48b1a5cf48c04da1b4ba6af07725cb35fd76119df01baf",
-        "type": "blob"
-      },
-      "tests/gateway/test_session_hygiene.py": {
-        "mode": "100644",
-        "sha256": "fb961024884420a7e2fdf8ce49b47444ed92ec3653e5a8c239d97a34e742af53",
-        "type": "blob"
-      },
-      "tests/gateway/test_session_hygiene_turnhold_adoption.py": {
-        "mode": "100644",
-        "sha256": "c6d52293679d7c7c4f48c2ca635cb784d4310ff1e80fa7626408bf577b76d21f",
-        "type": "blob"
-      },
-      "tests/gateway/test_session_split_brain.py": {
-        "mode": "100644",
-        "sha256": "e6a677100befd3aaaabc20c7522f64b1639f6f73773b4b96515bd0161bdc8c7b",
-        "type": "blob"
-      },
-      "tests/gateway/test_silent_partial_delivery.py": {
-        "mode": "100644",
-        "sha256": "758796da8cc48d31f3f78eda298f4b0e75869fe74ee8b49dcb2374fa2a3bc5d3",
-        "type": "blob"
-      },
-      "tests/gateway/test_slack_approval_buttons.py": {
-        "mode": "100644",
-        "sha256": "56db24c8ea1e3d97a96504c607037caffea1a0e79f27a91334465be93726d4d3",
-        "type": "blob"
-      },
-      "tests/gateway/test_stale_finalize_suppression.py": {
-        "mode": "100644",
-        "sha256": "a0fab1e9e94df40a148b386e240358ab636b65f6c764d34ba05da16b556b90a9",
-        "type": "blob"
-      },
-      "tests/gateway/test_streaming_tts_gateway_regression.py": {
-        "mode": "100644",
-        "sha256": "e31ba6d4747ba5ae1389362de249fd0e27e06cb929fe7abcc1681b7d9ad7375e",
-        "type": "blob"
-      },
-      "tests/gateway/test_telegram_approval_buttons.py": {
-        "mode": "100644",
-        "sha256": "315d38925c50b807f0dbf6a2ae1824679d93f5d6d70d7fd669a66936fb89ece0",
-        "type": "blob"
-      },
-      "tests/gateway/test_telegram_noise_filter.py": {
-        "mode": "100644",
-        "sha256": "75391b3fbcaff28e48fc1226073360f18e4172a63a74fc668f3ed72aaabed6cf",
-        "type": "blob"
-      },
-      "tests/gateway/test_telegram_voice_v0_regressions.py": {
-        "mode": "100644",
-        "sha256": "13ccf2495565604d6064e4effeca862d6d2f0b83ed12f344c0d4677439de03bd",
-        "type": "blob"
-      },
-      "tests/gateway/test_tts_media_routing.py": {
-        "mode": "100644",
-        "sha256": "79e9a96f50139b442a51ec02e4449127856567bcb7271f7f2a4ed21e7a8d7e22",
-        "type": "blob"
-      },
       "tests/install/e2e-assets/desktop-smoke-windows.ps1": {
         "mode": "100644",
-        "sha256": "16b18193285d9b5147ffea13f9e20e5caca183313a5f2977d8a5059d0f4bf893",
+        "sha256": "63b40ce9472b209d3f721976ee1d3115ed8f0a410ad9fb7a4703ce503ff2eeb6",
         "type": "blob"
       },
       "tests/install/e2e-assets/record-start.ps1": {
@@ -6486,7 +5877,7 @@
       },
       "tests/install/e2e-assets/source-driver.ps1": {
         "mode": "100644",
-        "sha256": "3ce450cc8dc464a35e133303e14403f2be5a25a8ba71e69c1b5b10fec44160b6",
+        "sha256": "b9c9fe9ef1eca7abf6a4afd12b4a9e01a5d1dd3f66d5521a06c8dde81ba57836",
         "type": "blob"
       },
       "tests/install/e2e-assets/ts-prefix.ps1": {
@@ -6504,459 +5895,124 @@
         "sha256": "fd36e48414f31ebf42c9e09ec99669010155afcb8a34ac7dd19e171804e57a27",
         "type": "blob"
       },
+      "tests/install/e2e-assets/windows-bundle-plugin-smoke.ps1": {
+        "mode": "100644",
+        "sha256": "49c3b9711022d68a5d22e691a16acd2095cfc0f5e685a023ca4919fb01704f32",
+        "type": "blob"
+      },
       "tests/install/e2e-assets/windows-bundled-drive-update.ps1": {
         "mode": "100644",
         "sha256": "0d13043ff45229d66b3c62d8adf935ecebaae8b048366588e913879d15b9d2aa",
         "type": "blob"
       },
+      "tests/install/e2e-assets/windows-bundled-processes.test.ps1": {
+        "mode": "100644",
+        "sha256": "a4926675bcaba820375d368d2974199f8625d87e1e5a2b9359f892841edd2c3c",
+        "type": "blob"
+      },
       "tests/install/windows-bundle-smoke.ps1": {
         "mode": "100644",
-        "sha256": "09c20962614a910b679cd0b0918b29a84afe54373a74d193b65b750310b9b2e5",
+        "sha256": "4dde21a0184d626561d85fcb9dba245a437fd46f7da52ad5906ba104e33b1e9c",
         "type": "blob"
       },
       "tests/install/windows-bundled-e2e.ps1": {
         "mode": "100644",
-        "sha256": "cc3309d34f7e4be910671170f85edf53d21602d8e5e4e5cb9001dddd563051a8",
+        "sha256": "2090de4fd6ade89f2a7a6e83274bd687a3dae8b9dc395c9b982738b388f49e63",
         "type": "blob"
       },
       "tests/install/windows-e2e.ps1": {
         "mode": "100644",
-        "sha256": "b2fad8f18534cc150c85f7cee0105f0acb1cc714b1cce934b5d6b07bf2bb7cbf",
+        "sha256": "81d342a9dd7afe735fc7f64c50959a2586988f97141181e698464f12d779ec80",
         "type": "blob"
       },
-      "tests/tools/conftest.py": {
+      "tools/bot_desktop/baseline.py": {
         "mode": "100644",
-        "sha256": "ea5cd4ae2901d3821c699cccc2960898e9606d02881c6ce5172a70caeb093648",
+        "sha256": "14b3a4f13c4a34e3bbc8a8540a387a165506f65afb10a0367e0f05a24a4e1502",
         "type": "blob"
       },
-      "tests/tools/test_bot_desktop_browser.py": {
+      "tools/bot_desktop/external.py": {
         "mode": "100644",
-        "sha256": "ad428382575dc834704fee0f00b2db871aed8d99940ba423900de43b614bbae3",
+        "sha256": "0848bcfbb15e26f3c91cca3b5ac895937612799becf86a0c023b134689917620",
         "type": "blob"
       },
-      "tests/tools/test_bot_desktop_browser_fence.py": {
+      "tools/bot_desktop/generation.py": {
         "mode": "100644",
-        "sha256": "272091c27b618dbacfd6c801d0cd464b3f8f173497822f3af3945bcb6b3bc1b4",
+        "sha256": "e00cb6e578a1687b5354e38075f4236508ec3e994a18eb79265852ff296b2bbc",
         "type": "blob"
       },
-      "tests/tools/test_browser_cdp_override.py": {
+      "tools/bot_desktop/install.py": {
         "mode": "100644",
-        "sha256": "06dc870b35c2e96229b0bdd3927f5be276a837f42b63afbc8a94fe9ee6a2545b",
+        "sha256": "ec2b45a33a985c263384a0f78ef2a27320eaa05f98219d2a4d05b5b7fc72e966",
         "type": "blob"
       },
-      "tests/tools/test_browser_cloud_fallback.py": {
+      "tools/bot_desktop/lease.py": {
         "mode": "100644",
-        "sha256": "09ec428ecb10a9a2c2faa7f9568d96ccab9fe4bf7516c492069904696678de80",
+        "sha256": "2bdf7526864821da075df384e7151dcdda8b6153cdebf91b461e603a0816bb72",
         "type": "blob"
       },
-      "tests/tools/test_browser_eval_shim_args.py": {
+      "tools/bot_desktop/lease_external.py": {
         "mode": "100644",
-        "sha256": "671bfb0fd7bc879e58242859d323af958bef5714a4ab09f1c0e08fd9e531eb86",
+        "sha256": "45c32d62a19b457caf938896356d87cd8a1ff8e518a6c536d74b00a11af64071",
         "type": "blob"
       },
-      "tests/tools/test_browser_headed_mode.py": {
+      "tools/bot_desktop/origin.py": {
         "mode": "100644",
-        "sha256": "abfe1f826d984032df844f63cb24b9ccb4c3488e036f0e0185f865f9720ac006",
+        "sha256": "418d6d1a69630227b4d06563837864665b66c0486cfc01f2eb4b1ee4cd93e2df",
         "type": "blob"
       },
-      "tests/tools/test_browser_lightpanda.py": {
+      "tools/bot_desktop/participants.py": {
         "mode": "100644",
-        "sha256": "8fb2a309a0e3e329ee83fe0f140712c0f13f5f1227ac821c40dbfd43c4726383",
+        "sha256": "93c9c9b967defe9aa352faedcdaaad6cf42eb57753ffaa682536ee1d3a1cc42f",
         "type": "blob"
       },
-      "tests/tools/test_browser_open_timeout.py": {
+      "tools/bot_desktop/recovery.py": {
         "mode": "100644",
-        "sha256": "9f16f5caf94129ea5a7fb76125f3fff5f52214372b11c8b55c17208e0db3605a",
+        "sha256": "07763c9c69bdfcf8b0d1112680b6b3b3bd6f60ba72503984c43b54245b30e4c4",
         "type": "blob"
       },
-      "tests/tools/test_browser_pm.py": {
+      "tools/bot_desktop/retirement.py": {
         "mode": "100644",
-        "sha256": "1a07a95245eb6c9f92bf7925979e9fc7d48342b6f9dc1186d4055ebe310a3ec6",
+        "sha256": "e50672ce1860ac5b38282c53a1b8289fa8b209a9c31ca0767702aa41b1ea778e",
         "type": "blob"
       },
-      "tests/tools/test_browser_real_profile.py": {
+      "tools/bot_desktop/rfb_filter.py": {
         "mode": "100644",
-        "sha256": "da16933990c3f5c6b5dbeaeb1084fb08cd95471ede55bd9b756294a69e95bdce",
+        "sha256": "cfcb7fadbabf061131e808b313adf4ce65844fc8ab67e572561c5a64267e9f43",
         "type": "blob"
       },
-      "tests/tools/test_browser_supervisor_healthcheck.py": {
+      "tools/bot_desktop/runtime.py": {
         "mode": "100644",
-        "sha256": "0dfe74c162b23a12f6e99e5af52b38346005781c233969370c73237f84c64dee",
+        "sha256": "dc7ec21da8856062731f27d9c3d7f32225bbb0e0ba76daa57684568692523354",
         "type": "blob"
       },
-      "tests/tools/test_browser_suspect_recycle.py": {
+      "tools/browser_session.py": {
         "mode": "100644",
-        "sha256": "abe4f900720fa162ef9dedc024cfea60c4bdd353865b19b303b938cb78f2ceb9",
-        "type": "blob"
-      },
-      "tests/tools/test_browser_use_cli.py": {
-        "mode": "100644",
-        "sha256": "ef8cefddf4e4f643db4a66638c96828e9f644a41ea5a8b8de0167af390def38f",
-        "type": "blob"
-      },
-      "tests/tools/test_browser_use_harness.py": {
-        "mode": "100644",
-        "sha256": "a51edaf947ac0ddd7aff71304675d54af9179b6d0a910d9ac64dc5ed25cac6cb",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use.py": {
-        "mode": "100644",
-        "sha256": "12115a91db580dc1db62737792f4e7326f90d6e4594fcbac2702580bcfca2f8b",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use_approval_isolation.py": {
-        "mode": "100644",
-        "sha256": "91dd31b1bf35f4cfbb133c20f9452210e451bc5a7440b0eac420ab2b2947a7f1",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use_delivery_ladder.py": {
-        "mode": "100644",
-        "sha256": "13dda052986df094982b5c744a12dc50d2db060726608f9effb3c5a6d5f665d8",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use_input_target_guard.py": {
-        "mode": "100644",
-        "sha256": "35a3ce4120f514911b063a94a388455407fc5e5943c504313fbd66409c89e1dd",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use_native_platform.py": {
-        "mode": "100644",
-        "sha256": "03fc37ef35cf42325774b4ab5911d995eafd47f340daf2bb84d27299d7d459a0",
-        "type": "blob"
-      },
-      "tests/tools/test_computer_use_screenshot_dedup.py": {
-        "mode": "100644",
-        "sha256": "9c4b0c0623428fa51cff9b023e2237153c48bcf6c06285012f32d9c8091fac0b",
-        "type": "blob"
-      },
-      "tests/tools/test_deferral_fixes.py": {
-        "mode": "100644",
-        "sha256": "f47c84a0ed0b3704eb69309e2f347bc614ed84013f9c7c7579939c1296256ee7",
-        "type": "blob"
-      },
-      "tests/tools/test_delegate.py": {
-        "mode": "100644",
-        "sha256": "fd2fbd575606907b988f608ef23a55fb0b9d878dc37bd2818b6b7598018c323c",
-        "type": "blob"
-      },
-      "tests/tools/test_delegate_output_schema.py": {
-        "mode": "100644",
-        "sha256": "41ebd28251ba4887b8b55069a09f2d933938506b389c64a1b702cfbcea16d7d0",
-        "type": "blob"
-      },
-      "tests/tools/test_mcp_tool_session_expired.py": {
-        "mode": "100644",
-        "sha256": "feb0918579dfb19f90470ecdb07a727f169186f9b6505061e9b52be5ed88b22f",
-        "type": "blob"
-      },
-      "tests/tools/test_memory_tool.py": {
-        "mode": "100644",
-        "sha256": "8e5b899b031539b29866dded3db120c4c53eefa6c8ff1bb683657484c08baccc",
-        "type": "blob"
-      },
-      "tests/tools/test_process_registry.py": {
-        "mode": "100644",
-        "sha256": "05e54ddd664559ffe41a22bd7d45d008fc6f29198ae89655e0bd7dc2c75e2d52",
-        "type": "blob"
-      },
-      "tests/tools/test_session_search.py": {
-        "mode": "100644",
-        "sha256": "d847689e3b76c0ef2607c4d43f55851e3adf8239b7dd921e691371aa1e6dc9d2",
-        "type": "blob"
-      },
-      "tests/tools/test_skill_manager_tool.py": {
-        "mode": "100644",
-        "sha256": "5f0f0f365ddf34e36bcfe4799a3facde2b1b3530916ba880af98bcb91dd5728a",
-        "type": "blob"
-      },
-      "tests/tools/test_tool_search.py": {
-        "mode": "100644",
-        "sha256": "c83e054529c07aced0466b72510ee8825bd364a402ac4cec118ddf67dd1dcaf0",
-        "type": "blob"
-      },
-      "tools/browser_lifecycle_runtime.py": {
-        "mode": "100644",
-        "sha256": "286a17aae7679bb3da3bffdc80623e0464a3d4f9b83dcf2aac218df1aa9bd05a",
-        "type": "blob"
-      },
-      "tools/browser_supervisor.py": {
-        "mode": "100644",
-        "sha256": "1394a18b70f31be76ef8ec1152aa53cd66a45c5b330f83bb41c6e30762717899",
-        "type": "blob"
-      },
-      "tools/browser_tool_lifecycle.py": {
-        "mode": "100644",
-        "sha256": "c42381914f9c5526d763c710c2e6d8d5123db5ef4d3b0701c3a51ec9439bc964",
-        "type": "blob"
-      },
-      "tools/browser_tool_session.py": {
-        "mode": "100644",
-        "sha256": "a345e2dcaa11f4f5961790614773eba65dbb90ef2d9266b9dd24660ee18e15dd",
-        "type": "blob"
-      },
-      "tools/browser_use_cli.py": {
-        "mode": "100644",
-        "sha256": "bf595cc9d9f2804973b021b9b57002f2ed4c8510f3a0213fb7025febc41f7d31",
-        "type": "blob"
-      },
-      "tools/computer_use/cua_backend.py": {
-        "mode": "100644",
-        "sha256": "3173cd3fc0f2607175de684b6eb1c7a3ed10ba588f7f22fd63540eeb9b22bbd8",
-        "type": "blob"
-      },
-      "tools/computer_use/cua_backend_capture.py": {
-        "mode": "100644",
-        "sha256": "2857174e47077b301088276c4a2f3987bf44036d6d16d920e7d227c376149268",
-        "type": "blob"
-      },
-      "tools/computer_use/cua_backend_daemon.py": {
-        "mode": "100644",
-        "sha256": "2fb7a5f69c36a4d2dae6f37f315a1b73e292478c852a47a6650f071ca840cf5a",
+        "sha256": "b994f30b0299d6a8b61ea81f4bd36c734094869424050a7009563274af4a0606",
         "type": "blob"
       },
       "tools/computer_use/tool.py": {
         "mode": "100644",
-        "sha256": "08dc50247ea6419c7d2725d766b9138787a8840c2cc79673898d03dbf9669358",
+        "sha256": "3b544e6a14fbc29a15700c3346e178ed1ede39a294443d24f48938ce6573909c",
         "type": "blob"
       },
-      "tools/cronjob_tools.py": {
+      "tui_gateway/contracts/display.py": {
         "mode": "100644",
-        "sha256": "27b7fcfa42fba5e62223318d3fdb37c88e3a4e05aea566de8a72f2e07c1468bf",
+        "sha256": "378a7d88a99ec9284c0ae03cce817023362654ced439a0917074c4037eb53236",
         "type": "blob"
       },
-      "tools/delegate_tool_child_run.py": {
+      "tui_gateway/methods_display.py": {
         "mode": "100644",
-        "sha256": "4beec9a83c2ecb8a4f0e71968f0a6c6cda71f477df7b98c4e28674b526e3d908",
+        "sha256": "e21fad83e206188a90ec65b815ffaa77dd29d408f0e33ebcbdd44a5a3be0c5e0",
         "type": "blob"
       },
-      "tools/durability_declarations.py": {
+      "tui_gateway/methods_display_watch.py": {
         "mode": "100644",
-        "sha256": "3894dfaaa4c422d0cc46d275e06a61095932117b02a7d283232b07d954a4faba",
-        "type": "blob"
-      },
-      "tools/file_operations.py": {
-        "mode": "100644",
-        "sha256": "0b4bc81058c29828edd9955687e1012514b2c43a490c006874bdc5edce4b2b73",
-        "type": "blob"
-      },
-      "tools/file_operations_search.py": {
-        "mode": "100644",
-        "sha256": "dbed9ef52e6ac385e57b8f411f6321751dcbe572ae9b766d4a17575d07490458",
-        "type": "blob"
-      },
-      "tools/golden_topic_recall.py": {
-        "mode": "100644",
-        "sha256": "92131a957530a55dfbb97a61a7a89d15ff0283ffb1ee999d8afe87af5830efcd",
-        "type": "blob"
-      },
-      "tools/log_promise_tool.py": {
-        "mode": "100644",
-        "sha256": "841f01a008287a2183cce8241eff3686c06425121055781739c3101adf69ba1a",
-        "type": "blob"
-      },
-      "tools/mcp_call_classifier.py": {
-        "mode": "100644",
-        "sha256": "9258ca0d7b6fa38b003454e097995d9406ef159e6c14e619abfe783ad05a04bc",
-        "type": "blob"
-      },
-      "tools/mcp_call_recovery.py": {
-        "mode": "100644",
-        "sha256": "e2f65169adb93a8c007543e830ad8075d7fd153d4c48e4b0efd67984cfdc4d8d",
-        "type": "blob"
-      },
-      "tools/mcp_tool_handlers.py": {
-        "mode": "100644",
-        "sha256": "982790029b659e04d971d9dbe283651b2b0945bd505516500079c19ce6c79a7f",
-        "type": "blob"
-      },
-      "tools/memory_contract.py": {
-        "mode": "100644",
-        "sha256": "0f605200df3227aeaee64572e8cf668099713684c3ed2df616f1d40d70a6bd32",
-        "type": "blob"
-      },
-      "tools/memory_routing_declarations.py": {
-        "mode": "100644",
-        "sha256": "7b2177de001c9a25ad2cc5e14e3459559af26b6256e156bdfea3f8a98f9dbeb2",
-        "type": "blob"
-      },
-      "tools/memory_tool.py": {
-        "mode": "100644",
-        "sha256": "5cb546ce0954cbc11d9415058eca2589feacecf37dfb7d9e1892ed829d85ebfd",
-        "type": "blob"
-      },
-      "tools/process_registry.py": {
-        "mode": "100644",
-        "sha256": "7dc36f2ba74f59c9dbbd842246a60de969bf1b87bc2e87b1f16ed56b0a968d52",
-        "type": "blob"
-      },
-      "tools/send_message_senders.py": {
-        "mode": "100644",
-        "sha256": "0e0d59589bc054bf1c316b64e64031a35fb291bc8a7da3e52e55b9be9395a7e4",
-        "type": "blob"
-      },
-      "tools/send_message_tool.py": {
-        "mode": "100644",
-        "sha256": "9ecb99fefdd97ddf561ba67e1e3b241adec6480e97117883f8f1be13fec3800d",
-        "type": "blob"
-      },
-      "tools/session_search_tool.py": {
-        "mode": "100644",
-        "sha256": "5b115c20f13fa273618e56e7a02fe613dd46e85ffe1a9be7eb3d7983b546c8eb",
-        "type": "blob"
-      },
-      "tools/skill_manager_tool.py": {
-        "mode": "100644",
-        "sha256": "c8e1975358d679c7612884f5bde65a5484e447543e8830aaaea39b9d4046278b",
-        "type": "blob"
-      },
-      "tools/skill_provenance.py": {
-        "mode": "100644",
-        "sha256": "9f147ea1c65843ea1d32b9b0f9dc62a1ec41d3d8ec62043e57f80cb17fd0a924",
-        "type": "blob"
-      },
-      "tools/tool_search.py": {
-        "mode": "100644",
-        "sha256": "738eceebeeb20d0e92af6b23d9531aa5d9825fa710729f5bd2208b189ace19d2",
-        "type": "blob"
-      },
-      "tools/tts_tool.py": {
-        "mode": "100644",
-        "sha256": "58137c32231a6550b25c522a74b8bb2f1c26d0859b213a41d155888389f95f19",
-        "type": "blob"
-      },
-      "tools/x_search_tool.py": {
-        "mode": "100644",
-        "sha256": "bd7aeda28f393a5de168a4215ee8e5d6f5435fcbcaf6b6cb1f7e90eb573876cc",
-        "type": "blob"
-      },
-      "uv.lock": {
-        "mode": "100644",
-        "sha256": "469b55a1c09437043a90c697b3d8f50f499377ebfb4afc0cf33efd7c3d562d9e",
-        "type": "blob"
-      },
-      "website/docs/user-guide/features/curator.md": {
-        "mode": "100644",
-        "sha256": "1fd000ef2bfa5df0a346a276d9d7834f95b96bf9ce9d89c7474ad5e4aea6c047",
-        "type": "blob"
-      },
-      "workers/__init__.py": {
-        "mode": "100644",
-        "sha256": "65aa296496df9b4297108982e18df0c5eccdbcd384ba6f1c8cd2a64459ff8f45",
-        "type": "blob"
-      },
-      "workers/memory/__init__.py": {
-        "mode": "100644",
-        "sha256": "b7555a185f970c765f67492eac46b132efbbf381b91b33b214b1dcfbbeb77284",
-        "type": "blob"
-      },
-      "workers/memory/__main__.py": {
-        "mode": "100644",
-        "sha256": "1342c88d6d08e3fa9db7a9f168dff20f09581a70541fb2be1fb56430ce65637e",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/__init__.py": {
-        "mode": "100644",
-        "sha256": "2dab1f45c9f1ceaecab12561d46c751a3ac8022274391750b58d642834437578",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/change_detect.py": {
-        "mode": "100644",
-        "sha256": "354e0b591358321c2264d8e129be04f12c66cfb2f46bf40f9b2f9da71d417f99",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/external.py": {
-        "mode": "100644",
-        "sha256": "9b05f09d2adcc28a052341326ba77baa6f3db4ee643bf550cfe2aaa4e166154a",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/ingest_daemon.py": {
-        "mode": "100644",
-        "sha256": "3e8c0c09c88e1936c509663bd75f4b7749c8313cb7dc8d1056d6bf55e4946033",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/read_tools.py": {
-        "mode": "100644",
-        "sha256": "a6b2550ce6038809f4bfd59cd06db768c9066d20824f26eb103025aebd22920e",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/recall.py": {
-        "mode": "100644",
-        "sha256": "45a1e4f8b3f760af71a3208f85805565cdbc78f1c61dbfda3c57a2566cc90c70",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/reindex_daemon.py": {
-        "mode": "100644",
-        "sha256": "f7f10a044387eaa6998c1ee02b3eca9542c7e47663f483bb8874b22bb5761763",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/reranker.py": {
-        "mode": "100644",
-        "sha256": "fcd8faaa67567baca65c70d9f900795f2fd3979d65c6ae7677ed241081426cf9",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/store.py": {
-        "mode": "100644",
-        "sha256": "7ae788d1c10a89ff972d4ffb1a306e79fe9065198b86fbd3f38cfe9f38b9e839",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/summarize.py": {
-        "mode": "100644",
-        "sha256": "2709377fd44570dd706ab9a3e97406b0a6121d1520f931da03362a31f09366c7",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis/vector_reindex.py": {
-        "mode": "100644",
-        "sha256": "2ec26c81995cade65cb06526da44989b6586d73ddc7b09126ce8caa73cc463df",
-        "type": "blob"
-      },
-      "workers/memory/anamnesis_compat_mcp.py": {
-        "mode": "100644",
-        "sha256": "e47ad72bbdd0ed46bcd511d8f4130d9cbd0c6b1aa723b75becefc092a246804b",
-        "type": "blob"
-      },
-      "workers/memory/compress.py": {
-        "mode": "100644",
-        "sha256": "17e02f2ef1df8edf56769ed738bec8dfcb6c5c2b294735f32d523309406977c4",
-        "type": "blob"
-      },
-      "workers/memory/memory_router.py": {
-        "mode": "100644",
-        "sha256": "571d9f1e04a125d6afca1600850284f91e20844d6cb44f9fa03e56b26926ab25",
-        "type": "blob"
-      },
-      "workers/memory/recall.py": {
-        "mode": "100644",
-        "sha256": "8cf045d89aaec7221990530e63ea3255adb5645bd8d06d1ddfaf71e67eb19f0a",
-        "type": "blob"
-      },
-      "workers/memory/retrieve.py": {
-        "mode": "100644",
-        "sha256": "3dd93a2a9faf0f9f47d0b299f1a514f6c98e56eb0109a31f250aea05a2d475cd",
-        "type": "blob"
-      },
-      "workers/memory/store.py": {
-        "mode": "100644",
-        "sha256": "fc413bf2670305373ae2ae5d5f32f920a45ddf8344859f632bd425a59f8074f4",
-        "type": "blob"
-      },
-      "workers/memory/store_mcp.py": {
-        "mode": "100644",
-        "sha256": "ab77ead08936ae10bc230def61b9d6e6ef9e1a35d77ea562a4f19b82b21760b7",
-        "type": "blob"
-      },
-      "workers/memory/summarize.py": {
-        "mode": "100644",
-        "sha256": "643e6f10a17257600f62b02f6dffaf1a3292910436218c1d41a4daa66c01a867",
-        "type": "blob"
-      },
-      "workers/memory/thread_preferences.py": {
-        "mode": "100644",
-        "sha256": "442a02fd6a9de472c62daf3ede4498828a15b5c59a1a678763492efd403e8348",
+        "sha256": "c92eba1a0d27df52bc666c064be6561a5bdae3e8848e7d87d888ac959b70072f",
         "type": "blob"
       }
     },
-    "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
-    "upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
+    "golden_sha": "0e9165b3fc38a7514b11a7f1d579fd01d14db54e",
+    "upstream_sha": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
     "verified": true
   },
   "schema_version": 1

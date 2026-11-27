@@ -1,6 +1,6 @@
 """pdf MCP — markdown/HTML to PDF rendering for Hermes.
 
-Solves Deacon's recurring "WHY ARE THESE NOT DOWNLOADABLE PDFS" frustration.
+Solves the operator's recurring "WHY ARE THESE NOT DOWNLOADABLE PDFS" frustration.
 Multi-backend renderer:
   1. weasyprint (preferred — highest quality, needs cairo/pango on macOS)
   2. fpdf2 (fallback — pure python, no system deps, simpler typography)

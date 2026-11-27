@@ -122,27 +122,27 @@ try {
 }
 
 try {
-  $dualRoot = (Test-Path (Join-Path $homePath 'profiles\sarah')) -or (Get-ScheduledTask -TaskName 'SarahGateway' -ErrorAction SilentlyContinue)
+  $dualRoot = (Test-Path (Join-Path $homePath 'profiles\secondary')) -or (Get-ScheduledTask -TaskName 'SecondaryGateway' -ErrorAction SilentlyContinue)
   $singleBase = $homePath
   if (-not $dualRoot) {
-    $posca = Join-Path $homePath 'profiles\posca'
-    if ((-not (Test-Path (Join-Path $homePath 'gateway_state.json'))) -and (Test-Path (Join-Path $posca 'gateway_state.json'))) {
-      $singleBase = $posca
+    $soleProfile = Join-Path $homePath 'profiles\primary'
+    if ((-not (Test-Path (Join-Path $homePath 'gateway_state.json'))) -and (Test-Path (Join-Path $soleProfile 'gateway_state.json'))) {
+      $singleBase = $soleProfile
     }
   }
   $actions = @()
   $lanes = @()
 
   if ($dualRoot) {
-    $alfredBase = Join-Path $homePath 'profiles\alfred'
-    if (-not (Test-Path $alfredBase)) { $alfredBase = $homePath }
-    $alfredTask = 'HermesGateway'
-    if (Get-ScheduledTask -TaskName 'AlfredGateway' -ErrorAction SilentlyContinue) {
-      $alfredTask = 'AlfredGateway'
+    $primaryBase = Join-Path $homePath 'profiles\primary'
+    if (-not (Test-Path $primaryBase)) { $primaryBase = $homePath }
+    $primaryTask = 'HermesGateway'
+    if (Get-ScheduledTask -TaskName 'PrimaryGateway' -ErrorAction SilentlyContinue) {
+      $primaryTask = 'PrimaryGateway'
     }
     $lanes = @(
-      @{ name = 'alfred'; base = $alfredBase; task = $alfredTask; pattern = 'gateway run'; stop = $false },
-      @{ name = 'sarah'; base = (Join-Path $homePath 'profiles\sarah'); task = 'SarahGateway'; pattern = 'gateway run'; stop = $false }
+      @{ name = 'primary'; base = $primaryBase; task = $primaryTask; pattern = 'gateway run'; stop = $false },
+      @{ name = 'secondary'; base = (Join-Path $homePath 'profiles\secondary'); task = 'SecondaryGateway'; pattern = 'gateway run'; stop = $false }
     )
     $all = Get-GatewayProcesses 'gateway run'
     $trimmed = Stop-Oldest $all 4

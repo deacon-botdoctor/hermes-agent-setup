@@ -1,0 +1,207 @@
+{
+  "edits_sha256": "b279b1a0f54d27446fcaddd674b38c541ee74c1dd35a1bc959ffddedff772590",
+  "files": {
+    "agent/prompt_builder.py": {
+      "after": "2317f124b28ae898e46ece25735b0ff66c0ad1f42074b32b8fbfc9b31fddce58",
+      "before": "92794560ec7e3e0396e9f33bc505c7d2e13aed1275f199b39ed934f3c54a9fcb",
+      "mode": 420
+    },
+    "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx": {
+      "after": "e07b1387f0fe5e408e1cfab9c34ec7de403b236ea71829608769201cae57dd98",
+      "before": "4267315fcf5d310ea6e7dc0e999ba5877a182d405ed0de52f8b3b6477e8863bb",
+      "mode": 420
+    },
+    "apps/desktop/src/plugins/hermes-bots/screen-pane.tsx": {
+      "after": "253201492874460ce61c47b78d5b2a1bb640ebb7c5757825c2a2b8bff6210cbd",
+      "before": "7675237dba57fcd9abb9cd175e02ee2436c4c58c306863b8a4099084446b8894",
+      "mode": 420
+    },
+    "apps/desktop/src/plugins/hermes-bots/screen-portal.tsx": {
+      "after": "0b9d0ad4f772bbbff9b7d1df717f6d1f1b843f380f5f503d897044aa7eff12aa",
+      "before": "9fdf04e404f27f4d6688090875604aaecc9c966c94840ab7b2863e6404090bd8",
+      "mode": 420
+    },
+    "apps/desktop/src/plugins/hermes-bots/screen-state.ts": {
+      "after": "544c38394a32b42ac89f37a7d449e4b7e3824321ece72894f55c2a75a946c15e",
+      "before": "c39bb8b6ea5170cbfafa749dc262c4f9b61e3af775904e7d8b45be16742aced1",
+      "mode": 420
+    },
+    "apps/shared/src/gateway-contract.generated.ts": {
+      "after": "6479557fb4f6cff2224dc4411dafb0001fa8f5045d0e10380021d2b759dfda91",
+      "before": "87671cbb35c360e256cb1d83c9bb3706d0eacce3c71d02b51c0d9ffbd9a06b04",
+      "mode": 420
+    },
+    "apps/shared/src/gateway-contract.openrpc.json": {
+      "after": "a5261fec490a46edcd94ec4dc022eeef8eac08f770ee0a233710d8841237c692",
+      "before": "62b058bcd4c7d0f72a1be13f943ad903d0b39eae484e3afc48a46b449a265617",
+      "mode": 420
+    },
+    "hermes_cli/config_defaults.py": {
+      "after": "271f84d2c41df24d21a1a20d14d312abeac16650955ca0597cad044b74b452cb",
+      "before": "bbe9cc0e53382a0482fb3cd47ebe5e15e85de223c38829cd1a71eed47bd05123",
+      "mode": 420
+    },
+    "hermes_cli/managed_scope.py": {
+      "after": "e4a061d5efa6b8f334d3359e67ffb853e9eaef478fb896c0051a5d06903e0bb9",
+      "before": "1c5d16b92952a0101cb8ee8f0f70cf7cd2d19faffe224f9ca1b52dd29e794ed2",
+      "mode": 420
+    },
+    "hermes_cli/subcommands/computer_use_screen.py": {
+      "after": "63f69ba5494ca2326868d98acbe0602419bbfbca4f5f83a4e233a6d5c3f945a7",
+      "before": "4d8c4a7fe25a0d9125f98f6fac734d45157d55c05c650bddbe79395f2ed0498f",
+      "mode": 420
+    },
+    "hermes_cli/web_routers/display.py": {
+      "after": "980dbecdf6b1823e40762000aeb3f548d7d61f0afb607ca2c409b2c2c5ba7207",
+      "before": "c3a0915a680ae2f13c67bc788e067d862b382c41952f0b234e71e6f75bcafdd0",
+      "mode": 420
+    },
+    "hermes_cli/web_routers/display_external.py": {
+      "after": "1c266788e3e9444314332502f8602392485929925fb9d04b1436bac7dac9b117",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/README.md": {
+      "after": "af456fbc9ac38ef05c00b051ff2ba815e218efbe3caef804215e6e1084451eb8",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/__init__.py": {
+      "after": "6b46e603ea737e510a77ddf30481fdfd005fb4505f4ff6c8aa373075226473a0",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/backend.py": {
+      "after": "9311cf525548ab7b6f07f2a1053737eccddba0c7b3aec582ebdb9f948834b7b7",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/common.py": {
+      "after": "f710ed46159ecf91e8e1eae6ecfd6023d6cf18a709716d869f7698fd27d6b137",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/plugin.yaml": {
+      "after": "8d485059d4c9c59e0ff0c097d5cdc53f40524ba7911ed2b803ab9b7abc39eb3b",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/requirements.txt": {
+      "after": "c54b365a7fa2d5dcd691e507e2333d39ed765d07d3d604869b6368e6cfd02603",
+      "before": null,
+      "mode": 420
+    },
+    "plugins/computer_use/wayvnc/rfb_worker.py": {
+      "after": "4cfa0b83ba229904d4137021dbd3240e625c28b0deec344ec18759183a4c8998",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/baseline.py": {
+      "after": "14b3a4f13c4a34e3bbc8a8540a387a165506f65afb10a0367e0f05a24a4e1502",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/external.py": {
+      "after": "0848bcfbb15e26f3c91cca3b5ac895937612799becf86a0c023b134689917620",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/generation.py": {
+      "after": "e00cb6e578a1687b5354e38075f4236508ec3e994a18eb79265852ff296b2bbc",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/install.py": {
+      "after": "ec2b45a33a985c263384a0f78ef2a27320eaa05f98219d2a4d05b5b7fc72e966",
+      "before": "15ac992658419ff9082c6241352e0901e4ee1d83eebd4084fd67ba0cb082a9a6",
+      "mode": 420
+    },
+    "tools/bot_desktop/lease.py": {
+      "after": "2bdf7526864821da075df384e7151dcdda8b6153cdebf91b461e603a0816bb72",
+      "before": "26f477a502f106325459c738b16cad9ab07955d76442177f9649b0a8d51dc887",
+      "mode": 420
+    },
+    "tools/bot_desktop/lease_external.py": {
+      "after": "45c32d62a19b457caf938896356d87cd8a1ff8e518a6c536d74b00a11af64071",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/origin.py": {
+      "after": "418d6d1a69630227b4d06563837864665b66c0486cfc01f2eb4b1ee4cd93e2df",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/participants.py": {
+      "after": "93c9c9b967defe9aa352faedcdaaad6cf42eb57753ffaa682536ee1d3a1cc42f",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/recovery.py": {
+      "after": "07763c9c69bdfcf8b0d1112680b6b3b3bd6f60ba72503984c43b54245b30e4c4",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/retirement.py": {
+      "after": "e50672ce1860ac5b38282c53a1b8289fa8b209a9c31ca0767702aa41b1ea778e",
+      "before": null,
+      "mode": 420
+    },
+    "tools/bot_desktop/rfb_filter.py": {
+      "after": "cfcb7fadbabf061131e808b313adf4ce65844fc8ab67e572561c5a64267e9f43",
+      "before": "3e7b31584072f82b0a003f7bcc50b30f42cfab3080301e2c4766de384753f1da",
+      "mode": 420
+    },
+    "tools/bot_desktop/runtime.py": {
+      "after": "dc7ec21da8856062731f27d9c3d7f32225bbb0e0ba76daa57684568692523354",
+      "before": "49e0aaa2b37774bd88fe0961357555a15939dd10c50a97393e3f0c122e93f45e",
+      "mode": 420
+    },
+    "tools/browser_session.py": {
+      "after": "b994f30b0299d6a8b61ea81f4bd36c734094869424050a7009563274af4a0606",
+      "before": "6fff818beddb9549320019dbb9753e9ab49008ce5c19c604507e78bf88cb9639",
+      "mode": 420
+    },
+    "tools/computer_use/tool.py": {
+      "after": "3b544e6a14fbc29a15700c3346e178ed1ede39a294443d24f48938ce6573909c",
+      "before": "02bcba1dd8fd0a1c6e3aa7a53c05d4d0d4c743eb3410fe9d8f7386c45ce8a62e",
+      "mode": 420
+    },
+    "tui_gateway/contracts/display.py": {
+      "after": "378a7d88a99ec9284c0ae03cce817023362654ced439a0917074c4037eb53236",
+      "before": "ef5e72b566529934c910178ff057a1c16c058c75305b5889338135c3c60f5898",
+      "mode": 420
+    },
+    "tui_gateway/methods_display.py": {
+      "after": "e21fad83e206188a90ec65b815ffaa77dd29d408f0e33ebcbdd44a5a3be0c5e0",
+      "before": "abfeac0184879dfa019068f5d3857ebc408576eeaf1bebdf087090cd204652a6",
+      "mode": 420
+    },
+    "tui_gateway/methods_display_watch.py": {
+      "after": "c92eba1a0d27df52bc666c064be6561a5bdae3e8848e7d87d888ac959b70072f",
+      "before": "9cdc1077062db4e828ad807946f5fc942339f2b06b7053a5e2f0fdce56f7f129",
+      "mode": 420
+    }
+  },
+  "port": {
+    "base_golden_commit": "db8d7d4750ff845d898e7d991f2785cf90588b42",
+    "method": "map unchanged exact seams onto current pinned SDK; retain all unrelated upstream content",
+    "source_upstream": "6112c2adb9e11f69734a29be9d2696f345ffa06a"
+  },
+  "provider_basis_source_tree": "a93ff00bde366b8cfe86b0d285fe85bd1fa0b047",
+  "schema": 1,
+  "source_overlay": {
+    "active_bootstrap_supported": true,
+    "basis_golden_commit": "7c85d1defb7eb0ccbf44317f6405d53f31f2fe03",
+    "bootstrap_requires": [
+      "authentic-privileged-operator-origin",
+      "live-exact-native-aggregate-barrier",
+      "existing-lease-drain-and-serialized-grant-commit"
+    ],
+    "digest_method": "sha256 canonical JSON path-to-{sha256,bytes,mode} effective S2+packet overlay",
+    "kind": "source-only-origin-gated-aggregate-baseline",
+    "native_overlay_sha256": "c10b38daa7af30250ed20caffe62a6d1a5217380de00a555296d76cc4cef7ec1",
+    "origin_evidence_produced_by_this_packet": false,
+    "requires_new_exact_tree_admission": true
+  },
+  "upstream": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19"
+}

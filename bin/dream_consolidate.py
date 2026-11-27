@@ -9,13 +9,17 @@ Designed to run immediately after dream.py as a nightly cron job.
 """
 
 import json
+import hashlib
 import logging
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+try:
+    from operator_native_llm import call_native
+except ModuleNotFoundError:
+    from bin.operator_native_llm import call_native
 
 try:
     from native_memory_limits import char_limit_for_target, automatic_memory_review_enabled
@@ -37,12 +41,22 @@ def render_memory_entries(entries):
     return "\n§\n".join(e.strip() for e in entries if e.strip())
 
 
-def write_memory_entries(path, entries):
+def write_memory_entries(path, entries, expected_source=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     limit = char_limit_for_target("user" if "USER" in path.name else "memory")
     if len(render_memory_entries(entries)) > limit:
         raise ValueError("Memory exceeds its limit; preserve entries for reviewed consolidation")
-    path.write_text(render_memory_entries(entries), encoding="utf-8")
+    if expected_source is not None and path.read_bytes() != expected_source:
+        raise RuntimeError("memory changed during consolidation; preserve the newer version")
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix=".consolidation-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(render_memory_entries(entries)); stream.flush(); os.fsync(stream.fileno())
+        os.chmod(temporary, path.stat().st_mode & 0o777 if path.exists() else 0o600)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary): os.unlink(temporary)
 
 
 def dedupe_entries(entries):
@@ -57,64 +71,7 @@ logging.basicConfig(
 logger = logging.getLogger("consolidate")
 
 
-def load_config():
-    """Read model config from config.yaml."""
-    try:
-        import yaml
-    except ImportError:
-        return None, None, None
-
-    config_path = HERMES_HOME / "config.yaml"
-    if not config_path.exists():
-        return None, None, None
-
-    cfg = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
-
-    aux = cfg.get("auxiliary", {}) or {}
-    for key in ("dream", "compression", "session_search", "approval"):
-        section = aux.get(key, {}) or {}
-        provider = section.get("provider", "")
-        base_url = section.get("base_url") or ""
-        if not base_url and provider == "openrouter":
-            base_url = "https://openrouter.ai/api/v1"
-        if section.get("model") and base_url:
-            model = section["model"]
-            base_url = base_url.rstrip("/")
-            api_key = section.get("api_key", "")
-            if not api_key:
-                env_key = section.get("api_key_env", "")
-                if env_key:
-                    api_key = os.environ.get(env_key, "")
-                    if not api_key:
-                        env_file = HERMES_HOME / ".env"
-                        if env_file.exists():
-                            for line in env_file.read_text(encoding="utf-8").splitlines():
-                                if line.startswith(f"{env_key}="):
-                                    api_key = line.split("=", 1)[1].strip().strip("'\"")
-                                    break
-            if model and base_url and api_key:
-                return model, base_url, api_key
-
-    m = cfg.get("model", {}) or {}
-    model = m.get("default", "")
-    base_url = m.get("base_url", "")
-    api_key = ""
-    env_key = m.get("api_key_env", "")
-    if env_key:
-        api_key = os.environ.get(env_key, "")
-        if not api_key:
-            env_file = HERMES_HOME / ".env"
-            if env_file.exists():
-                for line in env_file.read_text(encoding="utf-8").splitlines():
-                    if line.startswith(f"{env_key}="):
-                        api_key = line.split("=", 1)[1].strip().strip("'\"")
-                        break
-    if not api_key:
-        api_key = m.get("api_key", "")
-    return model, base_url, api_key
-
-
-def score_and_prune(entries, target, model, base_url, api_key):
+def score_and_prune(entries, target):
     """Send entries to the model for AKL decay scoring, return pruned list."""
     if not entries:
         return entries
@@ -140,32 +97,9 @@ def score_and_prune(entries, target, model, base_url, api_key):
     )
 
     try:
-        with httpx.Client(timeout=60) as client:
-            resp = client.post(
-                f"{base_url}/chat/completions",
-                json={
-                    "model": model,
-                    "temperature": 0,
-                    "max_tokens": 512,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-            )
-
-        if resp.status_code != 200:
-            logger.warning("API error %d during scoring: %s", resp.status_code, resp.text[:200])
-            return entries  # Return unmodified on error
-
-        data = resp.json()
-        choices = data.get("choices") or [{}]
-        message = choices[0].get("message") or {}
-        content = message.get("content") or ""
+        content = call_native(system_prompt, prompt, 512, HERMES_HOME)
+        if not content:
+            raise RuntimeError("native dream scoring failed")
 
         # Parse JSON
         if "```" in content:
@@ -174,8 +108,10 @@ def score_and_prune(entries, target, model, base_url, api_key):
                 content = content[4:]
 
         scores = json.loads(content.strip())
-        if not isinstance(scores, list):
-            return entries
+        if (not isinstance(scores, list) or len(scores) != len(entries)
+                or any(not isinstance(x, dict) or type(x.get("index")) is not int or type(x.get("score")) is not int or not 1 <= x["score"] <= 5 for x in scores)
+                or {x["index"] for x in scores} != set(range(1, len(entries)+1))):
+            raise ValueError("invalid or incomplete scoring verdict")
 
         # Build score map
         score_map = {}
@@ -216,8 +152,7 @@ def score_and_prune(entries, target, model, base_url, api_key):
         return kept
 
     except Exception as e:
-        logger.warning("Scoring failed: %s", e)
-        return entries  # Return unmodified on error
+        raise RuntimeError("native dream scoring failed; memory preserved") from e
 
 
 def main():
@@ -228,17 +163,14 @@ def main():
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     logger.info("Consolidation starting")
 
-    model, base_url, api_key = load_config()
-    if not model or not base_url or not api_key:
-        logger.error("No model configured for consolidation")
-        return
-
     for target, filename in [("memory", "MEMORY.md"), ("user", "USER.md")]:
         path = MEMORY_DIR / filename
         if not path.exists():
             continue
 
-        entries = read_memory_entries(path)
+        previous_bytes = path.read_bytes()
+        previous = previous_bytes.decode("utf-8").replace("\r\n", "\n")
+        entries = [e.strip() for e in previous.split("\n§\n") if e.strip()]
         if not entries:
             continue
 
@@ -248,23 +180,38 @@ def main():
             logger.info("Deduped %s: %d -> %d entries", filename, len(entries), len(deduped))
 
         # Score and prune
-        pruned = score_and_prune(deduped, target, model, base_url, api_key)
+        pruned = score_and_prune(deduped, target)
 
         # Capacity alone never authorizes deleting a preference or constraint.
         if len(render_memory_entries(pruned)) > char_limit_for_target(target):
             logger.warning("%s remains over limit; preserved for reviewed consolidation", filename)
             continue
         if pruned != entries:
-            # Backup
-            backup = path.with_suffix(f".bak-consolidate-{datetime.now().strftime('%Y%m%d')}")
-            if path.exists() and not backup.exists():
-                import shutil
-                shutil.copy2(path, backup)
-            elif not path.exists() and backup.exists():
-                import shutil
-                shutil.copy2(backup, path)
+            recovery = os.environ.get("HERMES_DREAM_RECOVERY_RECEIPT")
+            if recovery:
+                receipt_path = Path(recovery)
+                if receipt_path.is_symlink() or not receipt_path.resolve().is_relative_to(HERMES_HOME / "state/dream-preimages"):
+                    raise RuntimeError("recovery receipt is not owned by this maintenance run")
+                receipt = json.loads(receipt_path.read_text())
+                items = [v for v in receipt["preimages"] if v.get("source") == str(path)]
+                if len(items) != 1 or receipt.get("stage") != "before-consolidation":
+                    raise RuntimeError("missing exact consolidation recovery preimage")
+                backup = Path(items[0]["backup"])
+                expected = hashlib.sha256(previous_bytes).hexdigest()
+                if (backup.is_symlink() or not backup.resolve().is_relative_to(receipt_path.parent.resolve())
+                        or items[0].get("sha256") != expected or hashlib.sha256(backup.read_bytes()).hexdigest() != expected):
+                    raise RuntimeError("consolidation recovery preimage does not match")
+            else:
+                # Backup
+                backup = path.with_suffix(f".bak-consolidate-{datetime.now().strftime('%Y%m%d')}")
+                if path.exists() and not backup.exists():
+                    import shutil
+                    shutil.copy2(path, backup)
+                elif not path.exists() and backup.exists():
+                    import shutil
+                    shutil.copy2(backup, path)
 
-            write_memory_entries(path, pruned)
+            write_memory_entries(path, pruned, previous_bytes)
             logger.info("Consolidated %s: %d -> %d entries", filename, len(entries), len(pruned))
         else:
             logger.info("%s: no changes needed (%d entries)", filename, len(entries))

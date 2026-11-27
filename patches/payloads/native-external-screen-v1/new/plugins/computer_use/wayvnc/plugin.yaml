@@ -1,0 +1,6 @@
+name: wayvnc
+description: >-
+  Optional dedicated-workstation WayVNC provider. Real PNG capture and approved
+  foreground guest-seat input only; no AX, app routing or native Screen lifecycle.
+version: 0.1.0
+author: Bot Doctor

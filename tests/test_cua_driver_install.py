@@ -34,9 +34,9 @@ def test_release_contract_is_exact_and_complete():
 
     assert contract["release"] == {
         "repository": "trycua/cua",
-        "source_commit": "ac9b1643acb61e20d5af078215e7d1b8c414db89",
-        "tag": "cua-driver-rs-v0.22.0",
-        "version": "0.22.0",
+        "source_commit": "0c69d9a2c8abbb5051a2df4a23f0fa166d5385dc",
+        "tag": "cua-driver-rs-v0.34.1",
+        "version": "0.34.1",
     }
     assert set(contract["assets"]) == {
         "linux-arm64",
@@ -303,7 +303,7 @@ def test_native_install_checks_pin_before_installing(tmp_path, drift):
     )
     expected = {"url": "https://example.invalid/cua", "sha256": "a" * 64}
     actual = dict(expected, sha256="b" * 64) if drift == "archive" else expected
-    version = "0.21.0" if drift == "version" else "0.22.0"
+    version = "0.21.0" if drift == "version" else CURRENT_VERSION
     (package / "lock.py").write_text(
         "class Lockfile:\n    def __init__(self, path): pass\n"
         f"    def version(self, name): return {version!r}\n"
@@ -312,7 +312,7 @@ def test_native_install_checks_pin_before_installing(tmp_path, drift):
     (package / "paths.py").write_text("def lockfile_path(): return 'lock.json'\n")
     (package / "store.py").write_text("def current_target(): return 'linux-x64'\n")
     result = subprocess.run(
-        [sys.executable, "-c", helper.PINNED_INSTALL_CODE, "0.22.0", json.dumps(expected)],
+        [sys.executable, "-c", helper.PINNED_INSTALL_CODE, CURRENT_VERSION, json.dumps(expected)],
         cwd=tmp_path, capture_output=True, text=True,
     )
     assert (result.returncode == 0) is (drift is None), result.stderr

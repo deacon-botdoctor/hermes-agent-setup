@@ -33,6 +33,29 @@ Do not manually acknowledge events during normal work. The event-driven reflecti
 
 Remediation remains bounded: `skill_candidate` enters the inert proposal/draft lane, while `repair` and `escalate` create a local repair envelope for operator-control collection. Never execute model-authored shell text. Credentials, restarts, client/fleet mutation, destructive actions, and other hard stops still require their normal approval.
 
+## Support tickets
+
+Add `--ticket` when a bot failed at something, something went wrong internally,
+or there was friction that Doc should fix. The command writes a packet to the
+local outbox and needs no credential or network access. `"queued": true` means
+the packet is waiting for the fleet relay. It does not prove that Doc received it.
+
+```sh
+python3 "${HERMES_HOME:-$HOME/.hermes}/bin/papercut.py" --ticket \
+  --category failure \
+  --kind tool \
+  --tool browser_tool \
+  --error-class timeout \
+  --summary "Browser tool timed out on every attempt during a scheduled task"
+```
+
+Set `--category` to `failure`, `internal_error`, or `friction`. Describe the
+failure, not the conversation. Do not include names, contact details, links,
+quotes, or message text. Doc withholds a summary that appears to contain them.
+Repeats of the same problem within an hour are not queued again.
+
+A ticket does not ask you to stop. Continue with the smallest safe recovery.
+
 ## Plugin catalog
 
 For a `tool` or `dependency` papercut, or a repeated tool gap, first use an

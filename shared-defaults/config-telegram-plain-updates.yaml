@@ -1,0 +1,15 @@
+# Telegram progress comes from the botdoctor-telegram plugin: one task-specific
+# message, edited as work proceeds. Native interim messages and the native
+# long-running heartbeat stay off so the user does not get a second bubble with
+# the same text (plugins/botdoctor-telegram/README.md).
+agent:
+  gateway_notify_interval: 300
+  gateway_timeout_warning: 0
+
+display:
+  show_commentary: true
+  platforms:
+    telegram:
+      interim_assistant_messages: false
+      long_running_notifications: false
+      cleanup_progress: true

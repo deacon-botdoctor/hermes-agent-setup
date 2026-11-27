@@ -99,7 +99,7 @@ private func validateTarget(path: URL, allowedRoot: URL) throws {
         throw ToolError.validation("target must be a child of the exact allowed root")
     }
     let lowered = path.path.lowercased()
-    let protectedFragments = ["/.hermes/", "/mackey brain/", "/documents/codex/"]
+    let protectedFragments = ["/.hermes/", "/documents/codex/"]
     guard protectedFragments.allSatisfy({ !lowered.contains($0) }) else {
         throw ToolError.validation("target intersects a protected runtime or working-data path")
     }

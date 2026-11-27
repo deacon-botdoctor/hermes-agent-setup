@@ -1,0 +1,96 @@
+# One model per agent, set in one place (the operator, 2026-11-16: "model routing
+# instructions should really be turned off - we swap the active model way too
+# often already"). Every side task and every subagent uses the agent's own main
+# model: the native meaning of an `auto` auxiliary provider with an empty model,
+# and of an empty delegation provider/model. Changing an agent's model then
+# changes everything it runs, with nothing left behind on an old model.
+# The multi-model /moa preset (OpenRouter Claude and DeepSeek advisors) is off.
+# The auxiliary.video lane is not set here: video understanding is a capability
+# lane, not a copy of the chat model. Allowed differences live in
+# fleet-exemptions.yaml with a reason (operator agent: Claude primary, side work on Codex).
+# Source decision: GBrain decisions/fleet-consistency-baseline-20261115.
+auxiliary:
+  approval:
+    provider: auto
+    model: ""
+    base_url: ""
+  background_review:
+    provider: auto
+    model: ""
+    base_url: ""
+  compression:
+    provider: auto
+    model: ""
+    base_url: ""
+  curator:
+    provider: auto
+    model: ""
+    base_url: ""
+  goal_judge:
+    provider: auto
+    model: ""
+    base_url: ""
+  group_router:
+    provider: auto
+    model: ""
+    base_url: ""
+  kanban_decomposer:
+    provider: auto
+    model: ""
+    base_url: ""
+  mcp:
+    provider: auto
+    model: ""
+    base_url: ""
+  memory_query_rewrite:
+    provider: auto
+    model: ""
+    base_url: ""
+  moa_aggregator:
+    provider: auto
+    model: ""
+    base_url: ""
+  moa_reference:
+    provider: auto
+    model: ""
+    base_url: ""
+  monitor:
+    provider: auto
+    model: ""
+    base_url: ""
+  profile_describer:
+    provider: auto
+    model: ""
+    base_url: ""
+  review:
+    provider: auto
+    model: ""
+    base_url: ""
+  title_generation:
+    provider: auto
+    model: ""
+    base_url: ""
+  triage_specifier:
+    provider: auto
+    model: ""
+    base_url: ""
+  tts_audio_tags:
+    provider: auto
+    model: ""
+    base_url: ""
+  vision:
+    provider: auto
+    model: ""
+    base_url: ""
+  voice_chat:
+    provider: auto
+    model: ""
+    base_url: ""
+delegation:
+  provider: ""
+  model: ""
+  base_url: ""
+moa:
+  presets:
+    default:
+      enabled: false

@@ -1,34 +1,34 @@
 {
   "assembled_runtime_fingerprint": {
-    "digest": "a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0",
-    "file_count": 340
+    "digest": "ec69a5a346f5e8deae73d562d643238f56466554c059d728dcb942f92f0f6076",
+    "file_count": 142
   },
-  "baseline_wiring_digest": "5d8581742b832046920f70e5c121d33475314cd59b1bd6f6688d5517ffa1b9d0",
-  "canonical_upstream_sha": "d62fbea7e110c6008e1ffe1b226d1f593ba4bc28",
+  "baseline_wiring_digest": "e557f5c5ee7af6721ebd9fa2a622d9b584e0d5670f3db4163d06adb43d4b2207",
+  "canonical_upstream_sha": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
   "cua_driver": {
     "baseline_acceptance": "exact_version_present",
     "contract": {
       "path": "contracts/cua-driver-release-v1.json",
-      "sha256": "3207daaee7e3c673a1b5c19e0e018e8643f17c0e3063d1bf4341d56fd232a818"
+      "sha256": "34fd93c5506a277dba8fb858dd43909c4227c673db942e68fe0514b2e877d080"
     },
     "gui_acceptance": "doctor_ready_and_list_windows",
     "helper": {
       "path": "bin/ensure-cua-driver.py",
       "sha256": "c2ec1b746197999a10457685ca64b3b2296a4f8d6a920f8aed26f3fc78674398"
     },
-    "source_commit": "ac9b1643acb61e20d5af078215e7d1b8c414db89",
-    "tag": "cua-driver-rs-v0.22.0",
-    "version": "0.22.0"
+    "source_commit": "0c69d9a2c8abbb5051a2df4a23f0fa166d5385dc",
+    "tag": "cua-driver-rs-v0.34.1",
+    "version": "0.34.1"
   },
-  "deployment_digest": "204ff78409d9a9e237c7d7d5e523659d3301a1bcf7aad1578798c6480cefc50a",
-  "golden_sha": "e34072cee2f8f377f1a3ab54653c4ace4dc16b04",
+  "deployment_digest": "cea91b19c8759e8b85b97a9aa73039d999a9e7c23f8cf16f3ac5ee28764b62e5",
+  "golden_sha": "0e9165b3fc38a7514b11a7f1d579fd01d14db54e",
   "native_agent_continuity": {
     "activation": "manifest_driven_existing_selfheal",
     "contract": {
       "path": "contracts/native-agent-continuity-release-v1.json",
-      "sha256": "0760c8c18f7a89a2b7a92561aa5d799bcf6f252326555288748c45050f180fd9"
+      "sha256": "2e914bf4b1ad61aca3c8af383c8314baa7162b03eb7656f040df2791f79c5b96"
     },
-    "package_digest": "5ebdedce01f2aa39d8e4762560dfc66331e98c27f98435a547eae8a3c22974fd",
+    "package_digest": "6fa2c3bb1fa03c40cc3ed5aa62148bdde47c4bffe80188c8389a731cced4ecd7",
     "platforms": [
       "linux",
       "macos",
@@ -36,7 +36,7 @@
     ],
     "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415"
   },
-  "release": "botdoctor-hermes-2026.10.05-golden-e34072ce",
+  "release": "botdoctor-hermes-2026.11.26-golden-0e9165b3",
   "runtime_coherence": {
     "file_count": 7,
     "installer": {
@@ -56,14 +56,14 @@
     "source_commit": "183de949ad32611e77a50b9de042c76e2044cd14",
     "source_repo": "https://github.com/Bot-Doctor-LLC/hermes-agent-baseline.git"
   },
-  "runtime_payload_digest": "7c9738d8c51c799b36b71d30f17f953659cc369d5815cbfc7854f7a6e63c0e1f",
+  "runtime_payload_digest": "4064f6715751bbc9bb37adb7c436ae895eab6fb573ee463d95eaac7d31214bf1",
   "schema_version": 1,
   "source_manifest": "runtime-payload-source-manifest.json",
   "source_scope": "sanitized_deployable_components",
   "status": "candidate",
   "update_contract": "maintenance-quiescence-v2",
   "verification": {
-    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced a45a3cb2217186d6df09f4012de4ea14637a6172acff15e9be07a09bed26e0a0 across 340 changed runtime files.",
-    "golden_suite": "Exact reviewed Golden source: e34072cee2f8f377f1a3ab54653c4ace4dc16b04"
+    "clean_upstream_rehearsal": "Clean pinned upstream assembly reproduced ec69a5a346f5e8deae73d562d643238f56466554c059d728dcb942f92f0f6076 across 142 changed runtime files.",
+    "golden_suite": "Exact reviewed Golden source: 0e9165b3fc38a7514b11a7f1d579fd01d14db54e"
   }
 }

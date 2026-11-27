@@ -1,0 +1,28 @@
+schema_version: 1
+
+# Dotted paths that the pinned Hermes runtime and every installed fleet plugin,
+# script, cron job, hook, and skill no longer read. The full-scope merge deletes
+# them unless a path is exempt. Evidence (2026-11-16 fleet audit):
+# - security.tirith_*: Hermes v0.23 removed the bundled Tirith scanner. Its config
+#   migration 50 says "Nothing reads its keys now"; Golden carried them forward.
+# - The remaining paths: a token scan of each runtime's code root, plugins, bin,
+#   scripts, cron, hooks, and skills on all 23 reachable runtimes found no reader.
+# A path that gains a reader again must leave this list in the same change.
+removed_paths:
+  - security.tirith_enabled
+  - security.tirith_path
+  - security.tirith_timeout
+  - security.tirith_fail_open
+  - memory.flush_min_turns
+  - base_workflow_specialists
+  - capability_status
+  - composio_replacement
+  - context_vaults
+  - discord_disabled
+  - group_system_prompts
+  - non_serv_quality_cost_routing
+  - parent_model_routing
+  - self_structure_contract
+  - thread_model_overrides
+  - worker_bee_model_policy
+  - workflow_specialists

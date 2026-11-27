@@ -18,7 +18,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "e1ab09a6ed68cec9bc63b089c048fe5b86ff348466bc3610b06f3f8ad4396e48",
+      "source_sha256": "2b476336834ef6ed6c8da5d2c1213516eb8be74ae964dd7f781a5cee9a971e3f",
       "stage": "baseline",
       "summary": "Find and inspect installed skills, approved catalog candidates, tools, and integrations before accepting a weak workaround."
     },
@@ -290,7 +290,7 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "027e99e8c4970d93b372531d18a5f939514a3bf603b923bb54a0669f8b68761a",
+      "source_sha256": "6d0d0515f0eb61812a9f28d7e2b37437d27b84562cd4811f3276ff9171f920c7",
       "stage": "endorsed",
       "summary": "Direct palettes, typography, narration, beat planning, composition patterns, and brand treatment for HyperFrames."
     },
@@ -368,6 +368,24 @@
     },
     {
       "bundles": [
+        "research"
+      ],
+      "id": "news-watch",
+      "install_path": "skills/curated/news-watch",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "external_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "5ddbd9b1a4fffaeea33429797785a1bac4949631ed7868f29691508a9659afc4",
+      "stage": "endorsed",
+      "summary": "Create and manage recurring news, statement, and event alerts through tenant-local search and native scheduling."
+    },
+    {
+      "bundles": [
         "core-baseline"
       ],
       "id": "nightly-client-reflection-default",
@@ -380,9 +398,9 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "c1a2fa5984092472bbaf593711debd2b4d2a55153755560211b789a0840a6f7f",
+      "source_sha256": "5745fe51f45b5900b5c48ee58b96615a0ba9e7a161fc2ee92cb0c7a64dfce35a",
       "stage": "baseline",
-      "summary": "Run the default bounded client-agent day review and skill-candidate reflection workflow."
+      "summary": "Run bounded client-agent day review and skill-candidate reflection only when explicitly enabled."
     },
     {
       "bundles": [
@@ -398,9 +416,27 @@
         "mac",
         "windows"
       ],
-      "source_sha256": "cb85bcd83b23837401af18a8d90426c3158edae96694eb8e8dc18ba3b06a545c",
+      "source_sha256": "c3a278add53640d440ad025aef8f520fa6874cc0db55d9ef658f6334bc8a62d0",
       "stage": "baseline",
       "summary": "Capture small routing, update, tool, authentication, and dependency friction after bounded recovery."
+    },
+    {
+      "bundles": [
+        "core-baseline"
+      ],
+      "id": "printing-press",
+      "install_path": "skills/printing-press",
+      "invokable": true,
+      "kind": "skill",
+      "permission_class": "local_write",
+      "platforms": [
+        "linux",
+        "mac",
+        "windows"
+      ],
+      "source_sha256": "f5593af7893364e00d722273844c70ac29f9cead48f705411bca416d33966f0e",
+      "stage": "baseline",
+      "summary": "Research and verify integrations through full discovery and real engine legs; a catalog miss is not a completed pass."
     },
     {
       "bundles": [],

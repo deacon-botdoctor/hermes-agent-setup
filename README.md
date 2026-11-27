@@ -14,12 +14,29 @@ manifest allowlists every shipped runtime file by Git blob identity. Public
 local health/readiness tools are included; private fleet routes, credentials,
 client identities, private data, and operator-control implementation are not.
 
-This release also carries the separately pinned native-agent-continuity overlay
-and advances the general Hermes/Golden runtime to the fleet-proven host-health,
-capability-readiness, and cron self-remediation build. Managed new-client
-provisioning writes the tenant manifest that activates continuity through the
-existing self-heal scheduler; installations without that manifest receive the
-verified files but are not enrolled or changed automatically.
+This release advances the runtime to the build that the managed fleet runs
+now: Golden `0e9165b3` on upstream Hermes `v0.23.0`, with a 10-entry patch
+registry. It also carries the separately pinned native-agent-continuity
+overlay. Managed new-client provisioning writes the tenant manifest that
+activates continuity through the existing self-heal scheduler; installations
+without that manifest receive the verified files but are not enrolled or
+changed automatically. [`RUNTIME.md`](RUNTIME.md) lists what changed and the
+small public sanitization delta from the fleet source.
+
+## The drop-in guide
+
+[`docs/drop-in-guide.pdf`](docs/drop-in-guide.pdf) (source:
+[`docs/drop-in-guide.md`](docs/drop-in-guide.md)) is one document that an
+agent can read and act on to rebuild itself the way the reference operator
+is set up. It covers the covenant and operating floors, the STE writing
+style, memory and knowledge, the auth broker pattern, model routing, the
+multi-machine T3 setup, shipping and merge policy, scheduled jobs,
+client isolation, self-repair, install and rollback, what to customize, the
+T3 email triage workflow (approval cards, one-tap actions, silent runs), and
+desktop/browser automation with Agent Desktop as the default tool on every
+computer.
+Each section marks what is Hermes-native and what is a Bot Doctor convention.
+Rebuild the PDF with `sh docs/build-drop-in-guide.sh`.
 
 ## Start here
 
@@ -49,11 +66,17 @@ fingerprint. It does not stop or install a gateway.
 
 See [`RUNTIME.md`](RUNTIME.md) for what this release changes and why.
 
-### Semantic computer-control readiness
+### Desktop automation and semantic computer-control readiness
 
-The lazy skill and native `computer_use` tool are discoverable on CLI and
-Telegram by default. Profile installation now installs and verifies the exact
-Golden-pinned Cua Driver version through native Hermes. A headless host may
+Every computer should install **Agent Desktop** (`vercel-labs/agent-desktop`)
+and configure agents to default to **Agent Desktop** over every other desktop or
+browser UI tool (see `docs/drop-in-guide.md`, section 15, and
+[`DEFAULTS.md`](DEFAULTS.md)).
+
+For Hermes-native fallback, the lazy skill and native `computer_use` tool are
+discoverable on CLI and Telegram by default. Profile installation installs and
+verifies the exact Golden-pinned Cua Driver version (`0.34.1`) through native
+Hermes. A headless host may
 record a degraded desktop doctor while retaining normal automation; the
 stricter semantic-only guard stays off unless a local GUI host passes the
 public, read-only wiring audit:
@@ -192,15 +215,12 @@ checkpoints. Pressure is not an automatic large-job veto. Cleanup remains
 limited to task-owned or retention-policy-covered data; unknown processes,
 unique data, active runtimes, and rollback artifacts are protected.
 
-Routine scheduled-job failures are repair work, not an operator assignment.
-After saving the original receipt, Hermes may run exactly one bounded repair
-turn inside the owning runtime for script, configuration, runtime, timeout, or
-execution failures, then verify and append the result. Successful script jobs
-remain model-free, repair cannot recurse, and credentials, billing,
-permissions, destructive data, provider limits, and uncertain external side
-effects remain hard stops. The operator receives either a verified recovery or
-the concrete boundary that stopped automatic repair—never an instruction to
-repair the agent's script or configuration.
+Scheduled jobs use native Hermes cron, which now owns the inactivity
+watchdog, catch-up windows, at-most-once occurrence accounting, and headless
+refusal. A failing assigned job is repair work inside the owning runtime;
+credentials, billing, permissions, destructive data, provider limits, and
+uncertain external side effects remain hard stops. The operator receives
+either a verified recovery or the concrete boundary that stopped the repair.
 
 ## Build a new public release
 

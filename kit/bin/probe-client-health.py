@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """probe-client-health.py — Rich health probe for Hermes client gateways.
 
-Produces the same heartbeat schema as probe-enoch-health.py and
+Produces the same heartbeat schema as probe-operator-health.py and
 probe-doc-health.py so fleet scanners and watchers get consistent
-diagnostic depth from every host — not just Enoch/Doc.
+diagnostic depth from every host — not just the operator agent and Doc.
 
 Runs on macOS clients (via launchd) and Spark-hosted Linux clients
 (via systemd timer). Called by client-selfheal-heartbeat.sh.
@@ -478,7 +478,7 @@ def main() -> None:
     restart_churn = safe_restart_churn(SAFE_RESTART_LOG_PATH)
     score = performance_score(response_metrics, recent_errors, polling_conflicts)
 
-    # --- Build indicators (same schema as Enoch/Doc) ---
+    # --- Build indicators (same schema as the operator agent and Doc) ---
     indicators = [{
         "name": "telegram_transport",
         "status": transport_health["status"],
@@ -614,7 +614,7 @@ def main() -> None:
         # A shared-host runtime derives its identity from its parent directory.
         agent_name = HERMES_HOME.parent.name
     elif HERMES_HOME.parent.name == "sandboxes":
-        agent_name = HERMES_HOME.name  # alfred, sarah, etc.
+        agent_name = HERMES_HOME.name  # the profile directory name
     elif HERMES_HOME.parent.name == "profiles":
         agent_name = HERMES_HOME.name  # doc, etc.
     else:

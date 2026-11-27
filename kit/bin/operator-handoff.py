@@ -146,8 +146,8 @@ def write_direct_inbox(
         "body": text,
         "action": args.need.strip(),
         "why_you": "You are Doc, the client operator running from Spark. Handle remediation, pattern flagging, and prevention planning here rather than pushing this directly into BotDoctor ops.",
-        "constraint": "Do not send a user-visible report until remediation is understood. If Deacon needs to know, send only the after-report: what was received, what happened, what was fixed, and how we will prevent it next time.",
-        "done_when": "Issue is remediated or clearly bounded, prevention notes are captured, and any needed after-report to Deacon is ready.",
+        "constraint": "Do not send a user-visible report until remediation is understood. If the operator needs to know, send only the after-report: what was received, what happened, what was fixed, and how we will prevent it next time.",
+        "done_when": "Issue is remediated or clearly bounded, prevention notes are captured, and any needed after-report to the operator is ready.",
         "refs": refs,
         "document": str(args.document).strip() if args.document else None,
         "document_caption": str(args.document_caption).strip() if args.document_caption else None,
@@ -203,10 +203,10 @@ def local_outbox_fallback(outbox_path: str, args: argparse.Namespace, client_id:
 def main() -> None:
     parser = argparse.ArgumentParser(description='Send a structured client-agent escalation to the Bot Doctor operator thread.')
     parser.add_argument('--summary', required=True, help='One-line description of the issue.')
-    parser.add_argument('--need', default='Doc and Deacon should inspect this operator-side issue.', help='Requested operator action.')
+    parser.add_argument('--need', default='Doc and the operator should inspect this operator-side issue.', help='Requested operator action.')
     parser.add_argument('--why', default='This appears to require shared infrastructure, routing, or operator intervention beyond client-agent authority.', help='Why the agent is escalating instead of changing it directly.')
     parser.add_argument('--client-status', default='Client-visible issue is contained and has been escalated to the operator lane.', help='What the client is experiencing right now.')
-    parser.add_argument('--client-message', default="This looks like an operator-side issue. I'm flagging it to Doc and Deacon now.", help='Plain-English line the agent can tell the client.')
+    parser.add_argument('--client-message', default="This looks like an operator-side issue. I'm flagging it to Doc and the operator now.", help='Plain-English line the agent can tell the client.')
     parser.add_argument('--label', default='NOW', help='Operator status label: NOW|WATCH|BLOCKED|DONE.')
     parser.add_argument('--client-id', default='', help='Override client identifier.')
     parser.add_argument('--agent-name', default='', help='Override agent name.')

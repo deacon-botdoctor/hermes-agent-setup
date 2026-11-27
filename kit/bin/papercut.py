@@ -15,6 +15,9 @@ from pathlib import Path
 
 UTC = timezone.utc
 KINDS = ("routing", "update", "tool", "auth", "dependency", "other")
+CATEGORIES = ("failure", "internal_error", "friction")
+TICKET_SUMMARY_LIMIT = 300
+TICKET_REPEAT_S = 3600
 SECRET_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|token|password|secret)\s*[=:]\s*[^\s,;]+"),
     re.compile(r"\b\d{6,}:[A-Za-z0-9_-]{20,}\b"),  # Telegram-like token
@@ -63,6 +66,49 @@ def build_event(args: argparse.Namespace) -> dict:
     }
 
 
+def slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9_.-]+", "-", value.lower()).strip("-")[:64]
+
+
+def write_ticket(event: dict, args: argparse.Namespace) -> dict:
+    """Queue a local packet for Doc's relay. It holds no credential or sender identity: the relay sets those."""
+    tool, error_class = slug(args.tool), slug(args.error_class)
+    fingerprint = hashlib.sha256("|".join((args.category, args.kind, tool, error_class)).encode("utf-8")).hexdigest()[:16]
+    state = hermes_home() / "state"
+    sent_path = state / "papercuts" / "tickets-sent.json"
+    sent = json.loads(sent_path.read_text(encoding="utf-8")) if sent_path.exists() else {}
+    stamp = datetime.now(UTC).timestamp()
+    if stamp - sent.get(fingerprint, 0) < TICKET_REPEAT_S:
+        return {"queued": False, "detail": "repeat-within-hour"}
+    packet = {
+        "schema_version": 1,
+        "type": "support_ticket",
+        "transport": "local_outbox_relay",
+        "id": "ticket-" + hashlib.sha256((event["id"] + fingerprint).encode("utf-8")).hexdigest()[:16],
+        "created_at": event["created_at"],
+        "category": args.category,
+        "kind": args.kind,
+        "tool": tool,
+        "error_class": error_class,
+        "severity": args.severity,
+        "summary": event["summary"][:TICKET_SUMMARY_LIMIT],
+    }
+    if args.problem_key:
+        packet["problem_key"] = slug(args.problem_key)
+    outbox = state / "operator-outbox"
+    outbox.mkdir(parents=True, exist_ok=True)
+    temporary = outbox / (packet["id"] + ".tmp")
+    temporary.write_text(json.dumps(packet, sort_keys=True), encoding="utf-8")
+    temporary.replace(outbox / (packet["id"] + ".json"))
+    result = {"queued": True, "packet_id": packet["id"]}
+    sent[fingerprint] = stamp
+    try:
+        sent_path.write_text(json.dumps(sent, sort_keys=True), encoding="utf-8")
+    except OSError:  # the packet is already queued; a later repeat may queue again
+        result["dedupe_saved"] = False
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Capture a small agent papercut for fleet review.")
     parser.add_argument("--kind", choices=KINDS, required=True)
@@ -75,11 +121,24 @@ def main() -> int:
     parser.add_argument("--evidence", default="", help="Short sanitized error or observation")
     parser.add_argument("--severity", choices=("info", "warning", "error"), default="warning")
     parser.add_argument("--no-submit", action="store_true", help="Backward-compatible no-op; capture is always local.")
+    parser.add_argument("--ticket", action="store_true", help="Also queue a support ticket for Doc")
+    parser.add_argument("--category", choices=CATEGORIES, help="Required with --ticket")
+    parser.add_argument("--tool", default="", help="Tool or component that failed")
+    parser.add_argument("--error-class", default="", help="Short stable error name, such as timeout")
+    parser.add_argument("--problem-key", default="", help="Optional stable key for a known problem")
     args = parser.parse_args()
+    if args.ticket and not args.category:
+        parser.error("--ticket requires --category")
 
     event = build_event(args)
     append_jsonl(hermes_home() / "state" / "papercuts" / "events.jsonl", event)
-    print(json.dumps({"ok": True, "id": event["id"], "delivered": False, "detail": "local-only"}, sort_keys=True))
+    result = {"ok": True, "id": event["id"], "delivered": False, "detail": "local-only"}
+    if args.ticket:
+        try:
+            result["ticket"] = write_ticket(event, args)
+        except (OSError, ValueError) as error:  # filing must never break the agent's task
+            result["ticket"] = {"queued": False, "detail": type(error).__name__}
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 

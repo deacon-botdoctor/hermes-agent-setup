@@ -1,3 +1,8 @@
-# Default only: preserve an explicit tenant model and manifest exemptions.
-x_search:
-  model: grok-4.6
+# The native x_search tool only works through xAI Grok, and Grok is reserved
+# for Grok Bot (the operator, 2026-11-08; "X search should use the free things",
+# 2026-11-16). Keep the tool off on every fleet runtime. X research goes through
+# TReg's routed X endpoints instead: skills/fleet/x-research.
+# The merge adds this entry to an agent's existing disabled_toolsets list.
+agent:
+  disabled_toolsets:
+    - x_search

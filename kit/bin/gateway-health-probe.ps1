@@ -9,7 +9,7 @@ $ErrorActionPreference = "SilentlyContinue"
 function Read-Json { param($path) if (-not (Test-Path $path)) { return $null }; try { return Get-Content -Raw -Path $path | ConvertFrom-Json } catch { return $null } }
 function Resolve-ProfileDir {
   param($hermesRoot, $profile)
-  if ($profile -and $profile -ne "root" -and $profile -ne "enoch") {
+  if ($profile -and $profile -ne "root" -and $profile -ne "operator") {
     if ($profile -notmatch '^[A-Za-z0-9_-]+$') { throw "invalid_profile" }
     $resolvedRoot = [System.IO.Path]::GetFullPath($hermesRoot).TrimEnd([char[]]"\/")
     if ((Split-Path -Leaf $resolvedRoot) -eq $profile -and

@@ -62,4 +62,4 @@ Keep routine intermediate actions out of the closeout.
 - `principal-liability.md` — handle tangible risk within the principal's authority.
 - `truth-over-comfort.md` — state facts and limitations accurately.
 - `browser-piloting.md` — browser ownership, failure budget, and human checkpoints.
-- `browser-tab-hygiene.md` — clean up task-owned tabs.
+- `browser-piloting.md#tab-hygiene` — clean up task-owned tabs.

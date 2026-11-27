@@ -52,7 +52,7 @@ KNOWN_TEXT_REWRITES = {
     ),
     "- Anamnesis/memory is advisor/skill-first; use concrete on-demand MCP capabilities only when needed.":
         "- Native Hermes memory is built in; do not route recall through an external memory MCP.",
-    "- `anamnesis` - local semantic recall over Sarah's memories, sessions, and case notes.\n": "",
+    "- `anamnesis` - local semantic recall over the principal's memories, sessions, and case notes.\n": "",
     "**Working memory stays light on purpose.** Anamnesis holds concise, high-signal\n  cards":
         "**Working memory stays light on purpose.** Native Hermes memory holds concise,\n  high-signal cards",
     "working memory (Anamnesis).": "working memory (native Hermes memory).",
@@ -581,6 +581,15 @@ def plan_changes(
     }
     for path in instruction_paths(home):
         original = path.read_text(encoding="utf-8", errors="strict")
+        source = rules_source / path.name
+        if (
+            path.parent.name == "shared-rules"
+            and source.is_file()
+            and path.read_bytes() == source.read_bytes()
+        ):
+            # Canonical rules can name retired systems in negative examples.
+            # Keep their reviewed bytes; the directive scan below still applies.
+            continue
         updated = replacements.get(path, original)
         if path.name == "knowledge-store-policy.md" and (
             LEGACY_POLICY_TITLE in updated or active_directives(path, updated)

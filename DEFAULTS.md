@@ -26,13 +26,16 @@ active runtime generation assembled from the exact release in `release.json`.
 - Store secrets only in the platform-supported local secret/config path.
 - Use an external knowledge system only as an explicitly declared boundary;
   never silently substitute a local database for a shared canonical one.
-- Keep the bundled task-ledger and Telegram transcript read-tool plugins
-  disabled unless the user explicitly selects them. The narrow Telegram hook
-  remains active to index only the current chat/topic for fresh-topic
-  rehydration and current-topic search; it is not broad replay or a second
-  memory authority. External GBrain capture separately requires
-  `HERMES_ENABLE_GBRAIN_CAPTURE=1`. A task-ledger changelog backend is loaded
-  only from an explicitly configured `HERMES_TASK_CHANGELOG_DIR`.
+- The task-ledger plugin and the Telegram transcript read-tool and hook are
+  retired in this release; native Hermes tasks and session search own that
+  work. External GBrain capture still requires
+  `HERMES_ENABLE_GBRAIN_CAPTURE=1`.
+- Shared defaults route every auxiliary task and subagent to the agent's main
+  model. Record any deliberate difference in
+  `shared-defaults/fleet-exemptions.yaml` with a reason; the public file
+  ships with no rows.
+- Skill writes from the agent use native approval
+  (`skills.write_approval: true`), and the automatic curator is off.
 
 ## Capability model
 
@@ -71,8 +74,12 @@ Route in this order:
 
 1. native Hermes or a local user-owned capability;
 2. connected SaaS through the user's approved connector or Composio surface;
-3. browser automation only when the task requires UI interaction or the
-   approved API/connector has a verified gap.
+3. **Agent Desktop** (`vercel-labs/agent-desktop`) as the default tool on every
+   computer for desktop app and browser UI automation whenever a task requires
+   UI interaction or the approved API/connector has a verified gap;
+4. Hermes-native `computer_use` (`cua-driver`) or other UI tools only as an
+   explicit fallback when Agent Desktop is unavailable or cannot reach the
+   surface.
 
 Availability never grants permission. A visible tool, account, page, token, or
 connector does not authorize a read or mutation beyond the user's request and
@@ -105,7 +112,14 @@ new integration.
 - copied upstream source or placeholder compatibility plugins;
 - direct broad GitHub credentials.
 
-## Desktop exception
+## Desktop standard (Agent Desktop)
+
+Every computer should have **Agent Desktop** (`vercel-labs/agent-desktop`)
+installed, and all agents should default to **Agent Desktop** over every other
+desktop or browser automation tool (Cua, Playwright, raw OS scripting, or pixel
+clicking). Agent Desktop uses native accessibility trees and element refs
+without hijacking the user's cursor or foreground window. Keep the pinned
+Hermes-native `cua-driver` (`0.34.1`) as a verified compatibility fallback only.
 
 On a user-operated desktop, a local notes application or search launcher may be
 useful. That is a user-interface choice, not a runtime memory requirement. Keep

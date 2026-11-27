@@ -1,0 +1,44 @@
+@page {
+  size: Letter;
+  margin: 0.9in 0.85in 0.9in 0.85in;
+  @bottom-left { content: "The Drop-In Guide · botdoctor-hermes-2026.11.26-golden-0e9165b3"; font: 8pt "Helvetica Neue", Helvetica, Arial, sans-serif; color: #8a8f98; }
+  @bottom-right { content: counter(page) " / " counter(pages); font: 8pt "Helvetica Neue", Helvetica, Arial, sans-serif; color: #8a8f98; }
+}
+@page :first { @bottom-left { content: none; } @bottom-right { content: none; } }
+
+html { font: 10.2pt/1.5 "Charter", "Iowan Old Style", Georgia, serif; color: #1d2128; }
+body { margin: 0; }
+
+h1, h2, h3, h4 { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; color: #0f1720; line-height: 1.25; }
+h1 { font-size: 19pt; font-weight: 700; margin: 1.6em 0 0.35em; padding-bottom: 0.25em; border-bottom: 2px solid #0f1720; break-after: avoid; }
+h1:nth-of-type(2), h1:nth-of-type(3) { break-before: page; margin-top: 0; }
+h1:first-of-type { break-before: avoid; font-size: 32pt; border-bottom: none; margin-top: 1.6in; }
+h1:first-of-type + p { font-size: 14pt; color: #4a5160; margin-bottom: 1.2em; }
+h2 { font-size: 13.5pt; margin: 1.3em 0 0.4em; break-after: avoid; }
+h3 { font-size: 11pt; margin: 1.1em 0 0.3em; break-after: avoid; }
+p { margin: 0 0 0.65em; orphans: 3; widows: 3; }
+ul, ol { margin: 0 0 0.75em; padding-left: 1.35em; }
+li { margin: 0.15em 0; }
+strong { color: #0f1720; }
+
+code { font: 8.6pt/1.4 "SF Mono", Menlo, Consolas, monospace; background: #f2f4f7; padding: 0.05em 0.28em; border-radius: 3px; }
+pre { background: #f5f7fa; border: 1px solid #dfe3ea; border-left: 3px solid #3b5bdb; padding: 0.7em 0.9em; border-radius: 4px; white-space: pre-wrap; word-break: break-word; break-inside: avoid; margin: 0.5em 0 0.9em; }
+pre code { background: none; padding: 0; font-size: 8.3pt; }
+
+blockquote { margin: 0.6em 0 1em; padding: 0.6em 1em; background: #fbfaf6; border-left: 3px solid #b08d3c; color: #2b2a26; }
+blockquote p { margin: 0 0 0.5em; }
+
+table { width: 100%; border-collapse: collapse; margin: 0.5em 0 1em; font-size: 8.8pt; break-inside: auto; }
+th, td { border-bottom: 1px solid #dfe3ea; padding: 0.35em 0.5em; text-align: left; vertical-align: top; }
+th { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; background: #f2f4f7; font-weight: 600; }
+tr { break-inside: avoid; }
+
+a { color: #2f4ac0; text-decoration: none; }
+
+h1 + p, h2 + p { break-after: avoid; }
+h1 + p + h2 { break-before: avoid; }
+ol, ul { orphans: 2; widows: 2; }
+li { break-inside: avoid; }
+tbody tr:last-child, tbody tr:nth-last-child(2) { break-before: avoid; }
+h1 + table { break-inside: avoid; }
+h1 + p + ol { break-inside: avoid; }

@@ -1,0 +1,42 @@
+# Fleet consistency baseline.
+# the operator approved these values on 2026-11-15 and asked for one fleet-wide setting
+# per key ("if there are other settings and things that you find that are
+# different agent to agent we need a concrete reason why"). See GBrain
+# decisions/fleet-consistency-baseline-20261115.
+#
+# Each leaf replaces the same-keyed client value unless the path is protected,
+# in the runtime manifest's overlay_config_exemptions, or recorded for that
+# agent in fleet-exemptions.yaml with its reason. Several values equal the
+# pinned Hermes v0.23 defaults. They are explicit here so that a leftover local
+# override cannot keep one agent different from the rest.
+# Approvals stay off for clients and operators (Golden #674, 2026-08-04; the operator,
+# 2026-11-16, after the smart value made the operator agent prompt for routine commands).
+# Gateway agents must never use manual. A client-owned approval gate is an
+# exemption in fleet-exemptions.yaml with its reason.
+approvals:
+  mode: "off"
+  cron_mode: deny
+  destructive_slash_confirm: false
+  timeout: 300
+checkpoints:
+  enabled: true
+  max_snapshots: 50
+sessions:
+  auto_archive: false
+  auto_prune: false
+agent:
+  max_turns: 90
+  reasoning_effort: medium
+model:
+  reasoning_effort: medium
+delegation:
+  max_concurrent_children: 10
+  max_iterations: 250
+stt:
+  enabled: false
+  echo_transcripts: false
+memory:
+  memory_char_limit: 2200
+  user_char_limit: 1375
+terminal:
+  timeout: 180

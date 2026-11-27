@@ -1,0 +1,17 @@
+{
+  "name": "Printing Press",
+  "source": "https://github.com/mvanhorn/cli-printing-press",
+  "source_path": "skills/printing-press",
+  "source_commit": "1a6da7f9b62430906ad7b7081fb9e4ec8ff40996",
+  "version": "3.0.0",
+  "engine_version": "4.33.4",
+  "license": "MIT",
+  "local_patches": [
+    "Add the fleet execution contract and link it before upstream preflight.",
+    "Resolve the profile-local pinned binary in each Bash preflight shell.",
+    "Remove trailing whitespace from three upstream capture-reference lines.",
+    "Link non-vendored engine source and docs to the recorded upstream commit.",
+    "Replace third-party example email addresses with example.invalid placeholders."
+  ],
+  "vendored_at": "2026-10-11"
+}

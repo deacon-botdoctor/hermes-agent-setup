@@ -22,7 +22,8 @@ def _redact_persisted_urls(value):
 def patch_session_url_storage_redaction_v1(root: Path) -> bool:
     """Preflight every target before writing; refuse partial or mismatched application."""
     edits = {}
-    for relative in ("agent/redact.py", "hermes_state_messages.py", "hermes_state.py"):
+    for relative in ("agent/redact.py", "hermes_state_messages.py", "hermes_state.py",
+                     "hermes_state_api_content.py", "hermes_state_worker_lifecycle.py"):
         edits[relative] = (root / relative).read_text()
     originals = dict(edits)
     if MARKER in edits["hermes_state_messages.py"] and HELPER not in edits["hermes_state_messages.py"]:
@@ -63,9 +64,9 @@ def patch_session_url_storage_redaction_v1(root: Path) -> bool:
             '        _str_or_none = lambda v:')
     replace("hermes_state_messages.py", '                json.dumps(tool_calls) if tool_calls else None)\n',
             '                json.dumps(_redact_persisted_urls(tool_calls)) if tool_calls else None)\n')
-    replace("hermes_state_messages.py", '(_scrub_surrogates(api_content), session_id, self._encode_content(content)))',
+    replace("hermes_state_api_content.py", '(_scrub_surrogates(api_content), session_id, self._encode_content(content)))',
             '(_scrub_surrogates(_redact_persisted_urls(api_content)), session_id, self._encode_content(content)))')
-    replace("hermes_state_messages.py", '(_scrub_surrogates(api_content), row_id, session_id, self._encode_content(content)))',
+    replace("hermes_state_api_content.py", '(_scrub_surrogates(api_content), row_id, session_id, self._encode_content(content)))',
             '(_scrub_surrogates(_redact_persisted_urls(api_content)), row_id, session_id, self._encode_content(content)))')
     replace("hermes_state_messages.py", 'it differed from ``content``, stored as sent except lone surrogates.',
             'it differed from ``content``, stored with lone surrogates and URL credentials redacted.')
@@ -77,6 +78,26 @@ def patch_session_url_storage_redaction_v1(root: Path) -> bool:
             '    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)\n'
             '    with os.fdopen(descriptor, "a", encoding="utf-8") as handle:\n'
             '        os.fchmod(handle.fileno(), 0o600)\n')
+    # Native sidecar writes now live in separate DB and worker modules.
+    for relative in ("hermes_state_api_content.py", "hermes_state_worker_lifecycle.py"):
+        old = "from hermes_state_messages import _scrub_surrogates"
+        new = old + ", _redact_persisted_urls"
+        installed = edits[relative].count(new)
+        if installed not in (0, 2) or (not installed and edits[relative].count(old) != 2):
+            raise RuntimeError(f"{relative}: sidecar import anchor drift")
+        if not installed:
+            edits[relative] = edits[relative].replace(old, new)
+    relative = "hermes_state_worker_lifecycle.py"
+    old = "_scrub_surrogates(payload['api_content'])"
+    new = "_scrub_surrogates(_redact_persisted_urls(payload['api_content']))"
+    installed = edits[relative].count(new)
+    if installed not in (0, 2) or (not installed and edits[relative].count(old) != 2):
+        raise RuntimeError("worker sidecar storage anchor drift")
+    if not installed:
+        edits[relative] = edits[relative].replace(old, new)
+    replace("hermes_state_messages.py",
+            'msg.get("tool_call_id"), json.dumps(tool_calls) if tool_calls else None,',
+            'msg.get("tool_call_id"), json.dumps(_redact_persisted_urls(tool_calls)) if tool_calls else None,')
     for relative, source in edits.items():
         compile(source, relative, "exec")
     for relative, source in edits.items():

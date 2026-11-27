@@ -1,6 +1,6 @@
 ---
 name: capability-scout
-description: Find a suitable authorized tool or skill when an unresolved capability or output-quality gap prevents a viable task path.
+description: Discover authorized APIs and skills by task. Use for research, identity resolution, people/company enrichment, web/news/social data, extraction, or a tool or quality gap. Search TReg before treating generic web search as the only route.
 triggers:
   - capability gap
   - tool gap
@@ -10,11 +10,61 @@ triggers:
 
 # Capability Scout
 
-Use this when available tools do not provide a viable path, or an observed
-output-quality failure requires a different capability. A client-visible
-artifact, repeatable task, or general desire for quality alone does not require
-scouting. If a suitable installed authorized tool or skill is already known,
-use it directly.
+For research, discover the API that matches the task before committing to a
+familiar provider. Do not wait for a failure or for the principal to name TReg.
+For other tasks, scout when a tool or output-quality gap needs another route.
+
+## Research API discovery
+
+The canonical procedure is GBrain `workflows/treg-research-discovery` in the
+operator library. Retrieve it only through an authorized knowledge route;
+client agents must not cross into another principal's vault. The following
+runtime adapter supports native discovery without requiring operator access.
+
+Data Patriot is retired. Do not call its research, status, brief, or deep APIs.
+Older skills that route there are superseded for tool selection. Preserve their
+unrelated analysis and source standards.
+
+Use native `tool_search` to discover TReg and exact callable names. The custom
+capability router is a secondary reference for cold tools and operating patterns,
+not the live execution registry. Search TReg with `catalog_search` using the task,
+then inspect `catalog_get` for the selected endpoint before `call`.
+
+Choose the capability from the requested output and the identifiers you have:
+
+| Input and task | Discover | Check before claiming a result |
+|---|---|---|
+| Person name plus company, no email | Name/company identity or profile search | Candidate profile and corroborated affiliation; never invent an email. |
+| Known email | Reverse-email identity lookup | Email verification only checks deliverability. Corroborate the address-to-person and person-to-profile links. |
+| Company domain and business facts | Company enrichment plus required official-source reads | Structured fields and their sources. An office, registered address or generic location is not automatically headquarters. |
+| Known page URL and named fields or quotations | Single-page fetch or structured extraction | Actual page content, requested fields, supporting text and the source URL. Snippets or a company summary are insufficient. |
+| Profile URL, records or social content | Profile enrichment, official-record or platform-specific data | The requested fields and attributable source evidence. |
+
+Do not guess parameters or start a whole-site crawl for a single page unless needed.
+If an enrichment response cannot supply a requested field or provenance, include
+an appropriate follow-up source read and keep unresolved fields unknown.
+
+Inspect availability and relevant outcome observations before choosing a provider.
+When the catalog reports substantial repeated failures or classified misses,
+inspect another fitting authorized option before selecting a first attempt.
+State when observations are missing or do not represent the task; a metric or a
+provider miss does not establish absence. Reject blocked or unconfigured routes.
+
+Read input requirements, output, current price, miss semantics and async behavior.
+Prefer an authorized installed route; compare fit before cost. An HTTP success
+rate is not a match rate or research-quality score. Routed TReg endpoints may
+try multiple providers: inspect their documented ceiling and charge semantics.
+Use the requesting agent's configured identity. Disclose metered prices and use
+existing spending authority; do not change caps, buy credits or borrow tokens.
+
+Invoke the appropriate endpoint and read the returned sources. Verify identity
+against known identifiers and source context. Preserve citations, job handles,
+actual charges and concrete gaps. A completed job can contain incomplete research.
+
+For transient failures or weak evidence, rediscover an independent suitable route
+or direct source. Correct validation errors against the schema. Do not bypass a
+cap or access refusal. A failed backend plus generic web searches is not exhaustive
+research. Report which routes were checked and what remains unknown.
 
 ## Discovery
 

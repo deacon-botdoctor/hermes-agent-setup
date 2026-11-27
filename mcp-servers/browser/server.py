@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""browser — generic CDP browser automation MCP for Enoch.
+"""browser — generic CDP browser automation MCP for the operator agent.
 
 Drives Brave on Mini via Chrome DevTools Protocol (port 9222).
 No domain restrictions. Use for any web automation: navigate, click,

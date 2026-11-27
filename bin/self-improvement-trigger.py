@@ -138,6 +138,10 @@ def load_state() -> dict:
 
 def save_state(state: dict) -> None:
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    signatures = state.get("error_signatures")
+    if isinstance(signatures, dict):
+        cutoff = time.time() - ERROR_SIG_COOLDOWN_SECONDS
+        state["error_signatures"] = {k: v for k, v in signatures.items() if float(v or 0) >= cutoff}
     fd, temp_path = tempfile.mkstemp(prefix=".self-improvement-trigger-", suffix=".tmp", dir=STATE_FILE.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -295,6 +299,16 @@ def persist_tool_readiness_context(context: dict[str, Any]) -> None:
 
 
 ERROR_LINE_RE = re.compile(r"\b(error|fallback|failed)\b", re.IGNORECASE)
+# Per-line volatile fragments (ISO timestamps, clock times, long hex ids). They are
+# stripped before tokenizing so a recurring error keeps one signature; numeric codes
+# are treated exactly as before (pure-digit tokens dropped). No backslashes, so the
+# same pattern is embedded verbatim in the remote counter below.
+VOLATILE_PATTERN = (
+    "[0-9]{4}-[0-9]{2}-[0-9]{2}[t ][0-9]{2}:[0-9]{2}(?::[0-9]{2})?(?:[.,][0-9]+)?(?:z|[+-][0-9]{2}:?[0-9]{2})?"
+    "|(?<![0-9a-z])[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?:[.,][0-9]+)?(?![0-9a-z])"
+    "|(?<![0-9a-z])[0-9a-f]{8,}(?![0-9a-z])"
+)
+VOLATILE_RE = re.compile(VOLATILE_PATTERN)
 PROVIDER_RE = re.compile(
     r"\b(codex|openrouter|openai|anthropic|claude|gemini|ollama|vllm|telegram|maton|composio)\b", re.IGNORECASE
 )
@@ -309,7 +323,7 @@ def error_signature(path: Path | str, line: str) -> str:
     if provider_match:
         token = provider_match.group(1).lower()
     else:
-        compact = re.sub(r"[^a-z0-9]+", " ", line.lower())
+        compact = re.sub(r"[^a-z0-9]+", " ", VOLATILE_RE.sub(" ", line.lower()))
         words = [w for w in compact.split() if not w.isdigit()]
         token = "-".join(words[:6]) or "generic"
     return f"{basename}:{keyword}:{token[:80]}"
@@ -426,10 +440,11 @@ def count_spark_messages(user: str, since_ts: float) -> tuple[int, int]:
                 "prov = re.compile(r'\\b(codex|openrouter|openai|anthropic|claude|"
                 "gemini|ollama|vllm|telegram|maton|composio)\\b', re.I)\n"
                 "now = time.time(); count = 0\n"
+                "vol = re.compile('" + VOLATILE_PATTERN + "')\n"
                 "def sig(path, line):\n"
                 "    m = err.search(line); p = prov.search(line)\n"
                 "    keyword = m.group(1).lower() if m else 'error'\n"
-                "    words = re.sub(r'[^a-z0-9]+', ' ', line.lower()).split()\n"
+                "    words = re.sub(r'[^a-z0-9]+', ' ', vol.sub(' ', line.lower())).split()\n"
                 "    token = p.group(1).lower() if p else "
                 "'-'.join([w for w in words if not w.isdigit()][:6]) or 'generic'\n"
                 "    return f'{Path(path).name}:{keyword}:{token[:80]}'\n"

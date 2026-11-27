@@ -15,8 +15,8 @@ from pathlib import Path
 
 DEFAULT_URL = (
     "https://backend.composio.dev/v3/mcp/"
-    "ccefbe08-a260-46fa-a972-26e17e2df5d4"
-    "?include_composio_helper_actions=true&user_id=enoch-google-super"
+    "<YOUR_COMPOSIO_SERVER_ID>"
+    "?include_composio_helper_actions=true&user_id=<YOUR_COMPOSIO_USER_ID>"
 )
 WRAPPER = Path.home() / ".hermes/bin/composio-remote-mcp-with-env.sh"
 

@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import argparse
+import json, os, sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+HOME = Path.home()
+HERMES_HOME = Path(os.environ.get("HERMES_HOME", HOME / ".hermes")).expanduser()
+CONFIG = HERMES_HOME / "config.yaml"
+INSTALLED = HERMES_HOME / "state" / "capability-router-installed.json"
+WORKING = HERMES_HOME / "mcp-servers" / "capability-router" / "registry.json"
+SCHEMA_CACHE = HERMES_HOME / "state" / "mcp" / "tool-schemas"
+parser = argparse.ArgumentParser(description="Read configured capability state and saved health evidence; never run or repair tools.")
+parser.add_argument("--json", action="store_true", help="Emit JSON (also the default).")
+parser.add_argument("--health-report", type=Path, default=HERMES_HOME / "state/capability-regression-watchdog-run.json")
+args = parser.parse_args()
+
+def saved_health(path):
+    """Keep cached observations separate from current configuration exposure."""
+    unknown = {"state": "unknown", "freshness": "unknown", "age_seconds": None,
+               "checked_at": None, "scope": "No usable saved capability check.", "checks": []}
+    try:
+        if path.stat().st_size > 1024 * 1024:
+            return {**unknown, "reason": "report_too_large"}
+        data = json.loads(path.read_text())
+        stamp = data["updated_at"]
+        if (type(stamp) not in (int, float) or not 0 < stamp <= time.time() + 60
+                or data.get("status") not in {"pass", "fail"}
+                or data.get("mode") not in {"live", "static"}
+                or not isinstance(data.get("checks"), list)
+                or not data["checks"]):
+            raise ValueError("invalid report")
+        checks = []
+        for check in data["checks"]:
+            if (not isinstance(check, dict) or not isinstance(check.get("check"), str)
+                    or check.get("status") not in {"pass", "fail"}):
+                raise ValueError("invalid check")
+            # Do not forward arbitrary error, repair or provider text from the report.
+            checks.append({"check": check["check"], "status": check["status"]})
+        age = max(0, int(time.time() - stamp))
+        return {"state": data["status"], "freshness": "recent" if age <= 3600 else "stale",
+                "age_seconds": age, "checked_at": datetime.fromtimestamp(stamp, timezone.utc).isoformat(),
+                "scope": "Saved " + data["mode"] + " capability checks; no new probe was run.",
+                "mode": data["mode"], "checks": checks}
+    except FileNotFoundError:
+        return {**unknown, "reason": "report_missing"}
+    except (OSError, ValueError, TypeError, KeyError, OverflowError):
+        return {**unknown, "reason": "report_unreadable_or_invalid"}
+
+health = saved_health(args.health_report)
+
+def server_health(name):
+    observations = [{"kind": kind, "status": check["status"]}
+                    for check in health["checks"] for kind in ("transport", "read")
+                    if check["check"] == kind + ":" + name]
+    return {"state": ("fail" if any(c["status"] == "fail" for c in observations)
+                      else "pass" if observations else "unknown"),
+            "freshness": health["freshness"], "checked_at": health["checked_at"],
+            "age_seconds": health["age_seconds"], "observations": observations}
+
+def _enabled(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() not in {"false", "no", "off", "0"}
+    return bool(value) if value is not None else True
+
+def _load_yaml(path: Path) -> dict:
+    if not yaml or not path.exists():
+        return {}
+    data = yaml.safe_load(path.read_text()) or {}
+    return data if isinstance(data, dict) else {}
+
+cfg = _load_yaml(CONFIG)
+servers = cfg.get("mcp_servers") or {}
+policy = cfg.get("mcp_policy") or {}
+installed = json.loads(INSTALLED.read_text()) if INSTALLED.exists() else {"servers": {}}
+registry = json.loads(WORKING.read_text()) if WORKING.exists() else {"capabilities": []}
+cache_presence = {p.stem for p in SCHEMA_CACHE.glob("*.json")} if SCHEMA_CACHE.exists() else set()
+
+caps_by_server = {}
+for cap in registry.get("capabilities", []) or []:
+    srv = cap.get("mcp_server")
+    if not srv:
+        continue
+    caps_by_server[srv] = caps_by_server.get(srv, 0) + 1
+
+hot_policy = set(policy.get("hot_path") or []) | set(policy.get("active_enabled") or [])
+on_demand_policy = set(policy.get("on_demand") or [])
+
+def classify(name: str, scfg: dict) -> tuple[str, dict, list[dict]]:
+    meta = scfg.get("metadata") or {}
+    tier = str(scfg.get("tier") or "").strip() or None
+    enabled = _enabled(scfg.get("enabled", True))
+    installed_entry = (installed.get("servers") or {}).get(name) or {}
+    installed_flag = installed_entry.get("installed")
+    schema_cached = name in cache_presence
+    row = {
+        "server": name,
+        "enabled": enabled,
+        "tier": tier,
+        "mcp_profile_active": meta.get("mcp_profile_active"),
+        "installed": installed_flag,
+        "schema_cached": schema_cached,
+        "capabilities": caps_by_server.get(name, 0),
+        "health": server_health(name),
+    }
+    drift = []
+    if enabled and tier == "on_demand" and name not in on_demand_policy and name not in hot_policy:
+        drift.append({**row, "reason": "enabled on_demand but absent from mcp_policy.on_demand"})
+    if not enabled and tier == "on_demand":
+        drift.append({**row, "reason": "on_demand intent but disabled in config"})
+    if meta.get("mcp_profile_active") == "on_demand" and tier == "disabled":
+        drift.append({**row, "reason": "metadata says on_demand but tier disabled"})
+    if name in hot_policy or tier == "hot":
+        return ("hot_now", row, drift)
+    if enabled and tier == "on_demand":
+        if installed_flag is True or schema_cached:
+            return ("on_demand_available", row, drift)
+        return ("broken_or_misconfigured", {**row, "reason": "enabled on_demand but no installed-state/cached schema proof"}, drift)
+    if not enabled and tier == "disabled":
+        return ("disabled", row, drift)
+    return ("broken_or_misconfigured", {**row, "reason": "unclassified state"}, drift)
+
+report = {
+    "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    "hot_now": [],
+    "on_demand_available": [],
+    "disabled": [],
+    "broken_or_misconfigured": [],
+    "drift_warnings": [],
+}
+for name, scfg in sorted(servers.items()):
+    if not isinstance(scfg, dict):
+        continue
+    bucket, row, drift = classify(name, scfg)
+    reason, repair = {
+        "hot_now": ("Configured for hot-path exposure; this is not a live read result.",
+                    "If tools are missing, inspect exposure and the existing capability check."),
+        "on_demand_available": ("Configured for on-demand activation with cached installation/schema evidence.",
+                                "Use the existing activation route when needed."),
+        "disabled": ("Disabled in configuration.", "Keep disabled unless activation is explicitly authorized."),
+        "broken_or_misconfigured": (row.get("reason", "Configuration and available evidence disagree."),
+                                   "Inspect this server's declaration, activation policy and owning launcher."),
+    }[bucket]
+    row["reason"] = reason
+    row["repair"] = ("Inspect the owning route's transport/read error; preserve its account identity."
+                     if row["health"]["state"] == "fail" else repair)
+    report[bucket].append(row)
+    for warning in drift:
+        warning["repair"] = "Inspect this server's declaration and activation policy; preserve explicit disables."
+    report["drift_warnings"].extend(drift)
+report["summary"] = {k: len(report[k]) for k in ["hot_now", "on_demand_available", "disabled", "broken_or_misconfigured", "drift_warnings"]}
+report["health_evidence"] = {k: v for k, v in health.items() if k != "checks"}
+report["health_evidence"]["check_count"] = len(health["checks"])
+print(json.dumps(report, indent=2))

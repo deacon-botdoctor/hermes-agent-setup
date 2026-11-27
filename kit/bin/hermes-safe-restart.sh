@@ -50,15 +50,15 @@ case "$PROFILE" in
     UNIT="${HERMES_GATEWAY_UNIT:-ai.hermes.gateway}"
     PROFILE_HOME="$HERMES_HOME"
     ;;
-  enoch)
-    # Mini Enoch uses the single-gateway LaunchAgent when no dedicated
-    # ai.hermes.gateway-enoch.plist exists.
+  operator)
+    # The operator agent uses the single-gateway LaunchAgent when no dedicated
+    # ai.hermes.gateway-operator.plist exists.
     if [ -z "${HERMES_GATEWAY_UNIT:-}" ] \
         && [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway.plist" ] \
-        && [ ! -f "$HOME/Library/LaunchAgents/ai.hermes.gateway-enoch.plist" ]; then
+        && [ ! -f "$HOME/Library/LaunchAgents/ai.hermes.gateway-operator.plist" ]; then
       UNIT="ai.hermes.gateway"
     else
-      UNIT="${HERMES_GATEWAY_UNIT:-ai.hermes.gateway-enoch}"
+      UNIT="${HERMES_GATEWAY_UNIT:-ai.hermes.gateway-operator}"
     fi
     PROFILE_HOME="$HERMES_HOME"
     ;;

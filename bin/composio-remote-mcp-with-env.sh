@@ -11,6 +11,6 @@ if [ -z "${COMPOSIO_API_KEY:-}" ]; then
   exit 1
 fi
 
-: "${COMPOSIO_MCP_URL:=https://backend.composio.dev/v3/mcp/ccefbe08-a260-46fa-a972-26e17e2df5d4?include_composio_helper_actions=true&user_id=enoch-google-super}"
+: "${COMPOSIO_MCP_URL:?set COMPOSIO_MCP_URL to your own Composio MCP server URL}"
 
 exec /opt/homebrew/bin/node "$HOME/.hermes/vendor/composio-mcp/node_modules/@composio/mcp/dist/index" start --url "$COMPOSIO_MCP_URL"

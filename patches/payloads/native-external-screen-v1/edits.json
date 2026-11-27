@@ -1,0 +1,1805 @@
+{
+  "agent/prompt_builder.py": [
+    {
+      "after": [
+        "def bot_screen_note(running: bool, display: str | None, holder: str, mode: str = \"native\") -> str:\n"
+      ],
+      "before": [
+        "def bot_screen_note(running: bool, display: str | None, holder: str) -> str:\n"
+      ],
+      "end": 937,
+      "start": 936
+    },
+    {
+      "after": [
+        "    if mode == \"external_rfb\":\n",
+        "        return (\"Bot Screen: externally managed RFB viewport of one dedicated workstation; no X DISPLAY, \"\n",
+        "                \"host GUI launch routing, named-output/app identity or all-outputs claim. \"\n",
+        "                \"Clipboard and thumbnails unavailable. \" +\n",
+        "                (\"Agent actions require a fresh visible capture and foreground approval. \" if holder == \"agent\" else\n",
+        "                 \"Agent capture/input excluded; no automatic handback or recovery. \") +\n",
+        "                \"Local drain is not remote cleanup certification; same-size source/focus changes are not attested.\")\n"
+      ],
+      "before": [],
+      "end": 942,
+      "start": 942
+    },
+    {
+      "after": [
+        "        from tools.bot_desktop import external\n",
+        "        selected = external.mode()\n",
+        "        if selected == external.EXTERNAL:\n",
+        "            return bot_screen_note(_bd_runtime.is_running(), None, _bd_lease.get().holder, selected)\n"
+      ],
+      "before": [],
+      "end": 967,
+      "start": 967
+    }
+  ],
+  "apps/desktop/src/plugins/hermes-bots/screen-hero.tsx": [
+    {
+      "after": [
+        "import { thumbnailFence } from './screen-state'\n"
+      ],
+      "before": [],
+      "end": 17,
+      "start": 17
+    },
+    {
+      "after": [
+        "function useLiveThumbnail(bot: RosterRow, running: boolean, permitted: boolean, fence: string) {\n",
+        "  const [image, setImage] = useState<{ url: string; fence: string } | null>(null)\n",
+        "  const dataUrl = permitted && image?.fence === fence ? image.url : null\n"
+      ],
+      "before": [
+        "function useLiveThumbnail(bot: RosterRow, running: boolean) {\n",
+        "  const [dataUrl, setDataUrl] = useState<string | null>(null)\n"
+      ],
+      "end": 24,
+      "start": 22
+    },
+    {
+      "after": [
+        "    setImage(null)\n",
+        "\n",
+        "    if (!running || !permitted) {\n"
+      ],
+      "before": [
+        "    if (!running) {\n",
+        "      setDataUrl(null)\n"
+      ],
+      "end": 35,
+      "start": 33
+    },
+    {
+      "after": [
+        "          if (!cancelled && thumbnailFence(bot) === fence) {\n",
+        "            setImage(result.data_url ? { url: result.data_url, fence } : null)\n"
+      ],
+      "before": [
+        "          if (!cancelled) {\n",
+        "            setDataUrl(result.data_url ?? null)\n"
+      ],
+      "end": 71,
+      "start": 69
+    },
+    {
+      "after": [
+        "  }, [bot, running, permitted, fence])\n"
+      ],
+      "before": [
+        "  }, [bot, running])\n"
+      ],
+      "end": 98,
+      "start": 97
+    },
+    {
+      "after": [
+        "  const { tone, status, lease } = useScreenPortalState(bot)\n",
+        "  const running = Boolean(status?.running)\n",
+        "  const permitted = running && status?.mode !== 'external_rfb' && status?.thumbnail_available !== false && lease?.holder === 'agent' && (!lease.phase || lease.phase === 'native' || lease.phase === 'active-agent')\n",
+        "  const fence = thumbnailFence(bot)\n",
+        "  const { dataUrl, boxRef, stale, suppressed } = useLiveThumbnail(bot, running, permitted, fence)\n"
+      ],
+      "before": [
+        "  const { tone } = useScreenPortalState(bot)\n",
+        "  const running = tone === 'live' || tone === 'human' || tone === 'other'\n",
+        "  const { dataUrl, boxRef, stale, suppressed } = useLiveThumbnail(bot, running)\n"
+      ],
+      "end": 117,
+      "start": 114
+    },
+    {
+      "after": [
+        "  const caption = status?.mode === 'external_rfb'\n",
+        "    ? 'Externally managed RFB \u00b7 thumbnails unavailable'\n",
+        "    : lease?.holder === 'excluded'\n",
+        "      ? 'Input excluded \u00b7 handoff not qualified'\n",
+        "      : suppressed\n"
+      ],
+      "before": [
+        "  const caption = suppressed\n"
+      ],
+      "end": 123,
+      "start": 122
+    },
+    {
+      "after": [
+        "  const cta = status?.mode === 'external_rfb' ? 'Open viewer' : running\n"
+      ],
+      "before": [
+        "  const cta = running\n"
+      ],
+      "end": 138,
+      "start": 137
+    }
+  ],
+  "apps/desktop/src/plugins/hermes-bots/screen-pane.tsx": [
+    {
+      "after": [
+        "          if (client.viewOnly || observe.clipboard_available === false || observe.mode === 'external_rfb') {\n",
+        "            event.preventDefault()\n",
+        "\n"
+      ],
+      "before": [
+        "          if (client.viewOnly) {\n"
+      ],
+      "end": 311,
+      "start": 310
+    },
+    {
+      "after": [
+        "  if (status?.mode === 'external_rfb' && !status.running) {\n",
+        "    return <EmptyState description={status.blocker ?? 'Local endpoint unavailable. Start, Stop and Install are unavailable; close only ends this viewer transport.'} title=\"Externally managed RFB\" />\n",
+        "  }\n",
+        "\n"
+      ],
+      "before": [],
+      "end": 444,
+      "start": 444
+    },
+    {
+      "after": [
+        "        {status?.mode === 'external_rfb' ? (\n",
+        "          <span className=\"text-muted-foreground\">Externally managed RFB \u00b7 {status.geometry} \u00b7 clipboard unavailable</span>\n",
+        "        ) : null}\n"
+      ],
+      "before": [],
+      "end": 496,
+      "start": 496
+    },
+    {
+      "after": [
+        "        ) : lease?.holder === 'excluded' ? (\n",
+        "          <span className=\"rounded bg-muted px-2 py-0.5 text-muted-foreground\">Input excluded \u00b7 handoff not qualified</span>\n"
+      ],
+      "before": [],
+      "end": 524,
+      "start": 524
+    },
+    {
+      "after": [
+        "        {(conn === 'error' || status?.mode === 'external_rfb') && error ? (\n"
+      ],
+      "before": [
+        "        {conn === 'error' && error ? (\n"
+      ],
+      "end": 581,
+      "start": 580
+    }
+  ],
+  "apps/desktop/src/plugins/hermes-bots/screen-portal.tsx": [
+    {
+      "after": [
+        "  return lease?.holder === 'agent' ? 'live' : 'unknown'\n"
+      ],
+      "before": [
+        "  return 'live'\n"
+      ],
+      "end": 74,
+      "start": 73
+    },
+    {
+      "after": [
+        "  const subtitle = status?.mode === 'external_rfb' ? (status.running ? 'Externally managed RFB \u00b7 open viewer' : 'External endpoint unavailable') : {\n"
+      ],
+      "before": [
+        "  const subtitle = {\n"
+      ],
+      "end": 171,
+      "start": 170
+    }
+  ],
+  "apps/desktop/src/plugins/hermes-bots/screen-state.ts": [
+    {
+      "after": [
+        "  return prev != null && prev.authority === next.authority && next.epoch < prev.epoch\n"
+      ],
+      "before": [
+        "  return prev != null && next.epoch < prev.epoch\n"
+      ],
+      "end": 31,
+      "start": 30
+    },
+    {
+      "after": [
+        "  statusGeneration.set(key, (statusGeneration.get(key) ?? 0) + 1)\n"
+      ],
+      "before": [],
+      "end": 83,
+      "start": 83
+    },
+    {
+      "after": [
+        "    prev.lease.epoch === lease.epoch &&\n",
+        "    prev.lease.phase === lease.phase &&\n",
+        "    prev.lease.authority === lease.authority &&\n",
+        "    prev.lease.endpoint_generation === lease.endpoint_generation &&\n",
+        "    prev.lease.endpoint_identity === lease.endpoint_identity\n"
+      ],
+      "before": [
+        "    prev.lease.epoch === lease.epoch\n"
+      ],
+      "end": 93,
+      "start": 92
+    },
+    {
+      "after": [
+        "\n",
+        "\n",
+        "/** Synchronous privacy identity: asynchronous thumbnail callbacks read this\n",
+        " *  directly, not a React closure that can lag a takeover event. */\n",
+        "export function thumbnailFence(bot: RosterRow): string {\n",
+        "  const state = screenStateFor($screenState.get(), bot)\n",
+        "  const lease = state?.lease\n",
+        "  const status = state?.status\n",
+        "\n",
+        "  return JSON.stringify([status?.mode ?? 'native', status?.endpoint_fingerprint,\n",
+        "    status?.authority, status?.endpoint_generation, lease?.authority,\n",
+        "    lease?.phase, lease?.holder, lease?.epoch, lease?.endpoint_identity])\n",
+        "}\n"
+      ],
+      "before": [],
+      "end": 114,
+      "start": 114
+    }
+  ],
+  "apps/shared/src/gateway-contract.generated.ts": [
+    {
+      "after": [
+        "  mode?: string\n",
+        "  lifecycle_owner?: string\n",
+        "  endpoint_generation?: string | null\n",
+        "  authority?: string | null\n",
+        "  endpoint_fingerprint?: string | null\n",
+        "  thumbnail_available?: boolean\n",
+        "  clipboard_available?: boolean\n"
+      ],
+      "before": [],
+      "end": 1409,
+      "start": 1409
+    },
+    {
+      "after": [
+        "  phase?: LeasePhase\n",
+        "  authority?: string | null\n",
+        "  endpoint_generation?: string | null\n",
+        "  endpoint_identity?: string | null\n",
+        "  transition_nonce?: string | null\n"
+      ],
+      "before": [],
+      "end": 1424,
+      "start": 1424
+    },
+    {
+      "after": [
+        "export type LeaseHolder = 'agent' | 'human' | 'excluded'\n",
+        "export type LeasePhase = 'native' | 'active-agent' | 'active-human' | 'quiescing' | 'excluded'\n"
+      ],
+      "before": [
+        "export type LeaseHolder = 'agent' | 'human'\n"
+      ],
+      "end": 1426,
+      "start": 1425
+    },
+    {
+      "after": [
+        "  mode?: string\n",
+        "  lifecycle_owner?: string\n",
+        "  endpoint_generation?: string | null\n",
+        "  authority?: string | null\n",
+        "  endpoint_fingerprint?: string | null\n",
+        "  thumbnail_available?: boolean\n",
+        "  clipboard_available?: boolean\n"
+      ],
+      "before": [],
+      "end": 1454,
+      "start": 1454
+    },
+    {
+      "after": [
+        "  mode?: string\n",
+        "  lifecycle_owner?: string\n",
+        "  endpoint_generation?: string | null\n",
+        "  authority?: string | null\n",
+        "  endpoint_fingerprint?: string | null\n",
+        "  thumbnail_available?: boolean\n",
+        "  clipboard_available?: boolean\n"
+      ],
+      "before": [],
+      "end": 1479,
+      "start": 1479
+    },
+    {
+      "after": [
+        "  mode?: string\n",
+        "  lifecycle_owner?: string\n",
+        "  endpoint_generation?: string | null\n",
+        "  authority?: string | null\n",
+        "  endpoint_fingerprint?: string | null\n",
+        "  thumbnail_available?: boolean\n",
+        "  clipboard_available?: boolean\n"
+      ],
+      "before": [],
+      "end": 1506,
+      "start": 1506
+    },
+    {
+      "after": [
+        "  mode?: string\n",
+        "  lifecycle_owner?: string\n",
+        "  endpoint_generation?: string | null\n",
+        "  authority?: string | null\n",
+        "  endpoint_fingerprint?: string | null\n",
+        "  thumbnail_available?: boolean\n",
+        "  clipboard_available?: boolean\n"
+      ],
+      "before": [],
+      "end": 5691,
+      "start": 5691
+    }
+  ],
+  "apps/shared/src/gateway-contract.openrpc.json": [
+    {
+      "after": [
+        "          },\n",
+        "          \"phase\": {\n",
+        "            \"$ref\": \"#/components/schemas/LeasePhase\",\n",
+        "            \"default\": \"native\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"endpoint_identity\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Identity\"\n",
+        "          },\n",
+        "          \"transition_nonce\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Transition Nonce\"\n"
+      ],
+      "before": [],
+      "end": 17046,
+      "start": 17046
+    },
+    {
+      "after": [
+        "          \"mode\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Mode\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"lifecycle_owner\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Lifecycle Owner\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_fingerprint\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Fingerprint\"\n",
+        "          },\n",
+        "          \"thumbnail_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Thumbnail Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n",
+        "          \"clipboard_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Clipboard Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n"
+      ],
+      "before": [],
+      "end": 17348,
+      "start": 17348
+    },
+    {
+      "after": [
+        "          },\n",
+        "          \"mode\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Mode\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"lifecycle_owner\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Lifecycle Owner\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_fingerprint\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Fingerprint\"\n",
+        "          },\n",
+        "          \"thumbnail_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Thumbnail Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n",
+        "          \"clipboard_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Clipboard Available\",\n",
+        "            \"type\": \"boolean\"\n"
+      ],
+      "before": [],
+      "end": 17526,
+      "start": 17526
+    },
+    {
+      "after": [
+        "          },\n",
+        "          \"mode\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Mode\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"lifecycle_owner\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Lifecycle Owner\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_fingerprint\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Fingerprint\"\n",
+        "          },\n",
+        "          \"thumbnail_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Thumbnail Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n",
+        "          \"clipboard_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Clipboard Available\",\n",
+        "            \"type\": \"boolean\"\n"
+      ],
+      "before": [],
+      "end": 17689,
+      "start": 17689
+    },
+    {
+      "after": [
+        "          \"mode\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Mode\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"lifecycle_owner\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Lifecycle Owner\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_fingerprint\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Fingerprint\"\n",
+        "          },\n",
+        "          \"thumbnail_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Thumbnail Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n",
+        "          \"clipboard_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Clipboard Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n"
+      ],
+      "before": [],
+      "end": 17884,
+      "start": 17884
+    },
+    {
+      "after": [
+        "          },\n",
+        "          \"mode\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Mode\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"lifecycle_owner\": {\n",
+        "            \"default\": \"native\",\n",
+        "            \"title\": \"Lifecycle Owner\",\n",
+        "            \"type\": \"string\"\n",
+        "          },\n",
+        "          \"endpoint_generation\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Generation\"\n",
+        "          },\n",
+        "          \"authority\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Authority\"\n",
+        "          },\n",
+        "          \"endpoint_fingerprint\": {\n",
+        "            \"anyOf\": [\n",
+        "              {\n",
+        "                \"type\": \"string\"\n",
+        "              },\n",
+        "              {\n",
+        "                \"type\": \"null\"\n",
+        "              }\n",
+        "            ],\n",
+        "            \"default\": null,\n",
+        "            \"title\": \"Endpoint Fingerprint\"\n",
+        "          },\n",
+        "          \"thumbnail_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Thumbnail Available\",\n",
+        "            \"type\": \"boolean\"\n",
+        "          },\n",
+        "          \"clipboard_available\": {\n",
+        "            \"default\": true,\n",
+        "            \"title\": \"Clipboard Available\",\n",
+        "            \"type\": \"boolean\"\n"
+      ],
+      "before": [],
+      "end": 18075,
+      "start": 18075
+    },
+    {
+      "after": [
+        "          \"human\",\n",
+        "          \"excluded\"\n"
+      ],
+      "before": [
+        "          \"human\"\n"
+      ],
+      "end": 22372,
+      "start": 22371
+    },
+    {
+      "after": [
+        "        \"type\": \"string\"\n",
+        "      },\n",
+        "      \"LeasePhase\": {\n",
+        "        \"enum\": [\n",
+        "          \"native\",\n",
+        "          \"active-agent\",\n",
+        "          \"active-human\",\n",
+        "          \"quiescing\",\n",
+        "          \"excluded\"\n",
+        "        ],\n",
+        "        \"title\": \"LeasePhase\",\n"
+      ],
+      "before": [],
+      "end": 22374,
+      "start": 22374
+    }
+  ],
+  "hermes_cli/config_defaults.py": [
+    {
+      "after": [
+        "        \"mode\": \"native\",  # explicit external_rfb opts into externally owned service; no fallback\n",
+        "        \"external_rfb\": {\"endpoint\": \"\", \"generation\": \"\",\n",
+        "                         \"control_endpoint\": \"\", \"native_incarnation\": \"\"},\n"
+      ],
+      "before": [],
+      "end": 2505,
+      "start": 2505
+    }
+  ],
+  "hermes_cli/managed_scope.py": [
+    {
+      "after": [
+        "def _cached_read(path: Path, cache: dict[str, tuple], parse, *, fail_closed: bool = False):\n"
+      ],
+      "before": [
+        "def _cached_read(path: Path, cache: dict[str, tuple], parse):\n"
+      ],
+      "end": 69,
+      "start": 68
+    },
+    {
+      "after": [
+        "    except FileNotFoundError:\n",
+        "        return None  # absent\n"
+      ],
+      "before": [],
+      "end": 77,
+      "start": 77
+    },
+    {
+      "after": [
+        "        if fail_closed:\n",
+        "            raise\n",
+        "        return None\n"
+      ],
+      "before": [
+        "        return None  # absent\n"
+      ],
+      "end": 79,
+      "start": 78
+    },
+    {
+      "after": [
+        "        if fail_closed:\n",
+        "            raise\n"
+      ],
+      "before": [],
+      "end": 88,
+      "start": 88
+    },
+    {
+      "after": [
+        "def _load_managed_file(name: str, cache: dict[str, tuple], parse, *, fail_closed: bool = False) -> dict:\n"
+      ],
+      "before": [
+        "def _load_managed_file(name: str, cache: dict[str, tuple], parse) -> dict:\n"
+      ],
+      "end": 99,
+      "start": 98
+    },
+    {
+      "after": [
+        "    parsed = _cached_read(managed_dir / name, cache, parse, fail_closed=fail_closed)\n",
+        "    if fail_closed and parsed is not None and not isinstance(parsed, dict):\n",
+        "        raise ValueError(\"managed config must be a mapping\")\n"
+      ],
+      "before": [
+        "    parsed = _cached_read(managed_dir / name, cache, parse)\n"
+      ],
+      "end": 103,
+      "start": 102
+    },
+    {
+      "after": [
+        "def load_managed_config(*, fail_closed: bool = False) -> dict:\n"
+      ],
+      "before": [
+        "def load_managed_config() -> dict:\n"
+      ],
+      "end": 107,
+      "start": 106
+    },
+    {
+      "after": [
+        "    return _load_managed_file(\"config.yaml\", _CONFIG_CACHE, lambda p: fast_safe_load(p.read_text(encoding=\"utf-8-sig\")), fail_closed=fail_closed)\n"
+      ],
+      "before": [
+        "    return _load_managed_file(\"config.yaml\", _CONFIG_CACHE, lambda p: fast_safe_load(p.read_text(encoding=\"utf-8-sig\")) or {})\n"
+      ],
+      "end": 114,
+      "start": 113
+    },
+    {
+      "after": [
+        "def apply_managed_overlay(config: dict, *, fail_closed: bool = False) -> dict:\n"
+      ],
+      "before": [
+        "def apply_managed_overlay(config: dict) -> dict:\n"
+      ],
+      "end": 129,
+      "start": 128
+    },
+    {
+      "after": [
+        "        managed = load_managed_config(fail_closed=True) if fail_closed else load_managed_config()\n"
+      ],
+      "before": [
+        "        managed = load_managed_config()\n"
+      ],
+      "end": 139,
+      "start": 138
+    },
+    {
+      "after": [
+        "        if fail_closed:\n",
+        "            raise\n"
+      ],
+      "before": [],
+      "end": 152,
+      "start": 152
+    }
+  ],
+  "hermes_cli/subcommands/computer_use_screen.py": [
+    {
+      "after": [
+        "        return 0 if st.running else 1\n",
+        "    if st.mode == \"external_rfb\":\n",
+        "        held = lease.get()\n",
+        "        print(f\"External RFB [{st.profile}]: local endpoint {'available (not protocol readiness)' if st.running else 'unavailable'}\")\n",
+        "        print(f\"  control: {held.phase}; service externally managed; clipboard/thumbnail unavailable\")\n",
+        "        print(f\"  {st.blocker}\")\n"
+      ],
+      "before": [],
+      "end": 16,
+      "start": 16
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        external.refuse_lifecycle(\"Stop\")\n",
+        "    except external.ExternalScreenError as exc:\n",
+        "        print(str(exc))\n",
+        "        return 1\n"
+      ],
+      "before": [],
+      "end": 50,
+      "start": 50
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        external.refuse_lifecycle(\"Install\")\n",
+        "    except external.ExternalScreenError as exc:\n",
+        "        print(str(exc))\n",
+        "        return 1\n"
+      ],
+      "before": [],
+      "end": 63,
+      "start": 63
+    },
+    {
+      "after": [
+        "def _screen_external(args) -> int:\n",
+        "    from tools.bot_desktop import external, lease, lease_external\n",
+        "    try:\n",
+        "        if args.computer_use_screen_action == \"external-initialize\":\n",
+        "            result = {\"lease\": lease.public_view(external.initialize_excluded()),\n",
+        "                      \"operation\": \"excluded_initialization\", \"active_owner_granted\": False}\n",
+        "            rc = 0  # Preparation succeeded, not an active-owner result.\n",
+        "        else:\n",
+        "            result = lease_external.reconcile(\n",
+        "                aggregate_recovery=args.computer_use_screen_action == \"external-recover\")\n",
+        "            rc = 0 if result.get(\"active_owner_granted\") is True else 1\n",
+        "    except (OSError, ValueError, TypeError, external.ExternalScreenError) as exc:\n",
+        "        result = {\"phase\": \"excluded\", \"active_owner_granted\": False,\n",
+        "                  \"code\": getattr(exc, \"code\", \"external_screen_excluded\"), \"reason\": str(exc)}\n",
+        "        rc = 1\n",
+        "    if bool(getattr(args, \"json\", False)):\n",
+        "        print(json.dumps(result, sort_keys=True, indent=2))\n",
+        "    else:\n",
+        "        print(\"External Screen: \" + str(result.get(\"reason\") or result.get(\"operation\")))\n",
+        "        print(\"  active ownership \" + (\"granted\" if result.get(\"active_owner_granted\") is True else \"not granted\"))\n",
+        "    return rc\n",
+        "\n",
+        "\n",
+        "def _screen_generation(args) -> int:\n",
+        "    from tools.bot_desktop import external, generation\n",
+        "    try:\n",
+        "        result = generation.status()\n",
+        "        rc = 0\n",
+        "    except (OSError, ValueError, TypeError, KeyError, external.ExternalScreenError) as exc:\n",
+        "        result = {\"phase\": \"excluded\", \"active_owner_granted\": False,\n",
+        "                  \"code\": \"generation-excluded\", \"reason\": str(exc)}\n",
+        "        rc = 1\n",
+        "    if bool(getattr(args, \"json\", False)):\n",
+        "        print(json.dumps(result, sort_keys=True, indent=2))\n",
+        "    else:\n",
+        "        print(\"External Screen generation: \" + str(result.get(\"operation\") or result.get(\"reason\") or \"inspection only\"))\n",
+        "    return rc\n",
+        "\n",
+        "\n",
+        "SCREEN_ACTIONS = {\"status\": _screen_status, \"start\": _screen_start, \"stop\": _screen_stop, \"install\": _screen_install,\n",
+        "                  \"external-initialize\": _screen_external, \"external-reconcile\": _screen_external,\n",
+        "                  \"external-recover\": _screen_external,\n",
+        "                  \"external-generation-status\": _screen_generation}\n"
+      ],
+      "before": [
+        "SCREEN_ACTIONS = {\"status\": _screen_status, \"start\": _screen_start, \"stop\": _screen_stop, \"install\": _screen_install}\n"
+      ],
+      "end": 102,
+      "start": 101
+    },
+    {
+      "after": [
+        "    for name, help_text in ((\"external-initialize\", \"Explicitly prepare a new excluded external authority; never grants input\"),\n",
+        "                            (\"external-reconcile\", \"Bounded recovery/bootstrap; requires Operator origin evidence and native barriers\"),\n",
+        "                            (\"external-recover\", \"Explicit fresh aggregate C recovery of historical unknown input; requires zero READY clients including watchers\")):\n",
+        "        operation = sub.add_parser(name, help=help_text)\n",
+        "        add_json_flag(operation, \"Emit external preparation/reconciliation result as JSON.\")\n",
+        "    operation = sub.add_parser(\"external-generation-status\", help=\"Inspect generation metadata; no live permission inferred\")\n",
+        "    add_json_flag(operation, \"Emit bounded generation inspection data as JSON.\")\n"
+      ],
+      "before": [],
+      "end": 116,
+      "start": 116
+    }
+  ],
+  "hermes_cli/web_routers/display.py": [
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    external.refuse_lifecycle(\"native RFB opener\", profile_home)\n"
+      ],
+      "before": [],
+      "end": 116,
+      "start": 116
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        selected = external.mode(info[\"hermes_home\"])\n",
+        "        if selected == external.EXTERNAL:\n",
+        "            from .display_external import bridge\n",
+        "            await bridge(ws, info)\n",
+        "            return\n",
+        "        if \"external_identity\" in info:\n",
+        "            raise external.ExternalScreenError(\"external ticket cannot open native mode\")\n",
+        "    except (OSError, ValueError, TypeError, external.ExternalScreenError):\n",
+        "        await ws.close(code=_CLOSE_DESKTOP_GONE, reason=\"Screen identity changed or excluded\")\n",
+        "        return\n"
+      ],
+      "before": [],
+      "end": 143,
+      "start": 143
+    },
+    {
+      "after": [
+        "        try:\n",
+        "            if external.mode(profile_home) != external.NATIVE:\n",
+        "                evicted.set()\n",
+        "                return False\n",
+        "        except (OSError, ValueError, TypeError, external.ExternalScreenError):\n",
+        "            evicted.set()\n",
+        "            return False\n"
+      ],
+      "before": [],
+      "end": 172,
+      "start": 172
+    },
+    {
+      "after": [
+        "        while not evicted.is_set():\n",
+        "            try:\n",
+        "                if external.mode(profile_home) != external.NATIVE:\n",
+        "                    break\n",
+        "                await asyncio.wait_for(evicted.wait(), external.POLL_SECONDS)\n",
+        "            except asyncio.TimeoutError:\n",
+        "                continue\n",
+        "            except (OSError, ValueError, TypeError, external.ExternalScreenError):\n",
+        "                break\n"
+      ],
+      "before": [
+        "        await evicted.wait()\n"
+      ],
+      "end": 231,
+      "start": 230
+    }
+  ],
+  "tools/bot_desktop/install.py": [
+    {
+      "after": [
+        "    from . import external\n",
+        "    external.refuse_lifecycle(\"Install\")\n"
+      ],
+      "before": [],
+      "end": 75,
+      "start": 75
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    external.refuse_lifecycle(\"Install\")\n"
+      ],
+      "before": [],
+      "end": 100,
+      "start": 100
+    }
+  ],
+  "tools/bot_desktop/lease.py": [
+    {
+      "after": [
+        "    phase: str = \"native\"\n",
+        "    authority: Optional[str] = None\n",
+        "    endpoint_generation: Optional[str] = None\n",
+        "    endpoint_identity: Optional[str] = None\n",
+        "    transition_nonce: Optional[str] = None\n"
+      ],
+      "before": [],
+      "end": 54,
+      "start": 54
+    },
+    {
+      "after": [
+        "        data = asdict(self)\n",
+        "        if self.phase == \"native\":\n",
+        "            for key in (\"phase\", \"authority\", \"endpoint_generation\", \"endpoint_identity\", \"transition_nonce\"):\n",
+        "                data.pop(key)\n",
+        "        return data\n"
+      ],
+      "before": [
+        "        return asdict(self)\n"
+      ],
+      "end": 57,
+      "start": 56
+    },
+    {
+      "after": [
+        "    d.pop(\"transition_nonce\", None)  # transition machinery is internal, not a viewer capability\n"
+      ],
+      "before": [],
+      "end": 66,
+      "start": 66
+    },
+    {
+      "after": [
+        "    from . import external, lease_external\n",
+        "    try:\n",
+        "        selected = external.mode(profile_key)\n",
+        "    except (OSError, ValueError, TypeError, external.ExternalScreenError) as exc:\n",
+        "        return lease_external.excluded(str(exc))\n",
+        "    if selected == external.EXTERNAL:\n",
+        "        return lease_external.get(profile_key)\n"
+      ],
+      "before": [],
+      "end": 146,
+      "start": 146
+    },
+    {
+      "after": [
+        "    from . import external, lease_external\n",
+        "    if external.mode(profile_key) == external.EXTERNAL:\n",
+        "        return lease_external.transition(profile_key, viewer_id=viewer_id, reason=reason)\n"
+      ],
+      "before": [],
+      "end": 192,
+      "start": 192
+    },
+    {
+      "after": [
+        "    from . import external, lease_external\n",
+        "    if external.mode(profile_key) == external.EXTERNAL:\n",
+        "        return lease_external.transition(profile_key, viewer_id=viewer_id, release=True,\n",
+        "                                         unless_human=unless_human, epoch=epoch)\n"
+      ],
+      "before": [],
+      "end": 212,
+      "start": 212
+    },
+    {
+      "after": [
+        "    return get(profile_key).holder != AGENT\n"
+      ],
+      "before": [
+        "    return get(profile_key).holder == HUMAN\n"
+      ],
+      "end": 235,
+      "start": 234
+    },
+    {
+      "after": [
+        "    return lease.holder == HUMAN and lease.viewer_id == viewer_id and lease.phase in (\"native\", \"active-human\")\n"
+      ],
+      "before": [
+        "    return lease.holder == HUMAN and lease.viewer_id == viewer_id\n"
+      ],
+      "end": 240,
+      "start": 239
+    },
+    {
+      "after": [
+        "    if lease.holder != AGENT or lease.phase not in (\"native\", \"active-agent\"):\n",
+        "        if lease.phase != \"native\":\n",
+        "            raise HumanHasControl(\"External Screen excludes agent capture/input. \" + lease.reason)\n"
+      ],
+      "before": [
+        "    if lease.holder == HUMAN:\n"
+      ],
+      "end": 247,
+      "start": 246
+    }
+  ],
+  "tools/bot_desktop/rfb_filter.py": [
+    {
+      "after": [
+        "    ``strict_handshake`` restricts the external WayVNC profile to RFB 3.8 / None security;\n",
+        "    legacy callers keep their existing handshake behavior by default.\n"
+      ],
+      "before": [],
+      "end": 46,
+      "start": 46
+    },
+    {
+      "after": [
+        "    def __init__(self, allow_input: Callable[[], bool], *, blocked_types: frozenset[int] = frozenset(),\n",
+        "                 strict_handshake: bool = False) -> None:\n",
+        "        self._blocked_types = blocked_types\n",
+        "        self._strict_handshake = strict_handshake\n"
+      ],
+      "before": [
+        "    def __init__(self, allow_input: Callable[[], bool]) -> None:\n"
+      ],
+      "end": 49,
+      "start": 48
+    },
+    {
+      "after": [
+        "                if self._strict_handshake:\n",
+        "                    # Validate this chunk's version/security offsets before forwarding.\n",
+        "                    # Waiting for all 14 bytes would deadlock on the server's security reply.\n",
+        "                    expected = b\"RFB 003.008\\n\\x01\"\n",
+        "                    offset = 14 - self._handshake_left\n",
+        "                    if head[:len(expected) - offset] != expected[offset:offset + take]:\n",
+        "                        raise ValueError(\"external RFB requires version 3.8 and None security\")\n"
+      ],
+      "before": [],
+      "end": 60,
+      "start": 60
+    },
+    {
+      "after": [
+        "            if msg[0] in self._blocked_types:\n",
+        "                continue\n"
+      ],
+      "before": [],
+      "end": 75,
+      "start": 75
+    }
+  ],
+  "tools/bot_desktop/runtime.py": [
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return None\n"
+      ],
+      "before": [],
+      "end": 104,
+      "start": 104
+    },
+    {
+      "after": [
+        "    mode: str = \"native\"\n",
+        "    lifecycle_owner: str = \"native\"\n",
+        "    endpoint_generation: Optional[str] = None\n",
+        "    authority: Optional[str] = None\n",
+        "    endpoint_fingerprint: Optional[str] = None\n",
+        "    thumbnail_available: bool = True\n",
+        "    clipboard_available: bool = True\n"
+      ],
+      "before": [],
+      "end": 152,
+      "start": 152
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return dict(os.environ if base_env is None else base_env)\n"
+      ],
+      "before": [],
+      "end": 356,
+      "start": 356
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        external.require_provider()\n",
+        "        external.resolve()\n",
+        "        return\n"
+      ],
+      "before": [],
+      "end": 374,
+      "start": 374
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        raise external.ExternalScreenError(\"Browser/CUA placement unavailable on external RFB; use its fenced provider, not host fallback\")\n"
+      ],
+      "before": [],
+      "end": 400,
+      "start": 400
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return False\n"
+      ],
+      "before": [],
+      "end": 411,
+      "start": 411
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return None\n"
+      ],
+      "before": [],
+      "end": 450,
+      "start": 450
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return 0.0\n"
+      ],
+      "before": [],
+      "end": 459,
+      "start": 459
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return False\n"
+      ],
+      "before": [],
+      "end": 500,
+      "start": 500
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return {}\n"
+      ],
+      "before": [],
+      "end": 534,
+      "start": 534
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return Path(external.resolve().endpoint)\n"
+      ],
+      "before": [],
+      "end": 553,
+      "start": 553
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return False\n"
+      ],
+      "before": [],
+      "end": 562,
+      "start": 562
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return False\n"
+      ],
+      "before": [],
+      "end": 572,
+      "start": 572
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        try:\n",
+        "            external.resolve()\n",
+        "            return True  # local availability only, never RFB/frame readiness\n",
+        "        except (OSError, ValueError, TypeError, external.ExternalScreenError):\n",
+        "            return False\n"
+      ],
+      "before": [],
+      "end": 601,
+      "start": 601
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    external.refuse_lifecycle(\"open_rfb_stream\")\n"
+      ],
+      "before": [],
+      "end": 606,
+      "start": 606
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return \"1280x800\"\n"
+      ],
+      "before": [],
+      "end": 614,
+      "start": 614
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    if external.mode() == external.EXTERNAL:\n",
+        "        return _external_status(profile)\n"
+      ],
+      "before": [],
+      "end": 620,
+      "start": 620
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    external.refuse_lifecycle(\"start\")\n"
+      ],
+      "before": [],
+      "end": 728,
+      "start": 728
+    },
+    {
+      "after": [
+        "    from . import external\n",
+        "    external.refuse_lifecycle(\"stop\")\n"
+      ],
+      "before": [],
+      "end": 894,
+      "start": 894
+    },
+    {
+      "after": [
+        "\n",
+        "\n",
+        "def _external_status(profile=None) -> DesktopStatus:\n",
+        "    from . import external\n",
+        "    identity = None\n",
+        "    error = None\n",
+        "    try:\n",
+        "        identity = external.resolve()\n",
+        "    except (OSError, ValueError, TypeError, external.ExternalScreenError) as exc:\n",
+        "        error = str(exc)\n",
+        "    return DesktopStatus(profile=profile or _profile_name(), supported=os.name == \"posix\",\n",
+        "                         installed=True, missing=[], running=identity is not None,\n",
+        "                         pid=None, display=None, socket=identity.endpoint if identity else None,\n",
+        "                         geometry=\"1280x800\", install_command=None, browser=None,\n",
+        "                         blocker=error or external.CLEANUP_BLOCKER, placement=\"external\",\n",
+        "                         mode=external.EXTERNAL, lifecycle_owner=\"external\",\n",
+        "                         endpoint_generation=identity.generation if identity else None,\n",
+        "                         authority=identity.authority if identity else None,\n",
+        "                         endpoint_fingerprint=identity.fingerprint if identity else None,\n",
+        "                         thumbnail_available=False, clipboard_available=False)\n"
+      ],
+      "before": [],
+      "end": 928,
+      "start": 928
+    }
+  ],
+  "tools/browser_session.py": [
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    if external.mode() == external.EXTERNAL and (session_info.get(\"features\") or {}).get(\"local\"):\n",
+        "        return {\"success\": False, \"code\": \"external_browser_unavailable\",\n",
+        "                \"error\": \"Local browser is not the external workstation; no automatic alternate input/capture route\"}\n"
+      ],
+      "before": [],
+      "end": 101,
+      "start": 101
+    }
+  ],
+  "tools/computer_use/tool.py": [
+    {
+      "after": [
+        "_backend_sources: dict[str, tuple] = {}\n"
+      ],
+      "before": [],
+      "end": 86,
+      "start": 86
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    external.require_provider()\n"
+      ],
+      "before": [],
+      "end": 159,
+      "start": 159
+    },
+    {
+      "after": [
+        "    _backend_sources[sid] = _source_identity()\n"
+      ],
+      "before": [],
+      "end": 169,
+      "start": 169
+    },
+    {
+      "after": [
+        "    _backend_sources.pop(sid, None)\n"
+      ],
+      "before": [],
+      "end": 177,
+      "start": 177
+    },
+    {
+      "after": [
+        "            if (_backend_sources.get(sid) == _source_identity()\n",
+        "                    and _backend_permission_modes.get(sid, \"standard\") == permission_mode\n"
+      ],
+      "before": [
+        "            if (_backend_permission_modes.get(sid, \"standard\") == permission_mode\n"
+      ],
+      "end": 216,
+      "start": 215
+    },
+    {
+      "after": [
+        "                if (_backend_sources.get(sid) != _source_identity()\n",
+        "                        or _backend_permission_modes.get(sid) != _cua_permission_mode(str(session_id or \"\"))\n"
+      ],
+      "before": [
+        "                if (_backend_permission_modes.get(sid) != _cua_permission_mode(str(session_id or \"\"))\n"
+      ],
+      "end": 248,
+      "start": 247
+    },
+    {
+      "after": [
+        "        _backend_sources.clear()\n"
+      ],
+      "before": [],
+      "end": 284,
+      "start": 284
+    },
+    {
+      "after": [
+        "    if action == \"paste\":\n",
+        "        from tools.bot_desktop import external\n",
+        "        try:\n",
+        "            selected = external.mode()\n",
+        "        except (OSError, ValueError, TypeError, external.ExternalScreenError) as exc:\n",
+        "            return json.dumps({\"ok\": False, \"action\": \"paste\", \"code\": \"screen_unavailable\", \"error\": str(exc)})\n",
+        "        if selected == external.EXTERNAL:\n",
+        "            return json.dumps({\"ok\": False, \"action\": \"paste\", \"code\": \"paste_unavailable\",\n",
+        "                               \"error\": \"External RFB clipboard paste is unavailable; no clipboard acceptance acknowledgment or typing fallback.\",\n",
+        "                               \"delivery\": \"not_sent\"})\n"
+      ],
+      "before": [],
+      "end": 324,
+      "start": 324
+    },
+    {
+      "after": [
+        "    try:\n",
+        "        _bd_ensure_started()  # external mode refuses alternate routes, never starts X\n",
+        "    except RuntimeError as exc:\n",
+        "        return json.dumps({\"ok\": False, \"action\": action, \"code\": \"screen_unavailable\", \"error\": str(exc)})\n"
+      ],
+      "before": [
+        "    _bd_ensure_started()  # headless gateway: bring the profile's screen up before the backend probes DISPLAY\n"
+      ],
+      "end": 335,
+      "start": 334
+    },
+    {
+      "after": [
+        "                current = _bd_lease.assert_agent_may_act()\n",
+        "                if (current.epoch, current.authority, current.endpoint_generation, current.endpoint_identity) != (admitted.epoch, admitted.authority, admitted.endpoint_generation, admitted.endpoint_identity):\n"
+      ],
+      "before": [
+        "                if _bd_lease.get().epoch != admitted.epoch:\n"
+      ],
+      "end": 368,
+      "start": 367
+    },
+    {
+      "after": [
+        "\n",
+        "\n",
+        "def _source_identity():\n",
+        "    from plugins.computer_use import configured_backend_name\n",
+        "    from tools.bot_desktop import external\n",
+        "    return configured_backend_name(), external.identity_mark()\n"
+      ],
+      "before": [],
+      "end": 981,
+      "start": 981
+    }
+  ],
+  "tui_gateway/contracts/display.py": [
+    {
+      "after": [
+        "    excluded = \"excluded\"\n",
+        "\n",
+        "\n",
+        "class LeasePhase(WireEnum):\n",
+        "    native = \"native\"\n",
+        "    active_agent = \"active-agent\"\n",
+        "    active_human = \"active-human\"\n",
+        "    quiescing = \"quiescing\"\n",
+        "    excluded = \"excluded\"\n"
+      ],
+      "before": [],
+      "end": 22,
+      "start": 22
+    },
+    {
+      "after": [
+        "    phase: LeasePhase = LeasePhase.native\n",
+        "    authority: str | None = None\n",
+        "    endpoint_generation: str | None = None\n",
+        "    endpoint_identity: str | None = None\n",
+        "    transition_nonce: str | None = None\n"
+      ],
+      "before": [],
+      "end": 34,
+      "start": 34
+    },
+    {
+      "after": [
+        "    mode: str = \"native\"\n",
+        "    lifecycle_owner: str = \"native\"\n",
+        "    endpoint_generation: str | None = None\n",
+        "    authority: str | None = None\n",
+        "    endpoint_fingerprint: str | None = None\n",
+        "    thumbnail_available: bool = True\n",
+        "    clipboard_available: bool = True\n"
+      ],
+      "before": [],
+      "end": 65,
+      "start": 65
+    }
+  ],
+  "tui_gateway/methods_display.py": [
+    {
+      "after": [
+        "        from tools.bot_desktop import external\n",
+        "        if external.mode() == external.EXTERNAL:\n",
+        "            return _ok(rid, {\"data_url\": None, \"suppressed\": \"external_thumbnail_unavailable\"})\n",
+        "        if before.holder != _bd_lease.AGENT:\n"
+      ],
+      "before": [
+        "        if before.holder == _bd_lease.HUMAN:\n"
+      ],
+      "end": 70,
+      "start": 69
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        external.refuse_lifecycle(\"Stop\")\n",
+        "    except external.ExternalScreenError as exc:\n",
+        "        return _err(rid, _DISPLAY_ERR, str(exc))\n"
+      ],
+      "before": [],
+      "end": 98,
+      "start": 98
+    },
+    {
+      "after": [
+        "        from tools.bot_desktop import external\n",
+        "        if external.mode() == external.EXTERNAL:\n",
+        "            identity = external.resolve()\n",
+        "            extra[\"hermes_home\"] = identity.home\n",
+        "            extra[\"external_identity\"] = identity.as_dict()\n"
+      ],
+      "before": [],
+      "end": 164,
+      "start": 164
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        external.refuse_lifecycle(\"Sandbox image switch\")\n",
+        "    except external.ExternalScreenError as exc:\n",
+        "        return _err(rid, _DISPLAY_ERR, str(exc))\n"
+      ],
+      "before": [],
+      "end": 181,
+      "start": 181
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        external.refuse_lifecycle(\"Install\")\n",
+        "    except external.ExternalScreenError as exc:\n",
+        "        return _err(rid, _DISPLAY_ERR, str(exc))\n"
+      ],
+      "before": [],
+      "end": 196,
+      "start": 196
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        if external.mode() == external.NATIVE:\n",
+        "            _bd_runtime.touch_activity()\n",
+        "        lease = _bd_lease.acquire(viewer_id, reason=str(params.get(\"reason\") or \"\"))\n",
+        "    except (OSError, external.ExternalScreenError) as exc:\n",
+        "        return _err(rid, _DISPLAY_ERR, str(exc), data={\"code\": \"excluded\",\n",
+        "                    \"cause_code\": getattr(exc, \"code\", \"external_screen_excluded\"),\n",
+        "                    \"phase\": \"excluded\", \"active_owner_granted\": False})\n"
+      ],
+      "before": [
+        "    _bd_runtime.touch_activity()\n",
+        "    lease = _bd_lease.acquire(viewer_id, reason=str(params.get(\"reason\") or \"\"))\n"
+      ],
+      "end": 252,
+      "start": 250
+    },
+    {
+      "after": [
+        "    from tools.bot_desktop import external\n",
+        "    try:\n",
+        "        lease = _bd_lease.release(viewer_id, unless_human=viewer_id is None and not params.get(\"force\"))\n",
+        "    except (OSError, external.ExternalScreenError) as exc:\n",
+        "        return _err(rid, _DISPLAY_ERR, str(exc), data={\"code\": \"excluded\",\n",
+        "                    \"cause_code\": getattr(exc, \"code\", \"external_screen_excluded\"),\n",
+        "                    \"phase\": \"excluded\", \"active_owner_granted\": False})\n"
+      ],
+      "before": [
+        "    lease = _bd_lease.release(viewer_id, unless_human=viewer_id is None and not params.get(\"force\"))\n"
+      ],
+      "end": 266,
+      "start": 265
+    }
+  ],
+  "tui_gateway/methods_display_watch.py": [
+    {
+      "after": [
+        "                               str(lease_view.get(\"holder\") or \"\"), str(payload.get(\"mode\") or \"native\"))\n"
+      ],
+      "before": [
+        "                               str(lease_view.get(\"holder\") or \"\"))\n"
+      ],
+      "end": 64,
+      "start": 63
+    },
+    {
+      "after": [
+        "            from tools.bot_desktop import external\n",
+        "            identity = external.identity_mark(home)\n",
+        "            mark = identity if identity != (external.NATIVE,) else (identity, _mtime(sd / \"env\"), _mtime(sd / \"launcher.pid\"), _bd_runtime._launcher_pid() is not None)\n"
+      ],
+      "before": [
+        "            mark = (_mtime(sd / \"env\"), _mtime(sd / \"launcher.pid\"), _bd_runtime._launcher_pid() is not None)\n"
+      ],
+      "end": 92,
+      "start": 91
+    },
+    {
+      "after": [
+        "        from tools.bot_desktop import external\n",
+        "        external_mode = external.identity_mark(home) != (external.NATIVE,)\n",
+        "        if not external_mode and mtime == _lease_mtimes.get(key, 0):\n"
+      ],
+      "before": [
+        "        if mtime == _lease_mtimes.get(key, 0):\n"
+      ],
+      "end": 137,
+      "start": 136
+    },
+    {
+      "after": [
+        "        lease_mark = (lease.epoch, lease.phase, lease.authority, lease.endpoint_generation, lease.endpoint_identity, lease.reason) if external_mode else lease.epoch\n"
+      ],
+      "before": [],
+      "end": 140,
+      "start": 140
+    },
+    {
+      "after": [
+        "            _lease_epochs[key] = lease_mark\n"
+      ],
+      "before": [
+        "            _lease_epochs[key] = lease.epoch\n"
+      ],
+      "end": 142,
+      "start": 141
+    },
+    {
+      "after": [
+        "        if lease_mark == _lease_epochs[key]:\n"
+      ],
+      "before": [
+        "        if lease.epoch == _lease_epochs[key]:\n"
+      ],
+      "end": 144,
+      "start": 143
+    },
+    {
+      "after": [
+        "        _lease_epochs[key] = lease_mark\n"
+      ],
+      "before": [
+        "        _lease_epochs[key] = lease.epoch\n"
+      ],
+      "end": 146,
+      "start": 145
+    }
+  ]
+}

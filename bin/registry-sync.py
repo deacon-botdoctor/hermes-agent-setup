@@ -440,8 +440,9 @@ def _native_skill_capabilities() -> tuple[list[dict], str]:
         # Use the bound runtime's scanner directly. Registry synchronization is
         # on demand and must not depend on the retired per-turn retrieval hook.
         scan = ("import sys,json; sys.path.insert(0,sys.argv[1]); "
-                "from tools.skills_tool import _find_all_skills; "
-                "print(json.dumps({'skills': _find_all_skills()}))")
+                "from tools import skills_tool; "
+                "scan=getattr(skills_tool,'find_all_skills',None) or skills_tool._find_all_skills; "
+                "print(json.dumps({'skills': scan()}))")
         result = subprocess.run([str(python), "-I", "-c", scan, str(runtime)],
                                 capture_output=True, text=True, env=env,
                                 timeout=8, check=False, cwd=home)

@@ -5,9 +5,9 @@
   "source_commit": "6d3032a3b3e1c7895598cfb17b570376d4805415",
   "platforms": ["linux", "macos", "windows"],
   "activation": "manifest_driven_existing_selfheal",
-  "package_digest": "5ebdedce01f2aa39d8e4762560dfc66331e98c27f98435a547eae8a3c22974fd",
+  "package_digest": "6fa2c3bb1fa03c40cc3ed5aa62148bdde47c4bffe80188c8389a731cced4ecd7",
   "files": [
-    {"path": "native-continuity/bin/client-selfheal-heartbeat.ps1", "sha256": "09e73a1bea5c1918bedf3b47089c4debe2ae7b71a70124df62781e2efbc7410c", "mode": "0644"},
+    {"path": "native-continuity/bin/client-selfheal-heartbeat.ps1", "sha256": "9dc095888e22aec1c8a26c3e4b2bbf5de6d9577a649c7f47beb0bdfb862b382c", "mode": "0644"},
     {"path": "native-continuity/bin/client-selfheal-heartbeat.sh", "sha256": "b7340a5b6d04f85d362e9350ae75833a85534032086739212e7bb6af84b94828", "mode": "0755"},
     {"path": "native-continuity/bin/gbrain-mcp.py", "sha256": "2192f168ff0cfb63e70c39d6bd7a634d28c64c5450c58c87f409bbd90ec753eb", "mode": "0755"},
     {"path": "native-continuity/bin/native-agent-continuity.py", "sha256": "d7c208f50ea8bb8accf0e669afb2a9bd7014864ebb48a45e267bbe6be6e33d35", "mode": "0755"},

@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "version": "4.33.4+botdoctor.3",
+  "source_commit": "1a6da7f9b62430906ad7b7081fb9e4ec8ff40996",
+  "assets": {
+    "darwin_amd64": {
+      "archive_sha256": "5f91e3f259eb2aaea11b74b2fb908f665cf148d513cd02a2eca1b26dbd9c445b",
+      "binary_sha256": "b556f14ad92f5c48b88bf1df88aab00f8b3f3555653a3b18d1f91f213081f3e2",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    },
+    "darwin_arm64": {
+      "archive_sha256": "7a45d1e4325c70be673325e19fb8fa454d898fb289cc49f7509e2e94880be963",
+      "binary_sha256": "21f6dfaee4ce70ace036927825a82d229143d2ce9f2005e61a2802486871c2db",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    },
+    "linux_amd64": {
+      "archive_sha256": "a9ff898a5b94df36d4f866b6349395fa750532f8a74800ab593dc4a2da76db27",
+      "binary_sha256": "bc14c57c47f2e05c6fb3659de94200ff69636c0bf7d2acabd0ed250b90f2cfda",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    },
+    "linux_arm64": {
+      "archive_sha256": "1cfebb11c67c4e45f7d160c1c809dcdbe8958bf2abd2fffd34d2bbf232b64a4e",
+      "binary_sha256": "0440822904dcdebf83a18f0b3713e090d4bfc8cb0434ecf5efe384c3a4a903a8",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    },
+    "windows_amd64": {
+      "archive_sha256": "dbe4502009f3f4fbbea0999ec48a7193e17a1eeeacb40f4423a602a5ab5452df",
+      "binary_sha256": "a59b691704397c6c2859ac421f455421a26de14452bd3fac9f6cff8f4eca8405",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    },
+    "windows_arm64": {
+      "archive_sha256": "d071493f6cd218bdf6c567896a4250264ca38ed39432441ef80fc6a6ae149544",
+      "binary_sha256": "37fcdcbdedb8aea35add53c9c6be3703e674e53a8b0ad9f3fe9b990bd74799a6",
+      "license_sha256": "6313a8d109446595ea7973696aea987108385abf5dc339da0c2248901fbd6ff2"
+    }
+  },
+  "distribution": "staged",
+  "source_archive": {
+    "url": "https://codeload.github.com/mvanhorn/cli-printing-press/tar.gz/1a6da7f9b62430906ad7b7081fb9e4ec8ff40996",
+    "sha256": "f53bab5fc36b4f2984800db6a9c55949f79d8c6a2bee37699ce157945b17d4d6"
+  },
+  "patch_sha256": "f117872baff72a23bb3a929602bf0d045ea1cfd6c763754075e767f518c132bc"
+}
